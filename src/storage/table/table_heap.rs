@@ -871,7 +871,7 @@ impl TableHeap {
     }
 
     /// Expands provided values to match the full schema by handling AUTO_INCREMENT and DEFAULT values
-    fn expand_values_for_schema(
+    pub fn expand_values_for_schema(
         &self,
         values: Vec<Value>,
         schema: &Schema,

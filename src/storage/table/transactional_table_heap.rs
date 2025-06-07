@@ -79,16 +79,23 @@ impl TransactionalTableHeap {
             .lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
             .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
-        // Validate check constraints before inserting
-        Self::validate_check_constraints(&values, schema)?;
+        // First expand values to handle AUTO_INCREMENT and DEFAULT values
+        // This ensures we have the complete tuple values before constraint validation
+        let expanded_values = self.table_heap.expand_values_for_schema(values, schema)?;
+
+        // Validate check constraints on the expanded values
+        Self::validate_check_constraints(&expanded_values, schema)?;
+        
+        // Validate PRIMARY KEY and UNIQUE constraints on the expanded values
+        self.validate_primary_key_and_unique_constraints(&expanded_values, schema, &txn_ctx)?;
 
         // Create metadata with transaction ID
         let meta = Arc::new(TupleMeta::new(txn.get_transaction_id()));
 
-        // Perform insert using the new internal method
+        // Perform insert using the new internal method with expanded values
         let rid = self
             .table_heap
-            .insert_tuple_from_values(values, schema, meta)?;
+            .insert_tuple_from_values(expanded_values, schema, meta)?;
 
         // Transaction bookkeeping
         txn.append_write_set(self.table_oid, rid);
@@ -254,6 +261,133 @@ impl TransactionalTableHeap {
             column_name
         );
         Ok(true)
+    }
+
+    /// Validates PRIMARY KEY and UNIQUE constraints for the given values against existing data
+    fn validate_primary_key_and_unique_constraints(
+        &self,
+        values: &[Value],
+        schema: &Schema,
+        txn_ctx: &Arc<TransactionContext>,
+    ) -> Result<(), String> {
+        // Collect primary key columns and their values
+        let mut primary_key_values = Vec::new();
+        let mut primary_key_columns = Vec::new();
+        
+        // Collect unique columns and their values (only for columns that are UNIQUE but not part of PRIMARY KEY)
+        let mut unique_constraints = Vec::new();
+        
+        for (i, column) in schema.get_columns().iter().enumerate() {
+            if i >= values.len() {
+                return Err(format!(
+                    "Value index {} out of bounds for constraint validation",
+                    i
+                ));
+            }
+
+            if column.is_primary_key() {
+                primary_key_values.push(values[i].clone());
+                primary_key_columns.push(column.get_name().to_string());
+            }
+            
+            // Only check individual UNIQUE constraints for columns that are NOT part of the PRIMARY KEY
+            // For PRIMARY KEY columns, uniqueness is checked as part of the composite key
+            if column.is_unique() && !column.is_primary_key() {
+                unique_constraints.push((column.get_name().to_string(), values[i].clone()));
+            }
+        }
+
+        // Check PRIMARY KEY constraint if there are primary key columns
+        if !primary_key_values.is_empty() {
+            if self.check_primary_key_violation(&primary_key_values, &primary_key_columns, schema, txn_ctx)? {
+                return Err(format!(
+                    "Primary key violation: duplicate key value for columns ({})",
+                    primary_key_columns.join(", ")
+                ));
+            }
+        }
+
+        // Check UNIQUE constraints for non-primary key columns
+        for (column_name, value) in unique_constraints {
+            if self.check_unique_constraint_violation(&column_name, &value, schema, txn_ctx)? {
+                return Err(format!(
+                    "Unique constraint violation for column '{}': value '{}' already exists",
+                    column_name,
+                    value
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check if inserting the given primary key values would violate the PRIMARY KEY constraint
+    fn check_primary_key_violation(
+        &self,
+        pk_values: &[Value],
+        pk_columns: &[String],
+        schema: &Schema,
+        txn_ctx: &Arc<TransactionContext>,
+    ) -> Result<bool, String> {
+        // Create an iterator over all tuples in the table
+        let iterator = self.make_iterator(Some(txn_ctx.clone()));
+        
+        for item in iterator {
+            let (_, tuple) = item;
+            
+            // Check if this tuple has the same primary key values
+            let mut matches = true;
+            for (i, pk_column) in pk_columns.iter().enumerate() {
+                if let Some(column_index) = Self::find_column_index(schema, pk_column) {
+                    let existing_value = tuple.get_value(column_index);
+                    if existing_value != pk_values[i] {
+                        matches = false;
+                        break;
+                    }
+                } else {
+                    return Err(format!("Primary key column '{}' not found in schema", pk_column));
+                }
+            }
+            
+            if matches {
+                return Ok(true); // Found a duplicate
+            }
+        }
+        
+        Ok(false) // No duplicate found
+    }
+
+    /// Check if inserting the given value would violate a UNIQUE constraint
+    fn check_unique_constraint_violation(
+        &self,
+        column_name: &str,
+        value: &Value,
+        schema: &Schema,
+        txn_ctx: &Arc<TransactionContext>,
+    ) -> Result<bool, String> {
+        let column_index = Self::find_column_index(schema, column_name)
+            .ok_or_else(|| format!("Unique constraint column '{}' not found in schema", column_name))?;
+        
+        // Create an iterator over all tuples in the table
+        let iterator = self.make_iterator(Some(txn_ctx.clone()));
+        
+        for item in iterator {
+            let (_, tuple) = item;
+            
+            let existing_value = tuple.get_value(column_index);
+            if existing_value == *value {
+                return Ok(true); // Found a duplicate
+            }
+        }
+        
+        Ok(false) // No duplicate found
+    }
+
+    /// Helper function to find the index of a column by name
+    fn find_column_index(schema: &Schema, column_name: &str) -> Option<usize> {
+        schema.get_columns()
+            .iter()
+            .position(|col| col.get_name() == column_name)
     }
 
     pub fn insert_tuple(
