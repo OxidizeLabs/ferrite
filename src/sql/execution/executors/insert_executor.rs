@@ -145,6 +145,12 @@ impl AbstractExecutor for InsertExecutor {
             debug!("Inserting {} direct value sets", values_to_insert.len());
 
             for values in values_to_insert {
+                // Validate foreign key constraints before inserting
+                if let Err(e) = Self::validate_foreign_key_constraints_with_context(&self.context, &values, &schema) {
+                    error!("Foreign key constraint violation: {}", e);
+                    return Err(DBError::Execution(format!("Insert failed: {}", e)));
+                }
+
                 match transactional_table_heap.insert_tuple_from_values(
                     values.clone(),
                     &schema,
@@ -160,38 +166,54 @@ impl AbstractExecutor for InsertExecutor {
                     }
                 }
             }
-        } else if let Some(ref mut child) = self.child_executor {
-            debug!("Inserting from child executor (SELECT query)");
+        } else {
+            // Get the child executor reference separately to avoid borrowing conflicts
+            if let Some(ref mut child) = self.child_executor {
+                debug!("Inserting from child executor (SELECT query)");
 
-            loop {
-                match child.next()? {
-                    Some((tuple, _)) => {
-                        let values = tuple.get_values().clone();
-                        match transactional_table_heap.insert_tuple_from_values(
-                            values,
-                            &schema,
-                            txn_context.clone(),
-                        ) {
-                            Ok(_rid) => {
-                                insert_count += 1;
-                                trace!("Successfully inserted tuple #{} from SELECT", insert_count);
-                            }
-                            Err(e) => {
-                                error!("Failed to insert tuple from SELECT: {}", e);
-                                return Err(DBError::Execution(format!(
-                                    "Insert from SELECT failed: {}",
-                                    e
-                                )));
-                            }
+                // Collect all values first to avoid borrowing conflicts
+                let mut all_values = Vec::new();
+                loop {
+                    match child.next()? {
+                        Some((tuple, _)) => {
+                            let values = tuple.get_values().clone();
+                            all_values.push(values);
+                        }
+                        None => break,
+                    }
+                }
+
+                // Now validate and insert each set of values
+                for values in all_values {
+                                            // Validate foreign key constraints before inserting
+                        if let Err(e) = Self::validate_foreign_key_constraints_with_context(&self.context, &values, &schema) {
+                            error!("Foreign key constraint violation: {}", e);
+                            return Err(DBError::Execution(format!("Insert from SELECT failed: {}", e)));
+                        }
+
+                    match transactional_table_heap.insert_tuple_from_values(
+                        values,
+                        &schema,
+                        txn_context.clone(),
+                    ) {
+                        Ok(_rid) => {
+                            insert_count += 1;
+                            trace!("Successfully inserted tuple #{} from SELECT", insert_count);
+                        }
+                        Err(e) => {
+                            error!("Failed to insert tuple from SELECT: {}", e);
+                            return Err(DBError::Execution(format!(
+                                "Insert from SELECT failed: {}",
+                                e
+                            )));
                         }
                     }
-                    None => break,
                 }
+            } else {
+                return Err(DBError::Execution(
+                    "No values or child executor found for INSERT".to_string(),
+                ));
             }
-        } else {
-            return Err(DBError::Execution(
-                "No values or child executor found for INSERT".to_string(),
-            ));
         }
 
         info!(
@@ -210,6 +232,97 @@ impl AbstractExecutor for InsertExecutor {
 
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
+    }
+}
+
+impl InsertExecutor {
+    /// Validates foreign key constraints for the given values
+    fn validate_foreign_key_constraints_with_context(
+        context: &Arc<RwLock<ExecutionContext>>, 
+        values: &[crate::types_db::value::Value], 
+        schema: &Schema
+    ) -> Result<(), String> {
+        for (column_index, column) in schema.get_columns().iter().enumerate() {
+            if let Some(foreign_key_constraint) = column.get_foreign_key() {
+                if column_index >= values.len() {
+                    return Err(format!(
+                        "Value index {} out of bounds for foreign key validation",
+                        column_index
+                    ));
+                }
+
+                let value = &values[column_index];
+
+                // NULL values are allowed for foreign keys (unless column is NOT NULL)
+                if value.is_null() {
+                    continue;
+                }
+
+                // Validate that the foreign key value exists in the referenced table
+                if !Self::validate_foreign_key_reference_with_context(
+                    context,
+                    &value, 
+                    &foreign_key_constraint.referenced_table, 
+                    &foreign_key_constraint.referenced_column
+                )? {
+                    return Err(format!(
+                        "Foreign key constraint violation for column '{}': value '{}' does not exist in table '{}' column '{}'",
+                        column.get_name(),
+                        value,
+                        foreign_key_constraint.referenced_table,
+                        foreign_key_constraint.referenced_column
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate that a foreign key value exists in the referenced table
+    fn validate_foreign_key_reference_with_context(
+        context: &Arc<RwLock<ExecutionContext>>,
+        value: &crate::types_db::value::Value,
+        referenced_table: &str,
+        referenced_column: &str,
+    ) -> Result<bool, String> {
+        let context_guard = context.read();
+        let catalog_guard = context_guard.get_catalog().read();
+        
+        // Get the referenced table info
+        let table_info = catalog_guard
+            .get_table(referenced_table)
+            .ok_or_else(|| format!("Referenced table '{}' not found", referenced_table))?;
+        
+        let referenced_schema = table_info.get_table_schema();
+        
+        // Find the referenced column index
+        let column_index = referenced_schema.get_columns()
+            .iter()
+            .position(|col| col.get_name() == referenced_column)
+            .ok_or_else(|| format!("Referenced column '{}' not found in table '{}'", referenced_column, referenced_table))?;
+        
+        // Get transaction context
+        let txn_context = context_guard.get_transaction_context().clone();
+        
+        // Create transactional table heap for the referenced table
+        let referenced_table_heap = TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt()
+        );
+        
+        // Check if the value exists in the referenced table
+        let iterator = referenced_table_heap.make_iterator(Some(txn_context));
+        
+        for item in iterator {
+            let (_, tuple) = item;
+            let existing_value = tuple.get_value(column_index);
+            if existing_value == *value {
+                return Ok(true); // Found the referenced value
+            }
+        }
+        
+        Ok(false) // Referenced value not found
     }
 }
 
@@ -707,6 +820,596 @@ mod tests {
         assert!(result.unwrap().is_none(), "Insert should return None");
 
         // Verify no more tuples
+        assert!(executor.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_insert_with_special_characters() {
+        let test_ctx = TestContext::new("insert_special_chars");
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("text", TypeId::VarChar),
+        ]);
+
+        let table_name = "test_table_special".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create values with special characters
+        let special_text = "Hello\nWorld\t!@#$%^&*()[]{}\"'\\";
+        let expressions = vec![vec![
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(1),
+                Column::new("id", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(special_text),
+                Column::new("text", TypeId::VarChar),
+                vec![],
+            ))),
+        ]];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert
+        executor.init();
+        let result = executor.next();
+        assert!(result.unwrap().is_none(), "Insert should return None");
+    }
+
+    #[test]
+    fn test_insert_boundary_values() {
+        let test_ctx = TestContext::new("insert_boundary_values");
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("max_int", TypeId::Integer),
+            Column::new("min_int", TypeId::Integer),
+            Column::new("zero", TypeId::Integer),
+            Column::new("empty_string", TypeId::VarChar),
+        ]);
+
+        let table_name = "test_table_boundary".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create values with boundary cases
+        let expressions = vec![vec![
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(i32::MAX),
+                Column::new("max_int", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(i32::MIN),
+                Column::new("min_int", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(0),
+                Column::new("zero", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(""),
+                Column::new("empty_string", TypeId::VarChar),
+                vec![],
+            ))),
+        ]];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert
+        executor.init();
+        let result = executor.next();
+        assert!(result.unwrap().is_none(), "Insert should return None");
+    }
+
+    #[test]
+    fn test_insert_very_large_string() {
+        let test_ctx = TestContext::new("insert_large_string");
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("large_text", TypeId::VarChar),
+        ]);
+
+        let table_name = "test_table_large_text".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create a very large string (10KB)
+        let large_string = "A".repeat(10240);
+        let expressions = vec![vec![
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(1),
+                Column::new("id", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(large_string),
+                Column::new("large_text", TypeId::VarChar),
+                vec![],
+            ))),
+        ]];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert
+        executor.init();
+        let result = executor.next();
+        assert!(result.unwrap().is_none(), "Insert should return None");
+    }
+
+    #[test]
+    fn test_insert_mixed_null_and_values() {
+        let test_ctx = TestContext::new("insert_mixed_nulls");
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("score", TypeId::Decimal),
+            Column::new("active", TypeId::Boolean),
+        ]);
+
+        let table_name = "test_table_mixed".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create multiple rows with mixed null and non-null values
+        let expressions = vec![
+            // Row 1: All non-null
+            vec![
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(1),
+                    Column::new("id", TypeId::Integer),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new("Alice"),
+                    Column::new("name", TypeId::VarChar),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(95.5),
+                    Column::new("score", TypeId::Decimal),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(true),
+                    Column::new("active", TypeId::Boolean),
+                    vec![],
+                ))),
+            ],
+            // Row 2: Some nulls
+            vec![
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(2),
+                    Column::new("id", TypeId::Integer),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new_with_type(Val::Null, TypeId::VarChar),
+                    Column::new("name", TypeId::VarChar),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(87.2),
+                    Column::new("score", TypeId::Decimal),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new_with_type(Val::Null, TypeId::Boolean),
+                    Column::new("active", TypeId::Boolean),
+                    vec![],
+                ))),
+            ],
+            // Row 3: All nulls except id
+            vec![
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(3),
+                    Column::new("id", TypeId::Integer),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new_with_type(Val::Null, TypeId::VarChar),
+                    Column::new("name", TypeId::VarChar),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new_with_type(Val::Null, TypeId::Decimal),
+                    Column::new("score", TypeId::Decimal),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new_with_type(Val::Null, TypeId::Boolean),
+                    Column::new("active", TypeId::Boolean),
+                    vec![],
+                ))),
+            ],
+        ];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert
+        executor.init();
+        let result = executor.next();
+        assert!(result.unwrap().is_none(), "Insert should return None");
+    }
+
+    #[test]
+    fn test_insert_decimal_precision() {
+        let test_ctx = TestContext::new("insert_decimal_precision");
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("precise_value", TypeId::Decimal),
+            Column::new("small_decimal", TypeId::Decimal),
+        ]);
+
+        let table_name = "test_table_decimals".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create values with various decimal precisions
+        let expressions = vec![vec![
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(1),
+                Column::new("id", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(123456.789012345),
+                Column::new("precise_value", TypeId::Decimal),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(0.001),
+                Column::new("small_decimal", TypeId::Decimal),
+                vec![],
+            ))),
+        ]];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert
+        executor.init();
+        let result = executor.next();
+        assert!(result.unwrap().is_none(), "Insert should return None");
+    }
+
+    #[test]
+    fn test_insert_unicode_characters() {
+        let test_ctx = TestContext::new("insert_unicode");
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("unicode_text", TypeId::VarChar),
+        ]);
+
+        let table_name = "test_table_unicode".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create values with Unicode characters
+        let unicode_text = "Hello, 世界! Здравствуй мир! 🌍🚀✨";
+        let expressions = vec![vec![
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(1),
+                Column::new("id", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(unicode_text),
+                Column::new("unicode_text", TypeId::VarChar),
+                vec![],
+            ))),
+        ]];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert
+        executor.init();
+        let result = executor.next();
+        assert!(result.unwrap().is_none(), "Insert should return None");
+    }
+
+    #[test]
+    fn test_insert_extremely_large_batch() {
+        let test_ctx = TestContext::new("insert_extremely_large_batch");
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::VarChar),
+        ]);
+
+        let table_name = "test_table_xl_batch".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create an extremely large batch (1000 rows)
+        let mut expressions = Vec::new();
+        for i in 0..1000 {
+            expressions.push(vec![
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(i),
+                    Column::new("id", TypeId::Integer),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(format!("batch_value_{}", i)),
+                    Column::new("value", TypeId::VarChar),
+                    vec![],
+                ))),
+            ]);
+        }
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute inserts
+        executor.init();
+
+        // Insert operations complete in one call and return None
+        assert!(executor.next().unwrap().is_none());
+
+        // No more calls needed
+        assert!(executor.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_insert_multiple_calls() {
+        let test_ctx = TestContext::new("insert_multiple_calls");
+
+        // Create schema and table
+        let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+        let table_name = "test_table_multiple_calls".to_string();
+
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        let expressions = vec![vec![Arc::new(Expression::Constant(
+            ConstantExpression::new(
+                Value::new(1),
+                Column::new("id", TypeId::Integer),
+                vec![],
+            ),
+        ))]];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert
+        executor.init();
+
+        // First call should insert and return None
+        assert!(executor.next().unwrap().is_none());
+
+        // Subsequent calls should return None (no more work to do)
+        assert!(executor.next().unwrap().is_none());
+        assert!(executor.next().unwrap().is_none());
         assert!(executor.next().unwrap().is_none());
     }
 }
