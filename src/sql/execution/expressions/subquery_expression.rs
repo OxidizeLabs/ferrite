@@ -2,6 +2,7 @@ use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
@@ -86,7 +87,7 @@ impl SubqueryExpression {
         match self.subquery.as_ref() {
             Expression::Aggregate(agg) => {
                 match agg.get_agg_type() {
-                    crate::sql::execution::expressions::aggregate_expression::AggregationType::Avg => {
+                    AggregationType::Avg => {
                         // For AVG, we need to compute the average across all rows
                         // This is a simplified implementation - in practice, you'd want to
                         // execute the full subquery plan

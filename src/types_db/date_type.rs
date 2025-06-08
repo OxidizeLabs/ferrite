@@ -130,7 +130,7 @@ impl Type for DateType {
         }
     }
 
-    fn modulo(&self, other: &Value) -> Value {
+    fn modulo(&self, _other: &Value) -> Value {
         Value::new(Val::Null)
     }
 

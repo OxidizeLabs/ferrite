@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::config::PageId;
 use crate::common::config::INVALID_PAGE_ID;
 use crate::common::rid::RID;
@@ -401,11 +401,10 @@ impl DiskExtendableHashTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -416,7 +415,7 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
@@ -437,16 +436,17 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer.clone(),
-            ));
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             Self {
                 bpm,
@@ -459,9 +459,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_insert_and_get() {
-        let test_context = TestContext::new("test_insert_and_get");
+    #[tokio::test]
+    async fn test_insert_and_get() {
+        let test_context = TestContext::new("test_insert_and_get").await;
         let bpm = test_context.bpm();
         let hash_fn = HashFunction::new();
 
@@ -485,9 +485,9 @@ mod tests {
         assert_eq!(ht.get_value(&key3), None);
     }
 
-    #[test]
-    fn test_remove() {
-        let test_context = TestContext::new("test_remove");
+    #[tokio::test]
+    async fn test_remove() {
+        let test_context = TestContext::new("test_remove").await;
         let bpm = test_context.bpm();
         let hash_fn = HashFunction::new();
 
@@ -504,10 +504,10 @@ mod tests {
         assert_eq!(ht.get_value(&key1), None);
     }
 
-    #[test]
-    fn test_full_bucket() {
+    #[tokio::test]
+    async fn test_full_bucket() {
         initialize_logger();
-        let test_context = TestContext::new("test_full_bucket");
+        let test_context = TestContext::new("test_full_bucket").await;
         let bpm = test_context.bpm.clone();
         let hash_fn = HashFunction::new();
 

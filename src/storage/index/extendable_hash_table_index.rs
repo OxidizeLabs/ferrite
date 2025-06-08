@@ -1,7 +1,7 @@
 // use std::hash::Hash;
 // use std::sync::Arc;
 // use parking_lot::Mutex;
-// use crate::buffer::buffer_pool_manager::BufferPoolManager;
+// use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 // use crate::common::rid::RID;
 // use crate::concurrency::transaction::Transaction;
 // use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;

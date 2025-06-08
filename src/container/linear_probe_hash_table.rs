@@ -1,4 +1,4 @@
-// use crate::buffer::buffer_pool_manager::BufferPoolManager;
+// use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 // use crate::concurrency::transaction::Transaction;
 // use crate::container::hash_function::HashFunction;
 // use crate::storage::page::page_types::{
