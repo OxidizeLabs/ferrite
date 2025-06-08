@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::recovery::log_manager::LogManager;
 use std::sync::Arc;
