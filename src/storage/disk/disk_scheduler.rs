@@ -1,9 +1,9 @@
-use crate::common::config::{PageId, DISK_IO_BATCH_SIZE};
+use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use log::{error, info, debug, trace};
 use parking_lot::RwLock;
-use std::collections::{VecDeque, HashMap};
+use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;

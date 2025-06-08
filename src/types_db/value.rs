@@ -962,16 +962,16 @@ impl Value {
             }
 
             // ===== ENUM CONVERSIONS =====
-            (Val::Enum(id, s), TypeId::Integer) => {
+            (Val::Enum(id, _s), TypeId::Integer) => {
                 Ok(Value::new_with_type(Val::Integer(*id), target_type))
             }
-            (Val::Enum(id, s), TypeId::BigInt) => {
+            (Val::Enum(id, _s), TypeId::BigInt) => {
                 Ok(Value::new_with_type(Val::BigInt(*id as i64), target_type))
             }
-            (Val::Enum(id, s), TypeId::VarChar) => {
+            (Val::Enum(_id, s), TypeId::VarChar) => {
                 Ok(Value::new_with_type(Val::VarLen(s.clone()), target_type))
             }
-            (Val::Enum(id, s), TypeId::Char) => {
+            (Val::Enum(_id, s), TypeId::Char) => {
                 Ok(Value::new_with_type(Val::ConstLen(s.clone()), target_type))
             }
 
@@ -1190,10 +1190,6 @@ impl Value {
             sqlparser::ast::Value::EscapedStringLiteral(s) => Ok(s.clone()),
             sqlparser::ast::Value::UnicodeStringLiteral(s) => Ok(s.clone()),
             sqlparser::ast::Value::NationalStringLiteral(s) => Ok(s.clone()),
-            #[cfg(not(feature = "bigdecimal"))]
-            sqlparser::ast::Value::Number(s, _) => Ok(s.clone()),
-            #[cfg(feature = "bigdecimal")]
-            sqlparser::ast::Value::Number(s, _) => Ok(s.to_string()),
             sqlparser::ast::Value::Boolean(b) => Ok(b.to_string()),
             sqlparser::ast::Value::Null => Ok("NULL".to_string()),
             sqlparser::ast::Value::Placeholder(s) => Ok(s.clone()),

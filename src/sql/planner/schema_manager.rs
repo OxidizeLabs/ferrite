@@ -484,7 +484,7 @@ impl SchemaManager {
             DataType::SmallInt(_) => Ok(TypeId::SmallInt),
             DataType::Int(_) | DataType::Integer(_) => Ok(TypeId::Integer),
             DataType::BigInt(_) => Ok(TypeId::BigInt),
-            DataType::Decimal(precision_scale) => Ok(TypeId::Decimal),
+            DataType::Decimal(_) => Ok(TypeId::Decimal),
             DataType::Float(_) => Ok(TypeId::Float),
             DataType::Varchar(_) | DataType::String(_) | DataType::Text | DataType::Char(_) => {
                 Ok(TypeId::VarChar)

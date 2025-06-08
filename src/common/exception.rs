@@ -108,6 +108,10 @@ pub enum DeletePageError {
     FrameNotFound(FrameId),
     #[error("Failed to acquire lock: {0}")]
     LockError(String),
+    #[error("Page pinned - PageID: {0}")]
+    PagePinned(PageId),
+    #[error("Invalid Frame - FrameID: {0}")]
+    InvalidFrame(FrameId)
 }
 
 #[derive(Debug)]
