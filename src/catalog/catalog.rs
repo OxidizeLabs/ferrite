@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::database::Database;
 use crate::catalog::schema::Schema;
@@ -320,11 +320,10 @@ mod tests {
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -334,7 +333,7 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
@@ -355,16 +354,13 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, BUFFER_POOL_SIZE));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                Arc::from(disk_manager.unwrap()),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             // Create log manager and transaction manager
             let lock_manager = Arc::new(LockManager::new());
@@ -391,9 +387,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_database_operations() {
-        let ctx = TestContext::new("test_database_operations");
+    #[tokio::test]
+    async fn test_database_operations() {
+        let ctx = TestContext::new("test_database_operations").await;
         let bpm = ctx.bpm();
         let txn_manager = ctx.txn_manager();
 
@@ -434,9 +430,9 @@ mod tests {
         assert!(db_names.contains(&"test_db".to_string()));
     }
 
-    #[test]
-    fn test_multi_database_tables() {
-        let ctx = TestContext::new("test_multi_database_tables");
+    #[tokio::test]
+    async fn test_multi_database_tables() {
+        let ctx = TestContext::new("test_multi_database_tables").await;
         let bpm = ctx.bpm();
         let txn_manager = ctx.txn_manager();
 
@@ -484,9 +480,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_create_table() {
-        let ctx = TestContext::new("test_create_table");
+    #[tokio::test]
+    async fn test_create_table() {
+        let ctx = TestContext::new("test_create_table").await;
         let bpm = ctx.bpm();
         let txn_manager = ctx.txn_manager();
 
@@ -507,8 +503,4 @@ mod tests {
         assert_eq!(retrieved_info.unwrap().get_table_name(), "test_table");
         assert_eq!(retrieved_info.unwrap().get_table_schema(), schema);
     }
-
-    // Additional tests below remain largely the same as before,
-    // just ensuring they operate within the current database context
-    // ... (keeping the original tests)
 }
