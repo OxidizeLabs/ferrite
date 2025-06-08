@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalog::catalog::Catalog;
 use crate::client::client::ClientSession;
@@ -17,7 +17,6 @@ use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::execution_engine::ExecutionEngine;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use crate::storage::disk::disk_scheduler::DiskScheduler;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::error;
@@ -26,6 +25,7 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]
@@ -91,33 +91,32 @@ impl Default for DBConfig {
 
 impl DBInstance {
     /// Creates a new DB instance with the given configuration
-    pub fn new(config: DBConfig) -> Result<Self, DBError> {
+    pub async fn new(config: DBConfig) -> Result<Self, DBError> {
         // Check if database and log files already exist
         let db_file_exists = Path::new(&config.db_filename).exists();
         let log_file_exists = Path::new(&config.db_log_filename).exists();
 
         // Initialize disk components
-        let disk_manager = Arc::new(FileDiskManager::new(
+        let disk_manager = AsyncDiskManager::new(
             config.db_filename.clone(),
             config.db_log_filename.clone(),
-            config.buffer_pool_size,
-        ));
-
-        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+            DiskManagerConfig::default()
+        ).await?;
+        
+        let disk_manager_arc = Arc::new(disk_manager);
 
         // Initialize buffer pool
         let buffer_pool_manager = Arc::new(BufferPoolManager::new(
             config.buffer_pool_size,
-            disk_scheduler,
-            disk_manager.clone(),
+            disk_manager_arc.clone(),
             Arc::new(RwLock::new(LRUKReplacer::new(
                 config.lru_sample_size,
                 config.lru_k,
             ))),
-        ));
+        )?);
 
         // Initialize recovery components
-        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager.clone())));
+        let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
         log_manager.write().run_flush_thread();
 
         let transaction_manager = Arc::new(TransactionManager::new());
@@ -149,7 +148,7 @@ impl DBInstance {
         let recovery_manager = if db_file_exists && log_file_exists && config.enable_logging {
             info!("Existing database and log files found, running recovery...");
             let recovery_manager = Arc::new(LogRecoveryManager::new(
-                disk_manager,
+                disk_manager_arc.clone(),
                 buffer_pool_manager.clone(),
                 log_manager.clone(),
             ));
@@ -559,7 +558,7 @@ impl DBInstance {
     }
 
     fn create_log_manager(
-        disk_manager: &Arc<FileDiskManager>,
+        disk_manager: &Arc<AsyncDiskManager>,
     ) -> Result<Option<Arc<RwLock<LogManager>>>, DBError> {
         Ok(if cfg!(not(feature = "disable-checkpoint-manager")) {
             Some(Arc::new(RwLock::new(LogManager::new(disk_manager.clone()))))
@@ -570,17 +569,15 @@ impl DBInstance {
 
     fn create_buffer_pool_manager(
         config: &DBConfig,
-        disk_manager: &Arc<FileDiskManager>,
+        disk_manager: &Arc<AsyncDiskManager>,
     ) -> Result<Option<Arc<BufferPoolManager>>, DBError> {
         let replacer = LRUKReplacer::new(config.lru_sample_size, config.lru_k);
-        let scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
 
         let bpm = BufferPoolManager::new(
             config.buffer_pool_size,
-            scheduler,
             disk_manager.clone(),
             Arc::new(RwLock::new(replacer)),
-        );
+        )?;
 
         Ok(Some(Arc::new(bpm)))
     }
@@ -856,8 +853,8 @@ mod tests {
         let _ = fs::remove_file(&config.db_log_filename);
     }
 
-    #[test]
-    fn test_recovery_integration() {
+    #[tokio::test]
+    async fn test_recovery_integration() {
         // Create a unique test path
         let test_prefix = get_unique_path();
         let db_file = format!("tests/data/{}.db", test_prefix);
@@ -874,7 +871,7 @@ mod tests {
 
         // First session - create DB for the first time (no recovery)
         {
-            let db_instance = DBInstance::new(config.clone()).unwrap();
+            let db_instance = DBInstance::new(config.clone()).await.unwrap();
             let (db_exists, log_exists) = db_instance.files_exist();
             assert!(db_exists, "Database file should exist after initialization");
             assert!(log_exists, "Log file should exist after initialization");
@@ -904,7 +901,7 @@ mod tests {
 
         // Second session - open existing DB (should trigger recovery)
         {
-            let db_instance = DBInstance::new(config.clone()).unwrap();
+            let db_instance = DBInstance::new(config.clone()).await.unwrap();
             assert!(
                 db_instance.get_recovery_manager().is_some(),
                 "Recovery manager should be created on second run"

@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::concurrency::transaction_manager::TransactionManager;

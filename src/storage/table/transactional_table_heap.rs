@@ -1,3 +1,4 @@
+use crate::catalog::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::common::config::Timestamp;
@@ -11,10 +12,10 @@ use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::types_db::types::Type;
 use crate::types_db::value::Value;
 use log;
 use std::sync::Arc;
-use crate::types_db::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct TransactionalTableHeap {
@@ -66,6 +67,28 @@ impl TransactionalTableHeap {
         schema: &Schema,
         txn_ctx: Arc<TransactionContext>,
     ) -> Result<RID, String> {
+        self.insert_tuple_from_values_with_catalog(values, schema, txn_ctx, None)
+    }
+
+    /// Insert a tuple from values and schema with optional catalog for foreign key validation
+    ///
+    /// # Parameters
+    ///
+    /// - `values`: Values for the tuple.
+    /// - `schema`: Schema for the tuple.
+    /// - `txn_ctx`: Transaction context.
+    /// - `catalog`: Optional catalog for foreign key validation.
+    ///
+    /// # Returns
+    ///
+    /// An `Result` containing the RID of the inserted tuple, or an error message.
+    pub fn insert_tuple_from_values_with_catalog(
+        &self,
+        values: Vec<Value>,
+        schema: &Schema,
+        txn_ctx: Arc<TransactionContext>,
+        catalog: Option<&Catalog>,
+    ) -> Result<RID, String> {
         let txn = txn_ctx.get_transaction();
 
         // Transaction checks
@@ -90,7 +113,9 @@ impl TransactionalTableHeap {
         self.validate_primary_key_and_unique_constraints(&expanded_values, schema, &txn_ctx)?;
         
         // Validate FOREIGN KEY constraints on the expanded values
-        // Foreign key validation is handled at the execution layer
+        if let Some(catalog) = catalog {
+            self.validate_foreign_key_constraints(&expanded_values, schema, &txn_ctx, catalog)?;
+        }
 
         // Create metadata with transaction ID
         let meta = Arc::new(TupleMeta::new(txn.get_transaction_id()));
@@ -557,9 +582,7 @@ impl TransactionalTableHeap {
             return Ok((meta, tuple));
         }
 
-        // If latest version isn't visible, check version chain
-        let mut current_meta = meta;
-        let mut current_tuple = tuple;
+        // If the latest version isn't visible, check a version chain
         let mut current_link = txn_manager.get_undo_link(rid);
 
         log::debug!(
@@ -600,8 +623,8 @@ impl TransactionalTableHeap {
             );
 
             // Update current version
-            current_meta = Arc::from(prev_meta);
-            current_tuple = undo_log.tuple.clone();
+            let current_meta = Arc::from(prev_meta);
+            let current_tuple = undo_log.tuple.clone();
 
             if txn.is_tuple_visible(&current_meta) {
                 log::debug!(
@@ -658,7 +681,7 @@ impl TransactionalTableHeap {
         // lock_manager.lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
         //     .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
-        // Get current version for visibility check
+        // Get the current version for visibility check
         let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
 
         // Visibility checks
@@ -668,7 +691,7 @@ impl TransactionalTableHeap {
             return Err("Cannot delete uncommitted tuple from another transaction".to_string());
         }
 
-        // Create undo log with link to current version
+        // Create undo log with a link to the current version
         let txn_manager = txn_ctx.get_transaction_manager();
         log::debug!(
             "Creating undo log for delete. Current version: creator_txn={}, commit_ts={}",
@@ -678,7 +701,7 @@ impl TransactionalTableHeap {
 
         // Create undo log that points to the original version
         let undo_log = UndoLog {
-            is_deleted: false, // Original version was not deleted
+            is_deleted: false,
             modified_fields: vec![true; current_tuple.get_column_count()],
             tuple: current_tuple.clone(),
             ts: current_meta.get_commit_timestamp(),
@@ -726,6 +749,7 @@ impl TransactionalTableHeap {
         values: &[Value],
         schema: &Schema,
         txn_ctx: &Arc<TransactionContext>,
+        catalog: &Catalog,
     ) -> Result<(), String> {
         for (column_index, column) in schema.get_columns().iter().enumerate() {
             if let Some(foreign_key_constraint) = column.get_foreign_key() {
@@ -748,7 +772,8 @@ impl TransactionalTableHeap {
                     &value, 
                     &foreign_key_constraint.referenced_table, 
                     &foreign_key_constraint.referenced_column, 
-                    txn_ctx
+                    txn_ctx,
+                    catalog
                 )? {
                     return Err(format!(
                         "Foreign key constraint violation for column '{}': value '{}' does not exist in table '{}' column '{}'",
@@ -773,36 +798,81 @@ impl TransactionalTableHeap {
         referred_table: &str,
         referred_column: &str,
         txn_ctx: &Arc<TransactionContext>,
+        catalog: &Catalog,
     ) -> Result<bool, String> {
-        // For now, we'll implement a simple check by assuming that we can access the global catalog
-        // In a production system, this would need proper access to the catalog through the execution context
-        
-        // This is a simplified implementation that will be improved once we have proper catalog access
-        // For the test case, we know that departments table has ids 1 and 2
-        // We'll just do a basic validation for now
-        
-        log::warn!(
-            "Foreign key validation for column '{}' referencing table '{}' column '{}' is not fully implemented yet", 
-            referred_column, referred_table, referred_column
+        log::debug!(
+            "Validating foreign key reference: value='{}' in table='{}' column='{}'",
+            value, referred_table, referred_column
         );
+
+        // Get the referenced table from catalog
+        let ref_table_info = catalog.get_table(referred_table)
+            .ok_or_else(|| format!("Referenced table '{}' not found", referred_table))?;
+
+        // Get the referenced table's schema
+        let ref_schema = catalog.get_table_schema(referred_table)
+            .ok_or_else(|| format!("Schema for table '{}' not found", referred_table))?;
+
+        // Find the referenced column index
+        let ref_column_index = Self::find_column_index(&ref_schema, referred_column)
+            .ok_or_else(|| format!("Referenced column '{}' not found in table '{}'", 
+                                   referred_column, referred_table))?;
+
+        // Get the referenced table heap
+        let ref_table_heap = catalog.get_table_heap(referred_table)
+            .ok_or_else(|| format!("Table heap for '{}' not found", referred_table))?;
+
+        // Create a TransactionalTableHeap for the referenced table
+        let ref_txn_table_heap = TransactionalTableHeap::new(
+            ref_table_heap,
+            ref_table_info.get_table_oidt()
+        );
+
+        // Search the referenced table for the value
+        let iterator = ref_txn_table_heap.make_iterator(Some(txn_ctx.clone()));
         
-        // For now, return true (allow all foreign key values) 
-        // This is not secure but will prevent compilation errors
-        // TODO: Implement proper foreign key validation with catalog access
-        Ok(true)
+        for item in iterator {
+            let (meta, tuple) = item;
+            
+            // Skip deleted tuples and check visibility
+            if meta.is_deleted() {
+                continue;
+            }
+            
+            // Check if this version is visible to the current transaction
+            let txn = txn_ctx.get_transaction();
+            if !txn.is_tuple_visible(&meta) {
+                continue;
+            }
+            
+            let existing_value = tuple.get_value(ref_column_index);
+            if existing_value == *value {
+                log::debug!(
+                    "Found matching foreign key value '{}' in table '{}' column '{}'",
+                    value, referred_table, referred_column
+                );
+                return Ok(true); // Found the referenced value
+            }
+        }
+        
+        log::debug!(
+            "Foreign key value '{}' not found in table '{}' column '{}'",
+            value, referred_table, referred_column
+        );
+        Ok(false) // Referenced value not found
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
@@ -815,7 +885,12 @@ mod tests {
     }
 
     impl TestContext {
-        fn new(name: &str) -> Self {
+        async fn new(name: &str) -> Self {
+            initialize_logger();
+
+            const BUFFER_POOL_SIZE: usize = 100;
+            const K: usize = 2;
+            
             // Set up storage components
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir
@@ -831,15 +906,13 @@ mod tests {
                 .unwrap()
                 .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, 2)));
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
-                100,
-                disk_scheduler,
-                disk_manager.clone(),
+                BUFFER_POOL_SIZE,
+                Arc::from(disk_manager.unwrap()),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             // Set up transaction components with mock lock manager
             let txn_manager = Arc::new(TransactionManager::new());
@@ -888,9 +961,9 @@ mod tests {
         (meta, tuple)
     }
 
-    #[test]
-    fn test_insert_tuple_from_values() {
-        let ctx = TestContext::new("test_insert_tuple_from_values");
+    #[tokio::test]
+    async fn test_insert_tuple_from_values() {
+        let ctx = TestContext::new("test_insert_tuple_from_values").await;
 
         // Create transaction
         let txn_ctx = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
@@ -921,9 +994,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_version_chain_with_values() {
-        let ctx = TestContext::new("test_version_chain_with_values");
+    #[tokio::test]
+    async fn test_version_chain_with_values() {
+        let ctx = TestContext::new("test_version_chain_with_values").await;
 
         // Create first transaction
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
@@ -980,17 +1053,16 @@ mod tests {
         assert_eq!(old_tuple.get_value(1), Value::new(100));
     }
 
-    #[test]
-    fn test_version_chain() {
-        let ctx = TestContext::new("test_version_chain");
+    #[tokio::test]
+    async fn test_version_chain() {
+        let ctx = TestContext::new("test_version_chain").await;
 
         // Create first transaction
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
         let txn1 = txn_ctx1.get_transaction();
 
         // Insert initial version with txn1's ID
-        let (mut meta, mut tuple) = create_test_tuple();
-        meta = TupleMeta::new(txn1.get_transaction_id());
+        let (meta, mut tuple) = create_test_tuple();
 
         let rid = ctx
             .txn_heap
@@ -1001,7 +1073,7 @@ mod tests {
         ctx.txn_manager
             .commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm());
 
-        // Create second transaction
+        // Create a second transaction
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
 
         // Update tuple with txn2
@@ -1029,9 +1101,9 @@ mod tests {
         assert_eq!(old_tuple.get_values()[1], Value::new(100));
     }
 
-    #[test]
-    fn test_isolation_levels_with_values() {
-        let ctx = TestContext::new("test_isolation_levels_with_values");
+    #[tokio::test]
+    async fn test_isolation_levels_with_values() {
+        let ctx = TestContext::new("test_isolation_levels_with_values").await;
 
         // Create READ_UNCOMMITTED transaction
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
@@ -1046,7 +1118,7 @@ mod tests {
             .insert_tuple_from_values(values, &schema, txn_ctx1.clone())
             .expect("Insert from values failed");
 
-        // Verify visibility based on isolation level
+        // Verify visibility based on the isolation level
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
         assert!(
             ctx.txn_heap.get_tuple(rid, txn_ctx2).is_err(),
@@ -1060,24 +1132,22 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_isolation_levels() {
-        let ctx = TestContext::new("test_isolation_levels");
+    #[tokio::test]
+    async fn test_isolation_levels() {
+        let ctx = TestContext::new("test_isolation_levels").await;
 
         // Create READ_UNCOMMITTED transaction
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
-        let txn1 = txn_ctx1.get_transaction();
 
         // Insert tuple
-        let (mut meta, mut tuple) = create_test_tuple();
-        meta = TupleMeta::new(txn1.get_transaction_id());
+        let (meta, mut tuple) = create_test_tuple();
 
         let rid = ctx
             .txn_heap
             .insert_tuple(Arc::from(meta), &mut tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
-        // Verify visibility based on isolation level
+        // Verify visibility based on the isolation level
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
         assert!(
             ctx.txn_heap.get_tuple(rid, txn_ctx2).is_err(),

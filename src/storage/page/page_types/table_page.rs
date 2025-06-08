@@ -1741,7 +1741,7 @@ mod serialization_tests {
         assert_eq!(final_page.get_num_tuples(), 3);
 
         for (i, &rid) in rids.iter().enumerate() {
-            let (meta, tuple) = final_page.get_tuple(&rid).unwrap();
+            let (_meta, tuple) = final_page.get_tuple(&rid).unwrap();
             assert_eq!(tuple.get_value(0), Value::from(i as i32 + 1)); // ID unchanged
             assert_eq!(tuple.get_value(2), Value::from("updated")); // Status changed
         }
