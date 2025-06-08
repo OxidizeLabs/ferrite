@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID, INVALID_TXN_ID};
 use crate::common::exception::PageError;
@@ -1277,12 +1277,11 @@ mod tests {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::collections::HashSet;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     /// Basic test context for storage-only tests
     struct StorageTestContext {
@@ -1291,7 +1290,7 @@ mod tests {
     }
 
     impl StorageTestContext {
-        fn new(name: &str) -> Self {
+        async fn new(name: &str) -> Self {
             initialize_logger();
 
             const BUFFER_POOL_SIZE: usize = 100;
@@ -1311,15 +1310,13 @@ mod tests {
                 .unwrap()
                 .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                Arc::from(disk_manager.unwrap()),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             Self {
                 bpm,
@@ -1348,9 +1345,9 @@ mod tests {
         (meta, tuple)
     }
 
-    #[test]
-    fn test_basic_storage_operations() {
-        let ctx = StorageTestContext::new("test_basic_storage");
+    #[tokio::test]
+    async fn test_basic_storage_operations() {
+        let ctx = StorageTestContext::new("test_basic_storage").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1375,9 +1372,9 @@ mod tests {
         assert_eq!(stored_tuple, tuple);
     }
 
-    #[test]
-    fn test_page_management() {
-        let ctx = StorageTestContext::new("test_page_management");
+    #[tokio::test]
+    async fn test_page_management() {
+        let ctx = StorageTestContext::new("test_page_management").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1456,9 +1453,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_page_overflow() {
-        let ctx = StorageTestContext::new("test_page_overflow");
+    #[tokio::test]
+    async fn test_page_overflow() {
+        let ctx = StorageTestContext::new("test_page_overflow").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1480,9 +1477,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_tuple_update() {
-        let ctx = StorageTestContext::new("test_tuple_update");
+    #[tokio::test]
+    async fn test_tuple_update() {
+        let ctx = StorageTestContext::new("test_tuple_update").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1513,9 +1510,9 @@ mod tests {
         assert_eq!(retrieved_tuple.get_value(2), Value::new(30));
     }
 
-    #[test]
-    fn test_tuple_meta_update() {
-        let ctx = StorageTestContext::new("test_tuple_meta_update");
+    #[tokio::test]
+    async fn test_tuple_meta_update() {
+        let ctx = StorageTestContext::new("test_tuple_meta_update").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1538,9 +1535,9 @@ mod tests {
         assert_eq!(retrieved_meta.get_commit_timestamp(), 100);
     }
 
-    #[test]
-    fn test_page_iteration() {
-        let ctx = StorageTestContext::new("test_page_iteration");
+    #[tokio::test]
+    async fn test_page_iteration() {
+        let ctx = StorageTestContext::new("test_page_iteration").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1575,12 +1572,12 @@ mod tests {
         assert_eq!(found_count, rids.len(), "Should find all inserted tuples");
     }
 
-    #[test]
-    fn test_concurrent_access() {
+    #[tokio::test]
+    async fn test_concurrent_access() {
         use std::sync::Arc;
         use std::thread;
 
-        let ctx = StorageTestContext::new("test_concurrent_access");
+        let ctx = StorageTestContext::new("test_concurrent_access").await;
         let table_heap = Arc::new(ctx.create_table_heap());
         let schema = create_test_schema();
 
@@ -1607,9 +1604,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_invalid_operations() {
-        let ctx = StorageTestContext::new("test_invalid_operations");
+    #[tokio::test]
+    async fn test_invalid_operations() {
+        let ctx = StorageTestContext::new("test_invalid_operations").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1633,9 +1630,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_page_boundary_conditions() {
-        let ctx = StorageTestContext::new("test_page_boundary");
+    #[tokio::test]
+    async fn test_page_boundary_conditions() {
+        let ctx = StorageTestContext::new("test_page_boundary").await;
         let table_heap = ctx.create_table_heap();
         let schema = create_test_schema();
 
@@ -1661,9 +1658,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_insert_tuple_from_values() {
-        let ctx = StorageTestContext::new("test_insert_from_values");
+    #[tokio::test]
+    async fn test_insert_tuple_from_values() {
+        let ctx = StorageTestContext::new("test_insert_from_values").await;
         let table_heap = ctx.create_table_heap();
 
         // Create schema
@@ -1693,9 +1690,9 @@ mod tests {
         assert_eq!(retrieved_tuple.get_rid(), rid);
     }
 
-    #[test]
-    fn test_insert_multiple_tuples_from_values() {
-        let ctx = StorageTestContext::new("test_insert_multiple_from_values");
+    #[tokio::test]
+    async fn test_insert_multiple_tuples_from_values() {
+        let ctx = StorageTestContext::new("test_insert_multiple_from_values").await;
         let table_heap = ctx.create_table_heap();
 
         // Create schema
@@ -1729,9 +1726,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_insert_tuple_from_values_across_pages() {
-        let ctx = StorageTestContext::new("test_insert_across_pages");
+    #[tokio::test]
+    async fn test_insert_tuple_from_values_across_pages() {
+        let ctx = StorageTestContext::new("test_insert_across_pages").await;
         let table_heap = ctx.create_table_heap();
 
         // Create schema
@@ -1790,9 +1787,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_tuple_too_large_for_page() {
-        let ctx = StorageTestContext::new("test_tuple_too_large");
+    #[tokio::test]
+    async fn test_tuple_too_large_for_page() {
+        let ctx = StorageTestContext::new("test_tuple_too_large").await;
         let table_heap = ctx.create_table_heap();
 
         // Create schema

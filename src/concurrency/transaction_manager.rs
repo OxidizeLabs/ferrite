@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::common::config::{PageId, Timestamp, TxnId, INVALID_TXN_ID};
@@ -650,18 +650,17 @@ impl TransactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::config::TableOidT;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::thread;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     /// Test context that holds shared components
     struct TestContext {
@@ -673,7 +672,7 @@ mod tests {
     }
 
     impl TestContext {
-        fn new(name: &str) -> Self {
+        async fn new(name: &str) -> Self {
             // Create temporary directory
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir
@@ -690,24 +689,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
 
-            // Create buffer pool
+            // Create a buffer pool
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
             let buffer_pool = Arc::new(BufferPoolManager::new(
                 10,
-                disk_scheduler,
-                disk_manager.clone(),
+                Arc::from(disk_manager.unwrap()),
                 replacer,
-            ));
+            ).unwrap());
 
-            // Create transaction manager with its own lock manager
+            // Create a transaction manager with its own lock manager
             let txn_manager = Arc::new(TransactionManager::new());
 
             let lock_manager = Arc::new(LockManager::new());
 
-            // Create catalog using the transaction manager
+            // Create a catalog using the transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 buffer_pool.clone(),
                 txn_manager.clone(),
@@ -815,9 +812,9 @@ mod tests {
     mod basic_transaction_tests {
         use super::*;
 
-        #[test]
-        fn test_begin_transaction() {
-            let ctx = TestContext::new("test_begin_transaction");
+        #[tokio::test]
+        async fn test_begin_transaction() {
+            let ctx = TestContext::new("test_begin_transaction").await;
 
             // Begin transaction
             let txn = ctx
@@ -845,9 +842,9 @@ mod tests {
             assert_eq!(ctx.txn_manager().get_active_transaction_count(), 2);
         }
 
-        #[test]
-        fn test_commit_transaction() {
-            let ctx = TestContext::new("test_commit_transaction");
+        #[tokio::test]
+        async fn test_commit_transaction() {
+            let ctx = TestContext::new("test_commit_transaction").await;
 
             // Begin transaction
             let txn = ctx
@@ -925,9 +922,9 @@ mod tests {
                 .commit(verify_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_abort_transaction() {
-            let ctx = TestContext::new("test_abort_transaction");
+        #[tokio::test]
+        async fn test_abort_transaction() {
+            let ctx = TestContext::new("test_abort_transaction").await;
 
             // Begin transaction
             let txn = ctx
@@ -994,9 +991,9 @@ mod tests {
                 .commit(verify_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_transaction_manager_shutdown() {
-            let ctx = TestContext::new("test_transaction_manager_shutdown");
+        #[tokio::test]
+        async fn test_transaction_manager_shutdown() {
+            let ctx = TestContext::new("test_transaction_manager_shutdown").await;
 
             // Start a transaction
             let txn1 = ctx
@@ -1022,9 +1019,9 @@ mod tests {
     mod isolation_level_tests {
         use super::*;
 
-        #[test]
-        fn test_transaction_isolation() {
-            let ctx = TestContext::new("test_transaction_isolation");
+        #[tokio::test]
+        async fn test_transaction_isolation() {
+            let ctx = TestContext::new("test_transaction_isolation").await;
 
             let (table_oid, table_heap) = ctx.create_test_table();
             let txn_table_heap =
@@ -1104,9 +1101,9 @@ mod tests {
             ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_read_uncommitted_isolation() {
-            let ctx = TestContext::new("test_read_uncommitted_isolation");
+        #[tokio::test]
+        async fn test_read_uncommitted_isolation() {
+            let ctx = TestContext::new("test_read_uncommitted_isolation").await;
 
             let (table_oid, table_heap) = ctx.create_test_table();
             let txn_table_heap =
@@ -1167,9 +1164,9 @@ mod tests {
             ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_repeatable_read_isolation() {
-            let ctx = TestContext::new("test_repeatable_read_isolation");
+        #[tokio::test]
+        async fn test_repeatable_read_isolation() {
+            let ctx = TestContext::new("test_repeatable_read_isolation").await;
 
             let (table_oid, table_heap) = ctx.create_test_table();
             let txn_table_heap =
@@ -1303,9 +1300,9 @@ mod tests {
                 .commit(reader_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_serializable_isolation() {
-            let ctx = TestContext::new("test_serializable_isolation");
+        #[tokio::test]
+        async fn test_serializable_isolation() {
+            let ctx = TestContext::new("test_serializable_isolation").await;
 
             let (table_oid, table_heap) = ctx.create_test_table();
             let txn_table_heap =
@@ -1397,9 +1394,9 @@ mod tests {
         use super::*;
         use crate::types_db::types::Type;
 
-        #[test]
-        fn test_concurrent_transactions() {
-            let ctx = TestContext::new("test_concurrent_transactions");
+        #[tokio::test]
+        async fn test_concurrent_transactions() {
+            let ctx = TestContext::new("test_concurrent_transactions").await;
             let thread_count = 10;
             let mut handles = vec![];
 
@@ -1430,9 +1427,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_concurrent_read_write() {
-            let ctx = TestContext::new("test_concurrent_read_write");
+        #[tokio::test]
+        async fn test_concurrent_read_write() {
+            let ctx = TestContext::new("test_concurrent_read_write").await;
 
             // Create a test table and insert some initial data
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -1645,9 +1642,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_concurrent_updates() {
-            let ctx = TestContext::new("test_concurrent_updates");
+        #[tokio::test]
+        async fn test_concurrent_updates() {
+            let ctx = TestContext::new("test_concurrent_updates").await;
 
             // Create a test table and insert a tuple that will be concurrently updated
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -1906,9 +1903,9 @@ mod tests {
                 .commit(verify_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_deadlock_detection() {
-            let ctx = TestContext::new("test_deadlock_detection");
+        #[tokio::test]
+        async fn test_deadlock_detection() {
+            let ctx = TestContext::new("test_deadlock_detection").await;
 
             // Create test tables for deadlock scenario
             let (table_oid1, table_heap1) = ctx.create_test_table();
@@ -2221,9 +2218,9 @@ mod tests {
         use super::*;
         use crate::types_db::types::Type;
 
-        #[test]
-        fn test_undo_log_creation() {
-            let ctx = TestContext::new("test_undo_log_creation");
+        #[tokio::test]
+        async fn test_undo_log_creation() {
+            let ctx = TestContext::new("test_undo_log_creation").await;
 
             // Create test table and start a transaction
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -2312,9 +2309,9 @@ mod tests {
             ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_undo_log_application() {
-            let ctx = TestContext::new("test_undo_log_application");
+        #[tokio::test]
+        async fn test_undo_log_application() {
+            let ctx = TestContext::new("test_undo_log_application").await;
 
             // Create test table and start a transaction
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -2425,9 +2422,9 @@ mod tests {
                 .commit(verify_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_multiple_versions() {
-            let ctx = TestContext::new("test_multiple_versions");
+        #[tokio::test]
+        async fn test_multiple_versions() {
+            let ctx = TestContext::new("test_multiple_versions").await;
 
             // Create test table and start a transaction
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -2564,9 +2561,9 @@ mod tests {
             ctx.txn_manager().commit(txn4, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_garbage_collection() {
-            let ctx = TestContext::new("test_garbage_collection");
+        #[tokio::test]
+        async fn test_garbage_collection() {
+            let ctx = TestContext::new("test_garbage_collection").await;
 
             // Create test table and start a transaction
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -2687,9 +2684,9 @@ mod tests {
                 .commit(verify_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_deep_undo_chain() {
-            let ctx = TestContext::new("test_deep_undo_chain");
+        #[tokio::test]
+        async fn test_deep_undo_chain() {
+            let ctx = TestContext::new("test_deep_undo_chain").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -2843,9 +2840,9 @@ mod tests {
                 .commit(verify_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_concurrent_undo_operations() {
-            let ctx = TestContext::new("test_concurrent_undo_operations");
+        #[tokio::test]
+        async fn test_concurrent_undo_operations() {
+            let ctx = TestContext::new("test_concurrent_undo_operations").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -3026,9 +3023,9 @@ mod tests {
                 .commit(verify_txn, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_undo_log_edge_cases() {
-            let ctx = TestContext::new("test_undo_log_edge_cases");
+        #[tokio::test]
+        async fn test_undo_log_edge_cases() {
+            let ctx = TestContext::new("test_undo_log_edge_cases").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -3223,11 +3220,11 @@ mod tests {
             ctx.txn_manager().abort(txn3b);
         }
 
-        #[test]
-        fn test_undo_log_stress() {
+        #[tokio::test]
+        async fn test_undo_log_stress() {
             // This test creates a high volume of concurrent transactions
             // that create, modify, and roll back tuples to stress the undo log system
-            let ctx = TestContext::new("test_undo_log_stress");
+            let ctx = TestContext::new("test_undo_log_stress").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -3498,9 +3495,9 @@ mod tests {
     mod state_management_tests {
         use super::*;
 
-        #[test]
-        fn test_watermark_update() {
-            let ctx = TestContext::new("test_watermark_update");
+        #[tokio::test]
+        async fn test_watermark_update() {
+            let ctx = TestContext::new("test_watermark_update").await;
 
             // Get initial watermark - should be default/0 when no transactions exist
             let initial_watermark = ctx.txn_manager().get_watermark();
@@ -3558,9 +3555,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_transaction_state_transitions() {
-            let ctx = TestContext::new("test_transaction_state_transitions");
+        #[tokio::test]
+        async fn test_transaction_state_transitions() {
+            let ctx = TestContext::new("test_transaction_state_transitions").await;
 
             // 1. Begin -> Running
             let txn = ctx
@@ -3671,14 +3668,14 @@ mod tests {
             // No need to call commit on verify_txn as it doesn't exist in this function
         }
 
-        #[test]
-        fn test_transaction_recovery() {
+        #[tokio::test]
+        async fn test_transaction_recovery() {
             // This test simulates transaction recovery after a system restart
             // Note: In a real implementation, this would involve working with the
             // log manager and disk persistence, which may not be easily testable in this context.
             // We'll implement a simplified version to test the concept.
 
-            let ctx = TestContext::new("test_transaction_recovery");
+            let ctx = TestContext::new("test_transaction_recovery").await;
 
             // 1. Create a table and do some work in a transaction
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -3743,7 +3740,7 @@ mod tests {
 
             // Create a new transaction context with a new transaction manager
             // (In a real implementation, the transaction manager would recover state from WAL)
-            let new_ctx = TestContext::new("test_transaction_recovery_after_restart");
+            let new_ctx = TestContext::new("test_transaction_recovery_after_restart").await;
 
             // In a real recovery process:
             // 1. The transaction manager would scan the log
@@ -3797,9 +3794,9 @@ mod tests {
     mod visibility_tests {
         use super::*;
 
-        #[test]
-        fn test_read_uncommitted_visibility() {
-            let ctx = TestContext::new("test_read_uncommitted_visibility");
+        #[tokio::test]
+        async fn test_read_uncommitted_visibility() {
+            let ctx = TestContext::new("test_read_uncommitted_visibility").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -3897,9 +3894,9 @@ mod tests {
             ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_non_repeatable_reads() {
-            let ctx = TestContext::new("test_non_repeatable_reads");
+        #[tokio::test]
+        async fn test_non_repeatable_reads() {
+            let ctx = TestContext::new("test_non_repeatable_reads").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -4075,9 +4072,9 @@ mod tests {
             ctx.txn_manager().commit(txn_rr, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_phantom_reads() {
-            let ctx = TestContext::new("test_phantom_reads");
+        #[tokio::test]
+        async fn test_phantom_reads() {
+            let ctx = TestContext::new("test_phantom_reads").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
@@ -4235,9 +4232,9 @@ mod tests {
             ctx.txn_manager().commit(txn_s, ctx.buffer_pool_manager());
         }
 
-        #[test]
-        fn test_serializable_snapshot_isolation() {
-            let ctx = TestContext::new("test_serializable_snapshot_isolation");
+        #[tokio::test]
+        async fn test_serializable_snapshot_isolation() {
+            let ctx = TestContext::new("test_serializable_snapshot_isolation").await;
 
             // Create test table
             let (table_oid, table_heap) = ctx.create_test_table();
