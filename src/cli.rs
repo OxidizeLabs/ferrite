@@ -14,9 +14,9 @@ pub struct CLI {
 }
 
 impl CLI {
-    pub fn new() -> Result<Self, DBError> {
+    pub async fn new() -> Result<Self, DBError> {
         let config = DBConfig::default();
-        let db = DBInstance::new(config)?;
+        let db = DBInstance::new(config).await?;
         let rl = DefaultEditor::new().map_err(|e| DBError::Client(e.to_string()))?;
 
         Ok(Self {
