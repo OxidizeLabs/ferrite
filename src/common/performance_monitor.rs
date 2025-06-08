@@ -1,9 +1,7 @@
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use log::{warn, debug};
 use std::collections::HashMap;
-use parking_lot::RwLock;
 
 /// Comprehensive performance metrics for database operations
 #[derive(Debug, Default)]
