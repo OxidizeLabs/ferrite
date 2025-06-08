@@ -1983,8 +1983,6 @@ mod tests {
 
         #[test]
         fn test_memory_pressure_simulation() {
-            let ctx = TestContext::new("test_memory_pressure");
-            
             // Create disk manager with very small buffer
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir.path().join("pressure_test.db").to_str().unwrap().to_string();
