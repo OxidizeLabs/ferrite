@@ -116,7 +116,7 @@ impl AbstractExecutor for MockScanExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -124,42 +124,47 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
-    use std::fs;
+    use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
         transaction_context: Arc<TransactionContext>,
-        db_file: String,
-        db_log_file: String,
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                10,
-            ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            // Create disk components
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -176,8 +181,6 @@ mod tests {
                 bpm,
                 transaction_manager,
                 transaction_context,
-                db_file,
-                db_log_file,
             }
         }
 
@@ -188,17 +191,6 @@ mod tests {
         pub fn transaction_context(&self) -> Arc<TransactionContext> {
             self.transaction_context.clone()
         }
-
-        fn cleanup(&self) {
-            let _ = fs::remove_file(&self.db_file);
-            let _ = fs::remove_file(&self.db_log_file);
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
     }
 
     fn create_catalog(ctx: &TestContext) -> Catalog {
@@ -208,9 +200,9 @@ mod tests {
         )
     }
 
-    #[test]
-    fn test_mock_scan_executor() {
-        let ctx = TestContext::new("test_mock_scan_executor");
+    #[tokio::test]
+    async fn test_mock_scan_executor() {
+        let ctx = TestContext::new("test_mock_scan_executor").await;
 
         // Create schema
         let schema = Schema::new(vec![
@@ -251,9 +243,9 @@ mod tests {
         assert_eq!(tuple_count, 3, "Should have scanned 3 mock tuples");
     }
 
-    #[test]
-    fn test_mock_scan_executor_reuse() {
-        let ctx = TestContext::new("test_mock_scan_executor_reuse");
+    #[tokio::test]
+    async fn test_mock_scan_executor_reuse() {
+        let ctx = TestContext::new("test_mock_scan_executor_reuse").await;
         let bpm = ctx.bpm();
         let transaction_context = ctx.transaction_context();
 

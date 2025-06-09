@@ -283,7 +283,7 @@ impl AbstractExecutor for UpdateExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
@@ -302,11 +302,11 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::filter_plan::FilterNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::types::Type;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::types::KeyType;
 
     struct TestContext {
@@ -317,7 +317,8 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
@@ -337,16 +338,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                disk_manager_arc.clone(),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -669,9 +668,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_update_executor() {
-        let ctx = TestContext::new("test_update_executor");
+    #[tokio::test]
+    async fn test_update_executor() {
+        let ctx = TestContext::new("test_update_executor").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -794,9 +793,9 @@ mod tests {
         assert_eq!(found_updates, 2, "Not all updates were found");
     }
 
-    #[test]
-    fn test_update_with_single_arithmetic_expression() {
-        let ctx = TestContext::new("test_update_single_arith");
+    #[tokio::test]
+    async fn test_update_with_single_arithmetic_expression() {
+        let ctx = TestContext::new("test_update_single_arith").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -912,9 +911,9 @@ mod tests {
         assert!(verified, "Update was not verified");
     }
 
-    #[test]
-    fn test_update_multiple_columns() {
-        let ctx = TestContext::new("test_update_multiple_cols");
+    #[tokio::test]
+    async fn test_update_multiple_columns() {
+        let ctx = TestContext::new("test_update_multiple_cols").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1032,9 +1031,9 @@ mod tests {
         assert!(verified, "Updates were not verified");
     }
 
-    #[test]
-    fn test_update_with_complex_filter() {
-        let ctx = TestContext::new("test_update_complex_filter");
+    #[tokio::test]
+    async fn test_update_with_complex_filter() {
+        let ctx = TestContext::new("test_update_complex_filter").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1132,9 +1131,9 @@ mod tests {
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction
     }
 
-    #[test]
-    fn test_update_no_matching_rows() {
-        let ctx = TestContext::new("test_update_no_match");
+    #[tokio::test]
+    async fn test_update_no_matching_rows() {
+        let ctx = TestContext::new("test_update_no_match").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1201,9 +1200,9 @@ mod tests {
         assert!(result.unwrap().is_none()); // Update returns None after completion
     }
 
-    #[test]
-    fn test_update_executor_all_rows() {
-        let ctx = TestContext::new("test_update_all_rows");
+    #[tokio::test]
+    async fn test_update_executor_all_rows() {
+        let ctx = TestContext::new("test_update_all_rows").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1318,9 +1317,9 @@ mod tests {
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction
     }
 
-    #[test]
-    fn test_update_with_division() {
-        let ctx = TestContext::new("test_update_division");
+    #[tokio::test]
+    async fn test_update_with_division() {
+        let ctx = TestContext::new("test_update_division").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1434,9 +1433,9 @@ mod tests {
         assert!(verified, "Division update was not verified");
     }
 
-    #[test]
-    fn test_update_string_constant() {
-        let ctx = TestContext::new("test_update_string_const");
+    #[tokio::test]
+    async fn test_update_string_constant() {
+        let ctx = TestContext::new("test_update_string_const").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1536,9 +1535,9 @@ mod tests {
         assert!(verified, "String constant update was not verified");
     }
 
-    #[test]
-    fn test_update_without_filter() {
-        let ctx = TestContext::new("test_update_no_filter");
+    #[tokio::test]
+    async fn test_update_without_filter() {
+        let ctx = TestContext::new("test_update_no_filter").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1602,9 +1601,9 @@ mod tests {
         assert!(result.is_err(), "Update should fail without a data source");
     }
 
-    #[test]
-    fn test_update_chained_arithmetic() {
-        let ctx = TestContext::new("test_update_chained_arith");
+    #[tokio::test]
+    async fn test_update_chained_arithmetic() {
+        let ctx = TestContext::new("test_update_chained_arith").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 
@@ -1726,9 +1725,9 @@ mod tests {
         // In MVCC, uncommitted changes are not visible to iterators even within the same transaction
     }
 
-    #[test]
-    fn test_update_duplicate_prevention() {
-        let ctx = TestContext::new("test_update_duplicate_prevention");
+    #[tokio::test]
+    async fn test_update_duplicate_prevention() {
+        let ctx = TestContext::new("test_update_duplicate_prevention").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let exec_ctx = create_test_executor_context(&ctx, catalog.clone());
 

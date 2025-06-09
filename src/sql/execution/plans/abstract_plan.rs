@@ -785,22 +785,21 @@ impl Display for PlanNode {
 
 #[cfg(test)]
 mod basic_behaviour {
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::query_planner::QueryPlanner;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
     use log::info;
     use parking_lot::RwLock;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -809,41 +808,42 @@ mod basic_behaviour {
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
-            let temp_dir = TempDir::new().expect("Failed to create temp directory");
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_path = temp_dir
-                .path()
-                .join(format!("{}_{}.db", test_name, timestamp));
-            let log_path = temp_dir
-                .path()
-                .join(format!("{}_{}.log", test_name, timestamp));
-
-            const BUFFER_POOL_SIZE: usize = 10;
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_path.to_str().unwrap().to_string(),
-                log_path.to_str().unwrap().to_string(),
-                100,
-            ));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            // Create disk components
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let buffer_pool = Arc::new(BufferPoolManager::new(
+            let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
 
             // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
-                buffer_pool.clone(),
+                bpm.clone(),
                 transaction_manager.clone(), // Pass transaction manager
             )));
 
@@ -906,9 +906,9 @@ mod basic_behaviour {
         }
     }
 
-    #[test]
-    fn test_simple_selects() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_simple_selects");
+    #[tokio::test]
+    async fn test_simple_selects() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_simple_selects").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -928,9 +928,9 @@ mod basic_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_basic_filters() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_basic_filters");
+    #[tokio::test]
+    async fn test_basic_filters() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_basic_filters").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -949,9 +949,9 @@ mod basic_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_basic_aggregations() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_basic_aggregations");
+    #[tokio::test]
+    async fn test_basic_aggregations() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_basic_aggregations").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -969,9 +969,9 @@ mod basic_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_error_handling() {
-        let mut ctx = TestContext::new("test_error_handling");
+    #[tokio::test]
+    async fn test_error_handling() {
+        let mut ctx = TestContext::new("test_error_handling").await;
         ctx.setup_tables().unwrap();
 
         let error_cases = vec![
@@ -1001,9 +1001,9 @@ mod basic_behaviour {
         }
     }
 
-    #[test]
-    fn test_schema_validation() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_schema_validation");
+    #[tokio::test]
+    async fn test_schema_validation() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_schema_validation").await;
         ctx.setup_tables()?;
 
         let catalog = ctx.catalog.read();
@@ -1026,22 +1026,21 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod complex_behaviour {
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::query_planner::QueryPlanner;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
     use log::{info, warn};
     use parking_lot::RwLock;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -1050,41 +1049,41 @@ mod complex_behaviour {
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
-            let temp_dir = TempDir::new().expect("Failed to create temp directory");
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_path = temp_dir
-                .path()
-                .join(format!("{}_{}.db", test_name, timestamp));
-            let log_path = temp_dir
-                .path()
-                .join(format!("{}_{}.log", test_name, timestamp));
-
-            const BUFFER_POOL_SIZE: usize = 10;
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_path.to_str().unwrap().to_string(),
-                log_path.to_str().unwrap().to_string(),
-                100,
-            ));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            // Create disk components
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let buffer_pool = Arc::new(BufferPoolManager::new(
+            let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
-
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
 
             // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
-                buffer_pool.clone(),
+                bpm.clone(),
                 transaction_manager.clone(), // Pass transaction manager
             )));
 
@@ -1175,9 +1174,9 @@ mod complex_behaviour {
         }
     }
 
-    #[test]
-    fn test_simple_selects() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_simple_selects");
+    #[tokio::test]
+    async fn test_simple_selects() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_simple_selects").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -1198,9 +1197,9 @@ mod complex_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_filters() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_filters");
+    #[tokio::test]
+    async fn test_filters() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_filters").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -1222,9 +1221,9 @@ mod complex_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_joins() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_joins");
+    #[tokio::test]
+    async fn test_joins() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_joins").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -1247,9 +1246,9 @@ mod complex_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_aggregations() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_aggregations");
+    #[tokio::test]
+    async fn test_aggregations() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_aggregations").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -1270,9 +1269,9 @@ mod complex_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_sorting_and_limits() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_sorting_and_limits");
+    #[tokio::test]
+    async fn test_sorting_and_limits() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_sorting_and_limits").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -1292,9 +1291,9 @@ mod complex_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_complex_queries() -> Result<(), Box<dyn Error>> {
-        let mut ctx = TestContext::new("test_complex_queries");
+    #[tokio::test]
+    async fn test_complex_queries() -> Result<(), Box<dyn Error>> {
+        let mut ctx = TestContext::new("test_complex_queries").await;
         ctx.setup_tables()?;
 
         let test_cases = vec![
@@ -1341,9 +1340,9 @@ mod complex_behaviour {
         Ok(())
     }
 
-    #[test]
-    fn test_error_handling() {
-        let mut ctx = TestContext::new("test_error_handling");
+    #[tokio::test]
+    async fn test_error_handling() {
+        let mut ctx = TestContext::new("test_error_handling").await;
         ctx.setup_tables().unwrap();
 
         let error_cases = vec![

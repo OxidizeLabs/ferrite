@@ -371,7 +371,7 @@ impl AbstractExecutor for FilterExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -391,14 +391,14 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-    use crate::storage::table::tuple::{Tuple, TupleMeta};
+    use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -408,7 +408,8 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
@@ -428,16 +429,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                disk_manager_arc.clone(),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -685,7 +684,6 @@ mod tests {
                 Value::new(age),
                 Value::new(salary),
             ];
-            let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             txn_table_heap
                 .insert_tuple_from_values(values, schema, transaction_context.clone())
                 .expect("Failed to insert tuple");
@@ -697,9 +695,9 @@ mod tests {
         a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
     }
 
-    #[test]
-    fn test_filter_equals() {
-        let test_context = TestContext::new("filter_eq_test");
+    #[tokio::test]
+    async fn test_filter_equals() {
+        let test_context = TestContext::new("filter_eq_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -772,9 +770,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_filter_greater_than() {
-        let test_context = TestContext::new("filter_gt_test");
+    #[tokio::test]
+    async fn test_filter_greater_than() {
+        let test_context = TestContext::new("filter_gt_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -850,9 +848,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_filter_no_matches() {
-        let test_context = TestContext::new("filter_no_matches_test");
+    #[tokio::test]
+    async fn test_filter_no_matches() {
+        let test_context = TestContext::new("filter_no_matches_test").await;
         let schema = create_test_schema();
 
         // Create catalog with the test table
@@ -882,9 +880,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_filter_with_transaction() {
-        let test_context = TestContext::new("filter_transaction_test");
+    #[tokio::test]
+    async fn test_filter_with_transaction() {
+        let test_context = TestContext::new("filter_transaction_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -966,9 +964,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_filter_invalid_predicate() {
-        let test_context = TestContext::new("filter_invalid_test");
+    #[tokio::test]
+    async fn test_filter_invalid_predicate() {
+        let test_context = TestContext::new("filter_invalid_test").await;
         let schema = create_test_schema();
 
         // Create a filter with an empty schema to simulate invalid predicate
@@ -1009,9 +1007,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_having_filter() {
-        let test_context = TestContext::new("having_filter_test");
+    #[tokio::test]
+    async fn test_having_filter() {
+        let test_context = TestContext::new("having_filter_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -1084,9 +1082,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_having_filter_no_matches() {
-        let test_context = TestContext::new("having_filter_no_matches_test");
+    #[tokio::test]
+    async fn test_having_filter_no_matches() {
+        let test_context = TestContext::new("having_filter_no_matches_test").await;
         let schema = create_test_schema();
 
         // Create catalog with the test table
@@ -1116,9 +1114,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_having_avg_filter() {
-        let test_context = TestContext::new("having_avg_test");
+    #[tokio::test]
+    async fn test_having_avg_filter() {
+        let test_context = TestContext::new("having_avg_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -1195,9 +1193,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_having_max_filter() {
-        let test_context = TestContext::new("having_max_test");
+    #[tokio::test]
+    async fn test_having_max_filter() {
+        let test_context = TestContext::new("having_max_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -1274,9 +1272,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_where_and_having_sequence() {
-        let test_context = TestContext::new("where_having_sequence_test");
+    #[tokio::test]
+    async fn test_where_and_having_sequence() {
+        let test_context = TestContext::new("where_having_sequence_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 
@@ -1361,9 +1359,9 @@ mod tests {
         assert!(test_context._temp_dir.path().exists());
     }
 
-    #[test]
-    fn test_having_with_zero_values() {
-        let test_context = TestContext::new("having_zero_test");
+    #[tokio::test]
+    async fn test_having_with_zero_values() {
+        let test_context = TestContext::new("having_zero_test").await;
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
 

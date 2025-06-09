@@ -218,7 +218,7 @@ impl Display for ProjectionExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -239,13 +239,12 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -255,7 +254,7 @@ mod tests {
     }
 
     impl TestContext {
-        fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
@@ -276,16 +275,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
-            let buffer_pool_manager = Arc::new(BufferPoolManager::new(
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -293,7 +290,7 @@ mod tests {
 
             // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
-                buffer_pool_manager.clone(),
+                bpm.clone(),
                 transaction_manager.clone(), // Pass transaction manager
             )));
 
@@ -306,7 +303,7 @@ mod tests {
 
             Self {
                 catalog,
-                buffer_pool_manager,
+                buffer_pool_manager: bpm,
                 transaction_context,
                 _temp_dir: temp_dir,
             }
@@ -321,8 +318,8 @@ mod tests {
         }
     }
 
-    fn create_test_executor_context() -> (TestContext, Arc<RwLock<ExecutionContext>>) {
-        let ctx = TestContext::new("projection_test");
+    async fn create_test_executor_context() -> (TestContext, Arc<RwLock<ExecutionContext>>) {
+        let ctx = TestContext::new("projection_test").await;
         let bpm = ctx.bpm();
         let catalog = ctx.catalog();
         let transaction_context = ctx.transaction_context.clone();
@@ -336,8 +333,8 @@ mod tests {
         (ctx, execution_context)
     }
 
-    #[test]
-    fn test_projection_with_mock_data() {
+    #[tokio::test]
+    async fn test_projection_with_mock_data() {
         // Create input schema
         let input_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
@@ -380,7 +377,7 @@ mod tests {
         ];
 
         // Create executor context with test context
-        let (_, context) = create_test_executor_context();
+        let (_, context) = create_test_executor_context().await;
 
         let mock_scan_plan =
             MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
@@ -419,8 +416,8 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_projection_over_aggregation() {
+    #[tokio::test]
+    async fn test_projection_over_aggregation() {
         // Create input schema (simulating aggregation output)
         let input_schema = Schema::new(vec![
             Column::new("name", TypeId::VarChar),
@@ -470,7 +467,7 @@ mod tests {
         ];
 
         // Create executor context
-        let (_, context) = create_test_executor_context();
+        let (_, context) = create_test_executor_context().await;
 
         // Create mock scan plan to simulate aggregation output
         let mock_scan_plan =
@@ -510,8 +507,8 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_projection_with_multiple_aggregates() {
+    #[tokio::test]
+    async fn test_projection_with_multiple_aggregates() {
         // Create input schema with multiple aggregate functions
         let input_schema = Schema::new(vec![
             Column::new("dept", TypeId::VarChar),
@@ -598,7 +595,7 @@ mod tests {
             ))),
         ];
 
-        let (_, context) = create_test_executor_context();
+        let (_, context) = create_test_executor_context().await;
         let mock_scan_plan =
             MockScanNode::new(input_schema.clone(), "mock_agg".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
@@ -639,8 +636,8 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_projection_with_invalid_column_reference() {
+    #[tokio::test]
+    async fn test_projection_with_invalid_column_reference() {
         let input_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("name", TypeId::VarChar),
@@ -668,7 +665,7 @@ mod tests {
 
         let tuples = vec![(vec![Value::new(1), Value::new("test")], RID::new(0, 0))];
 
-        let (_, context) = create_test_executor_context();
+        let (_, context) = create_test_executor_context().await;
         let mock_scan_plan =
             MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
@@ -687,8 +684,8 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_projection_with_computed_expressions() {
+    #[tokio::test]
+    async fn test_projection_with_computed_expressions() {
         // Create input schema
         let input_schema = Schema::new(vec![
             Column::new("price", TypeId::Integer),
@@ -742,7 +739,7 @@ mod tests {
 
         let expressions = vec![price_expr, quantity_expr, total_expr, discounted_total_expr];
 
-        let (_, context) = create_test_executor_context();
+        let (_, context) = create_test_executor_context().await;
         let mock_scan_plan =
             MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(
@@ -779,8 +776,8 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_projection_with_null_values() {
+    #[tokio::test]
+    async fn test_projection_with_null_values() {
         // Create input schema
         let input_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
@@ -850,7 +847,7 @@ mod tests {
 
         let expressions = vec![id_expr, name_expr, salary_expr.clone(), has_salary_expr];
 
-        let (_, context) = create_test_executor_context();
+        let (_, context) = create_test_executor_context().await;
         let mock_scan_plan =
             MockScanNode::new(input_schema.clone(), "mock_table".to_string(), vec![]);
         let child_executor = Box::new(MockExecutor::new(

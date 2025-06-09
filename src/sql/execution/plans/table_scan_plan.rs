@@ -84,71 +84,63 @@ impl Display for TableScanNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::table_heap::TableHeap;
     use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
     use parking_lot::RwLock;
+    use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<TransactionManager>,
-        db_file: String,
-        db_log_file: String,
+        transaction_manager: Arc<TransactionManager>
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
-            let buffer_pool_size: usize = 5;
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
+
+            // Create disk components
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
-                buffer_pool_size,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                BUFFER_POOL_SIZE,
+                Arc::from(disk_manager.unwrap()),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager
             let transaction_manager = Arc::new(TransactionManager::new());
 
             Self {
                 bpm,
-                transaction_manager,
-                db_file,
-                db_log_file,
+                transaction_manager
             }
         }
-
-        fn cleanup(&self) {
-            let _ = std::fs::remove_file(&self.db_file);
-            let _ = std::fs::remove_file(&self.db_log_file);
-        }
     }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup()
-        }
-    }
-
-    fn setup_test_table(test_name: &str) -> (Arc<TableHeap>, Arc<TransactionManager>) {
-        let ctx = TestContext::new(test_name);
+    async fn setup_test_table(test_name: &str) -> (Arc<TableHeap>, Arc<TransactionManager>) {
+        let ctx = TestContext::new(test_name).await;
         let bpm = ctx.bpm.clone();
         let txn_manager = ctx.transaction_manager.clone();
         let table_heap = Arc::new(TableHeap::new(bpm, 0));
@@ -172,10 +164,10 @@ mod tests {
         )
     }
 
-    #[test]
-    fn test_table_scan_creation() {
+    #[tokio::test]
+    async fn test_table_scan_creation() {
         let schema = create_test_schema();
-        let (table_heap, _) = setup_test_table("test_table_scan_creation");
+        let (table_heap, _) = setup_test_table("test_table_scan_creation").await;
         let table_info = create_test_table_info("users", schema.clone(), table_heap);
 
         let scan = TableScanNode::new(table_info, Arc::from(schema), Some("u".to_string()));
@@ -185,10 +177,10 @@ mod tests {
         assert_eq!(scan.get_table_alias(), Some("u"));
     }
 
-    #[test]
-    fn test_table_scan_iterator() {
+    #[tokio::test]
+    async fn test_table_scan_iterator() {
         let schema = create_test_schema();
-        let (table_heap, _) = setup_test_table("test_table_scan_iterator");
+        let (table_heap, _) = setup_test_table("test_table_scan_iterator").await;
         let table_info = create_test_table_info("users", schema.clone(), table_heap);
 
         let scan = TableScanNode::new(table_info, Arc::from(schema), None);

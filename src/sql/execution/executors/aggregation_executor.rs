@@ -342,7 +342,7 @@ impl AbstractExecutor for AggregationExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -355,11 +355,10 @@ mod tests {
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::value::Val::{BigInt, Integer};
     use chrono::Utc;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -369,9 +368,9 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 100;
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -390,16 +389,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                disk_manager_arc.clone(),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -440,9 +437,9 @@ mod tests {
         )))
     }
 
-    #[test]
-    fn test_count_star() {
-        let test_context = TestContext::new("test_count_star");
+    #[tokio::test]
+    async fn test_count_star() {
+        let test_context = TestContext::new("test_count_star").await;
         let input_schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -493,9 +490,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_group_by_sum() {
-        let test_context = TestContext::new("test_group_by_sum");
+    #[tokio::test]
+    async fn test_group_by_sum() {
+        let test_context = TestContext::new("test_group_by_sum").await;
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer), // Will be converted to BigInt
             Column::new("value", TypeId::Integer),
@@ -581,9 +578,9 @@ mod tests {
         assert_eq!(results[1].get_value(1), Value::new(Integer(70))); // Sum as Integer
     }
 
-    #[test]
-    fn test_min_max_aggregation() {
-        let test_context = TestContext::new("test_min_max_aggregation");
+    #[tokio::test]
+    async fn test_min_max_aggregation() {
+        let test_context = TestContext::new("test_min_max_aggregation").await;
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -678,9 +675,9 @@ mod tests {
         assert_eq!(results[1].get_value(2), Value::new(50)); // Max
     }
 
-    #[test]
-    fn test_min_max_without_groupby() {
-        let test_context = TestContext::new("test_min_max_without_groupby");
+    #[tokio::test]
+    async fn test_min_max_without_groupby() {
+        let test_context = TestContext::new("test_min_max_without_groupby").await;
         let input_schema = Schema::new(vec![Column::new("value", TypeId::Integer)]);
 
         let exec_ctx = create_test_executor_context(&test_context);
@@ -748,9 +745,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_multiple_aggregates() {
-        let test_context = TestContext::new("test_multiple_aggregates");
+    #[tokio::test]
+    async fn test_multiple_aggregates() {
+        let test_context = TestContext::new("test_multiple_aggregates").await;
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -845,9 +842,9 @@ mod tests {
         assert_eq!(results[1].get_value(2).as_bigint().unwrap(), 3); // count = 3
     }
 
-    #[test]
-    fn test_empty_input() {
-        let test_context = TestContext::new("test_empty_input");
+    #[tokio::test]
+    async fn test_empty_input() {
+        let test_context = TestContext::new("test_empty_input").await;
         let input_schema = Schema::new(vec![Column::new("value", TypeId::Integer)]);
 
         let exec_ctx = create_test_executor_context(&test_context);
@@ -896,9 +893,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_single_group() {
-        let test_context = TestContext::new("test_single_group");
+    #[tokio::test]
+    async fn test_single_group() {
+        let test_context = TestContext::new("test_single_group").await;
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
@@ -966,9 +963,9 @@ mod tests {
         assert_eq!(results[0].get_value(1), Value::new(Integer(60))); // 10 + 20 + 30
     }
 
-    #[test]
-    fn test_aggregation_with_types() {
-        let test_context = TestContext::new("test_aggregation_with_types");
+    #[tokio::test]
+    async fn test_aggregation_with_types() {
+        let test_context = TestContext::new("test_aggregation_with_types").await;
         let input_schema = Schema::new(vec![
             Column::new("group_id", TypeId::VarChar), // String group
             Column::new("int_val", TypeId::Integer),  // Integer values
@@ -1129,9 +1126,9 @@ mod tests {
         assert_eq!(results[2].get_value(3).as_bigint().unwrap(), 1); // count = 1
     }
 
-    #[test]
-    fn test_aggregation_column_names() {
-        let test_context = TestContext::new("test_aggregation_column_names");
+    #[tokio::test]
+    async fn test_aggregation_column_names() {
+        let test_context = TestContext::new("test_aggregation_column_names").await;
         let input_schema = Schema::new(vec![
             Column::new("name", TypeId::VarChar), // Name column
             Column::new("age", TypeId::Integer),  // Age column

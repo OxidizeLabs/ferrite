@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::{
     config::{PageId, INVALID_PAGE_ID},
     rid::RID,
@@ -2381,45 +2381,60 @@ mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::index::index::{IndexInfo, IndexType};
     use parking_lot::RwLock;
     use std::sync::Arc;
-    use tempfile::tempdir;
+    use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
-    #[test]
-    fn test_basic_tree_operations() {
-        // Create a simple test environment
-        let temp_dir = tempdir().unwrap();
-        let db_path = temp_dir
-            .path()
-            .join("test.db")
-            .to_str()
-            .unwrap()
-            .to_string();
-        let log_path = temp_dir
-            .path()
-            .join("test.log")
-            .to_str()
-            .unwrap()
-            .to_string();
+    struct TestContext {
+        bpm: Arc<BufferPoolManager>,
+        _temp_dir: TempDir,
+    }
 
-        // Initialize disk manager
-        let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 4096));
+    impl TestContext {
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
+            const K: usize = 2;
 
-        // Create buffer pool manager components
-        let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-        let replacer = Arc::new(RwLock::new(LRUKReplacer::new(50, 2)));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-        // Create buffer pool manager
-        let buffer_pool_manager = Arc::new(BufferPoolManager::new(
-            50, // pool_size
-            disk_scheduler,
-            disk_manager,
-            replacer,
-        ));
-
+            // Create disk components
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                Arc::from(disk_manager.unwrap()),
+                replacer.clone(),
+            ).unwrap());
+            
+            Self {
+                bpm,
+                _temp_dir: temp_dir,
+            }
+        }
+    }
+    
+    #[tokio::test]
+    async fn test_basic_tree_operations() {
+        let ctx = TestContext::new("test_basic_tree_operations").await;
+        let bpm = ctx.bpm;
+    
         // Create a simple schema
         let key_schema = Schema::new(vec![]);
 
@@ -2439,7 +2454,7 @@ mod tests {
         let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
             i32_comparator,
             metadata,
-            buffer_pool_manager,
+            bpm,
         );
 
         // Initialize tree with order 4

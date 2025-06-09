@@ -401,7 +401,7 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -420,13 +420,12 @@ mod tests {
     use crate::sql::execution::plans::create_index_plan::CreateIndexPlanNode;
     use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use sqlparser::ast::{JoinConstraint, JoinOperator};
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -436,7 +435,7 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
@@ -457,15 +456,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                disk_manager_arc.clone(),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -504,9 +502,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_nested_index_join_executor() {
-        let ctx = TestContext::new("test_nested_index_join_executor");
+    #[tokio::test]
+    async fn test_nested_index_join_executor() {
+        let ctx = TestContext::new("test_nested_index_join_executor").await;
 
         // Create schemas for both tables
         let left_schema = Schema::new(vec![
@@ -684,7 +682,6 @@ mod tests {
             let catalog = ctx.catalog.read();
             let table_info = catalog.get_table("right_table").unwrap();
             let index_info = catalog.get_table_indexes("right_table")[0].clone();
-            let table_heap = table_info.get_table_heap();
 
             // Create a sequential scan to iterate through all tuples
             let right_scan = SeqScanPlanNode::new(
@@ -698,7 +695,6 @@ mod tests {
             // Manually insert entries into the index using the B+ tree directly
             let index_oid = index_info.get_index_oid();
             if let Some((_, btree)) = catalog.get_index_by_index_oid(index_oid) {
-                let dummy_transaction = ctx.transaction_context.get_transaction();
 
                 // Insert each tuple's keys into the index
                 while let Ok(Some((tuple, rid))) = right_executor.next() {
@@ -711,7 +707,6 @@ mod tests {
 
                     // Create key tuple with just the indexed column
                     let key_schema = index_info.get_key_schema();
-                    let key_tuple = Tuple::new(&key_values, key_schema, rid);
 
                     // Extract the key value for the B+ tree
                     let key_value = key_values[0].clone();
@@ -936,9 +931,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_simple_table_data_debug() {
-        let ctx = TestContext::new("test_simple_table_data_debug");
+    #[tokio::test]
+    async fn test_simple_table_data_debug() {
+        let ctx = TestContext::new("test_simple_table_data_debug").await;
 
         // Create schemas for both tables
         let left_schema = Schema::new(vec![

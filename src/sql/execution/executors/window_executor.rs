@@ -267,7 +267,7 @@ impl AbstractExecutor for WindowExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -281,13 +281,13 @@ mod tests {
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType};
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;
     use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -297,7 +297,8 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
@@ -317,15 +318,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                disk_manager_arc.clone(),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -386,10 +386,10 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn test_window_row_number() {
+    #[tokio::test]
+    async fn test_window_row_number() {
         // Create test context
-        let ctx = TestContext::new("test_window_row_number");
+        let ctx = TestContext::new("test_window_row_number").await;
         let catalog = Arc::new(RwLock::new(Catalog::new(
             ctx.bpm(),                       // index_names
             ctx.transaction_manager.clone(), // txn_manager
@@ -475,9 +475,9 @@ mod tests {
         assert_eq!(salaries, sorted_salaries);
     }
 
-    #[test]
-    fn test_window_partitioned_row_number() {
-        let ctx = TestContext::new("test_window_partitioned");
+    #[tokio::test]
+    async fn test_window_partitioned_row_number() {
+        let ctx = TestContext::new("test_window_partitioned").await;
         let catalog = Arc::new(RwLock::new(Catalog::new(
             ctx.bpm(),
             ctx.transaction_manager.clone(), // txn_manager
