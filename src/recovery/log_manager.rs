@@ -1,6 +1,6 @@
 use crate::common::config::{Lsn, INVALID_LSN, LOG_BUFFER_SIZE};
 use crate::recovery::log_record::LogRecord;
-use crate::storage::disk::disk_manager::FileDiskManager;
+use crate::storage::disk::async_disk_manager::AsyncDiskManager;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use log::{debug, error, trace, warn};
 use parking_lot::RwLock;
@@ -25,7 +25,7 @@ struct LogManagerState {
     log_buffer: RwLock<LogBuffer>,
     flush_thread: Mutex<Option<thread::JoinHandle<()>>>,
     stop_flag: AtomicBool,
-    disk_manager: Arc<FileDiskManager>,
+    disk_manager: Arc<AsyncDiskManager>,
     log_queue: (Sender<Arc<LogRecord>>, Receiver<Arc<LogRecord>>),
 }
 
@@ -74,7 +74,7 @@ impl LogManager {
     ///
     /// # Returns
     /// A new `LogManager` instance.
-    pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
+    pub fn new(disk_manager: Arc<AsyncDiskManager>) -> Self {
         let (sender, receiver) = bounded(1000); // Bounded channel for backpressure
 
         Self {
@@ -371,12 +371,12 @@ impl LogManager {
 mod tests {
     use super::*;
     use crate::common::config::TxnId;
+    use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
-    use log::warn;
-    use std::fs;
-    use std::path::Path;
+    use crate::storage::disk::async_disk_manager::DiskManagerConfig;
     use std::thread::sleep;
     use std::time::Duration;
+    use tempfile::TempDir;
 
     fn init_test_logger() {
         let _ = env_logger::builder()
@@ -386,48 +386,44 @@ mod tests {
     }
 
     struct TestContext {
-        log_file_path: String,
         log_manager: LogManager,
-        disk_manager: Arc<FileDiskManager>,
+        disk_manager: Arc<AsyncDiskManager>,
+        log_path: String,
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
-            // init_test_logger();
-            debug!("Creating new test context for: {}", test_name);
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
+            const K: usize = 2;
 
-            let log_file_path = format!(
-                "tests/data/{}_{}.log",
-                test_name,
-                chrono::Utc::now().timestamp()
-            );
-            let disk_manager = Arc::new(FileDiskManager::new(
-                "dummy.db".to_string(),
-                log_file_path.clone(),
-                100,
-            ));
-            let log_manager = LogManager::new(Arc::clone(&disk_manager));
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            TestContext {
-                log_file_path,
+            // Create disk components
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path.clone(), DiskManagerConfig::default())
+                    .await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let log_manager = LogManager::new(disk_manager_arc.clone());
+
+            Self {
                 log_manager,
-                disk_manager,
+                disk_manager: disk_manager_arc,
+                log_path,
             }
-        }
-
-        fn cleanup(&self) {
-            debug!("Cleaning up test context");
-            if Path::new(&self.log_file_path).exists() {
-                if let Err(e) = fs::remove_file(&self.log_file_path) {
-                    warn!("Failed to clean up log file: {}", e);
-                }
-            }
-        }
-    }
-
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
         }
     }
 
@@ -439,13 +435,14 @@ mod tests {
         use std::sync::atomic::{AtomicBool, AtomicU64};
 
         // Helper to create test state
-        fn create_test_state() -> Arc<LogManagerState> {
+        async fn disk_manager_arc() -> Arc<LogManagerState> {
             let (sender, receiver) = bounded(10); // smaller channel for testing
-            let disk_manager = Arc::new(FileDiskManager::new(
+            let disk_manager = AsyncDiskManager::new(
                 "dummy.db".to_string(),
                 "tests/data/helper_test.log".to_string(),
-                100,
-            ));
+                DiskManagerConfig::default(),
+            )
+            .await;
 
             Arc::new(LogManagerState {
                 next_lsn: AtomicU64::new(0),
@@ -453,7 +450,7 @@ mod tests {
                 log_buffer: RwLock::new(LogBuffer::new(LOG_BUFFER_SIZE as usize)),
                 flush_thread: Mutex::new(None),
                 stop_flag: AtomicBool::new(false),
-                disk_manager,
+                disk_manager: Arc::new(disk_manager.unwrap()),
                 log_queue: (sender, receiver),
             })
         }
@@ -471,9 +468,9 @@ mod tests {
             record
         }
 
-        #[test]
-        fn test_process_queued_records_single() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_process_queued_records_single() {
+            let state = disk_manager_arc().await;
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
             let mut batch_start_lsn = None;
             let mut max_lsn_in_batch = INVALID_LSN;
@@ -504,9 +501,9 @@ mod tests {
             assert!(!flush_buffer.is_empty(), "Buffer should not be empty");
         }
 
-        #[test]
-        fn test_process_queued_records_multiple() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_process_queued_records_multiple() {
+            let state = disk_manager_arc().await;
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
             let mut batch_start_lsn = None;
             let mut max_lsn_in_batch = INVALID_LSN;
@@ -552,9 +549,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_process_queued_records_commit() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_process_queued_records_commit() {
+            let state = disk_manager_arc().await;
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
             let mut batch_start_lsn = None;
             let mut max_lsn_in_batch = INVALID_LSN;
@@ -601,9 +598,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_process_queued_records_buffer_full() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_process_queued_records_buffer_full() {
+            let state = disk_manager_arc().await;
 
             // Create a small buffer to test overflow
             let mut flush_buffer = LogBuffer::new(100); // Small size to force overflow
@@ -653,9 +650,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_perform_flush_success() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_perform_flush_success() {
+            let state = disk_manager_arc().await;
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
 
             // Add some data to the buffer
@@ -676,9 +673,9 @@ mod tests {
             assert_eq!(persistent_lsn, 42, "Persistent LSN should be updated to 42");
         }
 
-        #[test]
-        fn test_perform_flush_empty_buffer() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_perform_flush_empty_buffer() {
+            let state = disk_manager_arc().await;
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
 
             // Set initial persistent LSN value
@@ -695,9 +692,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_perform_flush_different_reasons() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_perform_flush_different_reasons() {
+            let state = disk_manager_arc().await;
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
 
             // Test different flush reasons
@@ -722,9 +719,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_perform_flush_invalid_lsn() {
-            let state = create_test_state();
+        #[tokio::test]
+        async fn test_perform_flush_invalid_lsn() {
+            let state = disk_manager_arc().await;
             let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
 
             // Set initial persistent LSN
@@ -753,9 +750,9 @@ mod tests {
     mod basic_functionality {
         use super::*;
 
-        #[test]
-        fn test_log_manager_initialization() {
-            let ctx = TestContext::new("init_test");
+        #[tokio::test]
+        async fn test_log_manager_initialization() {
+            let ctx = TestContext::new("init_test").await;
 
             assert_eq!(ctx.log_manager.get_next_lsn(), 0);
             assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
@@ -765,9 +762,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_append_log_record() {
-            let mut ctx = TestContext::new("append_test");
+        #[tokio::test]
+        async fn test_append_log_record() {
+            let mut ctx = TestContext::new("append_test").await;
 
             let txn_id: TxnId = 1;
             let prev_lsn = INVALID_LSN;
@@ -787,9 +784,9 @@ mod tests {
             assert_eq!(ctx.log_manager.get_next_lsn(), 1);
         }
 
-        #[test]
-        fn test_multiple_append_operations() {
-            let mut ctx = TestContext::new("multiple_append_test");
+        #[tokio::test]
+        async fn test_multiple_append_operations() {
+            let mut ctx = TestContext::new("multiple_append_test").await;
 
             // Append multiple log records
             for i in 0..5 {
@@ -805,9 +802,9 @@ mod tests {
             assert_eq!(ctx.log_manager.get_next_lsn(), 5);
         }
 
-        #[test]
-        fn test_persistent_lsn_management() {
-            let mut ctx = TestContext::new("persistent_lsn_test");
+        #[tokio::test]
+        async fn test_persistent_lsn_management() {
+            let mut ctx = TestContext::new("persistent_lsn_test").await;
 
             assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
 
@@ -817,9 +814,9 @@ mod tests {
             assert_eq!(ctx.log_manager.get_persistent_lsn(), test_lsn);
         }
 
-        #[test]
-        fn test_log_record_types() {
-            let mut ctx = TestContext::new("record_types_test");
+        #[tokio::test]
+        async fn test_log_record_types() {
+            let mut ctx = TestContext::new("record_types_test").await;
             let mut next_lsn = 0;
 
             // Create all records first
@@ -877,9 +874,9 @@ mod tests {
         use super::*;
         use crate::common::config::PageId;
 
-        #[test]
-        fn test_flush_thread_lifecycle() {
-            let mut ctx = TestContext::new("flush_thread_test");
+        #[tokio::test]
+        async fn test_flush_thread_lifecycle() {
+            let mut ctx = TestContext::new("flush_thread_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -901,11 +898,9 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_concurrent_log_appends() {
-            let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new(
-                "concurrent_test",
-            )));
+        #[tokio::test]
+        async fn test_concurrent_log_appends() {
+            let ctx = Arc::new(RwLock::new(TestContext::new("concurrent_test").await));
             let thread_count = 5;
             let mut handles = vec![];
 
@@ -934,9 +929,9 @@ mod tests {
             assert_eq!(ctx.read().log_manager.get_next_lsn() as usize, thread_count);
         }
 
-        #[test]
-        fn test_shutdown_behavior() {
-            let mut ctx = TestContext::new("shutdown_test");
+        #[tokio::test]
+        async fn test_shutdown_behavior() {
+            let mut ctx = TestContext::new("shutdown_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -956,11 +951,11 @@ mod tests {
             ctx.log_manager.shut_down(); // Second shutdown should not panic
         }
 
-        #[test]
-        fn test_concurrent_shutdown() {
-            let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new(
-                "concurrent_shutdown_test",
-            )));
+        #[tokio::test]
+        async fn test_concurrent_shutdown() {
+            let ctx = Arc::new(parking_lot::RwLock::new(
+                TestContext::new("concurrent_shutdown_test").await,
+            ));
 
             // Start flush thread
             ctx.write().log_manager.run_flush_thread();
@@ -996,9 +991,9 @@ mod tests {
             ctx.write().log_manager.get_next_lsn();
         }
 
-        #[test]
-        fn test_flush_thread_periodic_flush() {
-            let mut ctx = TestContext::new("periodic_flush_test");
+        #[tokio::test]
+        async fn test_flush_thread_periodic_flush() {
+            let mut ctx = TestContext::new("periodic_flush_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1027,9 +1022,9 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_flush_thread_commit_flush() {
-            let mut ctx = TestContext::new("commit_flush_test");
+        #[tokio::test]
+        async fn test_flush_thread_commit_flush() {
+            let mut ctx = TestContext::new("commit_flush_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1062,9 +1057,9 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_flush_thread_buffer_full() {
-            let mut ctx = TestContext::new("buffer_full_test");
+        #[tokio::test]
+        async fn test_flush_thread_buffer_full() {
+            let mut ctx = TestContext::new("buffer_full_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1101,9 +1096,9 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_flush_thread_continuous_operation() {
-            let mut ctx = TestContext::new("continuous_operation_test");
+        #[tokio::test]
+        async fn test_flush_thread_continuous_operation() {
+            let mut ctx = TestContext::new("continuous_operation_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1186,11 +1181,11 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_flush_thread_concurrent_commits() {
-            let ctx = Arc::new(parking_lot::RwLock::new(TestContext::new(
-                "concurrent_commits_test",
-            )));
+        #[tokio::test]
+        async fn test_flush_thread_concurrent_commits() {
+            let ctx = Arc::new(parking_lot::RwLock::new(
+                TestContext::new("concurrent_commits_test").await,
+            ));
 
             // Start flush thread
             ctx.write().log_manager.run_flush_thread();
@@ -1247,9 +1242,9 @@ mod tests {
             ctx.write().log_manager.shut_down();
         }
 
-        #[test]
-        fn test_flush_thread_mixed_operations() {
-            let mut ctx = TestContext::new("mixed_operations_test");
+        #[tokio::test]
+        async fn test_flush_thread_mixed_operations() {
+            let mut ctx = TestContext::new("mixed_operations_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1313,9 +1308,9 @@ mod tests {
     mod read_and_write_tests {
         use super::*;
 
-        #[test]
-        fn test_write_and_read_log_record() {
-            let mut ctx = TestContext::new("write_read_test");
+        #[tokio::test]
+        async fn test_write_and_read_log_record() {
+            let mut ctx = TestContext::new("write_read_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1383,9 +1378,9 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_read_multiple_log_records() {
-            let mut ctx = TestContext::new("read_multiple_test");
+        #[tokio::test]
+        async fn test_read_multiple_log_records() {
+            let mut ctx = TestContext::new("read_multiple_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1471,9 +1466,9 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_read_with_invalid_offset() {
-            let mut ctx = TestContext::new("invalid_offset_test");
+        #[tokio::test]
+        async fn test_read_with_invalid_offset() {
+            let mut ctx = TestContext::new("invalid_offset_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();
@@ -1485,9 +1480,9 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[test]
-        fn test_read_after_log_write() {
-            let mut ctx = TestContext::new("read_after_log_write_test");
+        #[tokio::test]
+        async fn test_read_after_log_write() {
+            let mut ctx = TestContext::new("read_after_log_write_test").await;
 
             // Start flush thread
             ctx.log_manager.run_flush_thread();

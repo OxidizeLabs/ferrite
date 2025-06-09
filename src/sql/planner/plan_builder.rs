@@ -53,16 +53,13 @@ impl LogicalPlanBuilder {
             },
             SetExpr::Delete(_) => return Err("DELETE is not supported in this context".to_string()),
             SetExpr::SetOperation {
-                op,
-                left,
-                right,
-                set_quantifier,
+                ..
             } => {
                 return Err(
                     "Set operations (UNION, INTERSECT, etc.) are not yet supported".to_string(),
                 );
             }
-            SetExpr::Insert(insert) => {
+            SetExpr::Insert(_) => {
                 return Err(
                     "INSERT is not supported in this context. Use Statement::Insert instead."
                         .to_string(),
@@ -2405,21 +2402,17 @@ impl LogicalPlanBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction::{IsolationLevel, Transaction};
+    use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
-    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::sql::planner::logical_plan::LogicalToPhysical;
     use crate::sql::planner::query_planner::QueryPlanner;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
-    use chrono::Utc;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -2428,9 +2421,9 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 5;
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -2449,38 +2442,21 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                Arc::from(disk_manager.unwrap()),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             let transaction_manager = Arc::new(TransactionManager::new());
-            let lock_manager = Arc::new(LockManager::new());
 
             let catalog = Arc::new(RwLock::new(Catalog::new(
                 bpm.clone(),
                 transaction_manager.clone(),
             )));
-
-            // Create fresh transaction with unique ID
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let transaction = Arc::new(Transaction::new(
-                timestamp.parse::<u64>().unwrap_or(0), // Unique transaction ID
-                IsolationLevel::ReadUncommitted,
-            ));
-
-            let transaction_context = Arc::new(TransactionContext::new(
-                transaction,
-                lock_manager.clone(),
-                transaction_manager.clone(),
-            ));
-
+            
             let planner = QueryPlanner::new(catalog.clone());
 
             Self {
@@ -2546,9 +2522,9 @@ mod tests {
     mod create_table_tests {
         use super::*;
 
-        #[test]
-        fn test_create_simple_table() {
-            let mut fixture = TestContext::new("create_simple_table");
+        #[tokio::test]
+        async fn test_create_simple_table() {
+            let mut fixture = TestContext::new("create_simple_table").await;
 
             fixture
                 .create_table("users", "id INTEGER, name VARCHAR(255)", false)
@@ -2564,9 +2540,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_if_not_exists() {
-            let mut fixture = TestContext::new("create_table_if_not_exists");
+        #[tokio::test]
+        async fn test_create_table_if_not_exists() {
+            let mut fixture = TestContext::new("create_table_if_not_exists").await;
 
             // First creation should succeed
             fixture.create_table("users", "id INTEGER", false).unwrap();
@@ -2578,9 +2554,9 @@ mod tests {
             assert!(fixture.create_table("users", "id INTEGER", true).is_ok());
         }
 
-        #[test]
-        fn test_create_table_various_data_types() {
-            let mut fixture = TestContext::new("create_table_various_types");
+        #[tokio::test]
+        async fn test_create_table_various_data_types() {
+            let mut fixture = TestContext::new("create_table_various_types").await;
 
             fixture
                 .create_table(
@@ -2613,9 +2589,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_with_primary_key() {
-            let mut fixture = TestContext::new("create_table_with_primary_key");
+        #[tokio::test]
+        async fn test_create_table_with_primary_key() {
+            let mut fixture = TestContext::new("create_table_with_primary_key").await;
 
             fixture
                 .create_table(
@@ -2636,9 +2612,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_with_not_null_constraints() {
-            let mut fixture = TestContext::new("create_table_with_not_null");
+        #[tokio::test]
+        async fn test_create_table_with_not_null_constraints() {
+            let mut fixture = TestContext::new("create_table_with_not_null").await;
 
             fixture
                 .create_table(
@@ -2659,9 +2635,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_with_default_values() {
-            let mut fixture = TestContext::new("create_table_with_defaults");
+        #[tokio::test]
+        async fn test_create_table_with_default_values() {
+            let mut fixture = TestContext::new("create_table_with_defaults").await;
 
             fixture
                 .create_table(
@@ -2684,9 +2660,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_single_column() {
-            let mut fixture = TestContext::new("create_table_single_column");
+        #[tokio::test]
+        async fn test_create_table_single_column() {
+            let mut fixture = TestContext::new("create_table_single_column").await;
 
             fixture
                 .create_table("simple", "value INTEGER", false)
@@ -2696,9 +2672,9 @@ mod tests {
             fixture.assert_table_schema("simple", &[("value".to_string(), TypeId::Integer)]);
         }
 
-        #[test]
-        fn test_create_table_many_columns() {
-            let mut fixture = TestContext::new("create_table_many_columns");
+        #[tokio::test]
+        async fn test_create_table_many_columns() {
+            let mut fixture = TestContext::new("create_table_many_columns").await;
 
             let columns = (1..=20)
                 .map(|i| format!("col{} INTEGER", i))
@@ -2716,9 +2692,9 @@ mod tests {
             fixture.assert_table_schema("wide_table", &expected_schema);
         }
 
-        #[test]
-        fn test_create_table_quoted_identifiers() {
-            let mut fixture = TestContext::new("create_table_quoted");
+        #[tokio::test]
+        async fn test_create_table_quoted_identifiers() {
+            let mut fixture = TestContext::new("create_table_quoted").await;
 
             fixture
                 .create_table(
@@ -2731,9 +2707,9 @@ mod tests {
             fixture.assert_table_exists("\"Special Table\"");
         }
 
-        #[test]
-        fn test_create_table_case_sensitivity() {
-            let mut fixture = TestContext::new("create_table_case");
+        #[tokio::test]
+        async fn test_create_table_case_sensitivity() {
+            let mut fixture = TestContext::new("create_table_case").await;
 
             // Create table with mixed case
             fixture
@@ -2747,9 +2723,9 @@ mod tests {
             fixture.assert_table_exists("MyTable");
         }
 
-        #[test]
-        fn test_create_table_long_names() {
-            let mut fixture = TestContext::new("create_table_long_names");
+        #[tokio::test]
+        async fn test_create_table_long_names() {
+            let mut fixture = TestContext::new("create_table_long_names").await;
 
             let long_table_name = "a".repeat(50);
             let long_column_name = "b".repeat(50);
@@ -2765,9 +2741,9 @@ mod tests {
             fixture.assert_table_exists(&long_table_name);
         }
 
-        #[test]
-        fn test_create_table_with_check_constraint() {
-            let mut fixture = TestContext::new("create_table_with_check");
+        #[tokio::test]
+        async fn test_create_table_with_check_constraint() {
+            let mut fixture = TestContext::new("create_table_with_check").await;
 
             fixture
                 .create_table(
@@ -2781,9 +2757,9 @@ mod tests {
             fixture.assert_table_exists("products");
         }
 
-        #[test]
-        fn test_create_table_with_foreign_key() {
-            let mut fixture = TestContext::new("create_table_with_fk");
+        #[tokio::test]
+        async fn test_create_table_with_foreign_key() {
+            let mut fixture = TestContext::new("create_table_with_fk").await;
 
             // First create the referenced table
             fixture
@@ -2807,9 +2783,9 @@ mod tests {
             fixture.assert_table_exists("products");
         }
 
-        #[test]
-        fn test_create_table_with_unique_constraint() {
-            let mut fixture = TestContext::new("create_table_with_unique");
+        #[tokio::test]
+        async fn test_create_table_with_unique_constraint() {
+            let mut fixture = TestContext::new("create_table_with_unique").await;
 
             fixture
                 .create_table(
@@ -2823,9 +2799,9 @@ mod tests {
             fixture.assert_table_exists("users");
         }
 
-        #[test]
-        fn test_create_table_with_auto_increment() {
-            let mut fixture = TestContext::new("create_table_with_auto_increment");
+        #[tokio::test]
+        async fn test_create_table_with_auto_increment() {
+            let mut fixture = TestContext::new("create_table_with_auto_increment").await;
 
             fixture
                 .create_table(
@@ -2839,9 +2815,9 @@ mod tests {
             fixture.assert_table_exists("logs");
         }
 
-        #[test]
-        fn test_create_temporary_table() {
-            let mut fixture = TestContext::new("create_temporary_table");
+        #[tokio::test]
+        async fn test_create_temporary_table() {
+            let mut fixture = TestContext::new("create_temporary_table").await;
 
             // Test temporary table creation
             let create_sql = "CREATE TEMPORARY TABLE temp_data (id INTEGER, value VARCHAR(255))";
@@ -2859,9 +2835,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_table_duplicate_already_exists() {
-            let mut fixture = TestContext::new("create_table_duplicate");
+        #[tokio::test]
+        async fn test_create_table_duplicate_already_exists() {
+            let mut fixture = TestContext::new("create_table_duplicate").await;
 
             // Create initial table
             fixture.create_table("users", "id INTEGER", false).unwrap();
@@ -2874,9 +2850,9 @@ mod tests {
             assert!(error_msg.contains("already exists"));
         }
 
-        #[test]
-        fn test_create_table_empty_name() {
-            let mut fixture = TestContext::new("create_table_empty_name");
+        #[tokio::test]
+        async fn test_create_table_empty_name() {
+            let mut fixture = TestContext::new("create_table_empty_name").await;
 
             // Parser should handle Test with an empty table name
             let create_sql = "CREATE TABLE (id INTEGER)";
@@ -2884,9 +2860,9 @@ mod tests {
             assert!(result.is_err());
         }
 
-        #[test]
-        fn test_create_table_no_columns() {
-            let mut fixture = TestContext::new("create_table_no_columns");
+        #[tokio::test]
+        async fn test_create_table_no_columns() {
+            let mut fixture = TestContext::new("create_table_no_columns").await;
 
             // Parser should handle Test with no columns
             let create_sql = "CREATE TABLE empty_table ()";
@@ -2894,9 +2870,9 @@ mod tests {
             assert!(result.is_err());
         }
 
-        #[test]
-        fn test_create_table_duplicate_column_names() {
-            let mut fixture = TestContext::new("create_table_duplicate_columns");
+        #[tokio::test]
+        async fn test_create_table_duplicate_column_names() {
+            let mut fixture = TestContext::new("create_table_duplicate_columns").await;
 
             // Test duplicate column names
             let create_sql = "CREATE TABLE test_table (id INTEGER, id VARCHAR(255))";
@@ -2905,9 +2881,9 @@ mod tests {
             // The test documents the expected behavior
         }
 
-        #[test]
-        fn test_create_table_with_complex_constraints() {
-            let mut fixture = TestContext::new("create_table_complex_constraints");
+        #[tokio::test]
+        async fn test_create_table_with_complex_constraints() {
+            let mut fixture = TestContext::new("create_table_complex_constraints").await;
 
             fixture
                 .create_table(
@@ -2925,9 +2901,9 @@ mod tests {
             fixture.assert_table_exists("orders");
         }
 
-        #[test]
-        fn test_create_table_with_index_hints() {
-            let mut fixture = TestContext::new("create_table_with_index_hints");
+        #[tokio::test]
+        async fn test_create_table_with_index_hints() {
+            let mut fixture = TestContext::new("create_table_with_index_hints").await;
 
             fixture
                 .create_table(
@@ -2944,9 +2920,9 @@ mod tests {
             fixture.assert_table_exists("indexed_table");
         }
 
-        #[test]
-        fn test_create_table_with_computed_columns() {
-            let mut fixture = TestContext::new("create_table_computed");
+        #[tokio::test]
+        async fn test_create_table_with_computed_columns() {
+            let mut fixture = TestContext::new("create_table_computed").await;
 
             // Test computed/generated columns
             fixture
@@ -2961,9 +2937,9 @@ mod tests {
             fixture.assert_table_exists("rectangle");
         }
 
-        #[test]
-        fn test_create_table_with_collation() {
-            let mut fixture = TestContext::new("create_table_collation");
+        #[tokio::test]
+        async fn test_create_table_with_collation() {
+            let mut fixture = TestContext::new("create_table_collation").await;
 
             fixture
                 .create_table(
@@ -2978,9 +2954,9 @@ mod tests {
             fixture.assert_table_exists("text_table");
         }
 
-        #[test]
-        fn test_create_table_with_engine_options() {
-            let mut fixture = TestContext::new("create_table_engine");
+        #[tokio::test]
+        async fn test_create_table_with_engine_options() {
+            let mut fixture = TestContext::new("create_table_engine").await;
 
             // Test MySQL-style engine options
             let create_sql =
@@ -3029,9 +3005,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_simple_select() {
-            let mut fixture = TestContext::new("simple_select");
+        #[tokio::test]
+        async fn test_simple_select() {
+            let mut fixture = TestContext::new("simple_select").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users";
@@ -3062,9 +3038,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_specific_columns() {
-            let mut fixture = TestContext::new("select_specific_columns");
+        #[tokio::test]
+        async fn test_select_specific_columns() {
+            let mut fixture = TestContext::new("select_specific_columns").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT id, name FROM users";
@@ -3090,9 +3066,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_column_aliases() {
-            let mut fixture = TestContext::new("select_with_aliases");
+        #[tokio::test]
+        async fn test_select_with_column_aliases() {
+            let mut fixture = TestContext::new("select_with_aliases").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT id AS user_id, name AS full_name, age AS years_old FROM users";
@@ -3119,9 +3095,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_filter() {
-            let mut fixture = TestContext::new("select_with_filter");
+        #[tokio::test]
+        async fn test_select_with_filter() {
+            let mut fixture = TestContext::new("select_with_filter").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE age > 25";
@@ -3171,9 +3147,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_multiple_conditions() {
-            let mut fixture = TestContext::new("select_multiple_conditions");
+        #[tokio::test]
+        async fn test_select_with_multiple_conditions() {
+            let mut fixture = TestContext::new("select_multiple_conditions").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT name FROM users WHERE age > 25 AND age < 65";
@@ -3198,9 +3174,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_equality_filter() {
-            let mut fixture = TestContext::new("select_equality_filter");
+        #[tokio::test]
+        async fn test_select_with_equality_filter() {
+            let mut fixture = TestContext::new("select_equality_filter").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE id = 1";
@@ -3217,9 +3193,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_string_comparison() {
-            let mut fixture = TestContext::new("select_string_comparison");
+        #[tokio::test]
+        async fn test_select_with_string_comparison() {
+            let mut fixture = TestContext::new("select_string_comparison").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE name = 'John'";
@@ -3236,9 +3212,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_not_equal() {
-            let mut fixture = TestContext::new("select_not_equal");
+        #[tokio::test]
+        async fn test_select_with_not_equal() {
+            let mut fixture = TestContext::new("select_not_equal").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE age != 30";
@@ -3255,9 +3231,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_less_than_equal() {
-            let mut fixture = TestContext::new("select_less_than_equal");
+        #[tokio::test]
+        async fn test_select_with_less_than_equal() {
+            let mut fixture = TestContext::new("select_less_than_equal").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE age <= 40";
@@ -3274,9 +3250,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_greater_than_equal() {
-            let mut fixture = TestContext::new("select_greater_than_equal");
+        #[tokio::test]
+        async fn test_select_with_greater_than_equal() {
+            let mut fixture = TestContext::new("select_greater_than_equal").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE age >= 18";
@@ -3293,9 +3269,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_is_null() {
-            let mut fixture = TestContext::new("select_is_null");
+        #[tokio::test]
+        async fn test_select_with_is_null() {
+            let mut fixture = TestContext::new("select_is_null").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE name IS NULL";
@@ -3316,9 +3292,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_is_not_null() {
-            let mut fixture = TestContext::new("select_is_not_null");
+        #[tokio::test]
+        async fn test_select_with_is_not_null() {
+            let mut fixture = TestContext::new("select_is_not_null").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE name IS NOT NULL";
@@ -3339,9 +3315,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_or_condition() {
-            let mut fixture = TestContext::new("select_or_condition");
+        #[tokio::test]
+        async fn test_select_with_or_condition() {
+            let mut fixture = TestContext::new("select_or_condition").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE age < 25 OR age > 65";
@@ -3359,9 +3335,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_parentheses() {
-            let mut fixture = TestContext::new("select_parentheses");
+        #[tokio::test]
+        async fn test_select_with_parentheses() {
+            let mut fixture = TestContext::new("select_parentheses").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT * FROM users WHERE (age > 25 AND age < 35) OR (age > 65)";
@@ -3379,9 +3355,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_table_alias() {
-            let mut fixture = TestContext::new("select_table_alias");
+        #[tokio::test]
+        async fn test_select_with_table_alias() {
+            let mut fixture = TestContext::new("select_table_alias").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT u.id, u.name FROM users u WHERE u.age > 25";
@@ -3414,9 +3390,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_mixed_qualified_unqualified() {
-            let mut fixture = TestContext::new("select_mixed_qualified");
+        #[tokio::test]
+        async fn test_select_mixed_qualified_unqualified() {
+            let mut fixture = TestContext::new("select_mixed_qualified").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT users.id, name FROM users WHERE age > 25";
@@ -3430,9 +3406,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_arithmetic_expression() {
-            let mut fixture = TestContext::new("select_arithmetic");
+        #[tokio::test]
+        async fn test_select_arithmetic_expression() {
+            let mut fixture = TestContext::new("select_arithmetic").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT id, age + 1 AS next_age FROM users";
@@ -3457,9 +3433,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_constant_expressions() {
-            let mut fixture = TestContext::new("select_constants");
+        #[tokio::test]
+        async fn test_select_constant_expressions() {
+            let mut fixture = TestContext::new("select_constants").await;
             setup_test_table(&mut fixture);
 
             let select_sql =
@@ -3486,9 +3462,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_complex_expressions() {
-            let mut fixture = TestContext::new("select_complex_expressions");
+        #[tokio::test]
+        async fn test_select_complex_expressions() {
+            let mut fixture = TestContext::new("select_complex_expressions").await;
             setup_test_table(&mut fixture);
 
             let select_sql =
@@ -3519,9 +3495,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_from_nonexistent_table() {
-            let mut fixture = TestContext::new("select_nonexistent_table");
+        #[tokio::test]
+        async fn test_select_from_nonexistent_table() {
+            let mut fixture = TestContext::new("select_nonexistent_table").await;
             // Note: Not creating any table
 
             let select_sql = "SELECT * FROM nonexistent_table";
@@ -3536,9 +3512,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_select_nonexistent_column() {
-            let mut fixture = TestContext::new("select_nonexistent_column");
+        #[tokio::test]
+        async fn test_select_nonexistent_column() {
+            let mut fixture = TestContext::new("select_nonexistent_column").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT nonexistent_column FROM users";
@@ -3553,9 +3529,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_select_mixed_valid_invalid_columns() {
-            let mut fixture = TestContext::new("select_mixed_columns");
+        #[tokio::test]
+        async fn test_select_mixed_valid_invalid_columns() {
+            let mut fixture = TestContext::new("select_mixed_columns").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT id, nonexistent_column FROM users";
@@ -3570,9 +3546,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_select_with_case_expression() {
-            let mut fixture = TestContext::new("select_case_expression");
+        #[tokio::test]
+        async fn test_select_with_case_expression() {
+            let mut fixture = TestContext::new("select_case_expression").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT id, CASE WHEN age < 18 THEN 'Minor' WHEN age >= 65 THEN 'Senior' ELSE 'Adult' END AS age_group FROM users";
@@ -3596,9 +3572,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_single_column() {
-            let mut fixture = TestContext::new("select_single_column");
+        #[tokio::test]
+        async fn test_select_single_column() {
+            let mut fixture = TestContext::new("select_single_column").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT name FROM users";
@@ -3620,9 +3596,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_duplicate_columns() {
-            let mut fixture = TestContext::new("select_duplicate_columns");
+        #[tokio::test]
+        async fn test_select_duplicate_columns() {
+            let mut fixture = TestContext::new("select_duplicate_columns").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT name, name, name FROM users";
@@ -3647,9 +3623,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_all_comparison_operators() {
-            let mut fixture = TestContext::new("select_all_comparisons");
+        #[tokio::test]
+        async fn test_select_all_comparison_operators() {
+            let mut fixture = TestContext::new("select_all_comparisons").await;
             setup_test_table(&mut fixture);
 
             let test_cases = vec![
@@ -3700,9 +3676,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_complex_where_conditions() {
-            let mut fixture = TestContext::new("select_complex_where");
+        #[tokio::test]
+        async fn test_select_with_complex_where_conditions() {
+            let mut fixture = TestContext::new("select_complex_where").await;
             setup_test_table(&mut fixture);
 
             let test_cases = vec![
@@ -3738,9 +3714,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_string_operations() {
-            let mut fixture = TestContext::new("select_string_operations");
+        #[tokio::test]
+        async fn test_select_with_string_operations() {
+            let mut fixture = TestContext::new("select_string_operations").await;
             setup_test_table(&mut fixture);
 
             let select_sql =
@@ -3766,9 +3742,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_empty_where_clause() {
-            let mut fixture = TestContext::new("select_empty_where");
+        #[tokio::test]
+        async fn test_select_empty_where_clause() {
+            let mut fixture = TestContext::new("select_empty_where").await;
             setup_test_table(&mut fixture);
 
             // Test with just WHERE keyword but no condition (should be syntax error)
@@ -3778,9 +3754,9 @@ mod tests {
             assert!(result.is_err(), "Empty WHERE clause should cause an error");
         }
 
-        #[test]
-        fn test_select_very_long_query() {
-            let mut fixture = TestContext::new("select_long_query");
+        #[tokio::test]
+        async fn test_select_very_long_query() {
+            let mut fixture = TestContext::new("select_long_query").await;
             setup_test_table(&mut fixture);
 
             // Test with a very long column list
@@ -3805,9 +3781,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_nested_expressions() {
-            let mut fixture = TestContext::new("select_nested_expressions");
+        #[tokio::test]
+        async fn test_select_with_nested_expressions() {
+            let mut fixture = TestContext::new("select_nested_expressions").await;
             setup_test_table(&mut fixture);
 
             let select_sql = "SELECT id, ((age + 5) * 2) - 1 AS complex_calc FROM users WHERE ((age * 2) + 10) > 50";
@@ -3847,9 +3823,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_simple_insert() {
-            let mut fixture = TestContext::new("simple_insert");
+        #[tokio::test]
+        async fn test_simple_insert() {
+            let mut fixture = TestContext::new("simple_insert").await;
             setup_test_table(&mut fixture);
 
             let insert_sql = "INSERT INTO users VALUES (1, 'test')";
@@ -3874,9 +3850,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_multiple_rows() {
-            let mut fixture = TestContext::new("insert_multiple_rows");
+        #[tokio::test]
+        async fn test_insert_multiple_rows() {
+            let mut fixture = TestContext::new("insert_multiple_rows").await;
             setup_test_table(&mut fixture);
 
             let insert_sql = "INSERT INTO users VALUES (1, 'John'), (2, 'Jane'), (3, 'Bob')";
@@ -3901,9 +3877,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_with_explicit_columns() {
-            let mut fixture = TestContext::new("insert_explicit_columns");
+        #[tokio::test]
+        async fn test_insert_with_explicit_columns() {
+            let mut fixture = TestContext::new("insert_explicit_columns").await;
             setup_test_table(&mut fixture);
 
             let insert_sql = "INSERT INTO users (id, name) VALUES (1, 'test')";
@@ -3928,9 +3904,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_different_data_types() {
-            let mut fixture = TestContext::new("insert_different_types");
+        #[tokio::test]
+        async fn test_insert_different_data_types() {
+            let mut fixture = TestContext::new("insert_different_types").await;
 
             // Create a table with various data types
             fixture
@@ -3963,9 +3939,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_null_values() {
-            let mut fixture = TestContext::new("insert_null_values");
+        #[tokio::test]
+        async fn test_insert_null_values() {
+            let mut fixture = TestContext::new("insert_null_values").await;
             setup_test_table(&mut fixture);
 
             let insert_sql = "INSERT INTO users VALUES (1, NULL)";
@@ -3990,9 +3966,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_into_nonexistent_table() {
-            let mut fixture = TestContext::new("insert_nonexistent_table");
+        #[tokio::test]
+        async fn test_insert_into_nonexistent_table() {
+            let mut fixture = TestContext::new("insert_nonexistent_table").await;
 
             let insert_sql = "INSERT INTO nonexistent_table VALUES (1, 'test')";
             let result = fixture.planner.create_logical_plan(insert_sql);
@@ -4001,9 +3977,9 @@ mod tests {
             assert!(result.unwrap_err().contains("does not exist"));
         }
 
-        #[test]
-        fn test_insert_column_count_mismatch() {
-            let mut fixture = TestContext::new("insert_column_mismatch");
+        #[tokio::test]
+        async fn test_insert_column_count_mismatch() {
+            let mut fixture = TestContext::new("insert_column_mismatch").await;
             setup_test_table(&mut fixture);
 
             // Too few values
@@ -4017,9 +3993,9 @@ mod tests {
             assert!(result.is_err());
         }
 
-        #[test]
-        fn test_insert_single_column_table() {
-            let mut fixture = TestContext::new("insert_single_column");
+        #[tokio::test]
+        async fn test_insert_single_column_table() {
+            let mut fixture = TestContext::new("insert_single_column").await;
 
             fixture
                 .create_table("single_col", "id INTEGER", false)
@@ -4047,9 +4023,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_with_expressions() {
-            let mut fixture = TestContext::new("insert_with_expressions");
+        #[tokio::test]
+        async fn test_insert_with_expressions() {
+            let mut fixture = TestContext::new("insert_with_expressions").await;
             setup_test_table(&mut fixture);
 
             let insert_sql = "INSERT INTO users VALUES (1 + 2, 'user_' || '123')";
@@ -4074,9 +4050,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_many_columns() {
-            let mut fixture = TestContext::new("insert_many_columns");
+        #[tokio::test]
+        async fn test_insert_many_columns() {
+            let mut fixture = TestContext::new("insert_many_columns").await;
 
             // Create a table with many columns
             fixture
@@ -4109,9 +4085,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_large_batch() {
-            let mut fixture = TestContext::new("insert_large_batch");
+        #[tokio::test]
+        async fn test_insert_large_batch() {
+            let mut fixture = TestContext::new("insert_large_batch").await;
             setup_test_table(&mut fixture);
 
             // Build a query with many rows
@@ -4142,9 +4118,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_string_with_quotes() {
-            let mut fixture = TestContext::new("insert_string_quotes");
+        #[tokio::test]
+        async fn test_insert_string_with_quotes() {
+            let mut fixture = TestContext::new("insert_string_quotes").await;
             setup_test_table(&mut fixture);
 
             let insert_sql = "INSERT INTO users VALUES (1, 'John''s Database')";
@@ -4169,9 +4145,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_with_default_values() {
-            let mut fixture = TestContext::new("insert_default_values");
+        #[tokio::test]
+        async fn test_insert_with_default_values() {
+            let mut fixture = TestContext::new("insert_default_values").await;
 
             // Create a table with default values
             fixture
@@ -4219,9 +4195,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_simple_update() {
-            let mut fixture = TestContext::new("simple_update");
+        #[tokio::test]
+        async fn test_simple_update() {
+            let mut fixture = TestContext::new("simple_update").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET age = 30";
@@ -4252,9 +4228,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_where() {
-            let mut fixture = TestContext::new("update_with_where");
+        #[tokio::test]
+        async fn test_update_with_where() {
+            let mut fixture = TestContext::new("update_with_where").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET age = 25 WHERE id = 1";
@@ -4285,9 +4261,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_multiple_columns() {
-            let mut fixture = TestContext::new("update_multiple_columns");
+        #[tokio::test]
+        async fn test_update_multiple_columns() {
+            let mut fixture = TestContext::new("update_multiple_columns").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET age = 30, name = 'John', salary = 60000";
@@ -4317,9 +4293,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_arithmetic_expression() {
-            let mut fixture = TestContext::new("update_arithmetic");
+        #[tokio::test]
+        async fn test_update_with_arithmetic_expression() {
+            let mut fixture = TestContext::new("update_arithmetic").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET salary = salary + 1000";
@@ -4349,9 +4325,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_complex_where() {
-            let mut fixture = TestContext::new("update_complex_where");
+        #[tokio::test]
+        async fn test_update_with_complex_where() {
+            let mut fixture = TestContext::new("update_complex_where").await;
             setup_test_table(&mut fixture);
 
             let update_sql =
@@ -4382,9 +4358,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_nonexistent_table() {
-            let mut fixture = TestContext::new("update_nonexistent");
+        #[tokio::test]
+        async fn test_update_nonexistent_table() {
+            let mut fixture = TestContext::new("update_nonexistent").await;
 
             let update_sql = "UPDATE nonexistent_table SET age = 30";
             let result = fixture.planner.create_logical_plan(update_sql);
@@ -4393,9 +4369,9 @@ mod tests {
             assert!(result.unwrap_err().contains("not found"));
         }
 
-        #[test]
-        fn test_update_nonexistent_column() {
-            let mut fixture = TestContext::new("update_nonexistent_column");
+        #[tokio::test]
+        async fn test_update_nonexistent_column() {
+            let mut fixture = TestContext::new("update_nonexistent_column").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET nonexistent_column = 30";
@@ -4404,9 +4380,9 @@ mod tests {
             assert!(result.is_err());
         }
 
-        #[test]
-        fn test_update_with_null() {
-            let mut fixture = TestContext::new("update_with_null");
+        #[tokio::test]
+        async fn test_update_with_null() {
+            let mut fixture = TestContext::new("update_with_null").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET name = NULL WHERE id = 1";
@@ -4436,9 +4412,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_string_literal() {
-            let mut fixture = TestContext::new("update_string_literal");
+        #[tokio::test]
+        async fn test_update_with_string_literal() {
+            let mut fixture = TestContext::new("update_string_literal").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET name = 'John Doe', department = 'Marketing'";
@@ -4468,9 +4444,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_column_reference() {
-            let mut fixture = TestContext::new("update_column_reference");
+        #[tokio::test]
+        async fn test_update_with_column_reference() {
+            let mut fixture = TestContext::new("update_column_reference").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET salary = age * 1000";
@@ -4500,9 +4476,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_different_data_types() {
-            let mut fixture = TestContext::new("update_different_types");
+        #[tokio::test]
+        async fn test_update_different_data_types() {
+            let mut fixture = TestContext::new("update_different_types").await;
 
             // Create a table with various data types
             fixture
@@ -4541,9 +4517,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_subexpression() {
-            let mut fixture = TestContext::new("update_subexpression");
+        #[tokio::test]
+        async fn test_update_with_subexpression() {
+            let mut fixture = TestContext::new("update_subexpression").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET salary = (age + 5) * 1000 WHERE id = 1";
@@ -4573,9 +4549,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_single_column_table() {
-            let mut fixture = TestContext::new("update_single_column");
+        #[tokio::test]
+        async fn test_update_single_column_table() {
+            let mut fixture = TestContext::new("update_single_column").await;
 
             fixture
                 .create_table("single_col", "value INTEGER", false)
@@ -4608,9 +4584,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_comparison_in_where() {
-            let mut fixture = TestContext::new("update_comparison_where");
+        #[tokio::test]
+        async fn test_update_with_comparison_in_where() {
+            let mut fixture = TestContext::new("update_comparison_where").await;
             setup_test_table(&mut fixture);
 
             let test_cases = vec![
@@ -4658,9 +4634,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_logical_operators() {
-            let mut fixture = TestContext::new("update_logical_operators");
+        #[tokio::test]
+        async fn test_update_with_logical_operators() {
+            let mut fixture = TestContext::new("update_logical_operators").await;
             setup_test_table(&mut fixture);
 
             let test_cases = vec![
@@ -4705,9 +4681,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_parentheses_in_expression() {
-            let mut fixture = TestContext::new("update_parentheses");
+        #[tokio::test]
+        async fn test_update_with_parentheses_in_expression() {
+            let mut fixture = TestContext::new("update_parentheses").await;
             setup_test_table(&mut fixture);
 
             let update_sql =
@@ -4738,9 +4714,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_all_columns() {
-            let mut fixture = TestContext::new("update_all_columns");
+        #[tokio::test]
+        async fn test_update_all_columns() {
+            let mut fixture = TestContext::new("update_all_columns").await;
             setup_test_table(&mut fixture);
 
             let update_sql = "UPDATE users SET id = 1, name = 'Updated', age = 35, department = 'IT', salary = 80000";
@@ -4770,9 +4746,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_same_column_multiple_times() {
-            let mut fixture = TestContext::new("update_same_column");
+        #[tokio::test]
+        async fn test_update_same_column_multiple_times() {
+            let mut fixture = TestContext::new("update_same_column").await;
             setup_test_table(&mut fixture);
 
             // SQL that tries to update the same column multiple times
@@ -4831,9 +4807,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_plan_aggregate_column_names() {
-            let mut fixture = TestContext::new("test_plan_aggregate_column_names");
+        #[tokio::test]
+        async fn test_plan_aggregate_column_names() {
+            let mut fixture = TestContext::new("test_plan_aggregate_column_names").await;
             setup_test_table(&mut fixture);
 
             let test_cases = vec![
@@ -4889,9 +4865,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_plan_aggregate_types() {
-            let mut fixture = TestContext::new("test_plan_aggregate_types");
+        #[tokio::test]
+        async fn test_plan_aggregate_types() {
+            let mut fixture = TestContext::new("test_plan_aggregate_types").await;
             setup_test_table(&mut fixture);
 
             let test_cases = vec![
@@ -4966,9 +4942,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_with_aggregates() {
-            let mut fixture = TestContext::new("group_by_aggregates");
+        #[tokio::test]
+        async fn test_group_by_with_aggregates() {
+            let mut fixture = TestContext::new("group_by_aggregates").await;
             setup_test_table(&mut fixture);
 
             // Verify the table was created correctly
@@ -5077,9 +5053,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_simple_count_star() {
-            let mut fixture = TestContext::new("simple_count_star");
+        #[tokio::test]
+        async fn test_simple_count_star() {
+            let mut fixture = TestContext::new("simple_count_star").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT COUNT(*) FROM users";
@@ -5116,9 +5092,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_simple_count_column() {
-            let mut fixture = TestContext::new("simple_count_column");
+        #[tokio::test]
+        async fn test_simple_count_column() {
+            let mut fixture = TestContext::new("simple_count_column").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT COUNT(name) FROM users";
@@ -5137,9 +5113,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_sum_aggregate() {
-            let mut fixture = TestContext::new("sum_aggregate");
+        #[tokio::test]
+        async fn test_sum_aggregate() {
+            let mut fixture = TestContext::new("sum_aggregate").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT SUM(age) FROM users";
@@ -5158,9 +5134,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_avg_aggregate() {
-            let mut fixture = TestContext::new("avg_aggregate");
+        #[tokio::test]
+        async fn test_avg_aggregate() {
+            let mut fixture = TestContext::new("avg_aggregate").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT AVG(age) FROM users";
@@ -5179,9 +5155,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_min_max_aggregates() {
-            let mut fixture = TestContext::new("min_max_aggregates");
+        #[tokio::test]
+        async fn test_min_max_aggregates() {
+            let mut fixture = TestContext::new("min_max_aggregates").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT MIN(age), MAX(age) FROM users";
@@ -5209,9 +5185,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_multiple_aggregates_with_aliases() {
-            let mut fixture = TestContext::new("multiple_aggregates_aliases");
+        #[tokio::test]
+        async fn test_multiple_aggregates_with_aliases() {
+            let mut fixture = TestContext::new("multiple_aggregates_aliases").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT COUNT(*) as user_count, SUM(age) as total_age, AVG(age) as avg_age, MIN(age) as min_age, MAX(age) as max_age FROM users";
@@ -5260,9 +5236,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_single_column() {
-            let mut fixture = TestContext::new("group_by_single_column");
+        #[tokio::test]
+        async fn test_group_by_single_column() {
+            let mut fixture = TestContext::new("group_by_single_column").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT name, COUNT(*) FROM users GROUP BY name";
@@ -5282,9 +5258,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_multiple_columns() {
-            let mut fixture = TestContext::new("group_by_multiple_columns");
+        #[tokio::test]
+        async fn test_group_by_multiple_columns() {
+            let mut fixture = TestContext::new("group_by_multiple_columns").await;
             setup_sales_table(&mut fixture);
 
             let sql =
@@ -5305,9 +5281,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_with_where_clause() {
-            let mut fixture = TestContext::new("group_by_with_where");
+        #[tokio::test]
+        async fn test_group_by_with_where_clause() {
+            let mut fixture = TestContext::new("group_by_with_where").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT name, COUNT(*) FROM users WHERE age > 18 GROUP BY name";
@@ -5328,9 +5304,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_having_clause_with_aggregate() {
-            let mut fixture = TestContext::new("having_clause_aggregate");
+        #[tokio::test]
+        async fn test_having_clause_with_aggregate() {
+            let mut fixture = TestContext::new("having_clause_aggregate").await;
             setup_test_table(&mut fixture);
 
             let sql =
@@ -5357,9 +5333,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_having_with_different_aggregate_functions() {
-            let mut fixture = TestContext::new("having_different_aggregates");
+        #[tokio::test]
+        async fn test_having_with_different_aggregate_functions() {
+            let mut fixture = TestContext::new("having_different_aggregates").await;
             setup_sales_table(&mut fixture);
 
             let test_cases = vec![
@@ -5389,9 +5365,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_aggregates_with_expressions() {
-            let mut fixture = TestContext::new("aggregates_with_expressions");
+        #[tokio::test]
+        async fn test_aggregates_with_expressions() {
+            let mut fixture = TestContext::new("aggregates_with_expressions").await;
             setup_sales_table(&mut fixture);
 
             let sql = "SELECT region, SUM(amount * quantity) as total_value, AVG(amount / quantity) as avg_unit_price FROM sales GROUP BY region";
@@ -5419,9 +5395,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_aggregate_without_group_by() {
-            let mut fixture = TestContext::new("aggregate_without_group_by");
+        #[tokio::test]
+        async fn test_aggregate_without_group_by() {
+            let mut fixture = TestContext::new("aggregate_without_group_by").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT COUNT(*), SUM(age), AVG(age) FROM users";
@@ -5440,9 +5416,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_count_distinct() {
-            let mut fixture = TestContext::new("count_distinct");
+        #[tokio::test]
+        async fn test_count_distinct() {
+            let mut fixture = TestContext::new("count_distinct").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT COUNT(DISTINCT name) FROM users";
@@ -5458,9 +5434,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_aggregates_with_null_handling() {
-            let mut fixture = TestContext::new("aggregates_null_handling");
+        #[tokio::test]
+        async fn test_aggregates_with_null_handling() {
+            let mut fixture = TestContext::new("aggregates_null_handling").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT COUNT(name), COUNT(*) FROM users WHERE name IS NOT NULL";
@@ -5478,9 +5454,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_mixed_aggregates_and_columns_error() {
-            let mut fixture = TestContext::new("mixed_aggregates_columns_error");
+        #[tokio::test]
+        async fn test_mixed_aggregates_and_columns_error() {
+            let mut fixture = TestContext::new("mixed_aggregates_columns_error").await;
             setup_test_table(&mut fixture);
 
             // This should be an error: selecting non-grouped columns with aggregates
@@ -5491,9 +5467,9 @@ mod tests {
             // The test documents the expected behavior
         }
 
-        #[test]
-        fn test_group_by_ordinal_position() {
-            let mut fixture = TestContext::new("group_by_ordinal");
+        #[tokio::test]
+        async fn test_group_by_ordinal_position() {
+            let mut fixture = TestContext::new("group_by_ordinal").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT name, COUNT(*) FROM users GROUP BY 1";
@@ -5503,9 +5479,9 @@ mod tests {
             // Test documents expected behavior
         }
 
-        #[test]
-        fn test_aggregate_functions_case_insensitive() {
-            let mut fixture = TestContext::new("aggregate_case_insensitive");
+        #[tokio::test]
+        async fn test_aggregate_functions_case_insensitive() {
+            let mut fixture = TestContext::new("aggregate_case_insensitive").await;
             setup_test_table(&mut fixture);
 
             let test_cases = vec![
@@ -5530,9 +5506,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_nested_aggregates_error() {
-            let mut fixture = TestContext::new("nested_aggregates_error");
+        #[tokio::test]
+        async fn test_nested_aggregates_error() {
+            let mut fixture = TestContext::new("nested_aggregates_error").await;
             setup_test_table(&mut fixture);
 
             // This should be an error: nested aggregates
@@ -5543,9 +5519,9 @@ mod tests {
             assert!(result.is_err(), "Nested aggregates should cause an error");
         }
 
-        #[test]
-        fn test_aggregate_with_order_by() {
-            let mut fixture = TestContext::new("aggregate_with_order_by");
+        #[tokio::test]
+        async fn test_aggregate_with_order_by() {
+            let mut fixture = TestContext::new("aggregate_with_order_by").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT name, COUNT(*) as user_count FROM users GROUP BY name ORDER BY user_count DESC";
@@ -5566,9 +5542,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_aggregate_with_limit() {
-            let mut fixture = TestContext::new("aggregate_with_limit");
+        #[tokio::test]
+        async fn test_aggregate_with_limit() {
+            let mut fixture = TestContext::new("aggregate_with_limit").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT name, COUNT(*) FROM users GROUP BY name LIMIT 5";
@@ -5592,9 +5568,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_complex_having_conditions() {
-            let mut fixture = TestContext::new("complex_having_conditions");
+        #[tokio::test]
+        async fn test_complex_having_conditions() {
+            let mut fixture = TestContext::new("complex_having_conditions").await;
             setup_sales_table(&mut fixture);
 
             let sql = "SELECT region, SUM(amount) as total, COUNT(*) as count FROM sales GROUP BY region HAVING SUM(amount) > 1000 AND COUNT(*) > 5";
@@ -5613,9 +5589,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_all_syntax() {
-            let mut fixture = TestContext::new("group_by_all");
+        #[tokio::test]
+        async fn test_group_by_all_syntax() {
+            let mut fixture = TestContext::new("group_by_all").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT name, age, COUNT(*) FROM users GROUP BY ALL";
@@ -5625,9 +5601,9 @@ mod tests {
             // Test documents expected behavior
         }
 
-        #[test]
-        fn test_aggregates_with_different_data_types() {
-            let mut fixture = TestContext::new("aggregates_different_types");
+        #[tokio::test]
+        async fn test_aggregates_with_different_data_types() {
+            let mut fixture = TestContext::new("aggregates_different_types").await;
             setup_sales_table(&mut fixture);
 
             let sql = "SELECT COUNT(id), SUM(amount), AVG(quantity), MIN(sale_date), MAX(product) FROM sales";
@@ -5661,9 +5637,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_aggregate_with_table_alias() {
-            let mut fixture = TestContext::new("aggregate_table_alias");
+        #[tokio::test]
+        async fn test_aggregate_with_table_alias() {
+            let mut fixture = TestContext::new("aggregate_table_alias").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT u.name, COUNT(*) FROM users u GROUP BY u.name";
@@ -5682,9 +5658,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_error_cases() {
-            let mut fixture = TestContext::new("aggregate_error_cases");
+        #[tokio::test]
+        async fn test_error_cases() {
+            let mut fixture = TestContext::new("aggregate_error_cases").await;
             setup_test_table(&mut fixture);
 
             let error_cases = vec![
@@ -5701,9 +5677,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_with_qualified_names_and_aliases() {
-            let mut fixture = TestContext::new("test_group_by_qualified_aliases");
+        #[tokio::test]
+        async fn test_group_by_with_qualified_names_and_aliases() {
+            let mut fixture = TestContext::new("test_group_by_qualified_aliases").await;
             setup_multiple_tables(&mut fixture);
 
             // Test the exact case that was failing - GROUP BY with qualified names and aliases
@@ -5733,9 +5709,9 @@ mod tests {
             assert_eq!(schema.get_column(3).unwrap().get_name(), "project_count");
         }
 
-        #[test]
-        fn test_group_by_mixed_qualified_and_unqualified_with_aliases() {
-            let mut fixture = TestContext::new("test_group_by_mixed_qualified");
+        #[tokio::test]
+        async fn test_group_by_mixed_qualified_and_unqualified_with_aliases() {
+            let mut fixture = TestContext::new("test_group_by_mixed_qualified").await;
             setup_multiple_tables(&mut fixture);
 
             // Test mixing qualified and unqualified names with aliases
@@ -5762,9 +5738,9 @@ mod tests {
             assert_eq!(schema.get_column(2).unwrap().get_name(), "total_count");
         }
 
-        #[test]
-        fn test_group_by_without_aliases_qualified_names() {
-            let mut fixture = TestContext::new("test_group_by_no_aliases");
+        #[tokio::test]
+        async fn test_group_by_without_aliases_qualified_names() {
+            let mut fixture = TestContext::new("test_group_by_no_aliases").await;
             setup_multiple_tables(&mut fixture);
 
             // Test GROUP BY with qualified names but no explicit aliases in SELECT
@@ -5793,9 +5769,9 @@ mod tests {
             assert_eq!(schema.get_column(2).unwrap().get_name(), "COUNT_project_id");
         }
 
-        #[test]
-        fn test_group_by_complex_qualified_expressions() {
-            let mut fixture = TestContext::new("test_group_by_complex");
+        #[tokio::test]
+        async fn test_group_by_complex_qualified_expressions() {
+            let mut fixture = TestContext::new("test_group_by_complex").await;
             setup_multiple_tables(&mut fixture);
 
             // Test with more complex qualified expressions and multiple aliases
@@ -5833,9 +5809,9 @@ mod tests {
             assert_eq!(schema.get_column(5).unwrap().get_name(), "avg_salary");
         }
 
-        #[test]
-        fn test_group_by_error_case_column_not_in_group_by() {
-            let mut fixture = TestContext::new("test_group_by_error");
+        #[tokio::test]
+        async fn test_group_by_error_case_column_not_in_group_by() {
+            let mut fixture = TestContext::new("test_group_by_error").await;
             setup_multiple_tables(&mut fixture);
 
             // Test error case - column in SELECT but not in GROUP BY should fail
@@ -5911,9 +5887,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_inner_join() {
-            let mut fixture = TestContext::new("inner_join");
+        #[tokio::test]
+        async fn test_inner_join() {
+            let mut fixture = TestContext::new("inner_join").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6023,9 +5999,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_left_outer_join() {
-            let mut fixture = TestContext::new("left_outer_join");
+        #[tokio::test]
+        async fn test_left_outer_join() {
+            let mut fixture = TestContext::new("left_outer_join").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6042,9 +6018,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_right_outer_join() {
-            let mut fixture = TestContext::new("right_outer_join");
+        #[tokio::test]
+        async fn test_right_outer_join() {
+            let mut fixture = TestContext::new("right_outer_join").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6061,9 +6037,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_full_outer_join() {
-            let mut fixture = TestContext::new("full_outer_join");
+        #[tokio::test]
+        async fn test_full_outer_join() {
+            let mut fixture = TestContext::new("full_outer_join").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6080,9 +6056,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_cross_join() {
-            let mut fixture = TestContext::new("cross_join");
+        #[tokio::test]
+        async fn test_cross_join() {
+            let mut fixture = TestContext::new("cross_join").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6099,9 +6075,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_multiple_joins() {
-            let mut fixture = TestContext::new("multiple_joins");
+        #[tokio::test]
+        async fn test_multiple_joins() {
+            let mut fixture = TestContext::new("multiple_joins").await;
             setup_extended_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount, p.name as product_name \
@@ -6121,9 +6097,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_self_join() {
-            let mut fixture = TestContext::new("self_join");
+        #[tokio::test]
+        async fn test_self_join() {
+            let mut fixture = TestContext::new("self_join").await;
             setup_extended_test_tables(&mut fixture);
 
             let join_sql = "SELECT e1.name as employee, e2.name as manager \
@@ -6146,9 +6122,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_where_clause() {
-            let mut fixture = TestContext::new("join_with_where");
+        #[tokio::test]
+        async fn test_join_with_where_clause() {
+            let mut fixture = TestContext::new("join_with_where").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6171,9 +6147,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_complex_conditions() {
-            let mut fixture = TestContext::new("join_complex_conditions");
+        #[tokio::test]
+        async fn test_join_with_complex_conditions() {
+            let mut fixture = TestContext::new("join_complex_conditions").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6194,9 +6170,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_aggregation() {
-            let mut fixture = TestContext::new("join_with_aggregation");
+        #[tokio::test]
+        async fn test_join_with_aggregation() {
+            let mut fixture = TestContext::new("join_with_aggregation").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, COUNT(o.order_id) as order_count, SUM(o.amount) as total \
@@ -6221,9 +6197,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_order_by() {
-            let mut fixture = TestContext::new("join_with_order_by");
+        #[tokio::test]
+        async fn test_join_with_order_by() {
+            let mut fixture = TestContext::new("join_with_order_by").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6246,9 +6222,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_limit() {
-            let mut fixture = TestContext::new("join_with_limit");
+        #[tokio::test]
+        async fn test_join_with_limit() {
+            let mut fixture = TestContext::new("join_with_limit").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6267,9 +6243,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_subquery() {
-            let mut fixture = TestContext::new("join_with_subquery");
+        #[tokio::test]
+        async fn test_join_with_subquery() {
+            let mut fixture = TestContext::new("join_with_subquery").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, recent_orders.total \
@@ -6295,9 +6271,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_aliases() {
-            let mut fixture = TestContext::new("join_with_aliases");
+        #[tokio::test]
+        async fn test_join_with_aliases() {
+            let mut fixture = TestContext::new("join_with_aliases").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name as user_name, o.amount as order_amount \
@@ -6318,9 +6294,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_nonexistent_table() {
-            let mut fixture = TestContext::new("join_nonexistent_table");
+        #[tokio::test]
+        async fn test_join_nonexistent_table() {
+            let mut fixture = TestContext::new("join_nonexistent_table").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, x.value \
@@ -6334,9 +6310,9 @@ mod tests {
             assert!(error_msg.contains("does not exist") || error_msg.contains("not found"));
         }
 
-        #[test]
-        fn test_join_invalid_condition() {
-            let mut fixture = TestContext::new("join_invalid_condition");
+        #[tokio::test]
+        async fn test_join_invalid_condition() {
+            let mut fixture = TestContext::new("join_invalid_condition").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6354,9 +6330,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_join_mixed_table_types() {
-            let mut fixture = TestContext::new("join_mixed_table_types");
+        #[tokio::test]
+        async fn test_join_mixed_table_types() {
+            let mut fixture = TestContext::new("join_mixed_table_types").await;
             setup_test_tables(&mut fixture);
 
             // Instead of VALUES with aliases, test join with a simple subquery
@@ -6373,9 +6349,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_join_with_null_handling() {
-            let mut fixture = TestContext::new("join_null_handling");
+        #[tokio::test]
+        async fn test_join_with_null_handling() {
+            let mut fixture = TestContext::new("join_null_handling").await;
             setup_test_tables(&mut fixture);
 
             let join_sql = "SELECT u.name, o.amount \
@@ -6397,9 +6373,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_natural_join() {
-            let mut fixture = TestContext::new("natural_join");
+        #[tokio::test]
+        async fn test_natural_join() {
+            let mut fixture = TestContext::new("natural_join").await;
             setup_test_tables(&mut fixture);
 
             // Test NATURAL JOIN (if supported)
@@ -6411,9 +6387,9 @@ mod tests {
             // This might not be supported yet, so we just check if it parses or fails gracefully
         }
 
-        #[test]
-        fn test_join_performance_hints() {
-            let mut fixture = TestContext::new("join_performance_hints");
+        #[tokio::test]
+        async fn test_join_performance_hints() {
+            let mut fixture = TestContext::new("join_performance_hints").await;
             setup_test_tables(&mut fixture);
 
             // Test various join hints (database-specific syntax)
@@ -6430,9 +6406,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_left_join_same_as_left_outer_join() {
-            let mut fixture = TestContext::new("left_join_synonym");
+        #[tokio::test]
+        async fn test_left_join_same_as_left_outer_join() {
+            let mut fixture = TestContext::new("left_join_synonym").await;
             setup_test_tables(&mut fixture);
 
             // Test LEFT JOIN
@@ -6481,9 +6457,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_right_join_same_as_right_outer_join() {
-            let mut fixture = TestContext::new("right_join_synonym");
+        #[tokio::test]
+        async fn test_right_join_same_as_right_outer_join() {
+            let mut fixture = TestContext::new("right_join_synonym").await;
             setup_test_tables(&mut fixture);
 
             // Test RIGHT JOIN
@@ -6549,9 +6525,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_order_by_with_limit() {
-            let mut fixture = TestContext::new("order_by_limit");
+        #[tokio::test]
+        async fn test_order_by_with_limit() {
+            let mut fixture = TestContext::new("order_by_limit").await;
             setup_test_table(&mut fixture);
 
             let sql = "SELECT name, salary \
@@ -6619,9 +6595,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_subquery_in_where() {
-            let mut fixture = TestContext::new("subquery_where");
+        #[tokio::test]
+        async fn test_subquery_in_where() {
+            let mut fixture = TestContext::new("subquery_where").await;
             setup_test_tables(&mut fixture);
 
             let sql = "SELECT e.name, e.salary \
@@ -6653,9 +6629,9 @@ mod tests {
         use super::*;
         use sqlparser::ast::{TransactionAccessMode, TransactionIsolationLevel, TransactionMode};
 
-        #[test]
-        fn test_build_start_transaction_plan_with_access_mode() {
-            let context = TestContext::new("test_access_mode");
+        #[tokio::test]
+        async fn test_build_start_transaction_plan_with_access_mode() {
+            let context = TestContext::new("test_access_mode").await;
             let builder = LogicalPlanBuilder::new(context.catalog.clone());
             let modes = vec![TransactionMode::AccessMode(TransactionAccessMode::ReadOnly)];
             let plan = builder.build_start_transaction_plan(
@@ -6677,9 +6653,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_build_start_transaction_plan_with_isolation_level() {
-            let context = TestContext::new("test_isolation_level");
+        #[tokio::test]
+        async fn test_build_start_transaction_plan_with_isolation_level() {
+            let context = TestContext::new("test_isolation_level").await;
             let builder = LogicalPlanBuilder::new(context.catalog.clone());
             let modes = vec![TransactionMode::IsolationLevel(
                 TransactionIsolationLevel::Serializable,
@@ -6710,9 +6686,9 @@ mod tests {
         use super::*;
         use sqlparser::ast::Ident;
 
-        #[test]
-        fn test_build_savepoint_plan() {
-            let fixture = TestContext::new("savepoint_test");
+        #[tokio::test]
+        async fn test_build_savepoint_plan() {
+            let fixture = TestContext::new("savepoint_test").await;
 
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
@@ -6728,9 +6704,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_build_release_savepoint_plan() {
-            let fixture = TestContext::new("release_savepoint_test");
+        #[tokio::test]
+        async fn test_build_release_savepoint_plan() {
+            let fixture = TestContext::new("release_savepoint_test").await;
 
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
@@ -6753,9 +6729,9 @@ mod tests {
         use super::*;
         use crate::sql::planner::logical_plan::LogicalPlanType;
 
-        #[test]
-        fn test_build_drop_plan() {
-            let fixture = TestContext::new("drop_plan_test");
+        #[tokio::test]
+        async fn test_build_drop_plan() {
+            let fixture = TestContext::new("drop_plan_test").await;
 
             // Create a logical plan builder directly
             let plan_builder = LogicalPlanBuilder::new(fixture.catalog.clone());
@@ -6803,9 +6779,9 @@ mod tests {
                 .unwrap();
         }
 
-        #[test]
-        fn test_create_simple_index() {
-            let mut fixture = TestContext::new("create_simple_index");
+        #[tokio::test]
+        async fn test_create_simple_index() {
+            let mut fixture = TestContext::new("create_simple_index").await;
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_name ON users (name)";
@@ -6838,9 +6814,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_composite_index() {
-            let mut fixture = TestContext::new("create_composite_index");
+        #[tokio::test]
+        async fn test_create_composite_index() {
+            let mut fixture = TestContext::new("create_composite_index").await;
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_name_age ON users (name, age)";
@@ -6878,9 +6854,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_index_if_not_exists() {
-            let mut fixture = TestContext::new("create_index_if_not_exists");
+        #[tokio::test]
+        async fn test_create_index_if_not_exists() {
+            let mut fixture = TestContext::new("create_index_if_not_exists").await;
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX IF NOT EXISTS idx_email ON users (email)";
@@ -6913,9 +6889,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_index_on_primary_key() {
-            let mut fixture = TestContext::new("create_index_on_primary_key");
+        #[tokio::test]
+        async fn test_create_index_on_primary_key() {
+            let mut fixture = TestContext::new("create_index_on_primary_key").await;
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_id ON users (id)";
@@ -6948,9 +6924,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_index_on_nonexistent_table() {
-            let mut fixture = TestContext::new("create_index_nonexistent_table");
+        #[tokio::test]
+        async fn test_create_index_on_nonexistent_table() {
+            let mut fixture = TestContext::new("create_index_nonexistent_table").await;
             // Note: Not creating any table
 
             let create_index_sql = "CREATE INDEX idx_name ON nonexistent_table (some_column)";
@@ -6965,9 +6941,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_index_on_nonexistent_column() {
-            let mut fixture = TestContext::new("create_index_nonexistent_column");
+        #[tokio::test]
+        async fn test_create_index_on_nonexistent_column() {
+            let mut fixture = TestContext::new("create_index_nonexistent_column").await;
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_bad ON users (nonexistent_column)";
@@ -6982,9 +6958,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_index_mixed_valid_invalid_columns() {
-            let mut fixture = TestContext::new("create_index_mixed_columns");
+        #[tokio::test]
+        async fn test_create_index_mixed_valid_invalid_columns() {
+            let mut fixture = TestContext::new("create_index_mixed_columns").await;
             setup_test_table(&mut fixture);
 
             // Mix valid and invalid columns
@@ -7000,9 +6976,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_index_all_columns() {
-            let mut fixture = TestContext::new("create_index_all_columns");
+        #[tokio::test]
+        async fn test_create_index_all_columns() {
+            let mut fixture = TestContext::new("create_index_all_columns").await;
             setup_test_table(&mut fixture);
 
             let create_index_sql = "CREATE INDEX idx_all ON users (id, name, age, email)";
@@ -7044,9 +7020,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_unique_index() {
-            let mut fixture = TestContext::new("create_unique_index");
+        #[tokio::test]
+        async fn test_create_unique_index() {
+            let mut fixture = TestContext::new("create_unique_index").await;
             setup_test_table(&mut fixture);
 
             // Note: This tests that the parser can handle UNIQUE INDEX syntax

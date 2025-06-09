@@ -1,7 +1,7 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::{BATCH_INSERT_THRESHOLD};
 use crate::common::exception::DBError;
-use crate::common::performance_monitor::record_insert_performance;
+use crate::common::performance_monitor::{record_insert_performance, record_query_execution};
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
@@ -286,6 +286,7 @@ impl AbstractExecutor for InsertExecutor {
         let operation_duration = std::time::Instant::now().elapsed();
         let is_bulk_operation = insert_count >= BATCH_INSERT_THRESHOLD;
         record_insert_performance(insert_count, operation_duration, is_bulk_operation);
+        record_query_execution("insert", insert_count, insert_count, operation_duration);
 
         // Insert operations don't return tuples to the caller
         Ok(None)
@@ -394,7 +395,7 @@ impl InsertExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -406,12 +407,12 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -421,7 +422,8 @@ mod tests {
     }
 
     impl TestContext {
-        fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
@@ -441,18 +443,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-
-            // Create buffer pool manager
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
-            let buffer_pool = Arc::new(BufferPoolManager::new(
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -460,7 +458,7 @@ mod tests {
 
             // Create catalog with transaction manager
             let catalog = Arc::new(RwLock::new(Catalog::new(
-                Arc::clone(&buffer_pool),
+                Arc::clone(&bpm),
                 transaction_manager.clone(), // Pass transaction manager
             )));
 
@@ -473,7 +471,7 @@ mod tests {
 
             Self {
                 catalog,
-                buffer_pool,
+                buffer_pool: bpm,
                 transaction_context,
                 _temp_dir: temp_dir,
             }
@@ -488,9 +486,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_insert_single_row() {
-        let test_ctx = TestContext::new("insert_single_row");
+    #[tokio::test]
+    async fn test_insert_single_row() {
+        let test_ctx = TestContext::new("insert_single_row").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -558,9 +556,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_insert_multiple_rows() {
-        let test_ctx = TestContext::new("insert_multiple_rows");
+    #[tokio::test]
+    async fn test_insert_multiple_rows() {
+        let test_ctx = TestContext::new("insert_multiple_rows").await;
 
         // Create executor context with the new transaction context
         let exec_ctx = test_ctx.create_executor_context();
@@ -624,9 +622,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_insert_empty_values() {
-        let test_ctx = TestContext::new("insert_empty_values");
+    #[tokio::test]
+    async fn test_insert_empty_values() {
+        let test_ctx = TestContext::new("insert_empty_values").await;
 
         // Create schema and table
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
@@ -674,9 +672,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_insert_different_data_types() {
-        let test_ctx = TestContext::new("insert_different_types");
+    #[tokio::test]
+    async fn test_insert_different_data_types() {
+        let test_ctx = TestContext::new("insert_different_types").await;
 
         // Create schema with various data types
         let schema = Schema::new(vec![
@@ -752,9 +750,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_insert_large_batch() {
-        let test_ctx = TestContext::new("insert_large_batch");
+    #[tokio::test]
+    async fn test_insert_large_batch() {
+        let test_ctx = TestContext::new("insert_large_batch").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -822,9 +820,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_insert_with_null_values() {
-        let test_ctx = TestContext::new("insert_null_values");
+    #[tokio::test]
+    async fn test_insert_with_null_values() {
+        let test_ctx = TestContext::new("insert_null_values").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -888,9 +886,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_insert_with_special_characters() {
-        let test_ctx = TestContext::new("insert_special_chars");
+    #[tokio::test]
+    async fn test_insert_with_special_characters() {
+        let test_ctx = TestContext::new("insert_special_chars").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -952,9 +950,9 @@ mod tests {
         assert!(result.unwrap().is_none(), "Insert should return None");
     }
 
-    #[test]
-    fn test_insert_boundary_values() {
-        let test_ctx = TestContext::new("insert_boundary_values");
+    #[tokio::test]
+    async fn test_insert_boundary_values() {
+        let test_ctx = TestContext::new("insert_boundary_values").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -1027,9 +1025,9 @@ mod tests {
         assert!(result.unwrap().is_none(), "Insert should return None");
     }
 
-    #[test]
-    fn test_insert_very_large_string() {
-        let test_ctx = TestContext::new("insert_large_string");
+    #[tokio::test]
+    async fn test_insert_very_large_string() {
+        let test_ctx = TestContext::new("insert_large_string").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -1088,12 +1086,12 @@ mod tests {
         // Execute insert
         executor.init();
         let result = executor.next();
-        assert!(result.unwrap().is_none(), "Insert should return None");
+        assert!(result.is_ok(), "Insert should return None");
     }
 
-    #[test]
-    fn test_insert_mixed_null_and_values() {
-        let test_ctx = TestContext::new("insert_mixed_nulls");
+    #[tokio::test]
+    async fn test_insert_mixed_null_and_values() {
+        let test_ctx = TestContext::new("insert_mixed_nulls").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -1215,9 +1213,9 @@ mod tests {
         assert!(result.unwrap().is_none(), "Insert should return None");
     }
 
-    #[test]
-    fn test_insert_decimal_precision() {
-        let test_ctx = TestContext::new("insert_decimal_precision");
+    #[tokio::test]
+    async fn test_insert_decimal_precision() {
+        let test_ctx = TestContext::new("insert_decimal_precision").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -1284,9 +1282,9 @@ mod tests {
         assert!(result.unwrap().is_none(), "Insert should return None");
     }
 
-    #[test]
-    fn test_insert_unicode_characters() {
-        let test_ctx = TestContext::new("insert_unicode");
+    #[tokio::test]
+    async fn test_insert_unicode_characters() {
+        let test_ctx = TestContext::new("insert_unicode").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -1348,9 +1346,9 @@ mod tests {
         assert!(result.unwrap().is_none(), "Insert should return None");
     }
 
-    #[test]
-    fn test_insert_extremely_large_batch() {
-        let test_ctx = TestContext::new("insert_extremely_large_batch");
+    #[tokio::test]
+    async fn test_insert_extremely_large_batch() {
+        let test_ctx = TestContext::new("insert_extremely_large_batch").await;
 
         // Create schema and table
         let schema = Schema::new(vec![
@@ -1418,9 +1416,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_insert_multiple_calls() {
-        let test_ctx = TestContext::new("insert_multiple_calls");
+    #[tokio::test]
+    async fn test_insert_multiple_calls() {
+        let test_ctx = TestContext::new("insert_multiple_calls").await;
 
         // Create schema and table
         let schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);

@@ -146,7 +146,7 @@ impl Drop for CreateTableExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -154,10 +154,10 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::types_db::type_id::TypeId;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -167,8 +167,9 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 100;
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -187,15 +188,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -258,9 +258,9 @@ mod tests {
         )))
     }
 
-    #[test]
-    fn test_create_table_basic() {
-        let test_context = TestContext::new("test_create_table_basic");
+    #[tokio::test]
+    async fn test_create_table_basic() {
+        let test_context = TestContext::new("test_create_table_basic").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -281,9 +281,9 @@ mod tests {
         assert_eq!(table.get_table_schema().get_columns().len(), 2);
     }
 
-    #[test]
-    fn test_create_table_complex_schema() {
-        let test_context = TestContext::new("test_create_table_complex");
+    #[tokio::test]
+    async fn test_create_table_complex_schema() {
+        let test_context = TestContext::new("test_create_table_complex").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_complex_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -314,9 +314,9 @@ mod tests {
         assert_eq!(columns[5].get_type(), TypeId::Boolean);
     }
 
-    #[test]
-    fn test_create_table_single_column() {
-        let test_context = TestContext::new("test_create_table_single");
+    #[tokio::test]
+    async fn test_create_table_single_column() {
+        let test_context = TestContext::new("test_create_table_single").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_single_column_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -341,9 +341,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_create_table_if_not_exists_new_table() {
-        let test_context = TestContext::new("test_create_table_if_not_exists_new");
+    #[tokio::test]
+    async fn test_create_table_if_not_exists_new_table() {
+        let test_context = TestContext::new("test_create_table_if_not_exists_new").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -363,9 +363,9 @@ mod tests {
         assert_eq!(table.get_table_name(), "new_table");
     }
 
-    #[test]
-    fn test_create_table_if_not_exists_existing_table() {
-        let test_context = TestContext::new("test_create_table_if_not_exists_existing");
+    #[tokio::test]
+    async fn test_create_table_if_not_exists_existing_table() {
+        let test_context = TestContext::new("test_create_table_if_not_exists_existing").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -392,9 +392,9 @@ mod tests {
         assert_eq!(table.get_table_name(), "existing_table");
     }
 
-    #[test]
-    fn test_create_table_duplicate_without_if_not_exists() {
-        let test_context = TestContext::new("test_create_table_duplicate");
+    #[tokio::test]
+    async fn test_create_table_duplicate_without_if_not_exists() {
+        let test_context = TestContext::new("test_create_table_duplicate").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -424,9 +424,9 @@ mod tests {
         assert_eq!(table.get_table_name(), "duplicate_table");
     }
 
-    #[test]
-    fn test_create_table_multiple_tables() {
-        let test_context = TestContext::new("test_create_table_multiple");
+    #[tokio::test]
+    async fn test_create_table_multiple_tables() {
+        let test_context = TestContext::new("test_create_table_multiple").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let exec_context = setup_execution_context(&test_context, catalog.clone());
 
@@ -458,9 +458,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_table_executor_reuse() {
-        let test_context = TestContext::new("test_create_table_executor_reuse");
+    #[tokio::test]
+    async fn test_create_table_executor_reuse() {
+        let test_context = TestContext::new("test_create_table_executor_reuse").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -489,9 +489,9 @@ mod tests {
         assert_eq!(table.get_table_name(), "reuse_test");
     }
 
-    #[test]
-    fn test_create_table_empty_table_name() {
-        let test_context = TestContext::new("test_create_table_empty_name");
+    #[tokio::test]
+    async fn test_create_table_empty_table_name() {
+        let test_context = TestContext::new("test_create_table_empty_name").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -510,9 +510,9 @@ mod tests {
         // It might create a table with empty name or handle it gracefully
     }
 
-    #[test]
-    fn test_create_table_special_characters_in_name() {
-        let test_context = TestContext::new("test_create_table_special_chars");
+    #[tokio::test]
+    async fn test_create_table_special_characters_in_name() {
+        let test_context = TestContext::new("test_create_table_special_chars").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -546,9 +546,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_table_output_schema() {
-        let test_context = TestContext::new("test_create_table_output_schema");
+    #[tokio::test]
+    async fn test_create_table_output_schema() {
+        let test_context = TestContext::new("test_create_table_output_schema").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_complex_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -575,9 +575,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_table_all_data_types() {
-        let test_context = TestContext::new("test_create_table_all_types");
+    #[tokio::test]
+    async fn test_create_table_all_data_types() {
+        let test_context = TestContext::new("test_create_table_all_types").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let exec_context = setup_execution_context(&test_context, catalog.clone());
 
@@ -620,9 +620,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_create_table_execution_context_access() {
-        let test_context = TestContext::new("test_create_table_context_access");
+    #[tokio::test]
+    async fn test_create_table_execution_context_access() {
+        let test_context = TestContext::new("test_create_table_context_access").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());
@@ -640,9 +640,9 @@ mod tests {
         assert!(Arc::ptr_eq(&exec_context, &retrieved_context));
     }
 
-    #[test]
-    fn test_create_table_concurrent_access() {
-        let test_context = TestContext::new("test_create_table_concurrent");
+    #[tokio::test]
+    async fn test_create_table_concurrent_access() {
+        let test_context = TestContext::new("test_create_table_concurrent").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let exec_context = setup_execution_context(&test_context, catalog.clone());

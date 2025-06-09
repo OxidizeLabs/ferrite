@@ -1,13 +1,13 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
-use crate::storage::disk::disk_manager::FileDiskManager;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::storage::disk::async_disk_manager::AsyncDiskManager;
 
 /// LogRecoveryManager is responsible for recovering the database from log records
 /// after a crash. It follows the ARIES recovery protocol:
@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// 2. Redo phase: Replay all actions, even for aborted transactions
 /// 3. Undo phase: Reverse actions of uncommitted transactions
 pub struct LogRecoveryManager {
-    disk_manager: Arc<FileDiskManager>,
+    disk_manager: Arc<AsyncDiskManager>,
     buffer_pool_manager: Arc<BufferPoolManager>,
     log_manager: Arc<RwLock<LogManager>>,
 }
@@ -41,7 +41,7 @@ impl LogRecoveryManager {
     /// # Returns
     /// A new `LogRecoveryManager` instance.
     pub fn new(
-        disk_manager: Arc<FileDiskManager>,
+        disk_manager: Arc<AsyncDiskManager>,
         buffer_pool_manager: Arc<BufferPoolManager>,
         log_manager: Arc<RwLock<LogManager>>,
     ) -> Self {
@@ -508,18 +508,20 @@ mod tests {
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction::Transaction;
     use crate::recovery::wal_manager::WALManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::Tuple;
     use std::fs;
     use std::path::Path;
     use std::thread::sleep;
     use std::time::Duration;
+    use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::DiskManagerConfig;
 
     // Common test context for all test modules
     pub struct TestContext {
-        pub log_file_path: String,
-        pub db_file_path: String,
-        pub disk_manager: Arc<FileDiskManager>,
+        pub log_path: String,
+        pub db_path: String,
+        pub disk_manager: Arc<AsyncDiskManager>,
         pub buffer_pool_manager: Arc<BufferPoolManager>,
         pub log_manager: Arc<RwLock<LogManager>>,
         pub wal_manager: WALManager,
@@ -527,39 +529,37 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
-            let db_file_path = format!(
-                "tests/data/{}_db_{}.db",
-                test_name,
-                chrono::Utc::now().timestamp()
-            );
-            let log_file_path = format!(
-                "tests/data/{}_log_{}.log",
-                test_name,
-                chrono::Utc::now().timestamp()
-            );
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 100;
+            const K: usize = 2;
 
-            // Ensure test directory exists
-            if let Some(parent) = Path::new(&db_file_path).parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file_path.clone(),
-                log_file_path.clone(),
-                1024,
-            ));
+            // Create disk components
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
+                BUFFER_POOL_SIZE,
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-
-            let buffer_pool_manager = Arc::new(BufferPoolManager::new(
-                10, // Small pool for testing
-                disk_scheduler,
-                disk_manager.clone(),
-                Arc::new(RwLock::new(LRUKReplacer::new(2, 2))),
-            ));
-
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager.clone())));
+            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
             {
                 let mut lm = log_manager.write();
                 lm.run_flush_thread();
@@ -568,28 +568,19 @@ mod tests {
             let wal_manager = WALManager::new(log_manager.clone());
 
             let recovery_manager = LogRecoveryManager::new(
-                disk_manager.clone(),
-                buffer_pool_manager.clone(),
+                disk_manager_arc.clone(),
+                bpm.clone(),
                 log_manager.clone(),
             );
 
             Self {
-                log_file_path,
-                db_file_path,
-                disk_manager,
-                buffer_pool_manager,
+                log_path,
+                db_path,
+                disk_manager: disk_manager_arc,
+                buffer_pool_manager: bpm,
                 log_manager,
                 wal_manager,
                 recovery_manager,
-            }
-        }
-
-        pub fn cleanup(&self) {
-            if Path::new(&self.log_file_path).exists() {
-                let _ = fs::remove_file(&self.log_file_path);
-            }
-            if Path::new(&self.db_file_path).exists() {
-                let _ = fs::remove_file(&self.db_file_path);
             }
         }
 
@@ -613,7 +604,7 @@ mod tests {
         /// Simulate a crash by stopping all active processes and destroying the context
         pub fn simulate_crash(&self) {
             // Make sure we have a test directory
-            if let Some(parent) = Path::new(&self.log_file_path).parent() {
+            if let Some(parent) = Path::new(&self.log_path).parent() {
                 fs::create_dir_all(parent).unwrap();
             }
 
@@ -628,20 +619,14 @@ mod tests {
         }
     }
 
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
-    }
-
     /// Tests for the analysis phase of log recovery
     mod analysis_tests {
         use super::*;
 
         /// Test analyzing logs with no transactions
-        #[test]
-        fn test_analysis_empty_log() {
-            let ctx = TestContext::new("analysis_empty_test");
+        #[tokio::test]
+        async fn test_analysis_empty_log() {
+            let ctx = TestContext::new("analysis_empty_test").await;
 
             // Start recovery (which includes analysis)
             let result = ctx.recovery_manager.start_recovery();
@@ -667,9 +652,9 @@ mod tests {
         }
 
         /// Test analyzing logs with a single complete transaction
-        #[test]
-        fn test_analysis_complete_transaction() {
-            let ctx = TestContext::new("analysis_complete_txn_test");
+        #[tokio::test]
+        async fn test_analysis_complete_transaction() {
+            let ctx = TestContext::new("analysis_complete_txn_test").await;
 
             // Create and run a transaction with BEGIN and COMMIT
             let txn = ctx.create_test_transaction(1);
@@ -694,9 +679,9 @@ mod tests {
         }
 
         /// Test analyzing logs with an incomplete transaction
-        #[test]
-        fn test_analysis_incomplete_transaction() {
-            let ctx = TestContext::new("analysis_incomplete_txn_test");
+        #[tokio::test]
+        async fn test_analysis_incomplete_transaction() {
+            let ctx = TestContext::new("analysis_incomplete_txn_test").await;
 
             // Create a transaction but don't commit it
             let txn = ctx.create_test_transaction(1);
@@ -739,9 +724,9 @@ mod tests {
         use super::*;
 
         /// Test redo with no operations to replay
-        #[test]
-        fn test_redo_empty_log() {
-            let ctx = TestContext::new("redo_empty_test");
+        #[tokio::test]
+        async fn test_redo_empty_log() {
+            let ctx = TestContext::new("redo_empty_test").await;
 
             // Start recovery
             let result = ctx.recovery_manager.start_recovery();
@@ -749,9 +734,9 @@ mod tests {
         }
 
         /// Test redo with update operations
-        #[test]
-        fn test_redo_update_operations() {
-            let ctx = TestContext::new("redo_update_test");
+        #[tokio::test]
+        async fn test_redo_update_operations() {
+            let ctx = TestContext::new("redo_update_test").await;
 
             // Create a transaction
             let txn = ctx.create_test_transaction(1);
@@ -794,9 +779,9 @@ mod tests {
         use super::*;
 
         /// Test undo with no incomplete transactions
-        #[test]
-        fn test_undo_no_active_transactions() {
-            let ctx = TestContext::new("undo_no_active_txn_test");
+        #[tokio::test]
+        async fn test_undo_no_active_transactions() {
+            let ctx = TestContext::new("undo_no_active_txn_test").await;
 
             // Create a transaction
             let txn = ctx.create_test_transaction(1);
@@ -822,9 +807,9 @@ mod tests {
         }
 
         /// Test undo with incomplete transactions
-        #[test]
-        fn test_undo_active_transactions() {
-            let ctx = TestContext::new("undo_active_txn_test");
+        #[tokio::test]
+        async fn test_undo_active_transactions() {
+            let ctx = TestContext::new("undo_active_txn_test").await;
 
             // Create a transaction
             let txn = ctx.create_test_transaction(1);
@@ -864,9 +849,9 @@ mod tests {
         use super::*;
 
         /// Test complete recovery process with multiple transactions
-        #[test]
-        fn test_complete_recovery_process() {
-            let ctx = TestContext::new("complete_recovery_test");
+        #[tokio::test]
+        async fn test_complete_recovery_process() {
+            let ctx = TestContext::new("complete_recovery_test").await;
 
             // Create multiple transactions
             // Transaction 1: Completes successfully
@@ -929,9 +914,9 @@ mod tests {
         }
 
         /// Test recovery after a crash during recovery
-        #[test]
-        fn test_recovery_after_recovery_crash() {
-            let ctx = TestContext::new("recovery_after_crash_test");
+        #[tokio::test]
+        async fn test_recovery_after_recovery_crash() {
+            let ctx = TestContext::new("recovery_after_crash_test").await;
 
             // Create and complete a transaction
             let txn = ctx.create_test_transaction(1);
@@ -950,7 +935,7 @@ mod tests {
             ctx.simulate_crash();
 
             // Create a new context that will "recover" the database
-            let recovery_ctx = TestContext::new("recovery_after_crash_test");
+            let recovery_ctx = TestContext::new("recovery_after_crash_test").await;
             // Point it to the same files
             // In a real test, we would need to implement this properly
 
@@ -958,7 +943,7 @@ mod tests {
             recovery_ctx.simulate_crash();
 
             // Create a final context for recovery after recovery crash
-            let final_ctx = TestContext::new("recovery_after_crash_test");
+            let final_ctx = TestContext::new("recovery_after_crash_test").await;
             // Again, point it to the same files
 
             // This recovery should also succeed

@@ -1,4 +1,4 @@
-use crate::buffer::buffer_pool_manager::BufferPoolManager;
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
@@ -615,7 +615,7 @@ impl ExecutionEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
@@ -623,8 +623,6 @@ mod tests {
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::table_heap::TableInfo;
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::type_id::TypeId;
@@ -632,6 +630,7 @@ mod tests {
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         engine: ExecutionEngine,
@@ -644,10 +643,9 @@ mod tests {
     }
 
     impl TestContext {
-        fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
-
-            const BUFFER_POOL_SIZE: usize = 100;
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -666,17 +664,16 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler.clone(),
-                disk_manager.clone(),
-                replacer,
-            ));
-
-            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager.clone())));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
+            
+            let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
 
             // Create WAL manager with the log manager
             let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
@@ -818,9 +815,9 @@ mod tests {
     mod create_table_tests {
         use crate::sql::execution::execution_engine::tests::{TestContext, TestResultWriter};
 
-        #[test]
-        fn test_create_table_basic_operations() {
-            let mut ctx = TestContext::new("test_create_table_basic_operations");
+        #[tokio::test]
+        async fn test_create_table_basic_operations() {
+            let mut ctx = TestContext::new("test_create_table_basic_operations").await;
 
             // Test CREATE TABLE with common column types
             let create_sql = "CREATE TABLE test_table (id INTEGER, name VARCHAR(50), age INTEGER, active BOOLEAN)";
@@ -854,9 +851,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_all_data_types() {
-            let mut ctx = TestContext::new("test_create_table_all_data_types");
+        #[tokio::test]
+        async fn test_create_table_all_data_types() {
+            let mut ctx = TestContext::new("test_create_table_all_data_types").await;
 
             // Test CREATE TABLE with all supported data types
             let create_sql = "CREATE TABLE all_types_table (
@@ -911,9 +908,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 1, "Expected 1 row");
         }
 
-        #[test]
-        fn test_create_table_minimal_columns() {
-            let mut ctx = TestContext::new("test_create_table_minimal_columns");
+        #[tokio::test]
+        async fn test_create_table_minimal_columns() {
+            let mut ctx = TestContext::new("test_create_table_minimal_columns").await;
 
             // Test CREATE TABLE with single column
             let create_sql = "CREATE TABLE single_col_table (id INTEGER)";
@@ -943,9 +940,9 @@ mod tests {
             assert_eq!(writer.get_rows()[0][0].to_string(), "42");
         }
 
-        #[test]
-        fn test_create_table_wide_schema() {
-            let mut ctx = TestContext::new("test_create_table_wide_schema");
+        #[tokio::test]
+        async fn test_create_table_wide_schema() {
+            let mut ctx = TestContext::new("test_create_table_wide_schema").await;
 
             // Test CREATE TABLE with many columns
             let create_sql = "CREATE TABLE wide_table (
@@ -990,9 +987,9 @@ mod tests {
             assert_eq!(row[3].to_string(), "100");
         }
 
-        #[test]
-        fn test_create_table_varchar_sizes() {
-            let mut ctx = TestContext::new("test_create_table_varchar_sizes");
+        #[tokio::test]
+        async fn test_create_table_varchar_sizes() {
+            let mut ctx = TestContext::new("test_create_table_varchar_sizes").await;
 
             // Test CREATE TABLE with different VARCHAR sizes
             let create_sql = "CREATE TABLE varchar_test (
@@ -1033,9 +1030,9 @@ mod tests {
             assert_eq!(writer.get_rows()[0][1].to_string(), "short");
         }
 
-        #[test]
-        fn test_create_table_numeric_precision() {
-            let mut ctx = TestContext::new("test_create_table_numeric_precision");
+        #[tokio::test]
+        async fn test_create_table_numeric_precision() {
+            let mut ctx = TestContext::new("test_create_table_numeric_precision").await;
 
             // Test CREATE TABLE with numeric types of different precision
             let create_sql = "CREATE TABLE numeric_precision_test (
@@ -1080,9 +1077,9 @@ mod tests {
             assert_eq!(row[1].to_string(), "32767");
         }
 
-        #[test]
-        fn test_create_multiple_tables_same_session() {
-            let mut ctx = TestContext::new("test_create_multiple_tables_same_session");
+        #[tokio::test]
+        async fn test_create_multiple_tables_same_session() {
+            let mut ctx = TestContext::new("test_create_multiple_tables_same_session").await;
 
             // Create first table
             let create_sql1 =
@@ -1148,9 +1145,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 2);
         }
 
-        #[test]
-        fn test_create_table_edge_case_names() {
-            let mut ctx = TestContext::new("test_create_table_edge_case_names");
+        #[tokio::test]
+        async fn test_create_table_edge_case_names() {
+            let mut ctx = TestContext::new("test_create_table_edge_case_names").await;
 
             // Test table with underscores and numbers
             let create_sql1 = "CREATE TABLE test_table_123 (id INTEGER, value VARCHAR(50))";
@@ -1203,9 +1200,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 1);
         }
 
-        #[test]
-        fn test_create_table_duplicate_name_error() {
-            let mut ctx = TestContext::new("test_create_table_duplicate_name_error");
+        #[tokio::test]
+        async fn test_create_table_duplicate_name_error() {
+            let mut ctx = TestContext::new("test_create_table_duplicate_name_error").await;
 
             // Create first table
             let create_sql = "CREATE TABLE duplicate_test (id INTEGER, name VARCHAR(50))";
@@ -1228,9 +1225,9 @@ mod tests {
             assert!(result.is_err(), "Creating duplicate table should fail");
         }
 
-        #[test]
-        fn test_create_table_with_boolean_operations() {
-            let mut ctx = TestContext::new("test_create_table_with_boolean_operations");
+        #[tokio::test]
+        async fn test_create_table_with_boolean_operations() {
+            let mut ctx = TestContext::new("test_create_table_with_boolean_operations").await;
 
             // Create table with multiple boolean columns
             let create_sql = "CREATE TABLE feature_flags (
@@ -1285,9 +1282,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_and_complex_queries() {
-            let mut ctx = TestContext::new("test_create_table_and_complex_queries");
+        #[tokio::test]
+        async fn test_create_table_and_complex_queries() {
+            let mut ctx = TestContext::new("test_create_table_and_complex_queries").await;
 
             // Create a more complex table for testing advanced queries
             let create_sql = "CREATE TABLE sales_data (
@@ -1355,9 +1352,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 5, "Expected all 5 records");
         }
 
-        #[test]
-        fn test_create_table_transaction_safety() {
-            let mut ctx = TestContext::new("test_create_table_transaction_safety");
+        #[tokio::test]
+        async fn test_create_table_transaction_safety() {
+            let mut ctx = TestContext::new("test_create_table_transaction_safety").await;
 
             // Start a transaction
             let begin_sql = "BEGIN";
@@ -1408,9 +1405,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_primary_key_constraint() {
-            let mut ctx = TestContext::new("test_create_table_primary_key_constraint");
+        #[tokio::test]
+        async fn test_create_table_primary_key_constraint() {
+            let mut ctx = TestContext::new("test_create_table_primary_key_constraint").await;
 
             // Test CREATE TABLE with PRIMARY KEY constraint
             let create_sql = "CREATE TABLE users_pk (
@@ -1463,9 +1460,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 unique records");
         }
 
-        #[test]
-        fn test_create_table_not_null_constraint() {
-            let mut ctx = TestContext::new("test_create_table_not_null_constraint");
+        #[tokio::test]
+        async fn test_create_table_not_null_constraint() {
+            let mut ctx = TestContext::new("test_create_table_not_null_constraint").await;
 
             // Test CREATE TABLE with NOT NULL constraints
             let create_sql = "CREATE TABLE required_fields (
@@ -1520,9 +1517,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
         }
 
-        #[test]
-        fn test_create_table_unique_constraint() {
-            let mut ctx = TestContext::new("test_create_table_unique_constraint");
+        #[tokio::test]
+        async fn test_create_table_unique_constraint() {
+            let mut ctx = TestContext::new("test_create_table_unique_constraint").await;
 
             // Test CREATE TABLE with UNIQUE constraint
             let create_sql = "CREATE TABLE unique_emails (
@@ -1581,9 +1578,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_create_table_check_constraint() {
-            let mut ctx = TestContext::new("test_create_table_check_constraint");
+        #[tokio::test]
+        async fn test_create_table_check_constraint() {
+            let mut ctx = TestContext::new("test_create_table_check_constraint").await;
 
             // Test CREATE TABLE with CHECK constraint
             let create_sql = "CREATE TABLE employees_check (
@@ -1647,9 +1644,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
         }
 
-        #[test]
-        fn test_create_table_default_values() {
-            let mut ctx = TestContext::new("test_create_table_default_values");
+        #[tokio::test]
+        async fn test_create_table_default_values() {
+            let mut ctx = TestContext::new("test_create_table_default_values").await;
 
             // Test CREATE TABLE with DEFAULT values
             let create_sql = "CREATE TABLE user_preferences (
@@ -1712,9 +1709,9 @@ mod tests {
             // Note: Default value verification depends on implementation
         }
 
-        #[test]
-        fn test_create_table_multiple_constraints() {
-            let mut ctx = TestContext::new("test_create_table_multiple_constraints");
+        #[tokio::test]
+        async fn test_create_table_multiple_constraints() {
+            let mut ctx = TestContext::new("test_create_table_multiple_constraints").await;
 
             // Test CREATE TABLE with multiple constraints on same table
             let create_sql = "CREATE TABLE comprehensive_users (
@@ -1785,9 +1782,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
         }
 
-        #[test]
-        fn test_create_table_foreign_key_constraint() {
-            let mut ctx = TestContext::new("test_create_table_foreign_key_constraint");
+        #[tokio::test]
+        async fn test_create_table_foreign_key_constraint() {
+            let mut ctx = TestContext::new("test_create_table_foreign_key_constraint").await;
 
             // Create parent table first
             let create_parent_sql = "CREATE TABLE departments (
@@ -1871,9 +1868,9 @@ mod tests {
             assert_eq!(writer.get_rows().len(), 3, "Expected 3 employee records");
         }
 
-        #[test]
-        fn test_create_table_auto_increment() {
-            let mut ctx = TestContext::new("test_create_table_auto_increment");
+        #[tokio::test]
+        async fn test_create_table_auto_increment() {
+            let mut ctx = TestContext::new("test_create_table_auto_increment").await;
 
             // Test CREATE TABLE with AUTO_INCREMENT/SERIAL (if supported)
             let create_sql = "CREATE TABLE auto_id_test (
@@ -1929,9 +1926,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_table_composite_constraints() {
-            let mut ctx = TestContext::new("test_create_table_composite_constraints");
+        #[tokio::test]
+        async fn test_create_table_composite_constraints() {
+            let mut ctx = TestContext::new("test_create_table_composite_constraints").await;
 
             // Test CREATE TABLE with composite constraints
             let create_sql = "CREATE TABLE order_items (
@@ -2005,9 +2002,9 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_create_index_basic_operations() {
-            let mut ctx = TestContext::new("test_create_index_basic_operations");
+        #[tokio::test]
+        async fn test_create_index_basic_operations() {
+            let mut ctx = TestContext::new("test_create_index_basic_operations").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2087,9 +2084,9 @@ mod tests {
             assert_eq!(rows[1][0].to_string(), "Charlie");
         }
 
-        #[test]
-        fn test_create_index_composite_indexes() {
-            let mut ctx = TestContext::new("test_create_index_composite_indexes");
+        #[tokio::test]
+        async fn test_create_index_composite_indexes() {
+            let mut ctx = TestContext::new("test_create_index_composite_indexes").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2184,9 +2181,9 @@ mod tests {
             assert_eq!(rows.len(), 2, "Expected 2 engineering employees");
         }
 
-        #[test]
-        fn test_create_unique_index() {
-            let mut ctx = TestContext::new("test_create_unique_index");
+        #[tokio::test]
+        async fn test_create_unique_index() {
+            let mut ctx = TestContext::new("test_create_unique_index").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2270,9 +2267,9 @@ mod tests {
             assert!(success, "Query after unique index creation failed");
         }
 
-        #[test]
-        fn test_create_index_different_data_types() {
-            let mut ctx = TestContext::new("test_create_index_different_data_types");
+        #[tokio::test]
+        async fn test_create_index_different_data_types() {
+            let mut ctx = TestContext::new("test_create_index_different_data_types").await;
 
             // Create test table with various data types
             let table_schema = Schema::new(vec![
@@ -2372,9 +2369,9 @@ mod tests {
             assert!(success, "Query using multiple indexed columns failed");
         }
 
-        #[test]
-        fn test_create_index_naming_conventions() {
-            let mut ctx = TestContext::new("test_create_index_naming_conventions");
+        #[tokio::test]
+        async fn test_create_index_naming_conventions() {
+            let mut ctx = TestContext::new("test_create_index_naming_conventions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2432,9 +2429,9 @@ mod tests {
             assert!(success, "Query using multiple indexes failed");
         }
 
-        #[test]
-        fn test_create_index_error_cases() {
-            let mut ctx = TestContext::new("test_create_index_error_cases");
+        #[tokio::test]
+        async fn test_create_index_error_cases() {
+            let mut ctx = TestContext::new("test_create_index_error_cases").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2506,9 +2503,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_index_on_populated_table() {
-            let mut ctx = TestContext::new("test_create_index_on_populated_table");
+        #[tokio::test]
+        async fn test_create_index_on_populated_table() {
+            let mut ctx = TestContext::new("test_create_index_on_populated_table").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2601,9 +2598,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_create_index_in_transaction() {
-            let mut ctx = TestContext::new("test_create_index_in_transaction");
+        #[tokio::test]
+        async fn test_create_index_in_transaction() {
+            let mut ctx = TestContext::new("test_create_index_in_transaction").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2697,9 +2694,9 @@ mod tests {
             assert!(success, "Query after rolled back index creation failed");
         }
 
-        #[test]
-        fn test_create_index_performance_verification() {
-            let mut ctx = TestContext::new("test_create_index_performance_verification");
+        #[tokio::test]
+        async fn test_create_index_performance_verification() {
+            let mut ctx = TestContext::new("test_create_index_performance_verification").await;
 
             // Create test table for performance testing
             let table_schema = Schema::new(vec![
@@ -2807,9 +2804,9 @@ mod tests {
             println!("Range query result: {} rows", writer.get_rows()[0][0]);
         }
 
-        #[test]
-        fn test_create_index_if_not_exists() {
-            let mut ctx = TestContext::new("test_create_index_if_not_exists");
+        #[tokio::test]
+        async fn test_create_index_if_not_exists() {
+            let mut ctx = TestContext::new("test_create_index_if_not_exists").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -2864,9 +2861,9 @@ mod tests {
             assert!(success, "Query using index failed");
         }
 
-        #[test]
-        fn test_create_index_multiple_tables() {
-            let mut ctx = TestContext::new("test_create_index_multiple_tables");
+        #[tokio::test]
+        async fn test_create_index_multiple_tables() {
+            let mut ctx = TestContext::new("test_create_index_multiple_tables").await;
 
             // Create multiple test tables
             let users_schema = Schema::new(vec![
@@ -2990,9 +2987,9 @@ mod tests {
         use crate::sql::execution::execution_engine::tests::{TestContext, TestResultWriter};
         use crate::types_db::type_id::TypeId;
 
-        #[test]
-        fn test_insert_basic_operations() {
-            let mut ctx = TestContext::new("test_insert_basic_operations");
+        #[tokio::test]
+        async fn test_insert_basic_operations() {
+            let mut ctx = TestContext::new("test_insert_basic_operations").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -3048,9 +3045,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_insert_with_column_specification() {
-            let mut ctx = TestContext::new("test_insert_with_column_specification");
+        #[tokio::test]
+        async fn test_insert_with_column_specification() {
+            let mut ctx = TestContext::new("test_insert_with_column_specification").await;
 
             // Create test table with various column types
             let table_schema = Schema::new(vec![
@@ -3125,9 +3122,9 @@ mod tests {
             assert_eq!(rows[2][4].to_string(), "60000");
         }
 
-        #[test]
-        fn test_insert_with_null_values() {
-            let mut ctx = TestContext::new("test_insert_with_null_values");
+        #[tokio::test]
+        async fn test_insert_with_null_values() {
+            let mut ctx = TestContext::new("test_insert_with_null_values").await;
 
             // Create test table with nullable columns
             let table_schema = Schema::new(vec![
@@ -3206,9 +3203,9 @@ mod tests {
             // rows[2][4] should be NULL
         }
 
-        #[test]
-        fn test_insert_with_different_data_types() {
-            let mut ctx = TestContext::new("test_insert_with_different_data_types");
+        #[tokio::test]
+        async fn test_insert_with_different_data_types() {
+            let mut ctx = TestContext::new("test_insert_with_different_data_types").await;
 
             // Create test table with all supported data types
             let table_schema = Schema::new(vec![
@@ -3314,9 +3311,9 @@ mod tests {
             assert_eq!(rows[0][6].to_string(), "true");
         }
 
-        #[test]
-        fn test_insert_with_select_statement() {
-            let mut ctx = TestContext::new("test_insert_with_select_statement");
+        #[tokio::test]
+        async fn test_insert_with_select_statement() {
+            let mut ctx = TestContext::new("test_insert_with_select_statement").await;
 
             // Create source table
             let source_schema = Schema::new(vec![
@@ -3429,9 +3426,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_with_expressions() {
-            let mut ctx = TestContext::new("test_insert_with_expressions");
+        #[tokio::test]
+        async fn test_insert_with_expressions() {
+            let mut ctx = TestContext::new("test_insert_with_expressions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -3515,9 +3512,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_transaction_behavior() {
-            let mut ctx = TestContext::new("test_insert_transaction_behavior");
+        #[tokio::test]
+        async fn test_insert_transaction_behavior() {
+            let mut ctx = TestContext::new("test_insert_transaction_behavior").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -3646,9 +3643,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_insert_error_cases() {
-            let mut ctx = TestContext::new("test_insert_error_cases");
+        #[tokio::test]
+        async fn test_insert_error_cases() {
+            let mut ctx = TestContext::new("test_insert_error_cases").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -3731,9 +3728,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_insert_with_constraints() {
-            let mut ctx = TestContext::new("test_insert_with_constraints");
+        #[tokio::test]
+        async fn test_insert_with_constraints() {
+            let mut ctx = TestContext::new("test_insert_with_constraints").await;
 
             // Create test table with constraints
             let create_sql = "CREATE TABLE constrained_table (
@@ -3828,9 +3825,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_insert_large_batch() {
-            let mut ctx = TestContext::new("test_insert_large_batch");
+        #[tokio::test]
+        async fn test_insert_large_batch() {
+            let mut ctx = TestContext::new("test_insert_large_batch").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -3900,9 +3897,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_with_default_values() {
-            let mut ctx = TestContext::new("test_insert_with_default_values");
+        #[tokio::test]
+        async fn test_insert_with_default_values() {
+            let mut ctx = TestContext::new("test_insert_with_default_values").await;
 
             // Create table with DEFAULT values
             let create_sql = "CREATE TABLE default_test (
@@ -3970,9 +3967,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_with_foreign_key_relationships() {
-            let mut ctx = TestContext::new("test_insert_with_foreign_key_relationships");
+        #[tokio::test]
+        async fn test_insert_with_foreign_key_relationships() {
+            let mut ctx = TestContext::new("test_insert_with_foreign_key_relationships").await;
 
             // Create parent table (departments)
             let create_dept_sql = "CREATE TABLE departments_fk (
@@ -4077,9 +4074,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_performance_bulk_operations() {
-            let mut ctx = TestContext::new("test_insert_performance_bulk_operations");
+        #[tokio::test]
+        async fn test_insert_performance_bulk_operations() {
+            let mut ctx = TestContext::new("test_insert_performance_bulk_operations").await;
 
             // Create test table optimized for bulk inserts
             let table_schema = Schema::new(vec![
@@ -4206,9 +4203,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_concurrent_transactions() {
-            let mut ctx = TestContext::new("test_insert_concurrent_transactions");
+        #[tokio::test]
+        async fn test_insert_concurrent_transactions() {
+            let mut ctx = TestContext::new("test_insert_concurrent_transactions").await;
 
             // Create test table for concurrent operations
             let table_schema = Schema::new(vec![
@@ -4336,9 +4333,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_insert_with_computed_columns() {
-            let mut ctx = TestContext::new("test_insert_with_computed_columns");
+        #[tokio::test]
+        async fn test_insert_with_computed_columns() {
+            let mut ctx = TestContext::new("test_insert_with_computed_columns").await;
 
             // Create test table with computed/derived values
             let table_schema = Schema::new(vec![
@@ -4471,9 +4468,9 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_delete_basic_operations() {
-            let mut ctx = TestContext::new("test_delete_basic_operations");
+        #[tokio::test]
+        async fn test_delete_basic_operations() {
+            let mut ctx = TestContext::new("test_delete_basic_operations").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -4568,9 +4565,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_delete_with_conditions() {
-            let mut ctx = TestContext::new("test_delete_with_conditions");
+        #[tokio::test]
+        async fn test_delete_with_conditions() {
+            let mut ctx = TestContext::new("test_delete_with_conditions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -4696,9 +4693,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_delete_no_rows_affected() {
-            let mut ctx = TestContext::new("test_delete_no_rows_affected");
+        #[tokio::test]
+        async fn test_delete_no_rows_affected() {
+            let mut ctx = TestContext::new("test_delete_no_rows_affected").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -4743,9 +4740,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_delete_all_rows() {
-            let mut ctx = TestContext::new("test_delete_all_rows");
+        #[tokio::test]
+        async fn test_delete_all_rows() {
+            let mut ctx = TestContext::new("test_delete_all_rows").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -4792,9 +4789,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_delete_in_transaction() {
-            let mut ctx = TestContext::new("test_delete_in_transaction");
+        #[tokio::test]
+        async fn test_delete_in_transaction() {
+            let mut ctx = TestContext::new("test_delete_in_transaction").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -4890,9 +4887,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_delete_with_complex_conditions() {
-            let mut ctx = TestContext::new("test_delete_with_complex_conditions");
+        #[tokio::test]
+        async fn test_delete_with_complex_conditions() {
+            let mut ctx = TestContext::new("test_delete_with_complex_conditions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -4986,9 +4983,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_delete_error_cases() {
-            let mut ctx = TestContext::new("test_delete_error_cases");
+        #[tokio::test]
+        async fn test_delete_error_cases() {
+            let mut ctx = TestContext::new("test_delete_error_cases").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -5038,9 +5035,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_delete_with_foreign_key_constraints() {
-            let mut ctx = TestContext::new("test_delete_with_foreign_key_constraints");
+        #[tokio::test]
+        async fn test_delete_with_foreign_key_constraints() {
+            let mut ctx = TestContext::new("test_delete_with_foreign_key_constraints").await;
 
             // Create parent table (departments)
             let create_dept_sql = "CREATE TABLE departments_fk (
@@ -5144,9 +5141,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_delete_with_subqueries() {
-            let mut ctx = TestContext::new("test_delete_with_subqueries");
+        #[tokio::test]
+        async fn test_delete_with_subqueries() {
+            let mut ctx = TestContext::new("test_delete_with_subqueries").await;
 
             // Create employees table
             let employees_schema = Schema::new(vec![
@@ -5267,9 +5264,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_delete_performance_bulk_operations() {
-            let mut ctx = TestContext::new("test_delete_performance_bulk_operations");
+        #[tokio::test]
+        async fn test_delete_performance_bulk_operations() {
+            let mut ctx = TestContext::new("test_delete_performance_bulk_operations").await;
 
             // Create test table for performance testing
             let table_schema = Schema::new(vec![
@@ -5372,9 +5369,9 @@ mod tests {
             println!("Complex condition delete: {:?}", complex_delete_duration);
         }
 
-        #[test]
-        fn test_delete_with_join_conditions() {
-            let mut ctx = TestContext::new("test_delete_with_join_conditions");
+        #[tokio::test]
+        async fn test_delete_with_join_conditions() {
+            let mut ctx = TestContext::new("test_delete_with_join_conditions").await;
 
             // Create related tables for join-based deletes
             let orders_schema = Schema::new(vec![
@@ -5510,9 +5507,9 @@ mod tests {
     mod update_tests {
         use super::*;
 
-        #[test]
-        fn test_update_basic_operations() {
-            let mut ctx = TestContext::new("test_update_basic_operations");
+        #[tokio::test]
+        async fn test_update_basic_operations() {
+            let mut ctx = TestContext::new("test_update_basic_operations").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -5624,9 +5621,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_update_with_conditions() {
-            let mut ctx = TestContext::new("test_update_with_conditions");
+        #[tokio::test]
+        async fn test_update_with_conditions() {
+            let mut ctx = TestContext::new("test_update_with_conditions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -5795,9 +5792,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_with_expressions() {
-            let mut ctx = TestContext::new("test_update_with_expressions");
+        #[tokio::test]
+        async fn test_update_with_expressions() {
+            let mut ctx = TestContext::new("test_update_with_expressions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -5914,9 +5911,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_no_rows_affected() {
-            let mut ctx = TestContext::new("test_update_no_rows_affected");
+        #[tokio::test]
+        async fn test_update_no_rows_affected() {
+            let mut ctx = TestContext::new("test_update_no_rows_affected").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -5960,9 +5957,9 @@ mod tests {
             assert_eq!(rows[1][1].to_string(), "30", "Bob's age should remain 30");
         }
 
-        #[test]
-        fn test_update_all_rows() {
-            let mut ctx = TestContext::new("test_update_all_rows");
+        #[tokio::test]
+        async fn test_update_all_rows() {
+            let mut ctx = TestContext::new("test_update_all_rows").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -6014,9 +6011,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_update_in_transaction() {
-            let mut ctx = TestContext::new("test_update_in_transaction");
+        #[tokio::test]
+        async fn test_update_in_transaction() {
+            let mut ctx = TestContext::new("test_update_in_transaction").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -6139,10 +6136,10 @@ mod tests {
         use crate::types_db::value::Val::Null;
         use crate::types_db::value::{Val, Value};
 
-        #[test]
-        fn test_simple_queries() {
+        #[tokio::test]
+        async fn test_simple_queries() {
             // Create a simpler test to avoid stack overflow
-            let mut ctx = TestContext::new("test_simple_queries");
+            let mut ctx = TestContext::new("test_simple_queries").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -6181,9 +6178,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_all_columns() {
-            let mut ctx = TestContext::new("test_select_all_columns");
+        #[tokio::test]
+        async fn test_select_all_columns() {
+            let mut ctx = TestContext::new("test_select_all_columns").await;
 
             // Create test table with multiple columns
             let table_schema = Schema::new(vec![
@@ -6259,9 +6256,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_select_with_constants() {
-            let mut ctx = TestContext::new("test_select_with_constants");
+        #[tokio::test]
+        async fn test_select_with_constants() {
+            let mut ctx = TestContext::new("test_select_with_constants").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6309,9 +6306,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_expressions() {
-            let mut ctx = TestContext::new("test_select_with_expressions");
+        #[tokio::test]
+        async fn test_select_with_expressions() {
+            let mut ctx = TestContext::new("test_select_with_expressions").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6378,9 +6375,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_distinct() {
-            let mut ctx = TestContext::new("test_select_distinct");
+        #[tokio::test]
+        async fn test_select_distinct() {
+            let mut ctx = TestContext::new("test_select_distinct").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6438,9 +6435,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_select_with_limit() {
-            let mut ctx = TestContext::new("test_select_with_limit");
+        #[tokio::test]
+        async fn test_select_with_limit() {
+            let mut ctx = TestContext::new("test_select_with_limit").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6484,9 +6481,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_offset() {
-            let mut ctx = TestContext::new("test_select_with_offset");
+        #[tokio::test]
+        async fn test_select_with_offset() {
+            let mut ctx = TestContext::new("test_select_with_offset").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6530,9 +6527,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_aliases() {
-            let mut ctx = TestContext::new("test_select_with_aliases");
+        #[tokio::test]
+        async fn test_select_with_aliases() {
+            let mut ctx = TestContext::new("test_select_with_aliases").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("employee_id", TypeId::Integer),
@@ -6607,9 +6604,9 @@ mod tests {
             assert_eq!(writer2.get_rows().len(), 2, "Should return 2 rows");
         }
 
-        #[test]
-        fn test_select_with_different_data_types() {
-            let mut ctx = TestContext::new("test_select_with_different_data_types");
+        #[tokio::test]
+        async fn test_select_with_different_data_types() {
+            let mut ctx = TestContext::new("test_select_with_different_data_types").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6679,9 +6676,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_with_null_values() {
-            let mut ctx = TestContext::new("test_select_with_null_values");
+        #[tokio::test]
+        async fn test_select_with_null_values() {
+            let mut ctx = TestContext::new("test_select_with_null_values").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6749,9 +6746,9 @@ mod tests {
             assert_eq!(writer2.get_rows().len(), 3, "Should return all 3 rows");
         }
 
-        #[test]
-        fn test_select_empty_table() {
-            let mut ctx = TestContext::new("test_select_empty_table");
+        #[tokio::test]
+        async fn test_select_empty_table() {
+            let mut ctx = TestContext::new("test_select_empty_table").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6786,9 +6783,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_select_performance_large_table() {
-            let mut ctx = TestContext::new("test_select_performance_large_table");
+        #[tokio::test]
+        async fn test_select_performance_large_table() {
+            let mut ctx = TestContext::new("test_select_performance_large_table").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6847,9 +6844,9 @@ mod tests {
         use crate::types_db::value::Val::Null;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_count_aggregation() {
-            let mut ctx = TestContext::new("test_count_aggregation");
+        #[tokio::test]
+        async fn test_count_aggregation() {
+            let mut ctx = TestContext::new("test_count_aggregation").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -6954,9 +6951,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_sum_aggregation() {
-            let mut ctx = TestContext::new("test_sum_aggregation");
+        #[tokio::test]
+        async fn test_sum_aggregation() {
+            let mut ctx = TestContext::new("test_sum_aggregation").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7016,9 +7013,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_avg_aggregation() {
-            let mut ctx = TestContext::new("test_avg_aggregation");
+        #[tokio::test]
+        async fn test_avg_aggregation() {
+            let mut ctx = TestContext::new("test_avg_aggregation").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7082,9 +7079,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_min_max_aggregation() {
-            let mut ctx = TestContext::new("test_min_max_aggregation");
+        #[tokio::test]
+        async fn test_min_max_aggregation() {
+            let mut ctx = TestContext::new("test_min_max_aggregation").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7168,9 +7165,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_aggregation_with_group_by() {
-            let mut ctx = TestContext::new("test_aggregation_with_group_by");
+        #[tokio::test]
+        async fn test_aggregation_with_group_by() {
+            let mut ctx = TestContext::new("test_aggregation_with_group_by").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7295,9 +7292,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_aggregation_with_having() {
-            let mut ctx = TestContext::new("test_aggregation_with_having");
+        #[tokio::test]
+        async fn test_aggregation_with_having() {
+            let mut ctx = TestContext::new("test_aggregation_with_having").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7356,9 +7353,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_aggregation_with_null_values() {
-            let mut ctx = TestContext::new("test_aggregation_with_null_values");
+        #[tokio::test]
+        async fn test_aggregation_with_null_values() {
+            let mut ctx = TestContext::new("test_aggregation_with_null_values").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7453,9 +7450,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_aggregation_on_empty_table() {
-            let mut ctx = TestContext::new("test_aggregation_on_empty_table");
+        #[tokio::test]
+        async fn test_aggregation_on_empty_table() {
+            let mut ctx = TestContext::new("test_aggregation_on_empty_table").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7513,9 +7510,9 @@ mod tests {
             assert_eq!(writer3.get_rows().len(), 1, "Should return 1 row");
         }
 
-        #[test]
-        fn test_complex_aggregation_scenarios() {
-            let mut ctx = TestContext::new("test_complex_aggregation_scenarios");
+        #[tokio::test]
+        async fn test_complex_aggregation_scenarios() {
+            let mut ctx = TestContext::new("test_complex_aggregation_scenarios").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7615,9 +7612,9 @@ mod tests {
             // Should filter to products with price > 100, then group by category, then filter groups with count > 1
         }
 
-        #[test]
-        fn test_aggregation_performance() {
-            let mut ctx = TestContext::new("test_aggregation_performance");
+        #[tokio::test]
+        async fn test_aggregation_performance() {
+            let mut ctx = TestContext::new("test_aggregation_performance").await;
 
             let table_schema = Schema::new(vec![
                 Column::new("id", TypeId::Integer),
@@ -7671,10 +7668,10 @@ mod tests {
         use super::*;
         use crate::types_db::value::Val;
 
-        #[test]
+        #[tokio::test]
         // #[ignore]
-        fn test_group_by_column_names() {
-            let mut ctx = TestContext::new("test_group_by_column_names");
+        async fn test_group_by_column_names() {
+            let mut ctx = TestContext::new("test_group_by_column_names").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -7746,9 +7743,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_aggregates() {
-            let mut ctx = TestContext::new("test_group_by_aggregates");
+        #[tokio::test]
+        async fn test_group_by_aggregates() {
+            let mut ctx = TestContext::new("test_group_by_aggregates").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -7874,9 +7871,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_group_by_single_column() {
-            let mut ctx = TestContext::new("test_group_by_single_column");
+        #[tokio::test]
+        async fn test_group_by_single_column() {
+            let mut ctx = TestContext::new("test_group_by_single_column").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -7922,9 +7919,9 @@ mod tests {
             assert_eq!(schema.get_columns()[1].get_name(), "item_count");
         }
 
-        #[test]
-        fn test_group_by_multiple_columns() {
-            let mut ctx = TestContext::new("test_group_by_multiple_columns");
+        #[tokio::test]
+        async fn test_group_by_multiple_columns() {
+            let mut ctx = TestContext::new("test_group_by_multiple_columns").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8001,9 +7998,9 @@ mod tests {
             assert_eq!(schema.get_columns()[3].get_name(), "avg_budget");
         }
 
-        #[test]
-        fn test_group_by_with_where_clause() {
-            let mut ctx = TestContext::new("test_group_by_with_where_clause");
+        #[tokio::test]
+        async fn test_group_by_with_where_clause() {
+            let mut ctx = TestContext::new("test_group_by_with_where_clause").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8085,9 +8082,9 @@ mod tests {
             assert_eq!(schema.get_columns()[2].get_name(), "avg_price");
         }
 
-        #[test]
-        fn test_group_by_with_having_clause() {
-            let mut ctx = TestContext::new("test_group_by_with_having_clause");
+        #[tokio::test]
+        async fn test_group_by_with_having_clause() {
+            let mut ctx = TestContext::new("test_group_by_with_having_clause").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8169,9 +8166,9 @@ mod tests {
             assert_eq!(schema.get_columns()[2].get_name(), "avg_score");
         }
 
-        #[test]
-        fn test_group_by_with_order_by() {
-            let mut ctx = TestContext::new("test_group_by_with_order_by");
+        #[tokio::test]
+        async fn test_group_by_with_order_by() {
+            let mut ctx = TestContext::new("test_group_by_with_order_by").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8217,9 +8214,9 @@ mod tests {
             assert_eq!(schema.get_columns()[1].get_name(), "total_sales");
         }
 
-        #[test]
-        fn test_group_by_with_null_values() {
-            let mut ctx = TestContext::new("test_group_by_with_null_values");
+        #[tokio::test]
+        async fn test_group_by_with_null_values() {
+            let mut ctx = TestContext::new("test_group_by_with_null_values").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8281,9 +8278,9 @@ mod tests {
             assert_eq!(schema.get_columns()[2].get_name(), "non_null_values");
         }
 
-        #[test]
-        fn test_group_by_all_aggregation_functions() {
-            let mut ctx = TestContext::new("test_group_by_all_aggregation_functions");
+        #[tokio::test]
+        async fn test_group_by_all_aggregation_functions() {
+            let mut ctx = TestContext::new("test_group_by_all_aggregation_functions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8336,9 +8333,9 @@ mod tests {
             assert_eq!(schema.get_columns()[5].get_name(), "max_val");
         }
 
-        #[test]
-        fn test_group_by_empty_table() {
-            let mut ctx = TestContext::new("test_group_by_empty_table");
+        #[tokio::test]
+        async fn test_group_by_empty_table() {
+            let mut ctx = TestContext::new("test_group_by_empty_table").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8377,9 +8374,9 @@ mod tests {
             assert_eq!(schema.get_columns()[1].get_name(), "count");
         }
 
-        #[test]
-        fn test_group_by_performance_large_dataset() {
-            let mut ctx = TestContext::new("test_group_by_performance_large_dataset");
+        #[tokio::test]
+        async fn test_group_by_performance_large_dataset() {
+            let mut ctx = TestContext::new("test_group_by_performance_large_dataset").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8442,9 +8439,9 @@ mod tests {
             assert_eq!(schema.get_columns()[4].get_name(), "total_value");
         }
 
-        #[test]
-        fn test_group_by_distinct_operations() {
-            let mut ctx = TestContext::new("test_group_by_distinct_operations");
+        #[tokio::test]
+        async fn test_group_by_distinct_operations() {
+            let mut ctx = TestContext::new("test_group_by_distinct_operations").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -8537,9 +8534,9 @@ mod tests {
         use crate::types_db::value::Val::Null;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_join_operations() {
-            let mut ctx = TestContext::new("test_join_operations");
+        #[tokio::test]
+        async fn test_join_operations() {
+            let mut ctx = TestContext::new("test_join_operations").await;
 
             // Create users table
             let users_schema = Schema::new(vec![
@@ -8618,9 +8615,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_right_join_operations() {
-            let mut ctx = TestContext::new("test_right_join_operations");
+        #[tokio::test]
+        async fn test_right_join_operations() {
+            let mut ctx = TestContext::new("test_right_join_operations").await;
 
             // Create employees table
             let employees_schema = Schema::new(vec![
@@ -8698,9 +8695,9 @@ mod tests {
             assert!(hr_row.is_some(), "HR department should be in results");
         }
 
-        #[test]
-        fn test_full_outer_join_operations() {
-            let mut ctx = TestContext::new("test_full_outer_join_operations");
+        #[tokio::test]
+        async fn test_full_outer_join_operations() {
+            let mut ctx = TestContext::new("test_full_outer_join_operations").await;
 
             // Create customers table
             let customers_schema = Schema::new(vec![
@@ -8757,10 +8754,10 @@ mod tests {
             );
         }
 
-        #[test]
+        #[tokio::test]
         #[ignore]
-        fn test_cross_join_operations() {
-            let mut ctx = TestContext::new("test_cross_join_operations");
+        async fn test_cross_join_operations() {
+            let mut ctx = TestContext::new("test_cross_join_operations").await;
 
             // Create small tables for cross join
             let colors_schema = Schema::new(vec![
@@ -8828,9 +8825,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_self_join_operations() {
-            let mut ctx = TestContext::new("test_self_join_operations");
+        #[tokio::test]
+        async fn test_self_join_operations() {
+            let mut ctx = TestContext::new("test_self_join_operations").await;
 
             // Create employees table with manager relationship
             let employees_schema = Schema::new(vec![
@@ -8882,9 +8879,9 @@ mod tests {
             assert!(writer2.get_rows().len() > 0, "Should find colleague pairs");
         }
 
-        #[test]
-        fn test_multiple_table_joins() {
-            let mut ctx = TestContext::new("test_multiple_table_joins");
+        #[tokio::test]
+        async fn test_multiple_table_joins() {
+            let mut ctx = TestContext::new("test_multiple_table_joins").await;
 
             // Create multiple related tables
             let customers_schema = Schema::new(vec![
@@ -8967,9 +8964,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_join_with_complex_conditions() {
-            let mut ctx = TestContext::new("test_join_with_complex_conditions");
+        #[tokio::test]
+        async fn test_join_with_complex_conditions() {
+            let mut ctx = TestContext::new("test_join_with_complex_conditions").await;
 
             // Create tables for complex join conditions
             let sales_schema = Schema::new(vec![
@@ -9074,9 +9071,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_join_performance_with_large_dataset() {
-            let mut ctx = TestContext::new("test_join_performance_with_large_dataset");
+        #[tokio::test]
+        async fn test_join_performance_with_large_dataset() {
+            let mut ctx = TestContext::new("test_join_performance_with_large_dataset").await;
 
             // Create larger tables to test join performance
             let table_a_schema = Schema::new(vec![
@@ -9135,9 +9132,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_join_with_null_handling() {
-            let mut ctx = TestContext::new("test_join_with_null_handling");
+        #[tokio::test]
+        async fn test_join_with_null_handling() {
+            let mut ctx = TestContext::new("test_join_with_null_handling").await;
 
             // Create tables with NULL values
             let teachers_schema = Schema::new(vec![
@@ -9219,9 +9216,9 @@ mod tests {
         use crate::types_db::value::Val::Null;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_where_clause() {
-            let mut ctx = TestContext::new("test_where_clause");
+        #[tokio::test]
+        async fn test_where_clause() {
+            let mut ctx = TestContext::new("test_where_clause").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -9323,9 +9320,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_comparison_operators() {
-            let mut ctx = TestContext::new("test_where_comparison_operators");
+        #[tokio::test]
+        async fn test_where_comparison_operators() {
+            let mut ctx = TestContext::new("test_where_comparison_operators").await;
 
             // Create test table with various numeric types
             let table_schema = Schema::new(vec![
@@ -9457,9 +9454,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_string_operations() {
-            let mut ctx = TestContext::new("test_where_string_operations");
+        #[tokio::test]
+        async fn test_where_string_operations() {
+            let mut ctx = TestContext::new("test_where_string_operations").await;
 
             // Create test table for string operations
             let table_schema = Schema::new(vec![
@@ -9576,9 +9573,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_null_conditions() {
-            let mut ctx = TestContext::new("test_where_null_conditions");
+        #[tokio::test]
+        async fn test_where_null_conditions() {
+            let mut ctx = TestContext::new("test_where_null_conditions").await;
 
             // Create test table that allows NULL values
             let table_schema = Schema::new(vec![
@@ -9691,9 +9688,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_complex_boolean_logic() {
-            let mut ctx = TestContext::new("test_where_complex_boolean_logic");
+        #[tokio::test]
+        async fn test_where_complex_boolean_logic() {
+            let mut ctx = TestContext::new("test_where_complex_boolean_logic").await;
 
             // Create test table for complex logic testing
             let table_schema = Schema::new(vec![
@@ -9839,9 +9836,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_in_conditions() {
-            let mut ctx = TestContext::new("test_where_in_conditions");
+        #[tokio::test]
+        async fn test_where_in_conditions() {
+            let mut ctx = TestContext::new("test_where_in_conditions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -9974,9 +9971,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_between_conditions() {
-            let mut ctx = TestContext::new("test_where_between_conditions");
+        #[tokio::test]
+        async fn test_where_between_conditions() {
+            let mut ctx = TestContext::new("test_where_between_conditions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -10118,9 +10115,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_like_patterns() {
-            let mut ctx = TestContext::new("test_where_like_patterns");
+        #[tokio::test]
+        async fn test_where_like_patterns() {
+            let mut ctx = TestContext::new("test_where_like_patterns").await;
 
             // Create test table for pattern matching
             let table_schema = Schema::new(vec![
@@ -10269,9 +10266,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_date_time_comparisons() {
-            let mut ctx = TestContext::new("test_where_date_time_comparisons");
+        #[tokio::test]
+        async fn test_where_date_time_comparisons() {
+            let mut ctx = TestContext::new("test_where_date_time_comparisons").await;
 
             // Create test table with date/time columns
             let table_schema = Schema::new(vec![
@@ -10424,9 +10421,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_edge_cases_and_errors() {
-            let mut ctx = TestContext::new("test_where_edge_cases_and_errors");
+        #[tokio::test]
+        async fn test_where_edge_cases_and_errors() {
+            let mut ctx = TestContext::new("test_where_edge_cases_and_errors").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -10553,9 +10550,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_where_subquery_conditions() {
-            let mut ctx = TestContext::new("test_where_subquery_conditions");
+        #[tokio::test]
+        async fn test_where_subquery_conditions() {
+            let mut ctx = TestContext::new("test_where_subquery_conditions").await;
 
             // Create employees table
             let employees_schema = Schema::new(vec![
@@ -10706,9 +10703,9 @@ mod tests {
         use crate::types_db::types::Type;
         use crate::types_db::value::Val;
 
-        #[test]
-        fn test_having_with_count() {
-            let mut ctx = TestContext::new("test_having_with_count");
+        #[tokio::test]
+        async fn test_having_with_count() {
+            let mut ctx = TestContext::new("test_having_with_count").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -10761,9 +10758,9 @@ mod tests {
             assert_eq!(rows[0][1].as_integer().unwrap(), 3);
         }
 
-        #[test]
-        fn test_having_with_sum() {
-            let mut ctx = TestContext::new("test_having_with_sum");
+        #[tokio::test]
+        async fn test_having_with_sum() {
+            let mut ctx = TestContext::new("test_having_with_sum").await;
 
             // Create sales table
             let table_schema = Schema::new(vec![
@@ -10806,9 +10803,9 @@ mod tests {
             assert_eq!(rows.len(), 2, "Expected 2 regions with sales > 200000");
         }
 
-        #[test]
-        fn test_having_with_avg() {
-            let mut ctx = TestContext::new("test_having_with_avg");
+        #[tokio::test]
+        async fn test_having_with_avg() {
+            let mut ctx = TestContext::new("test_having_with_avg").await;
 
             // Create student grades table
             let table_schema = Schema::new(vec![
@@ -10852,9 +10849,9 @@ mod tests {
             assert_eq!(rows.len(), 2, "Expected 2 classes with average grade > 85");
         }
 
-        #[test]
-        fn test_having_with_min_max() {
-            let mut ctx = TestContext::new("test_having_with_min_max");
+        #[tokio::test]
+        async fn test_having_with_min_max() {
+            let mut ctx = TestContext::new("test_having_with_min_max").await;
 
             // Create product prices table
             let table_schema = Schema::new(vec![
@@ -10910,9 +10907,9 @@ mod tests {
             assert_eq!(ToString::to_string(&rows[0][0]), "Electronics");
         }
 
-        #[test]
-        fn test_having_with_multiple_conditions() {
-            let mut ctx = TestContext::new("test_having_with_multiple_conditions");
+        #[tokio::test]
+        async fn test_having_with_multiple_conditions() {
+            let mut ctx = TestContext::new("test_having_with_multiple_conditions").await;
 
             // Create orders table
             let table_schema = Schema::new(vec![
@@ -10960,9 +10957,9 @@ mod tests {
             assert_eq!(rows[0][0].as_integer().unwrap(), 1);
         }
 
-        #[test]
-        fn test_having_with_null_values() {
-            let mut ctx = TestContext::new("test_having_with_null_values");
+        #[tokio::test]
+        async fn test_having_with_null_values() {
+            let mut ctx = TestContext::new("test_having_with_null_values").await;
 
             // Create table with null values
             let table_schema = Schema::new(vec![
@@ -11009,9 +11006,9 @@ mod tests {
             assert_eq!(rows.len(), 2, "Expected 2 groups with >1 non-null values");
         }
 
-        #[test]
-        fn test_having_without_group_by() {
-            let mut ctx = TestContext::new("test_having_without_group_by");
+        #[tokio::test]
+        async fn test_having_without_group_by() {
+            let mut ctx = TestContext::new("test_having_without_group_by").await;
 
             // Create simple table
             let table_schema = Schema::new(vec![
@@ -11053,9 +11050,9 @@ mod tests {
             assert_eq!(rows[0][1].as_integer().unwrap(), 1000); // total amount
         }
 
-        #[test]
-        fn test_having_with_subquery() {
-            let mut ctx = TestContext::new("test_having_with_subquery");
+        #[tokio::test]
+        async fn test_having_with_subquery() {
+            let mut ctx = TestContext::new("test_having_with_subquery").await;
 
             // Create employees table
             let table_schema = Schema::new(vec![
@@ -11101,9 +11098,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_having_performance_large_dataset() {
-            let mut ctx = TestContext::new("test_having_performance_large_dataset");
+        #[tokio::test]
+        async fn test_having_performance_large_dataset() {
+            let mut ctx = TestContext::new("test_having_performance_large_dataset").await;
 
             // Create large dataset for performance testing
             let table_schema = Schema::new(vec![
@@ -11161,9 +11158,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_having_edge_cases() {
-            let mut ctx = TestContext::new("test_having_edge_cases");
+        #[tokio::test]
+        async fn test_having_edge_cases() {
+            let mut ctx = TestContext::new("test_having_edge_cases").await;
 
             // Create table for edge case testing
             let table_schema = Schema::new(vec![
@@ -11216,10 +11213,10 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[test]
+        #[tokio::test]
         // #[ignore = "Causes stack overflow in the logical plan to physical plan conversion"]
-        fn test_order_by() {
-            let mut ctx = TestContext::new("test_order_by");
+        async fn test_order_by() {
+            let mut ctx = TestContext::new("test_order_by").await;
 
             println!("Creating test table and schema");
             // Create test table with minimal schema
@@ -11297,9 +11294,9 @@ mod tests {
             println!("Test completed successfully");
         }
 
-        #[test]
-        fn test_order_by_desc() {
-            let mut ctx = TestContext::new("test_order_by_desc");
+        #[tokio::test]
+        async fn test_order_by_desc() {
+            let mut ctx = TestContext::new("test_order_by_desc").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11343,9 +11340,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_multiple_columns() {
-            let mut ctx = TestContext::new("test_order_by_multiple_columns");
+        #[tokio::test]
+        async fn test_order_by_multiple_columns() {
+            let mut ctx = TestContext::new("test_order_by_multiple_columns").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11393,9 +11390,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_with_null_values() {
-            let mut ctx = TestContext::new("test_order_by_with_null_values");
+        #[tokio::test]
+        async fn test_order_by_with_null_values() {
+            let mut ctx = TestContext::new("test_order_by_with_null_values").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11440,9 +11437,9 @@ mod tests {
             // NULL handling behavior may vary by implementation
         }
 
-        #[test]
-        fn test_order_by_with_expressions() {
-            let mut ctx = TestContext::new("test_order_by_with_expressions");
+        #[tokio::test]
+        async fn test_order_by_with_expressions() {
+            let mut ctx = TestContext::new("test_order_by_with_expressions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11484,9 +11481,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_with_limit() {
-            let mut ctx = TestContext::new("test_order_by_with_limit");
+        #[tokio::test]
+        async fn test_order_by_with_limit() {
+            let mut ctx = TestContext::new("test_order_by_with_limit").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11529,9 +11526,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_with_offset() {
-            let mut ctx = TestContext::new("test_order_by_with_offset");
+        #[tokio::test]
+        async fn test_order_by_with_offset() {
+            let mut ctx = TestContext::new("test_order_by_with_offset").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11574,9 +11571,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_different_data_types() {
-            let mut ctx = TestContext::new("test_order_by_different_data_types");
+        #[tokio::test]
+        async fn test_order_by_different_data_types() {
+            let mut ctx = TestContext::new("test_order_by_different_data_types").await;
 
             // Create test table with various data types
             let table_schema = Schema::new(vec![
@@ -11634,9 +11631,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_with_aggregation() {
-            let mut ctx = TestContext::new("test_order_by_with_aggregation");
+        #[tokio::test]
+        async fn test_order_by_with_aggregation() {
+            let mut ctx = TestContext::new("test_order_by_with_aggregation").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11680,9 +11677,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_edge_cases() {
-            let mut ctx = TestContext::new("test_order_by_edge_cases");
+        #[tokio::test]
+        async fn test_order_by_edge_cases() {
+            let mut ctx = TestContext::new("test_order_by_edge_cases").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11729,9 +11726,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_order_by_performance() {
-            let mut ctx = TestContext::new("test_order_by_performance");
+        #[tokio::test]
+        async fn test_order_by_performance() {
+            let mut ctx = TestContext::new("test_order_by_performance").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -11787,9 +11784,9 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_case_when_simple() {
-            let mut ctx = TestContext::new("test_case_when_simple");
+        #[tokio::test]
+        async fn test_case_when_simple() {
+            let mut ctx = TestContext::new("test_case_when_simple").await;
 
             // Create test table with same schema but smaller dataset
             let table_schema = Schema::new(vec![
@@ -11869,9 +11866,9 @@ mod tests {
             assert_eq!(results, expected, "Results don't match expected values");
         }
 
-        #[test]
-        fn test_case_when_with_subquery() {
-            let mut ctx = TestContext::new("test_case_when_with_subquery");
+        #[tokio::test]
+        async fn test_case_when_with_subquery() {
+            let mut ctx = TestContext::new("test_case_when_with_subquery").await;
 
             // Create test table with same schema as original test
             let table_schema = Schema::new(vec![
@@ -12147,9 +12144,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_case_when_basic() {
-            let mut ctx = TestContext::new("test_case_when_basic");
+        #[tokio::test]
+        async fn test_case_when_basic() {
+            let mut ctx = TestContext::new("test_case_when_basic").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12193,9 +12190,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_multiple_conditions() {
-            let mut ctx = TestContext::new("test_case_when_multiple_conditions");
+        #[tokio::test]
+        async fn test_case_when_multiple_conditions() {
+            let mut ctx = TestContext::new("test_case_when_multiple_conditions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12260,9 +12257,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_with_null_values() {
-            let mut ctx = TestContext::new("test_case_when_with_null_values");
+        #[tokio::test]
+        async fn test_case_when_with_null_values() {
+            let mut ctx = TestContext::new("test_case_when_with_null_values").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12311,9 +12308,9 @@ mod tests {
             // NULL handling behavior may vary by implementation
         }
 
-        #[test]
-        fn test_case_when_with_aggregations() {
-            let mut ctx = TestContext::new("test_case_when_with_aggregations");
+        #[tokio::test]
+        async fn test_case_when_with_aggregations() {
+            let mut ctx = TestContext::new("test_case_when_with_aggregations").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12358,9 +12355,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_with_arithmetic() {
-            let mut ctx = TestContext::new("test_case_when_with_arithmetic");
+        #[tokio::test]
+        async fn test_case_when_with_arithmetic() {
+            let mut ctx = TestContext::new("test_case_when_with_arithmetic").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12404,9 +12401,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_nested() {
-            let mut ctx = TestContext::new("test_case_when_nested");
+        #[tokio::test]
+        async fn test_case_when_nested() {
+            let mut ctx = TestContext::new("test_case_when_nested").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12451,9 +12448,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_different_data_types() {
-            let mut ctx = TestContext::new("test_case_when_different_data_types");
+        #[tokio::test]
+        async fn test_case_when_different_data_types() {
+            let mut ctx = TestContext::new("test_case_when_different_data_types").await;
 
             // Create test table with various data types
             let table_schema = Schema::new(vec![
@@ -12511,9 +12508,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_with_in_clause() {
-            let mut ctx = TestContext::new("test_case_when_with_in_clause");
+        #[tokio::test]
+        async fn test_case_when_with_in_clause() {
+            let mut ctx = TestContext::new("test_case_when_with_in_clause").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12557,9 +12554,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_edge_cases() {
-            let mut ctx = TestContext::new("test_case_when_edge_cases");
+        #[tokio::test]
+        async fn test_case_when_edge_cases() {
+            let mut ctx = TestContext::new("test_case_when_edge_cases").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12605,9 +12602,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_case_when_performance() {
-            let mut ctx = TestContext::new("test_case_when_performance");
+        #[tokio::test]
+        async fn test_case_when_performance() {
+            let mut ctx = TestContext::new("test_case_when_performance").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12657,9 +12654,9 @@ mod tests {
     mod window_tests {
         use super::*;
 
-        #[test]
-        fn test_row_number_window_function() {
-            let mut ctx = TestContext::new("test_row_number_window_function");
+        #[tokio::test]
+        async fn test_row_number_window_function() {
+            let mut ctx = TestContext::new("test_row_number_window_function").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12737,9 +12734,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_rank_window_functions() {
-            let mut ctx = TestContext::new("test_rank_window_functions");
+        #[tokio::test]
+        async fn test_rank_window_functions() {
+            let mut ctx = TestContext::new("test_rank_window_functions").await;
 
             // Create test table with duplicate values for ranking
             let table_schema = Schema::new(vec![
@@ -12791,9 +12788,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_window_functions_with_partition() {
-            let mut ctx = TestContext::new("test_window_functions_with_partition");
+        #[tokio::test]
+        async fn test_window_functions_with_partition() {
+            let mut ctx = TestContext::new("test_window_functions_with_partition").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12883,9 +12880,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_lag_lead_window_functions() {
-            let mut ctx = TestContext::new("test_lag_lead_window_functions");
+        #[tokio::test]
+        async fn test_lag_lead_window_functions() {
+            let mut ctx = TestContext::new("test_lag_lead_window_functions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -12937,9 +12934,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_first_last_value_window_functions() {
-            let mut ctx = TestContext::new("test_first_last_value_window_functions");
+        #[tokio::test]
+        async fn test_first_last_value_window_functions() {
+            let mut ctx = TestContext::new("test_first_last_value_window_functions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13018,9 +13015,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_aggregation_window_functions() {
-            let mut ctx = TestContext::new("test_aggregation_window_functions");
+        #[tokio::test]
+        async fn test_aggregation_window_functions() {
+            let mut ctx = TestContext::new("test_aggregation_window_functions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13074,9 +13071,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_window_frames() {
-            let mut ctx = TestContext::new("test_window_frames");
+        #[tokio::test]
+        async fn test_window_frames() {
+            let mut ctx = TestContext::new("test_window_frames").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13127,9 +13124,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_ntile_window_function() {
-            let mut ctx = TestContext::new("test_ntile_window_function");
+        #[tokio::test]
+        async fn test_ntile_window_function() {
+            let mut ctx = TestContext::new("test_ntile_window_function").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13183,9 +13180,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_percent_rank_window_functions() {
-            let mut ctx = TestContext::new("test_percent_rank_window_functions");
+        #[tokio::test]
+        async fn test_percent_rank_window_functions() {
+            let mut ctx = TestContext::new("test_percent_rank_window_functions").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13237,9 +13234,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_complex_window_queries() {
-            let mut ctx = TestContext::new("test_complex_window_queries");
+        #[tokio::test]
+        async fn test_complex_window_queries() {
+            let mut ctx = TestContext::new("test_complex_window_queries").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13339,9 +13336,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_window_functions_edge_cases() {
-            let mut ctx = TestContext::new("test_window_functions_edge_cases");
+        #[tokio::test]
+        async fn test_window_functions_edge_cases() {
+            let mut ctx = TestContext::new("test_window_functions_edge_cases").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13400,9 +13397,9 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_transaction_handling() {
-            let mut ctx = TestContext::new("test_transaction_handling");
+        #[tokio::test]
+        async fn test_transaction_handling() {
+            let mut ctx = TestContext::new("test_transaction_handling").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13466,10 +13463,6 @@ mod tests {
             // Verify changes were committed
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
             let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "800",
@@ -13478,10 +13471,6 @@ mod tests {
 
             let select_sql = "SELECT balance FROM accounts WHERE id = 2";
             let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "700",
@@ -13497,18 +13486,10 @@ mod tests {
                 .unwrap();
             let rollback_sql = "ROLLBACK";
             let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
 
             // Verify changes were rolled back
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
             let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "800",
@@ -13516,9 +13497,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn test_transaction_rollback_on_failure() {
-            let mut ctx = TestContext::new("test_transaction_rollback_on_failure");
+        #[tokio::test]
+        async fn test_transaction_rollback_on_failure() {
+            let mut ctx = TestContext::new("test_transaction_rollback_on_failure").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13583,9 +13564,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_with_multiple_operations() {
-            let mut ctx = TestContext::new("test_transaction_with_multiple_operations");
+        #[tokio::test]
+        async fn test_transaction_with_multiple_operations() {
+            let mut ctx = TestContext::new("test_transaction_with_multiple_operations").await;
 
             // Create test tables
             let account_schema = Schema::new(vec![
@@ -13692,9 +13673,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_isolation_read_committed() {
-            let mut ctx = TestContext::new("test_transaction_isolation_read_committed");
+        #[tokio::test]
+        async fn test_transaction_isolation_read_committed() {
+            let mut ctx = TestContext::new("test_transaction_isolation_read_committed").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13771,9 +13752,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_with_constraints() {
-            let mut ctx = TestContext::new("test_transaction_with_constraints");
+        #[tokio::test]
+        async fn test_transaction_with_constraints() {
+            let mut ctx = TestContext::new("test_transaction_with_constraints").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13853,9 +13834,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_savepoints() {
-            let mut ctx = TestContext::new("test_transaction_savepoints");
+        #[tokio::test]
+        async fn test_transaction_savepoints() {
+            let mut ctx = TestContext::new("test_transaction_savepoints").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -13944,9 +13925,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_with_ddl() {
-            let mut ctx = TestContext::new("test_transaction_with_ddl");
+        #[tokio::test]
+        async fn test_transaction_with_ddl() {
+            let mut ctx = TestContext::new("test_transaction_with_ddl").await;
 
             // Test DDL operations in transactions
             let begin_sql = "BEGIN";
@@ -13998,9 +13979,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_deadlock_prevention() {
-            let mut ctx = TestContext::new("test_transaction_deadlock_prevention");
+        #[tokio::test]
+        async fn test_transaction_deadlock_prevention() {
+            let mut ctx = TestContext::new("test_transaction_deadlock_prevention").await;
 
             // Create test table for deadlock simulation
             let table_schema = Schema::new(vec![
@@ -14076,9 +14057,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_timeout() {
-            let mut ctx = TestContext::new("test_transaction_timeout");
+        #[tokio::test]
+        async fn test_transaction_timeout() {
+            let mut ctx = TestContext::new("test_transaction_timeout").await;
 
             // Create test table
             let table_schema = Schema::new(vec![
@@ -14134,9 +14115,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_acid_properties() {
-            let mut ctx = TestContext::new("test_transaction_acid_properties");
+        #[tokio::test]
+        async fn test_transaction_acid_properties() {
+            let mut ctx = TestContext::new("test_transaction_acid_properties").await;
 
             // Create test table for ACID testing
             let table_schema = Schema::new(vec![
@@ -14245,9 +14226,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_transaction_performance_stress() {
-            let mut ctx = TestContext::new("test_transaction_performance_stress");
+        #[tokio::test]
+        async fn test_transaction_performance_stress() {
+            let mut ctx = TestContext::new("test_transaction_performance_stress").await;
 
             // Create test table for performance testing
             let table_schema = Schema::new(vec![
@@ -14349,9 +14330,9 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[test]
-        fn test_decimal_precision_scale_display() {
-            let mut ctx = TestContext::new("test_decimal_precision_scale_display");
+        #[tokio::test]
+        async fn test_decimal_precision_scale_display() {
+            let mut ctx = TestContext::new("test_decimal_precision_scale_display").await;
 
             // Create test table with decimal columns of different precision and scale
             let table_schema = Schema::new(vec![
@@ -14487,9 +14468,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_float_precision_display() {
-            let mut ctx = TestContext::new("test_float_precision_display");
+        #[tokio::test]
+        async fn test_float_precision_display() {
+            let mut ctx = TestContext::new("test_float_precision_display").await;
 
             // Create test table with float columns
             let table_schema = Schema::new(vec![
@@ -14584,9 +14565,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_mixed_numeric_precision_display() {
-            let mut ctx = TestContext::new("test_mixed_numeric_precision_display");
+        #[tokio::test]
+        async fn test_mixed_numeric_precision_display() {
+            let mut ctx = TestContext::new("test_mixed_numeric_precision_display").await;
 
             // Create test table with mixed numeric types
             let table_schema = Schema::new(vec![
@@ -14703,9 +14684,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_decimal_edge_cases_display() {
-            let mut ctx = TestContext::new("test_decimal_edge_cases_display");
+        #[tokio::test]
+        async fn test_decimal_edge_cases_display() {
+            let mut ctx = TestContext::new("test_decimal_edge_cases_display").await;
 
             // Create test table for edge cases
             let table_schema = Schema::new(vec![
@@ -14794,9 +14775,9 @@ mod tests {
             }
         }
 
-        #[test]
-        fn test_decimal_column_aware_formatting() {
-            let mut ctx = TestContext::new("test_decimal_column_aware_formatting");
+        #[tokio::test]
+        async fn test_decimal_column_aware_formatting() {
+            let mut ctx = TestContext::new("test_decimal_column_aware_formatting").await;
 
             // Create test table with decimal columns that have specific precision and scale
             let price_column = Column::builder("price", TypeId::Decimal)

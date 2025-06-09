@@ -578,7 +578,7 @@ impl ExpressionParser {
                         CastFormat::Value(format_str) => {
                             cast_expr = cast_expr.with_format(format_str.to_string());
                         }
-                        CastFormat::ValueAtTimeZone(format_str, timezone) => {
+                        CastFormat::ValueAtTimeZone(format_str, _timezone) => {
                             // For now, ignore timezone and just use the format string
                             cast_expr = cast_expr.with_format(format_str.to_string());
                         }
@@ -3096,7 +3096,7 @@ impl ExpressionParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -3104,10 +3104,9 @@ mod tests {
     use crate::sql::execution::expressions::arithmetic_expression::ArithmeticOp;
     use crate::sql::execution::expressions::comparison_expression::ComparisonType;
     use crate::sql::execution::expressions::logic_expression::LogicType;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use sqlparser::ast::Ident;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -3116,7 +3115,7 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 5;
             const K: usize = 2;
@@ -3137,16 +3136,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                disk_manager_arc.clone(),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             let transaction_manager = Arc::new(TransactionManager::new());
 
@@ -3229,9 +3226,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_comparison_expressions() {
-        let ctx = TestContext::new("test_parse_comparison_expressions");
+    #[tokio::test]
+    async fn test_parse_comparison_expressions() {
+        let ctx = TestContext::new("test_parse_comparison_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3263,9 +3260,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_arithmetic_expressions() {
-        let ctx = TestContext::new("test_parse_arithmetic_expressions");
+    #[tokio::test]
+    async fn test_parse_arithmetic_expressions() {
+        let ctx = TestContext::new("test_parse_arithmetic_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3295,9 +3292,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_logical_expressions() {
-        let ctx = TestContext::new("test_parse_logical_expressions");
+    #[tokio::test]
+    async fn test_parse_logical_expressions() {
+        let ctx = TestContext::new("test_parse_logical_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3325,9 +3322,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_column_references() {
-        let ctx = TestContext::new("test_parse_column_references");
+    #[tokio::test]
+    async fn test_parse_column_references() {
+        let ctx = TestContext::new("test_parse_column_references").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec!["id = 1", "name = 'John'", "age > 25", "salary < 50000"];
@@ -3381,9 +3378,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_constants() {
-        let ctx = TestContext::new("test_parse_constants");
+    #[tokio::test]
+    async fn test_parse_constants() {
+        let ctx = TestContext::new("test_parse_constants").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3421,9 +3418,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_case_expressions() {
-        let ctx = TestContext::new("test_parse_case_expressions");
+    #[tokio::test]
+    async fn test_parse_case_expressions() {
+        let ctx = TestContext::new("test_parse_case_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3451,9 +3448,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_cast_expressions() {
-        let ctx = TestContext::new("test_parse_cast_expressions");
+    #[tokio::test]
+    async fn test_parse_cast_expressions() {
+        let ctx = TestContext::new("test_parse_cast_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3482,9 +3479,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_string_functions() {
-        let ctx = TestContext::new("test_parse_string_functions");
+    #[tokio::test]
+    async fn test_parse_string_functions() {
+        let ctx = TestContext::new("test_parse_string_functions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3526,9 +3523,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_complex_expressions() {
-        let ctx = TestContext::new("test_parse_complex_expressions");
+    #[tokio::test]
+    async fn test_parse_complex_expressions() {
+        let ctx = TestContext::new("test_parse_complex_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3591,11 +3588,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_aggregate_functions() {
+    #[tokio::test]
+    async fn test_parse_aggregate_functions() {
         use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 
-        let ctx = TestContext::new("test_parse_aggregate_functions");
+        let ctx = TestContext::new("test_parse_aggregate_functions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3643,9 +3640,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_between_expressions() {
-        let ctx = TestContext::new("test_parse_between_expressions");
+    #[tokio::test]
+    async fn test_parse_between_expressions() {
+        let ctx = TestContext::new("test_parse_between_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3681,9 +3678,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_nested_expressions() {
-        let ctx = TestContext::new("test_parse_nested_expressions");
+    #[tokio::test]
+    async fn test_parse_nested_expressions() {
+        let ctx = TestContext::new("test_parse_nested_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
@@ -3710,9 +3707,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_null_expressions() -> Result<(), String> {
-        let ctx = TestContext::new("test_parse_null_expressions");
+    #[tokio::test]
+    async fn test_parse_null_expressions() -> Result<(), String> {
+        let ctx = TestContext::new("test_parse_null_expressions").await;
         let schema = ctx.setup_test_schema();
 
         let simple_null_checks = vec!["name IS NULL", "age IS NOT NULL"];
@@ -3759,9 +3756,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_parse_error_cases() {
-        let ctx = TestContext::new("test_parse_error_cases");
+    #[tokio::test]
+    async fn test_parse_error_cases() {
+        let ctx = TestContext::new("test_parse_error_cases").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec!["invalid_column > 5", "age + 'string'", "CASE WHEN THEN END"];
@@ -3771,9 +3768,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_at_timezone() {
-        let ctx = TestContext::new("test_parse_at_timezone");
+    #[tokio::test]
+    async fn test_parse_at_timezone() {
+        let ctx = TestContext::new("test_parse_at_timezone").await;
         let schema = ctx.setup_test_schema();
 
         let expr_str = "timestamp_column AT TIME ZONE 'UTC'";
@@ -3788,9 +3785,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_at_timezone_invalid_types() {
-        let ctx = TestContext::new("test_parse_at_timezone_invalid_types");
+    #[tokio::test]
+    async fn test_parse_at_timezone_invalid_types() {
+        let ctx = TestContext::new("test_parse_at_timezone_invalid_types").await;
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec!["age AT TIME ZONE 'UTC'", "name AT TIME ZONE '123'"];
@@ -3800,9 +3797,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_join_operators() {
-        let ctx = TestContext::new("test_parse_join_operators");
+    #[tokio::test]
+    async fn test_parse_join_operators() {
+        let ctx = TestContext::new("test_parse_join_operators").await;
         let schema = ctx.setup_test_schema();
 
         // Create a second test schema
@@ -3897,9 +3894,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_parse_qualified_column_references() {
-        let ctx = TestContext::new("test_parse_qualified_column_references");
+    #[tokio::test]
+    async fn test_parse_qualified_column_references() {
+        let ctx = TestContext::new("test_parse_qualified_column_references").await;
 
         // Create a schema with regular columns
         let base_schema = ctx.setup_test_schema();

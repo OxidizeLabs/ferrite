@@ -121,18 +121,18 @@ impl AbstractExecutor for StartTransactionExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use parking_lot::RwLock;
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -143,8 +143,9 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 100;
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -163,15 +164,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -210,9 +210,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_start_transaction_executor() {
-        let test_context = TestContext::new("start_transaction_test");
+    #[tokio::test]
+    async fn test_start_transaction_executor() {
+        let test_context = TestContext::new("start_transaction_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -249,9 +249,9 @@ mod tests {
         assert!(result.unwrap().is_none());
     }
 
-    #[test]
-    fn test_start_transaction_with_default_isolation() {
-        let test_context = TestContext::new("start_transaction_default_test");
+    #[tokio::test]
+    async fn test_start_transaction_with_default_isolation() {
+        let test_context = TestContext::new("start_transaction_default_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -292,9 +292,9 @@ mod tests {
         assert_eq!(isolation_level, IsolationLevel::default());
     }
 
-    #[test]
-    fn test_start_transaction_with_invalid_isolation() {
-        let test_context = TestContext::new("start_transaction_invalid_test");
+    #[tokio::test]
+    async fn test_start_transaction_with_invalid_isolation() {
+        let test_context = TestContext::new("start_transaction_invalid_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -335,9 +335,9 @@ mod tests {
         assert_eq!(isolation_level, IsolationLevel::ReadCommitted);
     }
 
-    #[test]
-    fn test_start_read_only_transaction() {
-        let test_context = TestContext::new("start_read_only_transaction_test");
+    #[tokio::test]
+    async fn test_start_read_only_transaction() {
+        let test_context = TestContext::new("start_read_only_transaction_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -381,8 +381,8 @@ mod tests {
         // but that would require modifying the Transaction class to store that flag
     }
 
-    #[test]
-    fn test_all_isolation_levels() {
+    #[tokio::test]
+    async fn test_all_isolation_levels() {
         // Test each of the isolation levels
         let isolation_levels = vec![
             IsolationLevel::ReadUncommitted,
@@ -395,7 +395,7 @@ mod tests {
             let test_context = TestContext::new(&format!(
                 "isolation_level_{}_test",
                 expected_level.to_string().to_lowercase()
-            ));
+            )).await;
             let exec_context = test_context.create_execution_context();
 
             // Store the original transaction ID
@@ -441,10 +441,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_concurrent_transaction_starts() {
+    #[tokio::test]
+    async fn test_concurrent_transaction_starts() {
         // This test verifies that multiple transactions can be started concurrently
-        let test_context = TestContext::new("concurrent_transaction_starts_test");
+        let test_context = TestContext::new("concurrent_transaction_starts_test").await;
         let transaction_manager = test_context.transaction_manager.clone();
         let lock_manager = test_context.lock_manager.clone();
         let buffer_pool = test_context.bpm.clone();
@@ -519,9 +519,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_transaction_manager_shutdown_handling() {
-        let test_context = TestContext::new("transaction_manager_shutdown_test");
+    #[tokio::test]
+    async fn test_transaction_manager_shutdown_handling() {
+        let test_context = TestContext::new("transaction_manager_shutdown_test").await;
         let exec_context = test_context.create_execution_context();
 
         // First, shut down the transaction manager

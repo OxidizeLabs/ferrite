@@ -173,7 +173,7 @@ impl AbstractExecutor for SeqScanExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -182,14 +182,13 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -199,7 +198,7 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
@@ -220,15 +219,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                disk_manager_arc.clone(),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -262,7 +260,6 @@ mod tests {
     }
 
     fn create_test_values(
-        schema: &Schema,
         id: i32,
         name: &str,
         age: i32,
@@ -287,11 +284,9 @@ mod tests {
         )))
     }
 
-    #[test]
-    fn test_seq_scan_executor_with_data() {
-        let ctx = TestContext::new("test_seq_scan_executor_with_data");
-        let bpm = ctx.bpm();
-        let transaction_context = ctx.transaction_context.clone();
+    #[tokio::test]
+    async fn test_seq_scan_executor_with_data() {
+        let ctx = TestContext::new("test_seq_scan_executor_with_data").await;
 
         // Create catalog and schema
         let mut catalog = create_catalog(&ctx);
@@ -313,7 +308,7 @@ mod tests {
         let test_data = vec![(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
 
         for (id, name, age) in test_data.iter() {
-            let (meta, values) = create_test_values(&schema, *id, name, *age);
+            let (meta, values) = create_test_values(*id, name, *age);
             table_heap_guard
                 .insert_tuple_from_values(values, &schema, Arc::from(meta))
                 .expect("Failed to insert tuple");
@@ -368,10 +363,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_seq_scan_executor_empty_table() {
-        let ctx = TestContext::new("test_seq_scan_executor_empty");
-        let bpm = ctx.bpm();
+    #[tokio::test]
+    async fn test_seq_scan_executor_empty_table() {
+        let ctx = TestContext::new("test_seq_scan_executor_empty").await;
         let _transaction_context = ctx.transaction_context.clone();
 
         // Create catalog and schema
@@ -399,10 +393,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_seq_scan_executor_single_tuple() {
-        let ctx = TestContext::new("test_seq_scan_executor_single");
-        let bpm = ctx.bpm();
+    #[tokio::test]
+    async fn test_seq_scan_executor_single_tuple() {
+        let ctx = TestContext::new("test_seq_scan_executor_single").await;
         let transaction_context = ctx.transaction_context.clone();
 
         // Create catalog and schema
@@ -452,10 +445,9 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_seq_scan_executor_multiple_tuples() {
-        let ctx = TestContext::new("test_seq_scan_executor_multiple");
-        let bpm = ctx.bpm();
+    #[tokio::test]
+    async fn test_seq_scan_executor_multiple_tuples() {
+        let ctx = TestContext::new("test_seq_scan_executor_multiple").await;
         let transaction_context = ctx.transaction_context.clone();
 
         // Create catalog and schema

@@ -154,7 +154,7 @@ impl Drop for CreateIndexExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -162,12 +162,12 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::index::index::IndexType;
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -177,8 +177,9 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 100;
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -197,15 +198,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -245,8 +245,8 @@ mod tests {
         )
     }
 
-    fn create_test_executor_context() -> Arc<RwLock<ExecutionContext>> {
-        let ctx = TestContext::new("projection_test");
+    async fn create_test_executor_context() -> Arc<RwLock<ExecutionContext>> {
+        let ctx = TestContext::new("projection_test").await;
         let bpm = ctx.bpm();
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let transaction_context = ctx.transaction_context.clone();
@@ -260,9 +260,9 @@ mod tests {
         execution_context
     }
 
-    #[test]
-    fn test_create_index_basic() {
-        let test_context = TestContext::new("create_index_basic");
+    #[tokio::test]
+    async fn test_create_index_basic() {
+        let test_context = TestContext::new("create_index_basic").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
@@ -297,9 +297,9 @@ mod tests {
         assert_eq!(indexes[0].get_index_name(), "test_index");
     }
 
-    #[test]
-    fn test_create_index_multiple_columns() {
-        let test_context = TestContext::new("create_index_multi_col");
+    #[tokio::test]
+    async fn test_create_index_multiple_columns() {
+        let test_context = TestContext::new("create_index_multi_col").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
@@ -338,9 +338,9 @@ mod tests {
         assert_eq!(index.get_key_schema().get_column_count(), 2);
     }
 
-    #[test]
-    fn test_create_index_if_not_exists() {
-        let test_context = TestContext::new("create_index_if_not_exists");
+    #[tokio::test]
+    async fn test_create_index_if_not_exists() {
+        let test_context = TestContext::new("create_index_if_not_exists").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
@@ -359,7 +359,7 @@ mod tests {
             );
         }
 
-        let exec_context = create_test_executor_context();
+        let exec_context = create_test_executor_context().await;
         let columns = vec![0];
 
         let plan = Arc::new(CreateIndexPlanNode::new(
@@ -377,13 +377,13 @@ mod tests {
         assert!(executor.next().unwrap().is_none());
     }
 
-    #[test]
-    fn test_create_index_table_not_exists() {
-        let test_context = TestContext::new("create_index_no_table");
+    #[tokio::test]
+    async fn test_create_index_table_not_exists() {
+        let test_context = TestContext::new("create_index_no_table").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
-        let exec_context = create_test_executor_context();
+        let exec_context = create_test_executor_context().await;
         let columns = vec![0];
         let plan = Arc::new(CreateIndexPlanNode::new(
             schema.clone(),
@@ -404,9 +404,9 @@ mod tests {
         assert!(indexes.is_empty());
     }
 
-    #[test]
-    fn test_create_index_concurrent() {
-        let test_context = TestContext::new("create_index_concurrent");
+    #[tokio::test]
+    async fn test_create_index_concurrent() {
+        let test_context = TestContext::new("create_index_concurrent").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 
@@ -450,9 +450,9 @@ mod tests {
         assert_eq!(indexes.len(), 3);
     }
 
-    #[test]
-    fn test_create_index_duplicate() {
-        let test_context = TestContext::new("create_index_duplicate");
+    #[tokio::test]
+    async fn test_create_index_duplicate() {
+        let test_context = TestContext::new("create_index_duplicate").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
 

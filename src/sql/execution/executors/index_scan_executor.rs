@@ -433,7 +433,7 @@ impl AbstractExecutor for IndexScanExecutor {
 #[cfg(test)]
 mod index_scan_executor_tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::catalog::column::Column;
@@ -445,14 +445,14 @@ mod index_scan_executor_tests {
     use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::index::index::IndexType;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
     use std::sync::Arc;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         execution_context: Arc<RwLock<ExecutionContext>>,
@@ -460,7 +460,8 @@ mod index_scan_executor_tests {
     }
 
     impl TestContext {
-        fn new(name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
 
@@ -480,21 +481,20 @@ mod index_scan_executor_tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
-            let buffer_pool_manager = Arc::new(BufferPoolManager::new(
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
 
             let catalog = Arc::new(RwLock::new(Catalog::new(
-                buffer_pool_manager.clone(),
+                bpm.clone(),
                 transaction_manager.clone(),
             )));
 
@@ -506,7 +506,7 @@ mod index_scan_executor_tests {
             ));
 
             let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
-                buffer_pool_manager,
+                bpm,
                 catalog,
                 transaction_context,
             )));
@@ -639,7 +639,7 @@ mod index_scan_executor_tests {
         )))
     }
 
-    fn create_test_values(schema: &Schema, id: i32) -> Vec<Value> {
+    fn create_test_values(id: i32) -> Vec<Value> {
         let values = vec![
             Value::new(id),      // id column
             Value::new(id * 10), // value column
@@ -672,10 +672,10 @@ mod index_scan_executor_tests {
         }
     }
 
-    #[test]
-    fn test_index_scan_full() {
+    #[tokio::test]
+    async fn test_index_scan_full() {
         let schema = create_test_schema();
-        let ctx = TestContext::new("test_index_scan_full");
+        let ctx = TestContext::new("test_index_scan_full").await;
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
@@ -706,10 +706,10 @@ mod index_scan_executor_tests {
         assert_eq!(count, 10);
     }
 
-    #[test]
-    fn test_index_scan_equality() {
+    #[tokio::test]
+    async fn test_index_scan_equality() {
         let schema = create_test_schema();
-        let ctx = TestContext::new("test_index_scan_equality");
+        let ctx = TestContext::new("test_index_scan_equality").await;
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
@@ -746,10 +746,10 @@ mod index_scan_executor_tests {
         assert_eq!(count, 1);
     }
 
-    #[test]
-    fn test_index_scan_range() {
+    #[tokio::test]
+    async fn test_index_scan_range() {
         let schema = create_test_schema();
-        let ctx = TestContext::new("test_index_scan_range");
+        let ctx = TestContext::new("test_index_scan_range").await;
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
@@ -792,10 +792,10 @@ mod index_scan_executor_tests {
         assert_eq!(count, 5);
     }
 
-    #[test]
-    fn test_index_scan_with_deletion() {
+    #[tokio::test]
+    async fn test_index_scan_with_deletion() {
         let schema = create_test_schema();
-        let ctx = TestContext::new("test_index_scan_with_deletion");
+        let ctx = TestContext::new("test_index_scan_with_deletion").await;
         let context = ctx.execution_context();
         let (table_name, index_name, table_id, index_id, txn_table_heap) =
             setup_test_table(&schema, &context);
@@ -893,9 +893,9 @@ mod index_scan_executor_tests {
         }
     }
 
-    #[test]
-    fn test_index_scan_with_deleted_tuples() {
-        let test_context = TestContext::new("index_scan_deleted");
+    #[tokio::test]
+    async fn test_index_scan_with_deleted_tuples() {
+        let test_context = TestContext::new("index_scan_deleted").await;
         let catalog = Arc::new(RwLock::new(create_catalog(&test_context)));
         let schema = create_test_schema();
         let transaction_context = test_context.transaction_context();
@@ -913,7 +913,7 @@ mod index_scan_executor_tests {
 
             // Insert test data
             for i in 1..=10 {
-                let values = create_test_values(&schema, i);
+                let values = create_test_values(i);
                 table_heap
                     .insert_tuple_from_values(values, &schema, transaction_context.clone())
                     .unwrap();

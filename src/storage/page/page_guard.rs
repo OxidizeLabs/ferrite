@@ -136,80 +136,65 @@ impl PageGuard<dyn PageTrait> {
 
 #[cfg(test)]
 mod tests {
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use crate::storage::page::page::PAGE_TYPE_OFFSET;
     use crate::storage::page::page::{BasicPage, PageTrait, PageType};
-    use chrono::Utc;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+    use tempfile::TempDir;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     pub struct TestContext {
-        bpm: Arc<BufferPoolManager>,
-        db_file: String,
-        db_log_file: String,
+        bpm: Arc<BufferPoolManager>
     }
 
     impl TestContext {
-        pub fn new(test_name: &str) -> Self {
+        pub async fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 5;
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            // Create tests/data directory if it doesn't exist
-            std::fs::create_dir_all("tests/data").expect("Failed to create tests/data directory");
-
-            let db_file = format!("tests/data/{}_{}.db", test_name, timestamp);
-            let db_log_file = format!("tests/data/{}_{}.log", test_name, timestamp);
-
-            let disk_manager = Arc::new(FileDiskManager::new(
-                db_file.clone(),
-                db_log_file.clone(),
-                100,
-            ));
-            let disk_scheduler =
-                Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
+            // Create disk components
+            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
+                Arc::from(disk_manager.unwrap()),
                 replacer.clone(),
-            ));
+            ).unwrap());
 
             Self {
-                bpm,
-                db_file,
-                db_log_file,
+                bpm
             }
         }
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
             Arc::clone(&self.bpm)
         }
-
-        fn cleanup(&self) {
-            let _ = std::fs::remove_file(&self.db_file);
-            let _ = std::fs::remove_file(&self.db_log_file);
-        }
     }
 
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
-    }
-
-    #[test]
-    fn test_basic_page_operations() {
-        let ctx = TestContext::new("basic_page_operations");
+    #[tokio::test]
+    async fn test_basic_page_operations() {
+        let ctx = TestContext::new("basic_page_operations").await;
         let bpm = ctx.bpm();
 
         // Create a new page using the buffer pool manager
@@ -231,9 +216,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_page_guard_type_safety() {
-        let ctx = TestContext::new("page_guard_type_safety");
+    #[tokio::test]
+    async fn test_page_guard_type_safety() {
+        let ctx = TestContext::new("page_guard_type_safety").await;
         let bpm = ctx.bpm();
 
         // Create pages of different types
@@ -254,9 +239,9 @@ mod tests {
         assert_eq!(fetched_guard.get_page_type(), PageType::Basic);
     }
 
-    #[test]
-    fn test_concurrent_access() {
-        let ctx = TestContext::new("concurrent_access");
+    #[tokio::test]
+    async fn test_concurrent_access() {
+        let ctx = TestContext::new("concurrent_access").await;
         let bpm = ctx.bpm();
 
         // Create a new page
@@ -288,9 +273,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_buffer_pool_interaction() {
-        let ctx = TestContext::new("buffer_pool_interaction");
+    #[tokio::test]
+    async fn test_buffer_pool_interaction() {
+        let ctx = TestContext::new("buffer_pool_interaction").await;
         let bpm = ctx.bpm();
 
         // Fill buffer pool
@@ -326,9 +311,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_page_guard_drop_behavior() {
-        let ctx = TestContext::new("page_guard_drop");
+    #[tokio::test]
+    async fn test_page_guard_drop_behavior() {
+        let ctx = TestContext::new("page_guard_drop").await;
         let bpm = ctx.bpm();
 
         let page_id = {
@@ -385,9 +370,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_page_guard_concurrent_access_patterns() {
-        let ctx = TestContext::new("page_guard_concurrent");
+    #[tokio::test]
+    async fn test_page_guard_concurrent_access_patterns() {
+        let ctx = TestContext::new("page_guard_concurrent").await;
         let bpm = ctx.bpm();
 
         // Create a new page
@@ -438,9 +423,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_page_guard_dirty_flag() {
-        let ctx = TestContext::new("page_guard_dirty");
+    #[tokio::test]
+    async fn test_page_guard_dirty_flag() {
+        let ctx = TestContext::new("page_guard_dirty").await;
         let bpm = ctx.bpm();
 
         let page_guard = bpm
@@ -478,9 +463,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_page_guard_multiple_guards() {
-        let ctx = TestContext::new("page_guard_multiple");
+    #[tokio::test]
+    async fn test_page_guard_multiple_guards() {
+        let ctx = TestContext::new("page_guard_multiple").await;
         let bpm = ctx.bpm();
 
         // Create initial page
@@ -563,9 +548,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_page_guard_drop_writeback() {
-        let ctx = TestContext::new("page_guard_writeback");
+    #[tokio::test]
+    async fn test_page_guard_drop_writeback() {
+        let ctx = TestContext::new("page_guard_writeback").await;
         let bpm = ctx.bpm();
 
         let page_id = {

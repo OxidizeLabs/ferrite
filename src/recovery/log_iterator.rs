@@ -1,12 +1,12 @@
 use crate::recovery::log_record::{LogRecord, LogRecordType};
-use crate::storage::disk::disk_manager::FileDiskManager;
 use log::{debug, warn};
 use std::sync::Arc;
+use crate::storage::disk::async_disk_manager::AsyncDiskManager;
 
 /// `LogIterator` provides a robust way to iterate through log records in a log file.
 /// It handles EOF detection, validation of records, and proper advancing through the file.
 pub struct LogIterator {
-    disk_manager: Arc<FileDiskManager>,
+    disk_manager: Arc<AsyncDiskManager>,
     current_offset: u64,
     reached_eof: bool,
     buffer_size: usize,
@@ -20,7 +20,7 @@ impl LogIterator {
     ///
     /// # Returns
     /// A new `LogIterator` instance.
-    pub fn new(disk_manager: Arc<FileDiskManager>) -> Self {
+    pub fn new(disk_manager: Arc<AsyncDiskManager>) -> Self {
         Self {
             disk_manager,
             current_offset: 0,
@@ -37,7 +37,7 @@ impl LogIterator {
     ///
     /// # Returns
     /// A new `LogIterator` instance.
-    pub fn with_offset(disk_manager: Arc<FileDiskManager>, start_offset: u64) -> Self {
+    pub fn with_offset(disk_manager: Arc<AsyncDiskManager>, start_offset: u64) -> Self {
         Self {
             disk_manager,
             current_offset: start_offset,
@@ -201,44 +201,54 @@ mod tests {
     use super::*;
     use crate::common::config::{Lsn, TxnId, INVALID_LSN};
     use crate::recovery::log_record::{LogRecord, LogRecordType};
-    use crate::storage::disk::disk_manager::FileDiskManager;
     use std::fs;
     use std::path::Path;
     use std::sync::Arc;
+    use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::DiskManagerConfig;
 
     struct TestContext {
-        log_file_path: String,
-        disk_manager: Arc<FileDiskManager>,
+        log_path: String,
+        disk_manager: Arc<AsyncDiskManager>,
     }
 
     impl TestContext {
-        fn new(test_name: &str) -> Self {
-            let log_file_path = format!(
-                "tests/data/{}_log_{}.log",
-                test_name,
-                chrono::Utc::now().timestamp()
-            );
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
+            const K: usize = 2;
 
-            // Ensure directory exists
-            if let Some(parent) = Path::new(&log_file_path).parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
+            // Create temporary directory
+            let temp_dir = TempDir::new().unwrap();
+            let db_path = temp_dir
+                .path()
+                .join(format!("{name}.db"))
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join(format!("{name}.log"))
+                .to_str()
+                .unwrap()
+                .to_string();
 
-            let disk_manager = Arc::new(FileDiskManager::new(
-                "dummy.db".to_string(),
-                log_file_path.clone(),
-                1024,
-            ));
+            // Create disk components
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path.clone(), DiskManagerConfig::default())
+                    .await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
 
-            TestContext {
-                log_file_path,
-                disk_manager,
+            Self {
+                log_path,
+                disk_manager: disk_manager_arc,
             }
         }
 
         fn cleanup(&self) {
-            if Path::new(&self.log_file_path).exists() {
-                fs::remove_file(&self.log_file_path).unwrap();
+            if Path::new(&self.log_path).exists() {
+                fs::remove_file(&self.log_path).unwrap();
             }
         }
 
@@ -269,9 +279,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_empty_log_file() {
-        let ctx = TestContext::new("empty_log_file");
+    #[tokio::test]
+    async fn test_empty_log_file() {
+        let ctx = TestContext::new("empty_log_file").await;
         let mut iter = LogIterator::new(ctx.disk_manager.clone());
 
         // Should return None for empty file
@@ -279,9 +289,9 @@ mod tests {
         assert!(iter.is_end());
     }
 
-    #[test]
-    fn test_single_record() {
-        let ctx = TestContext::new("single_record");
+    #[tokio::test]
+    async fn test_single_record() {
+        let ctx = TestContext::new("single_record").await;
 
         // Write a single BEGIN record
         let record = ctx.create_test_begin_record(1);
@@ -302,9 +312,9 @@ mod tests {
         assert!(iter.is_end());
     }
 
-    #[test]
-    fn test_multiple_records() {
-        let ctx = TestContext::new("multiple_records");
+    #[tokio::test]
+    async fn test_multiple_records() {
+        let ctx = TestContext::new("multiple_records").await;
 
         // Write multiple records
         for i in 1..=5 {
@@ -330,9 +340,9 @@ mod tests {
         assert!(iter.is_end());
     }
 
-    #[test]
-    fn test_reset_iterator() {
-        let ctx = TestContext::new("reset_iterator");
+    #[tokio::test]
+    async fn test_reset_iterator() {
+        let ctx = TestContext::new("reset_iterator").await;
 
         // Write records
         for i in 1..=3 {
@@ -367,9 +377,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_set_offset() {
-        let ctx = TestContext::new("set_offset");
+    #[tokio::test]
+    async fn test_set_offset() {
+        let ctx = TestContext::new("set_offset").await;
 
         // Write records
         let mut offsets = Vec::new();
@@ -396,9 +406,9 @@ mod tests {
         assert_eq!(record.get_txn_id(), 1);
     }
 
-    #[test]
-    fn test_transaction_sequence() {
-        let ctx = TestContext::new("transaction_sequence");
+    #[tokio::test]
+    async fn test_transaction_sequence() {
+        let ctx = TestContext::new("transaction_sequence").await;
 
         // Write a BEGIN and COMMIT pair
         let begin_record = ctx.create_test_begin_record(42);
@@ -433,9 +443,9 @@ mod tests {
         assert!(iter.is_end(), "Iterator should be at the end");
     }
 
-    #[test]
-    fn test_collect_method() {
-        let ctx = TestContext::new("collect_method");
+    #[tokio::test]
+    async fn test_collect_method() {
+        let ctx = TestContext::new("collect_method").await;
 
         // Write multiple records
         for i in 1..=5 {
@@ -456,9 +466,9 @@ mod tests {
         assert!(iter.is_end());
     }
 
-    #[test]
-    fn test_buffer_size_change() {
-        let ctx = TestContext::new("buffer_size");
+    #[tokio::test]
+    async fn test_buffer_size_change() {
+        let ctx = TestContext::new("buffer_size").await;
 
         // Write a record
         let record = ctx.create_test_begin_record(1);
@@ -484,9 +494,9 @@ mod tests {
 
     // This test writes corrupted data to the log file and verifies
     // the iterator can recover and continue reading valid records
-    #[test]
-    fn test_recovery_from_corruption() {
-        let ctx = TestContext::new("corruption_recovery");
+    #[tokio::test]
+    async fn test_recovery_from_corruption() {
+        let ctx = TestContext::new("corruption_recovery").await;
 
         // Write a valid record
         let record1 = ctx.create_test_begin_record(1);

@@ -92,19 +92,19 @@ impl AbstractExecutor for RollbackTransactionExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::buffer_pool_manager::BufferPoolManager;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::disk_manager::FileDiskManager;
-    use crate::storage::disk::disk_scheduler::DiskScheduler;
     use parking_lot::RwLock;
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -115,8 +115,9 @@ mod tests {
     }
 
     impl TestContext {
-        pub fn new(name: &str) -> Self {
-            const BUFFER_POOL_SIZE: usize = 100;
+        pub async fn new(name: &str) -> Self {
+            initialize_logger();
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -135,15 +136,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
-            let disk_scheduler = Arc::new(RwLock::new(DiskScheduler::new(disk_manager.clone())));
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
+            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager_arc = Arc::new(disk_manager.unwrap());
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
             let bpm = Arc::new(BufferPoolManager::new(
                 BUFFER_POOL_SIZE,
-                disk_scheduler,
-                disk_manager.clone(),
-                replacer,
-            ));
+                disk_manager_arc.clone(),
+                replacer.clone(),
+            ).unwrap());
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -182,9 +182,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_rollback_transaction_executor() {
-        let test_context = TestContext::new("rollback_transaction_test");
+    #[tokio::test]
+    async fn test_rollback_transaction_executor() {
+        let test_context = TestContext::new("rollback_transaction_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -221,9 +221,9 @@ mod tests {
         assert!(result.unwrap().is_none());
     }
 
-    #[test]
-    fn test_rollback_transaction_with_chain() {
-        let test_context = TestContext::new("rollback_transaction_chain_test");
+    #[tokio::test]
+    async fn test_rollback_transaction_with_chain() {
+        let test_context = TestContext::new("rollback_transaction_chain_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -260,9 +260,9 @@ mod tests {
         assert!(chain_flag, "Chain flag should be set in execution context");
     }
 
-    #[test]
-    fn test_rollback_transaction_with_savepoint() {
-        let test_context = TestContext::new("rollback_transaction_savepoint_test");
+    #[tokio::test]
+    async fn test_rollback_transaction_with_savepoint() {
+        let test_context = TestContext::new("rollback_transaction_savepoint_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -303,9 +303,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_rollback_transaction_with_savepoint_and_chain() {
-        let test_context = TestContext::new("rollback_transaction_savepoint_chain_test");
+    #[tokio::test]
+    async fn test_rollback_transaction_with_savepoint_and_chain() {
+        let test_context = TestContext::new("rollback_transaction_savepoint_chain_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Store the original transaction ID
@@ -346,9 +346,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_rollback_executor_output_schema() {
-        let test_context = TestContext::new("rollback_executor_schema_test");
+    #[tokio::test]
+    async fn test_rollback_executor_output_schema() {
+        let test_context = TestContext::new("rollback_executor_schema_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Create a rollback transaction plan
@@ -366,9 +366,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_rollback_executor_context() {
-        let test_context = TestContext::new("rollback_executor_context_test");
+    #[tokio::test]
+    async fn test_rollback_executor_context() {
+        let test_context = TestContext::new("rollback_executor_context_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Create a rollback transaction plan
@@ -385,9 +385,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_multiple_rollback_executions() {
-        let test_context = TestContext::new("multiple_rollback_test");
+    #[tokio::test]
+    async fn test_multiple_rollback_executions() {
+        let test_context = TestContext::new("multiple_rollback_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Create a rollback transaction plan
@@ -421,8 +421,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_rollback_different_savepoint_names() {
+    #[tokio::test]
+    async fn test_rollback_different_savepoint_names() {
         let savepoint_names = vec![
             "savepoint1".to_string(),
             "sp_test".to_string(),
@@ -432,7 +432,7 @@ mod tests {
 
         for savepoint_name in savepoint_names {
             let test_context =
-                TestContext::new(&format!("rollback_savepoint_{}_test", savepoint_name));
+                TestContext::new(&format!("rollback_savepoint_{}_test", savepoint_name)).await;
             let exec_context = test_context.create_execution_context();
 
             // Store the original transaction ID
@@ -471,8 +471,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_rollback_all_parameter_combinations() {
+    #[tokio::test]
+    async fn test_rollback_all_parameter_combinations() {
         // Test all combinations of chain and savepoint parameters
         let test_cases = vec![
             (false, None),
@@ -487,7 +487,7 @@ mod tests {
                 chain,
                 savepoint.as_ref().map_or("none", |s| s)
             );
-            let test_context = TestContext::new(&test_name);
+            let test_context = TestContext::new(&test_name).await;
             let exec_context = test_context.create_execution_context();
 
             // Store the original transaction ID
@@ -535,10 +535,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_concurrent_rollback_executions() {
+    #[tokio::test]
+    async fn test_concurrent_rollback_executions() {
         // This test verifies that multiple rollback executors can run concurrently
-        let test_context = TestContext::new("concurrent_rollback_test");
+        let test_context = TestContext::new("concurrent_rollback_test").await;
 
         // Number of threads to create
         const NUM_THREADS: usize = 5;
@@ -554,7 +554,7 @@ mod tests {
             let thread_barrier = barrier.clone();
             let thread_results = results.clone();
             let thread_test_context =
-                TestContext::new(&format!("concurrent_rollback_thread_{}_test", i));
+                TestContext::new(&format!("concurrent_rollback_thread_{}_test", i)).await;
 
             let handle = thread::spawn(move || {
                 // Wait for all threads to be ready
@@ -630,9 +630,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_rollback_executor_initialization() {
-        let test_context = TestContext::new("rollback_executor_init_test");
+    #[tokio::test]
+    async fn test_rollback_executor_initialization() {
+        let test_context = TestContext::new("rollback_executor_init_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Create a rollback transaction plan
@@ -657,9 +657,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_rollback_executor_plan_access() {
-        let test_context = TestContext::new("rollback_executor_plan_access_test");
+    #[tokio::test]
+    async fn test_rollback_executor_plan_access() {
+        let test_context = TestContext::new("rollback_executor_plan_access_test").await;
         let exec_context = test_context.create_execution_context();
 
         // Create a rollback transaction plan with specific parameters
