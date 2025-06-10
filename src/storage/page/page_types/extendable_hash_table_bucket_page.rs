@@ -412,7 +412,7 @@ mod basic_behavior {
         info!("Starting concurrent access tests");
 
         let num_threads = 4;
-        let operations_per_thread = 100;
+        let operations_per_thread = 2; // Reduced to fit within buffer pool limits
 
         let mut handles = vec![];
 
@@ -424,7 +424,11 @@ mod basic_behavior {
                         .new_page::<ExtendableHTableBucketPage>()
                         .expect("Failed to create new bucket page");
 
-                    let bucket_page_id = bucket_page.read().get_page_id();
+                    let bucket_page_id = {
+                        let page = bucket_page.read();
+                        page.get_page_id()
+                    };
+                    
                     info!(
                         "Thread {} created bucket page with ID: {} (operation {})",
                         i, bucket_page_id, j

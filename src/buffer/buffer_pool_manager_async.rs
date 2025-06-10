@@ -133,6 +133,34 @@ impl BufferPoolManager {
         Some(PageGuard::new_for_new_page(new_page, new_page_id))
     }
 
+    /// Creates a new page with custom options using a provided constructor function.
+    ///
+    /// # Parameters
+    /// - `constructor`: A function that creates the page with the given page ID.
+    ///
+    /// # Returns
+    /// An optional `PageGuard<T>`.
+    pub fn new_page_with_options<T: Page, F>(&self, constructor: F) -> Option<PageGuard<T>>
+    where
+        F: FnOnce(PageId) -> T,
+    {
+        trace!("Creating new page with custom options of type {:?}", T::TYPE_ID);
+
+        let frame_id = self.get_available_frame()?;
+        trace!("Got available frame: {}", frame_id);
+
+        self.evict_page_if_necessary(frame_id);
+
+        let new_page_id = self.allocate_page_id();
+        trace!("Allocated new page ID: {}", new_page_id);
+
+        let new_page = self.create_typed_page_with_constructor::<T, F>(new_page_id, constructor);
+        self.update_page_metadata(frame_id, new_page_id, &new_page);
+
+        trace!("Created new page {} in frame {} with custom options", new_page_id, frame_id);
+        Some(PageGuard::new_for_new_page(new_page, new_page_id))
+    }
+
     /// Writes data to the page with the given page ID.
     ///
     /// # Parameters
@@ -601,6 +629,30 @@ impl BufferPoolManager {
 
         trace!(
             "Created new page {} of type {:?} (type byte: {})",
+            page_id,
+            T::TYPE_ID,
+            type_byte
+        );
+
+        Arc::new(RwLock::new(page))
+    }
+
+    fn create_typed_page_with_constructor<T: Page, F>(&self, page_id: PageId, constructor: F) -> Arc<RwLock<T>>
+    where
+        F: FnOnce(PageId) -> T,
+    {
+        let mut page = constructor(page_id);
+        
+        // Set initial page metadata
+        page.set_pin_count(1); // Start with pin count 1
+        page.set_dirty(false);
+
+        // Ensure page type is set correctly
+        let type_byte = T::TYPE_ID.to_u8();
+        page.get_data_mut()[PAGE_TYPE_OFFSET] = type_byte;
+
+        trace!(
+            "Created new page {} of type {:?} (type byte: {}) with custom constructor",
             page_id,
             T::TYPE_ID,
             type_byte

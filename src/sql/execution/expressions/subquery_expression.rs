@@ -80,7 +80,7 @@ impl SubqueryExpression {
 
     /// Execute a scalar subquery with aggregates by creating a temporary execution context
     /// This is a simplified implementation that handles the specific case of AVG(column)
-    fn execute_scalar_aggregate_subquery(&self, schema: &Schema) -> Result<Value, ExpressionError> {
+    fn execute_scalar_aggregate_subquery(&self) -> Result<Value, ExpressionError> {
         // For now, we'll implement a simplified version that handles AVG specifically
         // In a full implementation, this would create and execute a proper query plan
 
@@ -121,7 +121,7 @@ impl ExpressionOps for SubqueryExpression {
                 // Check if this is a scalar subquery with aggregates
                 if self.contains_aggregate(&self.subquery) {
                     // Execute as a separate query to get the aggregate result
-                    let result = self.execute_scalar_aggregate_subquery(schema)?;
+                    let result = self.execute_scalar_aggregate_subquery()?;
                     self.extract_scalar_value(result)
                 } else {
                     // Regular scalar subquery evaluation
@@ -157,7 +157,7 @@ impl ExpressionOps for SubqueryExpression {
                 // Check if this is a scalar subquery with aggregates
                 if self.contains_aggregate(&self.subquery) {
                     // Execute as a separate query to get the aggregate result
-                    let result = self.execute_scalar_aggregate_subquery(left_schema)?;
+                    let result = self.execute_scalar_aggregate_subquery()?;
                     self.extract_scalar_value(result)
                 } else {
                     // Regular scalar subquery evaluation

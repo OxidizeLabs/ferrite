@@ -402,17 +402,10 @@ mod tests {
             schema: &Schema,
             txn_ctx: Option<Arc<TransactionContext>>,
         ) -> RID {
-            let mut tuple = Tuple::new(&values, schema, RID::new(0, 0));
-            let meta = Arc::new(TupleMeta::new(
-                txn_ctx
-                    .as_ref()
-                    .map_or(0, |ctx| ctx.get_transaction().get_transaction_id()),
-            ));
-
             table
-                .insert_tuple(
-                    meta,
-                    &mut tuple,
+                .insert_tuple_from_values(
+                    values,
+                    schema,
                     txn_ctx.unwrap_or_else(|| self.transaction_context.clone()),
                 )
                 .expect("Failed to insert tuple")
@@ -435,9 +428,9 @@ mod tests {
         let schema = create_test_schema();
 
         // Insert test data
-        let values1 = vec![Value::new(1), Value::new("Alice")];
-        let values2 = vec![Value::new(2), Value::new("Bob")];
-        let values3 = vec![Value::new(3), Value::new("Charlie")];
+        let values1 = vec![Value::new(1), Value::new("Alice"), Value::new(25)];
+        let values2 = vec![Value::new(2), Value::new("Bob"), Value::new(30)];
+        let values3 = vec![Value::new(3), Value::new("Charlie"), Value::new(35)];
 
         ctx.insert_tuple(
             &table,
@@ -489,8 +482,8 @@ mod tests {
         let txn1 = ctx.create_transaction(IsolationLevel::ReadCommitted);
         let txn2 = ctx.create_transaction(IsolationLevel::ReadCommitted);
 
-        let values1 = vec![Value::new(1), Value::new("Alice")];
-        let values2 = vec![Value::new(2), Value::new("Bob")];
+        let values1 = vec![Value::new(1), Value::new("Alice"), Value::new(25)];
+        let values2 = vec![Value::new(2), Value::new("Bob"), Value::new(30)];
 
         ctx.insert_tuple(&table, values1, &schema, Some(txn1.clone()))
             .await;
@@ -520,7 +513,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Insert test data
-        let values = vec![Value::new(42), Value::new("Test")];
+        let values = vec![Value::new(42), Value::new("Test"), Value::new(28)];
         ctx.insert_tuple(
             &table,
             values,
@@ -547,6 +540,7 @@ mod tests {
         for (_meta, tuple) in scan_iterator.by_ref() {
             assert_eq!(tuple.get_value(0), Value::new(42));
             assert_eq!(tuple.get_value(1), Value::new("Test"));
+            assert_eq!(tuple.get_value(2), Value::new(28));
             found_tuples += 1;
         }
 
@@ -565,7 +559,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Insert test data
-        let values = vec![Value::new(1), Value::new("Test")];
+        let values = vec![Value::new(1), Value::new("Test"), Value::new(20)];
         ctx.insert_tuple(
             &table,
             values,

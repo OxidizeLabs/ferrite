@@ -212,7 +212,7 @@ impl DateTimeExpression {
                     .and_hms_opt(0, 0, 0)
                     .ok_or_else(|| ExpressionError::InvalidOperation("Invalid date".to_string()))?
             }
-            DateTimeField::Week(Some(weekday)) => {
+            DateTimeField::Week(Some(_)) => {
                 let weekday = naive.weekday().num_days_from_monday();
                 naive
                     .date()
@@ -251,7 +251,7 @@ impl DateTimeExpression {
             DateTimeField::Minute => Ok(timestamp.minute() as i32),
             DateTimeField::Second => Ok(timestamp.second() as i32),
             DateTimeField::Quarter => Ok(((timestamp.month() - 1) / 3 + 1) as i32),
-            DateTimeField::Week(Some(weekday)) => Ok(timestamp.iso_week().week() as i32),
+            DateTimeField::Week(Some(_)) => Ok(timestamp.iso_week().week() as i32),
             DateTimeField::IsoWeek => Ok(timestamp.iso_week().week() as i32),
             DateTimeField::Isoyear => Ok(timestamp.iso_week().year()),
             DateTimeField::Isodow => Ok(timestamp.weekday().number_from_monday() as i32),

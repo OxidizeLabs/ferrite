@@ -72,7 +72,7 @@ async fn run_server(port: u16) -> Result<(), Box<dyn error::Error>> {
     info!("Starting TKDB server on port {}", port);
 
     // Create database instance
-    let db = Arc::new(DBInstance::new(config)?);
+    let db = Arc::new(DBInstance::new(config).await?);
 
     // Create and start server
     let mut server = ServerHandle::new(port);
@@ -227,7 +227,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
 async fn run_cli() -> Result<(), Box<dyn error::Error>> {
     initialize_logger();
 
-    let cli = CLI::new();
+    let cli = CLI::new().await;
 
     Ok(cli.unwrap().run().unwrap())
 }

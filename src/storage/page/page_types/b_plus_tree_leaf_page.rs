@@ -179,6 +179,25 @@ where
         true
     }
 
+    /// Insert a key-value pair allowing temporary overflow (used during splits)
+    pub fn insert_key_value_with_overflow(&mut self, key: K, value: V) -> bool {
+        let index = self.find_key_index(&key);
+
+        // Check if key already exists
+        if index < self.size && (self.comparator)(&key, &self.keys[index]) == Ordering::Equal {
+            // Update value if key exists
+            self.values[index] = value;
+        } else {
+            // Insert new key-value pair (allowing overflow)
+            self.keys.insert(index, key);
+            self.values.insert(index, value);
+            self.size += 1;
+        }
+
+        self.is_dirty = true;
+        true
+    }
+
     pub fn remove_key_value_at(&mut self, index: usize) -> bool {
         if index >= self.size {
             return false;
