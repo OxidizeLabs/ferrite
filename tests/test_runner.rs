@@ -13,6 +13,7 @@ use tkdb::catalog::schema::Schema;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Once;
+use tokio::fs as async_fs;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -160,13 +161,14 @@ pub struct TKDBTest {
 }
 
 impl TKDBTest {
-    pub fn new() -> Result<Self, Box<dyn Error>> {
+    pub async fn new() -> Result<Self, Box<dyn Error>> {
         let config = generate_temp_db_config();
-        Self::new_with_config(config)
+        Self::new_with_config(config).await
     }
 
-    pub fn new_with_config(config: DBConfig) -> Result<Self, Box<dyn Error>> {
-        let instance = DBInstance::new(config.clone())?;
+    pub async fn new_with_config(config: DBConfig) -> Result<Self, Box<dyn Error>> {
+        let instance = DBInstance::new(config.clone()).await?;
+        
         Ok(Self {
             instance,
             config,
@@ -350,7 +352,7 @@ mod tests {
         }
     }
 
-    fn run_test_file(path: &Path) -> Result<TestStats, Box<dyn Error>> {
+    async fn run_test_file(path: &Path) -> Result<TestStats, Box<dyn Error>> {
         let start_time = Instant::now();
         
         println!("  Running {}", path.display());
@@ -361,21 +363,21 @@ mod tests {
         
         // Create shared stats that will be used by all DB instances
         let shared_stats = Arc::new(Mutex::new(TestStats::new()));
-        let shared_stats_clone = shared_stats.clone();
         
-        let mut runner = Runner::new(move || {
-            let config = generate_temp_db_config(); // Generate fresh config for each connection
-            let instance = match DBInstance::new(config.clone()) {
-                Ok(instance) => instance,
-                Err(e) => return std::future::ready(Err(e)),
-            };
-            let mut db = match TKDBTest::new_with_config(config) {
-                Ok(db) => db,
-                Err(e) => return std::future::ready(Err(DBError::SqlError(format!("Failed to create test DB: {}", e)))),
-            };
-            // Replace the DB's stats with our shared stats
-            db.stats = shared_stats_clone.clone();
-            std::future::ready(Ok(db))
+        let mut runner = Runner::new(|| {
+            let shared_stats_clone = shared_stats.clone();
+            async move {
+                let config = generate_temp_db_config(); // Generate fresh config for each connection
+                let instance = DBInstance::new(config.clone()).await?;
+                
+                let db = TKDBTest {
+                    instance,
+                    config,
+                    stats: shared_stats_clone,
+                };
+                
+                Ok(db)
+            }
         });
         
         let result = runner.run_file(path);
@@ -411,7 +413,7 @@ mod tests {
         }
     }
 
-    fn run_test_directory(
+    async fn run_test_directory(
         dir: &Path,
         suite_stats: &mut TestSuiteStats,
     ) -> Result<(), Box<dyn Error>> {
@@ -424,7 +426,7 @@ mod tests {
             let path = entry.path();
 
             if path.is_file() && path.extension().map_or(false, |ext| ext == "slt") {
-                match run_test_file(&path) {
+                match run_test_file(&path).await {
                     Ok(file_stats) => {
                         // Test file succeeded, add to statistics
                         suite_stats.stats.files_run += file_stats.files_run;
@@ -452,7 +454,7 @@ mod tests {
                     }
                 }
             } else if path.is_dir() {
-                if let Err(e) = run_test_directory(&path, suite_stats) {
+                if let Err(e) = Box::pin(run_test_directory(&path, suite_stats)).await {
                     any_failures = true;
                     if first_error.is_none() {
                         first_error = Some(e);
@@ -471,38 +473,38 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn run_ddl_tests() -> Result<(), Box<dyn Error>> {
+    #[tokio::test]
+    async fn run_ddl_tests() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let mut stats = TestSuiteStats::new("DDL Tests");
-        let result = run_test_directory(Path::new("tests/sql/ddl"), &mut stats);
+        let result = run_test_directory(Path::new("tests/sql/ddl"), &mut stats).await;
         stats.finish();
         cleanup_temp_directory();
         result
     }
 
-    #[test]
-    fn run_dml_tests() -> Result<(), Box<dyn Error>> {
+    #[tokio::test]
+    async fn run_dml_tests() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let mut stats = TestSuiteStats::new("DML Tests");
-        let result = run_test_directory(Path::new("tests/sql/dml"), &mut stats);
+        let result = run_test_directory(Path::new("tests/sql/dml"), &mut stats).await;
         stats.finish();
         cleanup_temp_directory();
         result
     }
 
-    #[test]
-    fn run_query_tests() -> Result<(), Box<dyn Error>> {
+    #[tokio::test]
+    async fn run_query_tests() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let mut stats = TestSuiteStats::new("Query Tests");
-        let result = run_test_directory(Path::new("tests/sql/queries"), &mut stats);
+        let result = run_test_directory(Path::new("tests/sql/queries"), &mut stats).await;
         stats.finish();
         cleanup_temp_directory();
         result
     }
 
-    #[test]
-    fn run_all_tests() -> Result<(), Box<dyn Error>> {
+    #[tokio::test]
+    async fn run_all_tests() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let test_categories = [
             "ddl",
@@ -522,7 +524,7 @@ mod tests {
             if dir.exists() {
                 let mut suite_stats = TestSuiteStats::new(&format!("{} Tests", category));
                 println!("\n{}Running {} tests...{}", BLUE, category, RESET);
-                run_test_directory(&dir, &mut suite_stats)?;
+                run_test_directory(&dir, &mut suite_stats).await?;
 
                 total_stats.files_run += suite_stats.stats.files_run;
                 total_stats.statements_run += suite_stats.stats.statements_run;
@@ -548,20 +550,20 @@ mod tests {
         Ok(())
     }
 
-    fn run_test_suite(suite_name: &str) -> Result<TestStats, Box<dyn Error>> {
+    async fn run_test_suite(suite_name: &str) -> Result<TestStats, Box<dyn Error>> {
         let dir = PathBuf::from("tests/sql").join(suite_name);
         if !dir.exists() {
             return Err(format!("Test suite '{}' not found", suite_name).into());
         }
 
         let mut suite_stats = TestSuiteStats::new(&format!("{} Suite", suite_name));
-        run_test_directory(&dir, &mut suite_stats)?;
+        run_test_directory(&dir, &mut suite_stats).await?;
         suite_stats.finish();
         Ok(suite_stats.stats)
     }
 
-    #[test]
-    fn run_data_modification_suite() -> Result<(), Box<dyn Error>> {
+    #[tokio::test]
+    async fn run_data_modification_suite() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let start_time = Instant::now();
         let mut total_stats = TestStats::new();
@@ -570,8 +572,8 @@ mod tests {
         println!("===================================");
 
         // Run both DDL and DML tests together
-        let ddl_stats = run_test_suite("ddl")?;
-        let dml_stats = run_test_suite("dml")?;
+        let ddl_stats = run_test_suite("ddl").await?;
+        let dml_stats = run_test_suite("dml").await?;
 
         total_stats.files_run = ddl_stats.files_run + dml_stats.files_run;
         total_stats.statements_run = ddl_stats.statements_run + dml_stats.statements_run;
@@ -595,8 +597,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn run_query_optimization_suite() -> Result<(), Box<dyn Error>> {
+    #[tokio::test]
+    async fn run_query_optimization_suite() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let start_time = Instant::now();
         let mut total_stats = TestStats::new();
@@ -605,8 +607,8 @@ mod tests {
         println!("===================================");
 
         // Run queries and indexes tests together
-        let query_stats = run_test_suite("queries")?;
-        let index_stats = run_test_suite("indexes")?;
+        let query_stats = run_test_suite("queries").await?;
+        let index_stats = run_test_suite("indexes").await?;
 
         total_stats.files_run = query_stats.files_run + index_stats.files_run;
         total_stats.statements_run = query_stats.statements_run + index_stats.statements_run;

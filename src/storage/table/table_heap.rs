@@ -97,7 +97,8 @@ impl TableHeap {
             latch: RwLock::new(()),
         };
 
-        // Create the first page
+        // Try to create the first page - if this fails, the table will be empty
+        // and the first insert will create the initial page
         if let Some(page_guard) = bpm.new_page::<TablePage>() {
             let first_page_id = page_guard.read().get_page_id();
 
@@ -132,8 +133,14 @@ impl TableHeap {
     pub fn insert_tuple(&self, meta: Arc<TupleMeta>, tuple: &Tuple) -> Result<RID, String> {
         let _write_guard = self.latch.write();
 
-        // Get the last page
+        // Check if we need to create the first page
         let last_page_id = *self.last_page_id.read();
+        if last_page_id == INVALID_PAGE_ID {
+            // Table is empty, create the first page
+            return self.create_first_page_and_insert(&meta, tuple);
+        }
+
+        // Get the last page
         let page_guard = self.get_page(last_page_id)?;
 
         // Try to insert into the current page
@@ -717,6 +724,61 @@ impl TableHeap {
         }
     }
 
+    /// Create the first page for an empty table and insert the tuple
+    fn create_first_page_and_insert(&self, meta: &TupleMeta, tuple: &Tuple) -> Result<RID, String> {
+        // First check if tuple is too large for any page
+        let temp_page = TablePage::new(0);
+        if temp_page.is_tuple_too_large(tuple) {
+            return Err("Tuple is too large to fit in a page".to_string());
+        }
+
+        // Create the first page
+        let first_page_guard = self
+            .bpm
+            .new_page::<TablePage>()
+            .ok_or_else(|| "Failed to create first page".to_string())?;
+        let first_page_id = first_page_guard.read().get_page_id();
+
+        debug!("Creating first page {} for empty table", first_page_id);
+
+        // Initialize the first page
+        {
+            let mut page = first_page_guard.write();
+            page.init();
+            page.set_dirty(true);
+        }
+
+        // Update table heap's page pointers
+        *self.first_page_id.write() = first_page_id;
+        *self.last_page_id.write() = first_page_id;
+
+        debug!("First page {} initialized, inserting tuple", first_page_id);
+
+        // Now insert the tuple into the first page
+        let mut page = first_page_guard.write();
+
+        // Verify the page has space for the tuple
+        if !page.has_space_for(tuple) {
+            return Err("First page has no space for tuple".to_string());
+        }
+
+        // Insert the tuple
+        match page.insert_tuple(meta, tuple) {
+            Some(rid) => {
+                page.set_dirty(true);
+                debug!(
+                    "Successfully inserted tuple into first page {}, RID: {:?}",
+                    first_page_id, rid
+                );
+                Ok(rid)
+            }
+            None => {
+                debug!("Failed to insert tuple into first page despite having space");
+                Err("Failed to insert tuple into first page".to_string())
+            }
+        }
+    }
+
     pub fn get_page(&self, page_id: PageId) -> Result<PageGuard<TablePage>, String> {
         self.bpm
             .fetch_page::<TablePage>(page_id)
@@ -768,8 +830,14 @@ impl TableHeap {
     ) -> Result<RID, String> {
         let _write_guard = self.latch.write();
 
-        // Get the last page
+        // Check if we need to create the first page
         let last_page_id = *self.last_page_id.read();
+        if last_page_id == INVALID_PAGE_ID {
+            // Table is empty, create the first page
+            return self.create_first_page_and_insert(&meta, tuple);
+        }
+
+        // Get the last page
         let page_guard = self.get_page(last_page_id)?;
 
         // Try to insert into the current page

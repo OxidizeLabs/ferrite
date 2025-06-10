@@ -229,10 +229,14 @@ where
 
         // If tree is empty (root is INVALID_PAGE_ID), create first leaf page as root
         if root_page_id == INVALID_PAGE_ID {
-            // Allocate a new leaf page
+            // Allocate a new leaf page with the comparator
+            let comparator = self.comparator.clone();
+            let leaf_max_size = self.calculate_leaf_max_size();
             let new_leaf_page = self
                 .buffer_pool_manager
-                .new_page::<BPlusTreeLeafPage<K, V, C>>()
+                .new_page_with_options(|page_id| {
+                    BPlusTreeLeafPage::<K, V, C>::new_with_options(page_id, leaf_max_size, comparator)
+                })
                 .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
 
             let new_page_id = new_leaf_page.get_page_id();
@@ -307,10 +311,10 @@ where
 
         // If leaf is full, we need to split
         if need_split {
-            // First insert the key-value pair into the leaf page
+            // First insert the key-value pair into the leaf page (allowing overflow)
             {
                 let mut leaf_write = leaf_page.write();
-                leaf_write.insert_key_value(key, value);
+                leaf_write.insert_key_value_with_overflow(key, value);
             }
 
             // Then split the page
@@ -454,55 +458,52 @@ where
         let mut result = Vec::new();
 
         // Find the leaf containing the start key
-        let leaf_page_guard = match self.find_leaf_page(start) {
+        let mut current_leaf_guard = match self.find_leaf_page(start) {
             Ok(page) => page,
             Err(BPlusTreeError::KeyNotFound) => return Ok(Vec::new()),
             Err(e) => return Err(e),
         };
 
-        // Start scanning from this leaf
-        let mut current_leaf_guard = leaf_page_guard;
-
         loop {
-            let leaf_page = current_leaf_guard.read();
-            // Find the index of the first key >= start
-            let mut key_index = leaf_page.find_key_index(start);
-            let size = leaf_page.get_size();
+            let next_page_id;
+            {
+                let leaf_page = current_leaf_guard.read();
+                // Find the index of the first key >= start
+                let mut key_index = leaf_page.find_key_index(start);
+                let size = leaf_page.get_size();
 
-            // Scan through keys in this leaf
-            while key_index < size {
-                if let Some(key) = leaf_page.get_key_at(key_index) {
-                    // Check if we've exceeded the end of the range
-                    if (self.comparator)(&key, end) == Ordering::Greater {
-                        return Ok(result); // Done with range scan
+                // Scan through keys in this leaf
+                while key_index < size {
+                    if let Some(key) = leaf_page.get_key_at(key_index) {
+                        // Check if we've exceeded the end of the range
+                        if (self.comparator)(&key, end) == Ordering::Greater {
+                            return Ok(result); // Done with range scan
+                        }
+
+                        // Add key-value pair to result if value exists
+                        if let Some(value) = leaf_page.get_value_at(key_index) {
+                            result.push((key.clone(), value.clone()));
+                        }
                     }
 
-                    // Add key-value pair to result if value exists
-                    if let Some(value) = leaf_page.get_value_at(key_index) {
-                        result.push((key.clone(), value.clone()));
-                    }
+                    key_index += 1;
                 }
 
-                key_index += 1;
-            }
+                // Get next page id before dropping the read guard
+                next_page_id = match leaf_page.get_next_page_id() {
+                    Some(id) if id != INVALID_PAGE_ID => id,
+                    _ => break, // No more leaves or invalid next page
+                };
+            } // Read guard is dropped here
 
-            // Move to next leaf if available
-            let next_page_id = match leaf_page.get_next_page_id() {
-                Some(id) if id != INVALID_PAGE_ID => id,
-                _ => break, // No more leaves or invalid next page
-            };
-
-            // Drop current leaf before fetching next one
-            drop(leaf_page);
+            // Explicitly drop the current page guard before fetching the next one
+            drop(current_leaf_guard);
 
             // Get the next leaf page
-            let next_page = self
+            current_leaf_guard = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
                 .ok_or_else(|| BPlusTreeError::PageNotFound(next_page_id))?;
-
-            // Replace current_leaf_guard with the new page
-            current_leaf_guard = next_page;
         }
 
         Ok(result)
@@ -522,10 +523,12 @@ where
             })?;
 
         let root_page_id;
+        let tree_height;
 
         {
             let header = header_page.read();
             root_page_id = header.get_root_page_id();
+            tree_height = header.get_tree_height();
 
             // Check if root_page_id is valid
             if root_page_id == INVALID_PAGE_ID {
@@ -533,21 +536,24 @@ where
             }
         }
 
+        // Drop header page early
+        drop(header_page);
+
         // Start with the root page
         let mut current_page_id = root_page_id;
 
-        // Traverse down to leaf
-        loop {
-            // Try to fetch the current page as a leaf page first
-            if let Some(leaf_page) = self
+        // If tree height is 1, the root is a leaf
+        if tree_height == 1 {
+            let leaf_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-            {
-                // If we successfully fetched a leaf page, return it
-                return Ok(leaf_page);
-            }
+                .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))?;
+            return Ok(leaf_page);
+        }
 
-            // If not a leaf page, try as an internal page
+        // Traverse down to leaf
+        loop {
+            // First try as an internal page (since we know height > 1 and we're not at leaf level yet)
             if let Some(internal_page) = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
@@ -560,12 +566,32 @@ where
                     child_page_id = internal.find_child_for_key(key);
                 }
 
+                // Get the child page id before dropping the internal page
+                let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+                
                 // Drop the internal page before continuing
                 drop(internal_page);
 
-                // Continue with this child
-                current_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+                // Try to fetch the child as a leaf page
+                if let Some(leaf_page) = self
+                    .buffer_pool_manager
+                    .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
+                {
+                    // If we successfully fetched a leaf page, return it
+                    return Ok(leaf_page);
+                }
+
+                // Continue with this child (it's another internal page)
+                current_page_id = next_page_id;
             } else {
+                // Try as a leaf page as a fallback
+                if let Some(leaf_page) = self
+                    .buffer_pool_manager
+                    .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
+                {
+                    return Ok(leaf_page);
+                }
+
                 // Neither a leaf nor an internal page, return error
                 return Err(BPlusTreeError::PageNotFound(current_page_id));
             }
@@ -585,10 +611,13 @@ where
             ));
         }
 
-        // Allocate a new leaf page
+        // Allocate a new leaf page with the comparator
+        let comparator = self.comparator.clone();
         let new_page = self
             .buffer_pool_manager
-            .new_page::<BPlusTreeLeafPage<K, V, C>>()
+            .new_page_with_options(|page_id| {
+                BPlusTreeLeafPage::<K, V, C>::new_with_options(page_id, leaf_max_size, comparator)
+            })
             .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
 
         let new_page_id = new_page.get_page_id();
@@ -626,7 +655,7 @@ where
                 Some(key) => key.clone(),
                 None => return Err(BPlusTreeError::InvalidPageType), // Should never happen
             };
-
+            
             // Remove the moved keys from the original leaf
             for i in split_point..current_size {
                 leaf_write.remove_key_value_at(split_point);
@@ -700,10 +729,13 @@ where
             ));
         }
 
-        // Allocate a new internal page
+        // Allocate a new internal page with the comparator
+        let comparator = self.comparator.clone();
         let new_page = self
             .buffer_pool_manager
-            .new_page::<BPlusTreeInternalPage<K, C>>()
+            .new_page_with_options(|page_id| {
+                BPlusTreeInternalPage::<K, C>::new_with_options(page_id, internal_max_size, comparator)
+            })
             .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
 
         let new_page_id = new_page.get_page_id();
@@ -1384,10 +1416,14 @@ where
         key: K,
         right_child_id: PageId,
     ) -> Result<(), BPlusTreeError> {
-        // Allocate a new internal page
+        // Allocate a new internal page with the comparator
+        let comparator = self.comparator.clone();
+        let internal_max_size = self.calculate_internal_max_size();
         let new_page = self
             .buffer_pool_manager
-            .new_page::<BPlusTreeInternalPage<K, C>>()
+            .new_page_with_options(|page_id| {
+                BPlusTreeInternalPage::<K, C>::new_with_options(page_id, internal_max_size, comparator)
+            })
             .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
 
         let new_root_id = new_page.get_page_id();
@@ -2458,38 +2494,132 @@ mod tests {
         );
 
         // Initialize tree with order 4
+        println!("Initializing tree...");
         assert!(tree.init_with_order(4).is_ok());
-        assert!(tree.is_empty());
+        println!("Tree initialized. Is empty: {}", tree.is_empty());
 
         // Insert a test key-value pair
         let key = 42;
         let value = RID::new(1, 1);
-        assert!(tree.insert(key, value.clone()).is_ok());
+        println!("Inserting key {} with value {:?}", key, value);
+        let insert_result = tree.insert(key, value.clone());
+        if let Err(ref e) = insert_result {
+            println!("Insert failed with error: {}", e);
+        }
+        assert!(insert_result.is_ok());
+        println!("Insert successful. Tree height: {}, size: {}", tree.get_height(), tree.get_size());
 
         // Search for the key
-        let result = tree.search(&key).unwrap();
-        assert!(result.is_some());
+        println!("Searching for key {}", key);
+        let search_result = tree.search(&key);
+        match &search_result {
+            Ok(Some(found_value)) => println!("Found value: {:?}", found_value),
+            Ok(None) => println!("Key not found"),
+            Err(e) => println!("Search failed with error: {}", e),
+        }
+        let result = search_result.unwrap();
+        assert!(result.is_some(), "Expected to find key {} but got None", key);
         assert_eq!(result.unwrap(), value);
+        println!("Search test passed");
 
         // Remove the key
+        println!("Removing key {}", key);
         let remove_result = tree.remove(&key).unwrap();
         assert!(remove_result);
+        println!("Remove successful");
 
         // Verify key is removed
         let search_result = tree.search(&key).unwrap();
         assert!(search_result.is_none());
+        println!("Verification after removal passed");
 
         // Add several keys to potentially trigger page splits and merges
+        println!("Adding multiple keys...");
         for i in 1..10 {
+            if i == 5 {
+                println!("\n=== DETAILED DEBUG FOR KEY 5 ===");
+                println!("About to insert key 5...");
+                
+                // Print tree before inserting key 5
+                println!("Tree before inserting key 5:");
+                let _ = tree.print_tree();
+                
+                // Print keys in order before key 5
+                match tree.in_order_traversal() {
+                    Ok(keys) => println!("Current keys in tree: {:?}", keys),
+                    Err(e) => println!("Failed to get keys: {}", e),
+                }
+            }
+            
+            println!("Inserting key {}", i);
             assert!(tree.insert(i, RID::new(1, i as u32)).is_ok());
+            
+            if i == 5 {
+                println!("Key 5 inserted successfully!");
+                
+                // Print tree after inserting key 5
+                println!("Tree after inserting key 5:");
+                let _ = tree.print_tree();
+                
+                // Print keys in order after key 5
+                match tree.in_order_traversal() {
+                    Ok(keys) => println!("Keys after inserting 5: {:?}", keys),
+                    Err(e) => println!("Failed to get keys: {}", e),
+                }
+                
+                // Try to search for key 5
+                match tree.search(&5) {
+                    Ok(Some(v)) => println!("Key 5 found with value: {:?}", v),
+                    Ok(None) => println!("WARNING: Key 5 not found immediately after insertion!"),
+                    Err(e) => println!("Error searching for key 5: {}", e),
+                }
+                println!("=== END DETAILED DEBUG FOR KEY 5 ===\n");
+            }
+            
+            // Print tree structure after key insertions to debug
+            if i == 4 {
+                println!("\n=== Tree structure after inserting key {} ===", i);
+                let _ = tree.print_tree();
+                println!("=======================================\n");
+            }
+            if i == 6 {
+                println!("\n=== Tree structure after inserting key {} (before split) ===", i);
+                let _ = tree.print_tree();
+                println!("=======================================\n");
+            }
+            if i == 7 {
+                println!("\n=== Tree structure after inserting key {} (after split) ===", i);
+                let _ = tree.print_tree();
+                println!("=======================================\n");
+            }
         }
+        println!("Tree height after inserts: {}, size: {}", tree.get_height(), tree.get_size());
+        
+        println!("\n=== Final tree structure ===");
+        let _ = tree.print_tree();
+        println!("=======================================\n");
 
         // Verify all keys exist
+        println!("Verifying all keys exist...");
         for i in 1..10 {
             let result = tree.search(&i).unwrap();
-            assert!(result.is_some());
+            if result.is_none() {
+                println!("Key {} not found!", i);
+                // Print tree again when we find the missing key
+                println!("\n=== Tree structure when key {} was not found ===", i);
+                let _ = tree.print_tree();
+                println!("=======================================\n");
+                
+                // Also print in-order traversal to see all keys that exist
+                match tree.in_order_traversal() {
+                    Ok(keys) => println!("Keys in tree (in-order): {:?}", keys),
+                    Err(e) => println!("Failed to get in-order traversal: {}", e),
+                }
+            }
+            assert!(result.is_some(), "Key {} should exist but was not found", i);
             assert_eq!(result.unwrap(), RID::new(1, i as u32));
         }
+        println!("All keys verification passed");
 
         // Test range scan
         let range_result = tree.range_scan(&3, &7).unwrap();
@@ -2511,6 +2641,99 @@ mod tests {
         }
         for i in 7..10 {
             assert!(tree.search(&i).unwrap().is_some());
+        }
+
+        println!("All tests passed");
+    }
+
+    #[tokio::test]
+    async fn test_debug_key_5_split() {
+        let ctx = TestContext::new("test_debug_key_5_split").await;
+        let bpm = ctx.bpm;
+    
+        // Create a simple schema
+        let key_schema = Schema::new(vec![]);
+
+        // Create metadata for index
+        let metadata = IndexInfo::new(
+            key_schema,
+            "test_index".to_string(),
+            1, // index_oid
+            "test_table".to_string(),
+            4,     // key_size (4 bytes for i32)
+            false, // is_primary_key
+            IndexType::BPlusTreeIndex,
+            vec![0], // key_attrs
+        );
+
+        // Create B+ tree
+        let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
+            i32_comparator,
+            metadata,
+            bpm,
+        );
+
+        // Initialize tree with order 4
+        assert!(tree.init_with_order(4).is_ok());
+
+        // Insert keys 1,2,3,4 to fill up the leaf
+        for i in 1..=4 {
+            println!("Inserting key {}", i);
+            assert!(tree.insert(i, RID::new(1, i as u32)).is_ok());
+        }
+        
+        println!("\n=== Tree before inserting key 5 (should be full) ===");
+        let _ = tree.print_tree();
+        
+        // Get the leaf page directly to examine it
+        let root_page_id = tree.get_root_page_id();
+        let leaf_page = tree.buffer_pool_manager
+            .fetch_page::<BPlusTreeLeafPage<i32, RID, I32Comparator>>(root_page_id)
+            .unwrap();
+        
+        {
+            let leaf_read = leaf_page.read();
+            println!("Leaf page before split:");
+            println!("  Size: {}, Max size: {}", leaf_read.get_size(), leaf_read.get_max_size());
+            print!("  Keys: [");
+            for i in 0..leaf_read.get_size() {
+                if let Some(key) = leaf_read.get_key_at(i) {
+                    print!("{}", key);
+                    if i < leaf_read.get_size() - 1 {
+                        print!(", ");
+                    }
+                }
+            }
+            println!("]");
+            print!("  Values: [");
+            for i in 0..leaf_read.get_size() {
+                if let Some(value) = leaf_read.get_value_at(i) {
+                    print!("{:?}", value);
+                    if i < leaf_read.get_size() - 1 {
+                        print!(", ");
+                    }
+                }
+            }
+            println!("]");
+        }
+        
+        println!("\n=== Inserting key 5 (should trigger split) ===");
+        assert!(tree.insert(5, RID::new(1, 5)).is_ok());
+        
+        println!("\n=== Tree after inserting key 5 ===");
+        let _ = tree.print_tree();
+        
+        // Verify key 5 can be found
+        match tree.search(&5) {
+            Ok(Some(v)) => println!("SUCCESS: Key 5 found with value: {:?}", v),
+            Ok(None) => println!("ERROR: Key 5 not found!"),
+            Err(e) => println!("ERROR searching for key 5: {}", e),
+        }
+        
+        // Print all keys in order
+        match tree.in_order_traversal() {
+            Ok(keys) => println!("All keys in tree: {:?}", keys),
+            Err(e) => println!("Failed to get keys: {}", e),
         }
     }
 }

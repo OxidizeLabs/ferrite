@@ -302,7 +302,6 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::filter_plan::FilterNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::types::Type;
     use tempfile::TempDir;
     use crate::common::logger::initialize_logger;
@@ -661,7 +660,6 @@ mod tests {
                 Value::new(dept.to_string()),
                 Value::new(salary),
             ];
-            let meta = Arc::new(TupleMeta::new(transaction_context.get_transaction_id()));
             table_heap
                 .insert_tuple_from_values(values, &schema, transaction_context.clone())
                 .unwrap();

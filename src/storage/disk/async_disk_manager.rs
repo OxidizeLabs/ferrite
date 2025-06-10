@@ -4794,7 +4794,7 @@ mod tests {
             disk_manager.read_page(i).await.unwrap(); // Access only once
         }
         
-        // Check that cache system is working with hot/cold separation
+        // Check that a cache system is working with hot/cold separation
         let cache_stats = disk_manager.cache_manager.get_cache_statistics().await;
         assert!(cache_stats.hot_cache_size > 0 || cache_stats.warm_cache_size > 0 || cache_stats.cold_cache_size > 0);
     }

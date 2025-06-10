@@ -16,7 +16,6 @@ use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::execution_engine::ExecutionEngine;
 use crate::sql::execution::transaction_context::TransactionContext;
-use crate::storage::disk::disk_manager::FileDiskManager;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::error;
@@ -102,7 +101,7 @@ impl DBInstance {
             config.db_log_filename.clone(),
             DiskManagerConfig::default()
         ).await?;
-        
+
         let disk_manager_arc = Arc::new(disk_manager);
 
         // Initialize buffer pool
@@ -549,13 +548,16 @@ impl DBInstance {
     }
 
     // Private helper methods
-    fn create_disk_manager(config: &DBConfig) -> Result<Arc<FileDiskManager>, DBError> {
-        Ok(Arc::new(FileDiskManager::new(
+    async fn create_disk_manager(config: &DBConfig) -> Result<Arc<AsyncDiskManager>, DBError> {
+        let disk_manager = AsyncDiskManager::new(
             config.db_filename.clone(),
             config.db_log_filename.clone(),
-            config.buffer_pool_size,
-        )))
+            DiskManagerConfig::default(),
+        ).await.map_err(|e| DBError::Io(format!("Failed to create disk manager: {}", e)))?;
+
+        Ok(Arc::new(disk_manager))
     }
+
 
     fn create_log_manager(
         disk_manager: &Arc<AsyncDiskManager>,
