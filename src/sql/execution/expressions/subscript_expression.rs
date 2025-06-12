@@ -74,6 +74,38 @@ impl ExpressionOps for SubscriptExpression {
 
                 // Convert index to usize
                 let index = match idx_val.get_val() {
+                    Val::TinyInt(i) => {
+                        let i = *i as i32;
+                        if i < 0 {
+                            let len = vec.len() as i32;
+                            // Handle negative indices (counting from end)
+                            if -i > len {
+                                return Err(ExpressionError::IndexOutOfBounds {
+                                    idx: i as usize,
+                                    size: len as usize,
+                                });
+                            }
+                            (len + i) as usize
+                        } else {
+                            i as usize
+                        }
+                    }
+                    Val::SmallInt(i) => {
+                        let i = *i as i32;
+                        if i < 0 {
+                            let len = vec.len() as i32;
+                            // Handle negative indices (counting from end)
+                            if -i > len {
+                                return Err(ExpressionError::IndexOutOfBounds {
+                                    idx: i as usize,
+                                    size: len as usize,
+                                });
+                            }
+                            (len + i) as usize
+                        } else {
+                            i as usize
+                        }
+                    }
                     Val::Integer(i) => {
                         if *i < 0 {
                             let len = vec.len() as i32;
@@ -87,6 +119,22 @@ impl ExpressionOps for SubscriptExpression {
                             (len + i) as usize
                         } else {
                             *i as usize
+                        }
+                    }
+                    Val::BigInt(i) => {
+                        let i = *i as i32;
+                        if i < 0 {
+                            let len = vec.len() as i32;
+                            // Handle negative indices (counting from end)
+                            if -i > len {
+                                return Err(ExpressionError::IndexOutOfBounds {
+                                    idx: i as usize,
+                                    size: len as usize,
+                                });
+                            }
+                            (len + i) as usize
+                        } else {
+                            i as usize
                         }
                     }
                     _ => {
@@ -112,12 +160,39 @@ impl ExpressionOps for SubscriptExpression {
                     Some(start_expr) => {
                         let start_val = start_expr.evaluate(tuple, schema)?;
                         match start_val.get_val() {
+                            Val::TinyInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
+                            Val::SmallInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
                                     if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
+                                }
+                            }
+                            Val::BigInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
                                 }
                             }
                             _ => {
@@ -134,12 +209,39 @@ impl ExpressionOps for SubscriptExpression {
                     Some(end_expr) => {
                         let end_val = end_expr.evaluate(tuple, schema)?;
                         match end_val.get_val() {
+                            Val::TinyInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
+                            Val::SmallInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
                                     if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
+                                }
+                            }
+                            Val::BigInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
                                 }
                             }
                             _ => {
@@ -193,6 +295,36 @@ impl ExpressionOps for SubscriptExpression {
 
                 // Convert index to usize
                 let index = match idx_val.get_val() {
+                    Val::TinyInt(i) => {
+                        let i = *i as i32;
+                        if i < 0 {
+                            let len = vec.len() as i32;
+                            if -i > len {
+                                return Err(ExpressionError::IndexOutOfBounds {
+                                    idx: i as usize,
+                                    size: len as usize,
+                                });
+                            }
+                            (len + i) as usize
+                        } else {
+                            i as usize
+                        }
+                    }
+                    Val::SmallInt(i) => {
+                        let i = *i as i32;
+                        if i < 0 {
+                            let len = vec.len() as i32;
+                            if -i > len {
+                                return Err(ExpressionError::IndexOutOfBounds {
+                                    idx: i as usize,
+                                    size: len as usize,
+                                });
+                            }
+                            (len + i) as usize
+                        } else {
+                            i as usize
+                        }
+                    }
                     Val::Integer(i) => {
                         if *i < 0 {
                             let len = vec.len() as i32;
@@ -205,6 +337,21 @@ impl ExpressionOps for SubscriptExpression {
                             (len + i) as usize
                         } else {
                             *i as usize
+                        }
+                    }
+                    Val::BigInt(i) => {
+                        let i = *i as i32;
+                        if i < 0 {
+                            let len = vec.len() as i32;
+                            if -i > len {
+                                return Err(ExpressionError::IndexOutOfBounds {
+                                    idx: i as usize,
+                                    size: len as usize,
+                                });
+                            }
+                            (len + i) as usize
+                        } else {
+                            i as usize
                         }
                     }
                     _ => {
@@ -235,12 +382,39 @@ impl ExpressionOps for SubscriptExpression {
                             right_schema,
                         )?;
                         match start_val.get_val() {
+                            Val::TinyInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
+                            Val::SmallInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
                                     if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
+                                }
+                            }
+                            Val::BigInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
                                 }
                             }
                             _ => {
@@ -262,12 +436,39 @@ impl ExpressionOps for SubscriptExpression {
                             right_schema,
                         )?;
                         match end_val.get_val() {
+                            Val::TinyInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
+                            Val::SmallInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
+                                }
+                            }
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
                                     if -i > len { 0 } else { (len + i) as usize }
                                 } else {
                                     *i as usize
+                                }
+                            }
+                            Val::BigInt(i) => {
+                                let i = *i as i32;
+                                if i < 0 {
+                                    let len = vec.len() as i32;
+                                    if -i > len { 0 } else { (len + i) as usize }
+                                } else {
+                                    i as usize
                                 }
                             }
                             _ => {
