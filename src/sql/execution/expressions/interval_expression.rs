@@ -341,7 +341,7 @@ mod tests {
                 assert_eq!(i.field, IntervalField::Year);
                 match i.value().as_ref() {
                     Expression::Literal(l) => {
-                        assert_eq!(l.get_value().get_val(), &Val::Integer(10));
+                        assert_eq!(l.get_value().get_val(), &Val::TinyInt(10));
                     }
                     _ => panic!("Expected Literal expression"),
                 }
