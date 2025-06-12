@@ -32,11 +32,19 @@ impl LiteralValueExpression {
                         TypeId::Decimal,
                     )
                 } else {
-                    // Parse as integer otherwise
-                    (
-                        Value::from(n.parse::<i32>().map_err(|e| e.to_string())?),
-                        TypeId::Integer,
-                    )
+                    // Try parsing as integer types in order of size
+                    // Start with smallest type that can hold the value
+                    if let Ok(val) = n.parse::<i8>() {
+                        (Value::from(val), TypeId::TinyInt)
+                    } else if let Ok(val) = n.parse::<i16>() {
+                        (Value::from(val), TypeId::SmallInt)
+                    } else if let Ok(val) = n.parse::<i32>() {
+                        (Value::from(val), TypeId::Integer)
+                    } else if let Ok(val) = n.parse::<i64>() {
+                        (Value::from(val), TypeId::BigInt)
+                    } else {
+                        return Err(format!("Number '{}' is too large to represent", n));
+                    }
                 }
             }
             SQLValue::SingleQuotedString(s) | SQLValue::DoubleQuotedString(s) => {
@@ -49,7 +57,10 @@ impl LiteralValueExpression {
 
         let name = match &value.get_val() {
             Val::Boolean(b) => format!("{}", b),
+            Val::TinyInt(i) => format!("{}", i),
+            Val::SmallInt(i) => format!("{}", i),
             Val::Integer(i) => format!("{}", i),
+            Val::BigInt(i) => format!("{}", i),
             Val::Decimal(d) => format!("{}", d),
             Val::VarLen(s) => format!("'{}'", s),
             Val::Null => "NULL".to_string(),
@@ -67,7 +78,10 @@ impl LiteralValueExpression {
         let type_id = value.get_type_id();
         let name = match &value.get_val() {
             Val::Boolean(b) => format!("{}", b),
+            Val::TinyInt(i) => format!("{}", i),
+            Val::SmallInt(i) => format!("{}", i),
             Val::Integer(i) => format!("{}", i),
+            Val::BigInt(i) => format!("{}", i),
             Val::Decimal(d) => format!("{}", d),
             Val::VarLen(s) => format!("'{}'", s),
             Val::Null => "NULL".to_string(),
@@ -158,11 +172,11 @@ mod tests {
 
     #[test]
     fn test_create_from_sql_value() {
-        // Test numeric literals
+        // Test numeric literals - 42 fits in TinyInt range
         let int_expr =
             LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
-        assert_eq!(int_expr.get_value(), &Value::new(42));
-        assert_eq!(int_expr.get_return_type().get_type(), TypeId::Integer);
+        assert_eq!(int_expr.get_value(), &Value::new(42i8));
+        assert_eq!(int_expr.get_return_type().get_type(), TypeId::TinyInt);
 
         let float_expr =
             LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
@@ -195,7 +209,7 @@ mod tests {
         let expr = LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();
         let result = expr.evaluate(&tuple, &schema).unwrap();
 
-        assert_eq!(result, Value::new(42));
+        assert_eq!(result, Value::new(42i8));
     }
 
     #[test]
@@ -244,5 +258,82 @@ mod tests {
 
         // Validation should always succeed for literals
         assert!(expr.validate(&schema).is_ok());
+    }
+
+    #[test]
+    fn test_numeric_type_selection() {
+        // Test TinyInt range (i8: -128 to 127)
+        let tiny_pos = LiteralValueExpression::new(SQLValue::Number("127".to_string(), false)).unwrap();
+        assert_eq!(tiny_pos.get_return_type().get_type(), TypeId::TinyInt);
+        assert_eq!(tiny_pos.get_value(), &Value::new(127i8));
+
+        let tiny_neg = LiteralValueExpression::new(SQLValue::Number("-128".to_string(), false)).unwrap();
+        assert_eq!(tiny_neg.get_return_type().get_type(), TypeId::TinyInt);
+        assert_eq!(tiny_neg.get_value(), &Value::new(-128i8));
+
+        // Test SmallInt range (i16: -32,768 to 32,767)
+        let small_pos = LiteralValueExpression::new(SQLValue::Number("32767".to_string(), false)).unwrap();
+        assert_eq!(small_pos.get_return_type().get_type(), TypeId::SmallInt);
+        assert_eq!(small_pos.get_value(), &Value::new(32767i16));
+
+        let small_neg = LiteralValueExpression::new(SQLValue::Number("-32768".to_string(), false)).unwrap();
+        assert_eq!(small_neg.get_return_type().get_type(), TypeId::SmallInt);
+        assert_eq!(small_neg.get_value(), &Value::new(-32768i16));
+
+        // Test values that exceed TinyInt but fit in SmallInt
+        let exceed_tiny = LiteralValueExpression::new(SQLValue::Number("128".to_string(), false)).unwrap();
+        assert_eq!(exceed_tiny.get_return_type().get_type(), TypeId::SmallInt);
+        assert_eq!(exceed_tiny.get_value(), &Value::new(128i16));
+
+        // Test Integer range (i32: -2,147,483,648 to 2,147,483,647)
+        let int_pos = LiteralValueExpression::new(SQLValue::Number("2147483647".to_string(), false)).unwrap();
+        assert_eq!(int_pos.get_return_type().get_type(), TypeId::Integer);
+        assert_eq!(int_pos.get_value(), &Value::new(2147483647i32));
+
+        let int_neg = LiteralValueExpression::new(SQLValue::Number("-2147483648".to_string(), false)).unwrap();
+        assert_eq!(int_neg.get_return_type().get_type(), TypeId::Integer);
+        assert_eq!(int_neg.get_value(), &Value::new(-2147483648i32));
+
+        // Test values that exceed SmallInt but fit in Integer
+        let exceed_small = LiteralValueExpression::new(SQLValue::Number("32768".to_string(), false)).unwrap();
+        assert_eq!(exceed_small.get_return_type().get_type(), TypeId::Integer);
+        assert_eq!(exceed_small.get_value(), &Value::new(32768i32));
+
+        // Test BigInt range (i64: -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
+        let big_pos = LiteralValueExpression::new(SQLValue::Number("9223372036854775807".to_string(), false)).unwrap();
+        assert_eq!(big_pos.get_return_type().get_type(), TypeId::BigInt);
+        assert_eq!(big_pos.get_value(), &Value::new(9223372036854775807i64));
+
+        let big_neg = LiteralValueExpression::new(SQLValue::Number("-9223372036854775808".to_string(), false)).unwrap();
+        assert_eq!(big_neg.get_return_type().get_type(), TypeId::BigInt);
+        assert_eq!(big_neg.get_value(), &Value::new(-9223372036854775808i64));
+
+        // Test values that exceed Integer but fit in BigInt
+        let exceed_int = LiteralValueExpression::new(SQLValue::Number("2147483648".to_string(), false)).unwrap();
+        assert_eq!(exceed_int.get_return_type().get_type(), TypeId::BigInt);
+        assert_eq!(exceed_int.get_value(), &Value::new(2147483648i64));
+
+        // Test decimal values still parse as Decimal
+        let decimal = LiteralValueExpression::new(SQLValue::Number("123.456".to_string(), false)).unwrap();
+        assert_eq!(decimal.get_return_type().get_type(), TypeId::Decimal);
+        assert_eq!(decimal.get_value(), &Value::new(123.456f64));
+
+        // Test zero should be TinyInt (smallest type)
+        let zero = LiteralValueExpression::new(SQLValue::Number("0".to_string(), false)).unwrap();
+        assert_eq!(zero.get_return_type().get_type(), TypeId::TinyInt);
+        assert_eq!(zero.get_value(), &Value::new(0i8));
+    }
+
+    #[test]
+    fn test_numeric_overflow() {
+        // Test value that exceeds i64::MAX should return an error
+        let overflow_result = LiteralValueExpression::new(SQLValue::Number("18446744073709551616".to_string(), false));
+        assert!(overflow_result.is_err());
+        assert!(overflow_result.unwrap_err().contains("too large to represent"));
+
+        // Test very large negative value
+        let neg_overflow_result = LiteralValueExpression::new(SQLValue::Number("-18446744073709551616".to_string(), false));
+        assert!(neg_overflow_result.is_err());
+        assert!(neg_overflow_result.unwrap_err().contains("too large to represent"));
     }
 }
