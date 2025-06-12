@@ -863,4 +863,522 @@ mod tests {
         );
         assert_eq!(range_subscript.to_string(), "test_vec[1:3]");
     }
+
+    #[test]
+    fn test_single_index_edge_cases() {
+        let vec_expr = create_test_vector();
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test index 0 (first element)
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("0".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(1)); // First element
+
+        // Test last valid index (4 for 5-element vector)
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("4".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(5)); // Last element
+
+        // Test negative index -5 (first element via negative indexing)
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-5".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(1)); // First element via negative index
+    }
+
+    #[test]
+    fn test_different_integer_types() {
+        let vec_expr = create_test_vector();
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test with TinyInt (value that fits in i8)
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("2".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(3));
+
+        // Test with SmallInt (value that requires i16)
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("200".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        // This should result in IndexOutOfBounds since 200 > 4
+        assert!(matches!(
+            subscript_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::IndexOutOfBounds { .. })
+        ));
+
+        // Test with large value that requires i32
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("50000".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        // This should result in IndexOutOfBounds
+        assert!(matches!(
+            subscript_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::IndexOutOfBounds { .. })
+        ));
+    }
+
+    #[test]
+    fn test_range_edge_cases() {
+        let vec_expr = create_test_vector();
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test range with only start bound
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("2".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: None,
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 3); // Elements 2, 3, 4 (indices 2, 3, 4)
+                assert_eq!(v[0], Value::new(3));
+                assert_eq!(v[1], Value::new(4));
+                assert_eq!(v[2], Value::new(5));
+            }
+            _ => panic!("Expected vector result"),
+        }
+
+        // Test range with only end bound
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("3".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: None,
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 3); // Elements 0, 1, 2 (indices 0, 1, 2)
+                assert_eq!(v[0], Value::new(1));
+                assert_eq!(v[1], Value::new(2));
+                assert_eq!(v[2], Value::new(3));
+            }
+            _ => panic!("Expected vector result"),
+        }
+
+        // Test empty range (start > end)
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("3".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("1".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 0); // Empty range
+            }
+            _ => panic!("Expected vector result"),
+        }
+
+        // Test range with start = end
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("2".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("2".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 0); // Empty range when start == end
+            }
+            _ => panic!("Expected vector result"),
+        }
+    }
+
+    #[test]
+    fn test_range_beyond_bounds() {
+        let vec_expr = create_test_vector();
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test range that extends beyond vector length
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("3".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("10".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 0); // Empty because end > vector.len()
+            }
+            _ => panic!("Expected vector result"),
+        }
+
+        // Test range starting beyond vector length
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("10".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("15".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 0); // Empty because start > vector.len()
+            }
+            _ => panic!("Expected vector result"),
+        }
+    }
+
+    #[test]
+    fn test_empty_vector() {
+        // Create an empty vector
+        let empty_vec = Value::new_vector(vec![] as Vec<Value>);
+        let vec_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            empty_vec,
+            Column::new("empty_vec", TypeId::Vector),
+            vec![],
+        )));
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test single index on empty vector
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("0".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        assert!(matches!(
+            subscript_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::IndexOutOfBounds { .. })
+        ));
+
+        // Test range on empty vector
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("0".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("1".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 0); // Empty result
+            }
+            _ => panic!("Expected vector result"),
+        }
+    }
+
+    #[test]
+    fn test_single_element_vector() {
+        // Create a single element vector
+        let single_vec = Value::new_vector(vec![Value::new(42)]);
+        let vec_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            single_vec,
+            Column::new("single_vec", TypeId::Vector),
+            vec![],
+        )));
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test index 0
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("0".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(42));
+
+        // Test negative index -1
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-1".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(42));
+
+        // Test index 1 (out of bounds)
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("1".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        assert!(matches!(
+            subscript_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::IndexOutOfBounds { .. })
+        ));
+    }
+
+    #[test]
+    fn test_negative_index_error_cases() {
+        let vec_expr = create_test_vector();
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test negative index beyond vector length (-6 for 5-element vector)
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-6".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        assert!(matches!(
+            subscript_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::IndexOutOfBounds { .. })
+        ));
+
+        // Test large negative index
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-100".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        assert!(matches!(
+            subscript_expr.evaluate(&tuple, &schema),
+            Err(ExpressionError::IndexOutOfBounds { .. })
+        ));
+    }
+
+    #[test]
+    fn test_mixed_negative_positive_ranges() {
+        let vec_expr = create_test_vector();
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test range from negative to positive index
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-3".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("4".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 2); // Elements at indices 2 and 3
+                assert_eq!(v[0], Value::new(3));
+                assert_eq!(v[1], Value::new(4));
+            }
+            _ => panic!("Expected vector result"),
+        }
+
+        // Test range from positive to negative index (should be empty)
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("3".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("-1".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 1); // Element at index 3
+                assert_eq!(v[0], Value::new(4));
+            }
+            _ => panic!("Expected vector result"),
+        }
+    }
+
+    #[test]
+    fn test_large_vector() {
+        // Create a larger vector to test performance and edge cases
+        let large_vec_data: Vec<Value> = (0..1000).map(|i| Value::new(i)).collect();
+        let large_vec = Value::new_vector(large_vec_data);
+        let vec_expr = Arc::new(Expression::Constant(ConstantExpression::new(
+            large_vec,
+            Column::new("large_vec", TypeId::Vector),
+            vec![],
+        )));
+        let schema = create_test_schema();
+        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+
+        // Test accessing middle element
+        let idx_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("500".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Single(idx_expr),
+            Column::new("result", TypeId::Integer),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        assert_eq!(result, Value::new(500));
+
+        // Test large range
+        let start_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("100".to_string(), false))
+                .unwrap(),
+        ));
+        let end_expr = Arc::new(Expression::Literal(
+            LiteralValueExpression::new(sqlparser::ast::Value::Number("200".to_string(), false))
+                .unwrap(),
+        ));
+        let subscript_expr = SubscriptExpression::new(
+            vec_expr.clone(),
+            Subscript::Range {
+                start: Some(start_expr),
+                end: Some(end_expr),
+            },
+            Column::new("result", TypeId::Vector),
+        );
+        let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
+        match result.get_val() {
+            Val::Vector(v) => {
+                assert_eq!(v.len(), 100); // 100 elements from index 100 to 199
+                assert_eq!(v[0], Value::new(100));
+                assert_eq!(v[99], Value::new(199));
+            }
+            _ => panic!("Expected vector result"),
+        }
+    }
 }
