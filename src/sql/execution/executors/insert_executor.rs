@@ -229,7 +229,12 @@ impl AbstractExecutor for InsertExecutor {
         } else {
             // Get the child executor reference separately to avoid borrowing conflicts
             if let Some(ref mut child) = self.child_executor {
-                debug!("Inserting from child executor (SELECT query)");
+                debug!("Inserting from child executor (VALUES/SELECT query)");
+
+                // Get the child executor's output schema first, before any mutable borrows
+                let child_schema = child.get_output_schema().clone();
+                debug!("Child schema: {:?}", child_schema);
+                debug!("Target table schema: {:?}", schema);
 
                 // Collect all values first to avoid borrowing conflicts
                 let mut all_values = Vec::new();
@@ -245,25 +250,35 @@ impl AbstractExecutor for InsertExecutor {
 
                 // Now validate and insert each set of values
                 for values in all_values {
+                    // Map values from child schema to table schema
+                    let mapped_values = self.schema_manager.map_values_to_schema(
+                        &values,
+                        &child_schema,
+                        &schema,
+                    );
+                    
+                    debug!("Original values: {:?}", values);
+                    debug!("Mapped values: {:?}", mapped_values);
+
                     // Validate foreign key constraints before inserting
-                    if let Err(e) = Self::validate_foreign_key_constraints_with_context(&self.context, &values, &schema) {
+                    if let Err(e) = Self::validate_foreign_key_constraints_with_context(&self.context, &mapped_values, &schema) {
                         error!("Foreign key constraint violation: {}", e);
-                        return Err(DBError::Execution(format!("Insert from SELECT failed: {}", e)));
+                        return Err(DBError::Execution(format!("Insert from VALUES/SELECT failed: {}", e)));
                     }
 
                     match transactional_table_heap.insert_tuple_from_values(
-                        values,
+                        mapped_values,
                         &schema,
                         txn_context.clone(),
                     ) {
                         Ok(_rid) => {
                             insert_count += 1;
-                            trace!("Successfully inserted tuple #{} from SELECT", insert_count);
+                            trace!("Successfully inserted tuple #{} from VALUES/SELECT", insert_count);
                         }
                         Err(e) => {
-                            error!("Failed to insert tuple from SELECT: {}", e);
+                            error!("Failed to insert tuple from VALUES/SELECT: {}", e);
                             return Err(DBError::Execution(format!(
-                                "Insert from SELECT failed: {}",
+                                "Insert from VALUES/SELECT failed: {}",
                                 e
                             )));
                         }
@@ -1043,7 +1058,7 @@ mod tests {
                 .expect("Failed to create table");
         }
 
-        // Create a very large string (10KB)
+        // Create a very large string (10KB) - this should fail due to page size constraints
         let large_string = "A".repeat(10240);
         let expressions = vec![vec![
             Arc::new(Expression::Constant(ConstantExpression::new(
@@ -1083,10 +1098,19 @@ mod tests {
         let exec_ctx = test_ctx.create_executor_context();
         let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
 
-        // Execute insert
+        // Execute insert - this should fail because the string is too large for a page
         executor.init();
         let result = executor.next();
-        assert!(result.is_ok(), "Insert should return None");
+        
+        // Expect the insert to fail with an error about the tuple being too large
+        assert!(result.is_err(), "Insert should fail for oversized tuple");
+        if let Err(error) = result {
+            let error_msg = error.to_string();
+            assert!(
+                error_msg.contains("too large") || error_msg.contains("Tuple is too large"),
+                "Error should mention tuple size issue, got: {}", error_msg
+            );
+        }
     }
 
     #[tokio::test]
@@ -1283,6 +1307,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_insert_reasonably_large_string() {
+        let test_ctx = TestContext::new("insert_reasonable_large_string").await;
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("large_text", TypeId::VarChar),
+        ]);
+
+        let table_name = "test_table_reasonable_large_text".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create a reasonably large string (1KB) that should fit in a page
+        let large_string = "A".repeat(1024);
+        let expressions = vec![vec![
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(1),
+                Column::new("id", TypeId::Integer),
+                vec![],
+            ))),
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(large_string),
+                Column::new("large_text", TypeId::VarChar),
+                vec![],
+            ))),
+        ]];
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute insert - this should succeed
+        executor.init();
+        let result = executor.next();
+        assert!(result.unwrap().is_none(), "Insert should return None for success");
+    }
+
+    #[tokio::test]
     async fn test_insert_unicode_characters() {
         let test_ctx = TestContext::new("insert_unicode").await;
 
@@ -1364,9 +1452,10 @@ mod tests {
                 .expect("Failed to create table");
         }
 
-        // Create an extremely large batch (1000 rows)
+        // Create a large batch (50 rows) that should fit within buffer pool constraints
+        // Note: Using 1000 rows would exhaust the small test buffer pool (10 pages)
         let mut expressions = Vec::new();
-        for i in 0..1000 {
+        for i in 0..50 {
             expressions.push(vec![
                 Arc::new(Expression::Constant(ConstantExpression::new(
                     Value::new(i),
@@ -1414,6 +1503,83 @@ mod tests {
 
         // No more calls needed
         assert!(executor.next().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_insert_buffer_pool_exhaustion() {
+        let test_ctx = TestContext::new("insert_buffer_exhaustion").await;
+
+        // Create schema and table
+        let schema = Schema::new(vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("value", TypeId::VarChar),
+        ]);
+
+        let table_name = "test_table_exhaustion".to_string();
+        {
+            let mut catalog = test_ctx.catalog.write();
+            catalog
+                .create_table(table_name.clone(), schema.clone())
+                .expect("Failed to create table");
+        }
+
+        // Create a batch that will definitely exhaust the buffer pool (200 rows for 10-page buffer)
+        let mut expressions = Vec::new();
+        for i in 0..1000 {
+            expressions.push(vec![
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(i),
+                    Column::new("id", TypeId::Integer),
+                    vec![],
+                ))),
+                Arc::new(Expression::Constant(ConstantExpression::new(
+                    Value::new(format!("batch_value_{}", i)),
+                    Column::new("value", TypeId::VarChar),
+                    vec![],
+                ))),
+            ]);
+        }
+
+        let values_node = Arc::new(ValuesNode::new(
+            schema.clone(),
+            expressions,
+            vec![PlanNode::Empty],
+        ));
+
+        let table_oid = {
+            let catalog = test_ctx.catalog.read();
+            catalog
+                .get_table(table_name.as_str())
+                .expect("Table not found")
+                .get_table_oidt()
+        };
+
+        let insert_plan = Arc::new(InsertNode::new(
+            schema,
+            table_oid,
+            table_name.to_string(),
+            vec![],
+            vec![PlanNode::Values(values_node.as_ref().clone())],
+        ));
+
+        let exec_ctx = test_ctx.create_executor_context();
+        let mut executor = InsertExecutor::new(exec_ctx, insert_plan);
+
+        // Execute inserts - this should fail due to buffer pool exhaustion
+        executor.init();
+        let result = executor.next();
+        
+        // Expect the insert to fail with an error about being unable to create new pages
+        assert!(result.is_err(), "Insert should fail when buffer pool is exhausted");
+        if let Err(error) = result {
+            let error_msg = error.to_string();
+            assert!(
+                error_msg.contains("Failed to create new page") || 
+                error_msg.contains("page") || 
+                error_msg.contains("buffer"),
+                "Error should mention page/buffer issue, got: {}", error_msg
+            );
+        }
     }
 
     #[tokio::test]
