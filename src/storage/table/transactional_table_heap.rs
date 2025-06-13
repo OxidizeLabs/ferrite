@@ -106,6 +106,9 @@ impl TransactionalTableHeap {
         // This ensures we have the complete tuple values before constraint validation
         let expanded_values = self.table_heap.expand_values_for_schema(values, schema)?;
 
+        // Validate NOT NULL constraints on the expanded values
+        Self::validate_not_null_constraints(&expanded_values, schema)?;
+
         // Validate check constraints on the expanded values
         Self::validate_check_constraints(&expanded_values, schema)?;
         
@@ -152,6 +155,30 @@ impl TransactionalTableHeap {
                         column.get_name(),
                         value,
                         constraint_expr
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validates NOT NULL constraints for the given values against the schema
+    fn validate_not_null_constraints(values: &[Value], schema: &Schema) -> Result<(), String> {
+        for (i, column) in schema.get_columns().iter().enumerate() {
+            if column.is_not_null() {
+                if i >= values.len() {
+                    return Err(format!(
+                        "Value index {} out of bounds for NOT NULL constraint validation",
+                        i
+                    ));
+                }
+
+                let value = &values[i];
+                if value.is_null() {
+                    return Err(format!(
+                        "NOT NULL constraint violation for column '{}': NULL value not allowed",
+                        column.get_name()
                     ));
                 }
             }
