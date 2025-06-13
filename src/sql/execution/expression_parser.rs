@@ -342,7 +342,25 @@ impl ExpressionParser {
                             | (TypeId::BigInt, TypeId::Integer)
                             | (TypeId::Integer, TypeId::BigInt)
                             | (TypeId::BigInt, TypeId::Decimal)
-                            | (TypeId::Decimal, TypeId::BigInt) => {
+                            | (TypeId::Decimal, TypeId::BigInt)
+                            // Add support for TinyInt comparisons
+                            | (TypeId::TinyInt, TypeId::TinyInt)
+                            | (TypeId::TinyInt, TypeId::SmallInt)
+                            | (TypeId::SmallInt, TypeId::TinyInt)
+                            | (TypeId::TinyInt, TypeId::Integer)
+                            | (TypeId::Integer, TypeId::TinyInt)
+                            | (TypeId::TinyInt, TypeId::BigInt)
+                            | (TypeId::BigInt, TypeId::TinyInt)
+                            | (TypeId::TinyInt, TypeId::Decimal)
+                            | (TypeId::Decimal, TypeId::TinyInt)
+                            // Add support for SmallInt comparisons
+                            | (TypeId::SmallInt, TypeId::SmallInt)
+                            | (TypeId::SmallInt, TypeId::Integer)
+                            | (TypeId::Integer, TypeId::SmallInt)
+                            | (TypeId::SmallInt, TypeId::BigInt)
+                            | (TypeId::BigInt, TypeId::SmallInt)
+                            | (TypeId::SmallInt, TypeId::Decimal)
+                            | (TypeId::Decimal, TypeId::SmallInt) => {
                                 let comp_type = match op {
                                     BinaryOperator::Eq => ComparisonType::Equal,
                                     BinaryOperator::NotEq => ComparisonType::NotEqual,
