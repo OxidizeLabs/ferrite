@@ -946,11 +946,6 @@ impl TableHeap {
     ) -> Result<Vec<Value>, String> {
         let schema_column_count = schema.get_column_count() as usize;
         
-        // If we already have the right number of values, return as-is
-        if values.len() == schema_column_count {
-            return Ok(values);
-        }
-        
         // If we have more values than columns, that's an error
         if values.len() > schema_column_count {
             return Err(format!(
@@ -962,23 +957,29 @@ impl TableHeap {
         
         let mut expanded_values = Vec::with_capacity(schema_column_count);
         
-        // Handle case where fewer values are provided than schema columns
-        // This assumes positional mapping for now - in a more sophisticated implementation,
-        // we might want to consider column names if available
+        // Process each column in the schema
         for i in 0..schema_column_count {
             let column = schema.get_column(i).ok_or_else(|| {
                 format!("Column index {} out of bounds in schema", i)
             })?;
             
             if i < values.len() {
-                // We have a value for this position, use it
-                expanded_values.push(values[i].clone());
+                // We have a value for this position
+                let value = &values[i];
+                
+                // Check if this is a NULL value for an AUTO_INCREMENT column
+                if value.is_null() && column.is_primary_key() {
+                    // Replace NULL with auto-generated value for AUTO_INCREMENT primary keys
+                    let auto_increment_value = self.get_next_auto_increment_value()?;
+                    expanded_values.push(Value::new(auto_increment_value));
+                } else {
+                    // Use the provided value as-is
+                    expanded_values.push(value.clone());
+                }
             } else {
-                // We need to generate a value for this column
+                // We need to generate a value for this column (missing value)
                 if column.is_primary_key() {
                     // For AUTO_INCREMENT primary keys, generate the next value
-                    // For now, we'll use a simple incrementing integer
-                    // In a real implementation, this should track the maximum value
                     let auto_increment_value = self.get_next_auto_increment_value()?;
                     expanded_values.push(Value::new(auto_increment_value));
                 } else if let Some(default_value) = column.get_default_value() {
