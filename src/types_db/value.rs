@@ -1244,6 +1244,32 @@ impl Type for Value {
     fn compare_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
+
+            // Handle cross-type numeric comparisons
+            (Val::TinyInt(a), Val::SmallInt(b)) => CmpBool::from(*a as i16 == *b),
+            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 == *b),
+            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 == *b),
+            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
+            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 == *b),
+            (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 == *b),
+            (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+
+            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as i32),
+            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a == *b as i32),
+            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 == *b),
+            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+
+            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as i64),
+            (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a == *b as i64),
+            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a == *b as i64),
+            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+
+            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as f64),
+            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a == *b as f64),
+            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a == *b as f64),
+            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a == *b as f64),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1258,6 +1284,31 @@ impl Type for Value {
     fn compare_not_equals(&self, other: &Value) -> CmpBool {
         match (&self.value_, &other.value_) {
             (Val::Null, _) | (_, Val::Null) => CmpBool::CmpNull,
+            // Handle cross-type numeric comparisons
+            (Val::TinyInt(a), Val::SmallInt(b)) => CmpBool::from(*a as i16 != *b),
+            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 != *b),
+            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 != *b),
+            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
+            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 != *b),
+            (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 != *b),
+            (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+
+            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as i32),
+            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a != *b as i32),
+            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 != *b),
+            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+
+            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as i64),
+            (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a != *b as i64),
+            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a != *b as i64),
+            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+
+            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as f64),
+            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a != *b as f64),
+            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a != *b as f64),
+            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a != *b as f64),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1276,16 +1327,30 @@ impl Type for Value {
             (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
             (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
             // Handle cross-type numeric comparisons
-            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
-            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a < (*b as f64)),
-            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from((*a as i64) < *b),
-            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a < (*b as i64)),
-            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a < (*b as f64)),
-            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
-            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) < *b),
-            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as i32)),
+            (Val::TinyInt(a), Val::SmallInt(b)) => CmpBool::from((*a as i16) < *b),
             (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) < *b),
+            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from((*a as i64) < *b),
+            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > (*b as i16)),
+            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) < *b),
+            (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from((*a as i64) < *b),
+            (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+
             (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as i32)),
+            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as i32)),
+            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from((*a as i64) < *b),
+            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+
+            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as i64)),
+            (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as i64)),
+            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a < (*b as i64)),
+            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+
+            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as f64)),
+            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a <( *b as f64)),
+            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a < (*b as f64)),
+            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a < (*b as f64)),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1304,16 +1369,30 @@ impl Type for Value {
             (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
             (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
             // Handle cross-type numeric comparisons
-            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from((*a as f64) <= *b),
-            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a <= (*b as f64)),
-            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from((*a as i64) <= *b),
-            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a <= (*b as i64)),
-            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a <= (*b as f64)),
-            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) <= *b),
-            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) <= *b),
-            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a <= (*b as i32)),
-            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) <= *b),
-            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a <= (*b as i32)),
+            (Val::TinyInt(a), Val::SmallInt(b)) => CmpBool::from(*a as i16 <= *b),
+            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 <= *b),
+            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 <= *b),
+            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
+            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 <= *b),
+            (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 <= *b),
+            (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+
+            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as i32),
+            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as i32),
+            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 <= *b),
+            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+
+            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as i64),
+            (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as i64),
+            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a <= *b as i64),
+            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+
+            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as f64),
+            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as f64),
+            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a <= *b as f64),
+            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a <= *b as f64),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1332,23 +1411,31 @@ impl Type for Value {
             (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
             (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
             // Handle cross-type numeric comparisons
-            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
-            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a > *b as f64),
-            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
-            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a > *b as i64),
-            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a > *b as f64),
-            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
-            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 > *b),
-            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as i32),
-            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 > *b),
-            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i32),
-            // Add missing TinyInt cross-type comparisons
-            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
-            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as f64),
-            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
-            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i64),
             (Val::TinyInt(a), Val::SmallInt(b)) => CmpBool::from(*a as i16 > *b),
+            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 > *b),
+            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
+            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+
             (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
+            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 > *b),
+            (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
+            (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+
+            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i32),
+            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as i32),
+            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
+            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+
+            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i64),
+            (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as i64),
+            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a > *b as i64),
+            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+
+            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as f64),
+            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as f64),
+            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a > *b as f64),
+            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a > *b as f64),
+            
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1367,23 +1454,30 @@ impl Type for Value {
             (Val::Vector(_), _) | (_, Val::Vector(_)) => CmpBool::CmpFalse,
             (Val::Array(_), _) | (_, Val::Array(_)) => CmpBool::CmpFalse,
             // Handle cross-type numeric comparisons
-            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from((*a as f64) >= *b),
-            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a >= (*b as f64)),
-            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from((*a as i64) >= *b),
-            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a >= (*b as i64)),
-            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a >= (*b as f64)),
-            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) >= *b),
-            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) >= *b),
-            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a >= (*b as i32)),
-            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) >= *b),
-            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a >= (*b as i32)),
-            // Add missing TinyInt cross-type comparisons
-            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) >= *b),
-            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a >= (*b as f64)),
-            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from((*a as i64) >= *b),
-            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a >= (*b as i64)),
-            (Val::TinyInt(a), Val::SmallInt(b)) => CmpBool::from((*a as i16) >= *b),
-            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a >= (*b as i16)),
+            (Val::TinyInt(a), Val::SmallInt(b)) => CmpBool::from(*a as i16 >= *b),
+            (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 >= *b),
+            (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 >= *b),
+            (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as i16),
+            (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 >= *b),
+            (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 >= *b),
+            (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+
+            (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as i32),
+            (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as i32),
+            (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 >= *b),
+            (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+
+            (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as i64),
+            (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as i64),
+            (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a >= *b as i64),
+            (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+
+            (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as f64),
+            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as f64),
+            (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a >= *b as f64),
+            (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a >= *b as f64),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
