@@ -35,6 +35,28 @@ pub enum CmpBool {
 
 pub trait Type {
     fn get_type_id(&self) -> TypeId;
+    
+    // **NEW: Static methods that receive actual values**
+    // These replace the broken instance methods for comparisons
+    fn compare_equals_static(left_val: &Val, right: &Value) -> CmpBool
+    where Self: Sized {
+        // Default implementation - types can override this
+        panic!("Static method compare_equals_static not implemented for this type")
+    }
+    
+    fn compare_greater_than_static(left_val: &Val, right: &Value) -> CmpBool
+    where Self: Sized {
+        // Default implementation - types can override this
+        panic!("Static method compare_greater_than_static not implemented for this type")
+    }
+    
+    fn compare_less_than_static(left_val: &Val, right: &Value) -> CmpBool
+    where Self: Sized {
+        // Default implementation - types can override this
+        panic!("Static method compare_less_than_static not implemented for this type")
+    }
+    
+    // **EXISTING: Keep all existing methods for compatibility**
     fn is_coercible_from(&self, type_id: TypeId) -> bool {
         match self.get_type_id() {
             TypeId::Invalid => false,
@@ -107,6 +129,7 @@ pub trait Type {
             TypeId::Struct => type_id == TypeId::Struct,
         }
     }
+    
     fn get_min_value(type_id: TypeId) -> Value
     where
         Self: Sized,
@@ -132,10 +155,11 @@ pub trait Type {
             TypeId::Array => Value::from(Vec::<Value>::new()),
             TypeId::Enum => Value::from(Val::Enum(0, String::new())),
             TypeId::Point => Value::from(Val::Point(f64::MIN, f64::MIN)),
-            TypeId::Invalid => Value::from(Null),
-            TypeId::Struct => Value::from(Null),
+            TypeId::Invalid => Value::from(Val::Null),
+            TypeId::Struct => Value::from(Val::Null),
         }
     }
+    
     fn get_max_value(type_id: TypeId) -> Value
     where
         Self: Sized,
@@ -165,6 +189,7 @@ pub trait Type {
             TypeId::Struct => Value::from(Val::Null),
         }
     }
+    
     fn compare_equals(&self, other: &Value) -> CmpBool;
     fn compare_not_equals(&self, other: &Value) -> CmpBool;
     fn compare_less_than(&self, other: &Value) -> CmpBool;
@@ -179,6 +204,7 @@ pub trait Type {
     fn min(&self, other: &Value) -> Value;
     fn max(&self, other: &Value) -> Value;
     fn to_string(&self, val: &Value) -> String;
+    
     fn technical_display(&self, val: &Value) -> String {
         match val.get_val() {
             Val::Boolean(b) => format!("BOOLEAN({})", b),
@@ -211,12 +237,15 @@ pub trait Type {
             Val::Struct => format!("STRUCT"),
         }
     }
+    
     fn sqrt(&self, _val: &Value) -> Value {
         Value::new(Val::Null)
     }
+    
     fn operate_null(&self, _left: &Value, _right: &Value) -> Value {
         Value::new(Val::Null)
     }
+    
     fn is_zero(&self, val: &Value) -> bool {
         match val.get_val() {
             Val::Integer(i) => *i == 0,
@@ -227,12 +256,15 @@ pub trait Type {
             _ => false,
         }
     }
+    
     fn is_inlined(&self, _val: &Value) -> bool {
         true
     }
+    
     fn copy(&self, val: &Value) -> Value {
         val.clone_optimized()
     }
+    
     fn cast_as(&self, val: &Value, type_id: TypeId) -> Value {
         if !self.is_coercible_from(type_id) {
             return Value::new(Val::Null);
@@ -240,27 +272,35 @@ pub trait Type {
         val.cast_to(self.get_type_id())
             .unwrap_or_else(|_| val.clone_optimized())
     }
+    
     fn get_data(&self, _val: &Value) -> &[u8] {
         &[]
     }
+    
     fn get_storage_size(&self, _val: &Value) -> u32 {
         get_type_size(self.get_type_id()) as u32
     }
+    
     fn as_integer(&self) -> Result<i32, String> {
         Err("Cannot convert to integer".to_string())
     }
+    
     fn as_bigint(&self) -> Result<i64, String> {
         Err("Cannot convert to bigint".to_string())
     }
+    
     fn as_smallint(&self) -> Result<i16, String> {
         Err("Cannot convert to smallint".to_string())
     }
+    
     fn as_tinyint(&self) -> Result<i8, String> {
         Err("Cannot convert to tinyint".to_string())
     }
+    
     fn as_decimal(&self) -> Result<f64, String> {
         Err("Cannot convert to decimal".to_string())
     }
+    
     fn as_bool(&self) -> Result<bool, String> {
         Err("Cannot convert to boolean".to_string())
     }
