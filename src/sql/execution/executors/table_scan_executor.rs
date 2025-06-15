@@ -169,7 +169,6 @@ mod tests {
     }
 
     fn create_test_values(
-        schema: &Schema,
         id: i32,
         name: &str,
         age: i32,
@@ -207,7 +206,7 @@ mod tests {
         let test_data = vec![(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
 
         for (id, name, age) in test_data.iter() {
-            let (meta, values) = create_test_values(&schema, *id, name, *age);
+            let (meta, values) = create_test_values(*id, name, *age);
             table_heap
                 .insert_tuple_from_values(values, &schema, Arc::from(meta))
                 .expect("Failed to insert tuple");
@@ -246,7 +245,7 @@ mod tests {
         // Create schema and empty table
         let schema = Arc::new(Schema::new(vec![Column::new("id", TypeId::Integer)]));
         let catalog_guard = Arc::new(RwLock::new(Catalog::new(
-            ctx.bpm.clone(),
+            bpm,
             ctx.transaction_manager.clone(),
         )));
 
