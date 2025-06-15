@@ -281,10 +281,6 @@ mod tests {
                 bpm
             }
         }
-
-        pub fn bpm(&self) -> Arc<BufferPoolManager> {
-            Arc::clone(&self.bpm)
-        }
     }
 
     #[cfg(test)]
