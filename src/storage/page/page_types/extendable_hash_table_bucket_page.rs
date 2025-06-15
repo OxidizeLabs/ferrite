@@ -318,10 +318,6 @@ mod basic_behavior {
                 bpm
             }
         }
-
-        pub fn bpm(&self) -> Arc<BufferPoolManager> {
-            Arc::clone(&self.bpm)
-        }
     }
 
     #[tokio::test]
