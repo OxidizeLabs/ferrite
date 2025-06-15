@@ -1,6 +1,5 @@
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
-use crate::common::exception::ExpressionError;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
@@ -8,8 +7,7 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::storage::table::tuple::Tuple;
-use crate::types_db::value::Value;
-use log::{debug, error, trace};
+use log::{debug, trace};
 use parking_lot::RwLock;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -72,69 +70,6 @@ impl ProjectionExecutor {
             )),
             initialized: false,
         }
-    }
-
-    /// Projects values from input tuple according to projection expressions
-    fn project_tuple(&self, tuple: &Tuple) -> Option<Tuple> {
-        // Evaluate expressions and handle errors
-        match self.evaluate_projection_expressions(tuple) {
-            Ok(values) => {
-                if values.is_empty() {
-                    debug!("No values after projection, skipping tuple");
-                    return None;
-                }
-
-                // Create new tuple with projected values
-                Some(Tuple::new(
-                    &values,
-                    &self.plan.get_output_schema(),
-                    tuple.get_rid(),
-                ))
-            }
-            Err(e) => {
-                error!("Failed to evaluate projection expressions: {}", e);
-                None
-            }
-        }
-    }
-
-    fn evaluate_projection_expressions(
-        &self,
-        tuple: &Tuple,
-    ) -> Result<Vec<Value>, ExpressionError> {
-        let mut values = Vec::with_capacity(self.plan.get_expressions().len());
-        let input_schema = self.child_executor.get_output_schema();
-        let column_mappings = self.plan.get_children_indices();
-        let mut mapping_index = 0; // Track position in column_mappings array
-
-        for (expr_index, expr) in self.plan.get_expressions().iter().enumerate() {
-            match expr.as_ref() {
-                Expression::Aggregate(_) => {
-                    // For aggregate expressions, use the tuple index directly
-                    // Aggregates don't use column mappings - they produce their own values
-                    values.push(tuple.get_value(expr_index).clone());
-                }
-                Expression::ColumnRef(_) => {
-                    // Use the pre-computed column mapping for ColumnRef expressions
-                    if mapping_index < column_mappings.len() {
-                        values.push(tuple.get_value(column_mappings[mapping_index]).clone());
-                        mapping_index += 1;
-                    } else {
-                        return Err(ExpressionError::InvalidOperation(
-                            "Column mapping not found for ColumnRef".to_string(),
-                        ));
-                    }
-                }
-                _ => {
-                    // For other expressions (CASE, arithmetic, literals, etc.), evaluate normally
-                    let value = expr.evaluate(tuple, input_schema)?;
-                    values.push(value);
-                    // No increment of mapping_index for non-ColumnRef expressions
-                }
-            }
-        }
-
-        Ok(values)
     }
 }
 
