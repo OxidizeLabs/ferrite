@@ -3123,7 +3123,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn test_insert_with_null_values() {
+        async fn test_insert_with_explicit_null_values() {
             let mut ctx = TestContext::new("test_insert_with_null_values").await;
 
             // Create test table with nullable columns
@@ -3160,7 +3160,7 @@ mod tests {
 
             // Test INSERT with column specification and NULLs
             let insert_sql =
-                "INSERT INTO contacts (id, name, phone) VALUES (3, 'Charlie', '555-0123')";
+                "INSERT INTO contacts VALUES (3, 'Charlie', NULL, '555-0123', NULL)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
@@ -3188,19 +3188,77 @@ mod tests {
             assert_eq!(rows[0][1].to_string(), "Alice");
             assert_eq!(rows[0][2].to_string(), "alice@example.com");
             // rows[0][3] should be NULL
+            assert!(rows[0][3].is_null(), "Expected NULL for phone in row 1");
             assert_eq!(rows[0][4].to_string(), "25");
 
             // Verify second row (multiple NULLs)
             assert_eq!(rows[1][0].to_string(), "2");
             assert_eq!(rows[1][1].to_string(), "Bob");
             // rows[1][2], rows[1][3], rows[1][4] should be NULL
+            assert!(rows[1][2].is_null(), "Expected NULL for email in row 2");
+            assert!(rows[1][3].is_null(), "Expected NULL for phone in row 2");
+            assert!(rows[1][4].is_null(), "Expected NULL for age in row 2");
 
-            // Verify third row (implicit NULLs)
+            // Verify third row (explicit NULLs)
             assert_eq!(rows[2][0].to_string(), "3");
             assert_eq!(rows[2][1].to_string(), "Charlie");
             // rows[2][2] should be NULL
+            assert!(rows[2][2].is_null(), "Expected NULL for email");
             assert_eq!(rows[2][3].to_string(), "555-0123");
             // rows[2][4] should be NULL
+            assert!(rows[2][4].is_null(), "Expected NULL for age")
+        }
+
+        #[tokio::test]
+        async fn test_insert_with_implicit_null_values() {
+            let mut ctx = TestContext::new("test_insert_with_null_values").await;
+
+            // Create test table with nullable columns
+            let table_schema = Schema::new(vec![
+                Column::new("id", TypeId::Integer),
+                Column::new("name", TypeId::VarChar),
+                Column::new("email", TypeId::VarChar),
+                Column::new("phone", TypeId::VarChar),
+                Column::new("age", TypeId::Integer),
+            ]);
+
+            let table_name = "contacts";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Test INSERT with column specification and NULLs
+            let insert_sql =
+                "INSERT INTO contacts (id, name, phone) VALUES (3, 'Charlie', '555-0123')";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(
+                success,
+                "Insert with partial columns (implicit NULLs) failed"
+            );
+
+            // Verify NULL handling
+            let select_sql = "SELECT id, name, email, phone, age FROM contacts ORDER BY id";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "Select with NULL values failed");
+
+            let rows = writer.get_rows();
+            assert_eq!(rows.len(), 1, "Expected 1 row");
+
+            // Verify row (implicit NULLs)
+            assert_eq!(rows[0][0].to_string(), "3");
+            assert_eq!(rows[0][1].to_string(), "Charlie");
+            // rows[2][2] should be NULL
+            assert!(rows[0][2].is_null(), "Expected NULL for email");
+            assert_eq!(rows[0][3].to_string(), "555-0123");
+            // rows[2][4] should be NULL
+            assert!(rows[0][4].is_null(), "Expected NULL for age")
         }
 
         #[tokio::test]
