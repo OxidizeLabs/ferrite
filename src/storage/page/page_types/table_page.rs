@@ -1409,18 +1409,6 @@ mod capacity_tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
-    fn create_test_tuple(id: i32) -> (TupleMeta, Tuple) {
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-        let values = vec![Value::from(id), Value::from("Test".to_string())];
-        let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, &schema, rid);
-        let meta = TupleMeta::new(123);
-        (meta, tuple)
-    }
-
     #[test]
     fn test_page_capacity() {
         let mut page = TablePage::new(1);
@@ -1876,18 +1864,6 @@ mod page_type_tests {
     use crate::common::logger::initialize_logger;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-
-    fn create_test_tuple() -> (TupleMeta, Tuple) {
-        let schema = Schema::new(vec![
-            Column::new("id", TypeId::Integer),
-            Column::new("name", TypeId::VarChar),
-        ]);
-        let values = vec![Value::new(1), Value::new("test")];
-        let rid = RID::new(1, 0);
-        let tuple = Tuple::new(&values, &schema, rid);
-        let meta = TupleMeta::new(1);
-        (meta, tuple)
-    }
 
     #[test]
     fn test_page_type_preservation() {
