@@ -1,11 +1,10 @@
 use crate::common::config::{PageId, INVALID_PAGE_ID};
 use crate::common::rid::RID;
-use crate::concurrency::lock_manager::LockMode;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableInfo;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use log::{debug, error};
+use log::debug;
 use std::sync::Arc;
 
 /// Table iterator for scanning through table pages
@@ -155,29 +154,6 @@ impl TableIterator {
     /// Check if a page exists and is valid
     fn is_valid_page(&self, page_id: PageId) -> bool {
         self.table_heap.get_table_heap().get_page(page_id).is_ok()
-    }
-
-    /// Acquire necessary table lock
-    fn acquire_table_lock(&self) -> bool {
-        if let Some(txn_ctx) = &self.txn_ctx {
-            let txn = txn_ctx.get_transaction();
-            let lock_manager = txn_ctx.get_lock_manager();
-
-            // Get the table heap first
-            let table_heap = self.table_heap.get_table_heap();
-            // Then acquire the latch
-            let _latch_guard = table_heap.latch.read();
-
-            if let Err(e) = lock_manager.lock_table(
-                txn.clone(),
-                LockMode::IntentionShared,
-                self.table_heap.get_table_oid(),
-            ) {
-                error!("Failed to acquire table lock: {}", e);
-                return false;
-            }
-        }
-        true
     }
 }
 
