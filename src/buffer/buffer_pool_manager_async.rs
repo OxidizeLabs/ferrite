@@ -603,13 +603,54 @@ impl BufferPoolManager {
         // No free frames, try to evict using LRU-K
         trace!("No free frames, attempting eviction");
         let mut replacer = self.replacer.write();
-        if let Some(frame_id) = replacer.evict() {
-            trace!("LRU-K replacer selected frame {} for eviction", frame_id);
-            Some(frame_id)
-        } else {
-            warn!("No evictable frames found");
-            None
+        
+        // Try multiple eviction attempts if needed
+        for _ in 0..self.pool_size {
+            if let Some(frame_id) = replacer.evict() {
+                trace!("LRU-K replacer selected frame {} for eviction", frame_id);
+                
+                // Find the page_id for this frame
+                let page_id = {
+                    let page_table = self.page_table.read();
+                    let mut victim_page_id = None;
+                    
+                    for (&pid, &fid) in page_table.iter() {
+                        if fid == frame_id {
+                            victim_page_id = Some(pid);
+                            break;
+                        }
+                    }
+                    
+                    victim_page_id
+                };
+                
+                // If we found a page to evict, do it now
+                if let Some(old_page_id) = page_id {
+                    self.evict_old_page(frame_id, old_page_id);
+                }
+                
+                return Some(frame_id);
+            }
+            
+            // If no frames are evictable, try to make some evictable
+            // Find pages with pin count 0 that aren't marked as evictable
+            let pages = self.pages.read();
+            for (i, page_opt) in pages.iter().enumerate() {
+                if let Some(page) = page_opt {
+                    let page_data = page.read();
+                    if page_data.get_pin_count() == 0 {
+                        // Drop read lock before acquiring write lock
+                        drop(page_data);
+                        
+                        // Set this frame as evictable
+                        replacer.set_evictable(i as FrameId, true);
+                    }
+                }
+            }
         }
+        
+        warn!("No evictable frames found after multiple attempts");
+        None
     }
 
     fn allocate_page_id(&self) -> PageId {

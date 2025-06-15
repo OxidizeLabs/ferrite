@@ -490,7 +490,7 @@ impl TransactionalTableHeap {
         let txn_manager = txn_ctx.get_transaction_manager();
 
         // Get latest version
-        let (meta, tuple) = self.table_heap.get_tuple_internal(rid)?;
+        let (meta, tuple) = self.table_heap.get_tuple_internal(rid, false)?;
 
         // Handle visibility based on isolation level
         match txn.get_isolation_level() {
@@ -521,7 +521,7 @@ impl TransactionalTableHeap {
         }
 
         // Get current version for visibility check
-        let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
+        let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid, false)?;
 
         // Visibility checks
         if current_meta.get_creator_txn_id() != meta.get_creator_txn_id()
@@ -548,6 +548,7 @@ impl TransactionalTableHeap {
                 prev_txn: current_meta.get_creator_txn_id(),
                 prev_log_idx: current_meta.get_undo_log_idx(),
             },
+            original_rid: Some(rid),
         };
 
         // Append undo log and get link
@@ -717,7 +718,7 @@ impl TransactionalTableHeap {
         //     .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
         // Get the current version for visibility check
-        let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid)?;
+        let (current_meta, current_tuple) = self.table_heap.get_tuple_internal(rid, false)?;
 
         // Visibility checks
         if current_meta.get_creator_txn_id() != txn.get_transaction_id()
@@ -734,17 +735,18 @@ impl TransactionalTableHeap {
             current_meta.get_commit_timestamp()
         );
 
-        // Create undo log that points to the original version
-        let undo_log = UndoLog {
-            is_deleted: false,
-            modified_fields: vec![true; current_tuple.get_column_count()],
-            tuple: current_tuple.clone(),
-            ts: current_meta.get_commit_timestamp(),
-            prev_version: UndoLink {
+        // Create undo log that points to the original version, now with RID for proper restoration
+        let undo_log = UndoLog::new_for_delete(
+            false, // Not deleted in the previous version
+            vec![true; current_tuple.get_column_count()],
+            current_tuple.clone(),
+            current_meta.get_commit_timestamp(),
+            UndoLink {
                 prev_txn: current_meta.get_creator_txn_id(),
                 prev_log_idx: current_meta.get_undo_log_idx(),
             },
-        };
+            rid,
+        );
 
         // Append undo log and get link
         let undo_link = txn.append_undo_log(Arc::from(undo_log));
@@ -823,8 +825,6 @@ impl TransactionalTableHeap {
 
         Ok(())
     }
-
-
 
     /// Validate that a foreign key value exists in the referenced table
     fn validate_foreign_key_reference(
