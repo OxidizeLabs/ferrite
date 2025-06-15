@@ -183,30 +183,7 @@ impl Column {
             TypeId::Point => 16,
         }
     }
-
-    fn type_size(type_id: TypeId, length: usize) -> usize {
-        match type_id {
-            TypeId::Boolean | TypeId::TinyInt => 1,
-            TypeId::SmallInt => 2,
-            TypeId::Integer => 4,
-            TypeId::BigInt | TypeId::Decimal | TypeId::Timestamp => 8,
-            TypeId::VarChar | TypeId::Char => length,
-            TypeId::Vector => length * size_of::<f64>(),
-            TypeId::Invalid => 0,
-            TypeId::Struct => length,
-            TypeId::Float => 4,
-            TypeId::Date => 4,
-            TypeId::Time => 4,
-            TypeId::Interval => 8,
-            TypeId::Binary => length,
-            TypeId::JSON => length,
-            TypeId::UUID => 16,
-            TypeId::Array => size_of::<Vec<Value>>(),
-            TypeId::Enum => 4,
-            TypeId::Point => 16,
-        }
-    }
-
+    
     /// Create a new column with default parameters
     pub fn new(column_name: &str, column_type: TypeId) -> Self {
         ColumnBuilder::new(column_name, column_type).build()
