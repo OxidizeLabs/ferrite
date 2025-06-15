@@ -1034,7 +1034,7 @@ mod complex_behaviour {
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::query_planner::QueryPlanner;
     use crate::types_db::type_id::TypeId;
-    use log::{info, warn};
+    use log::info;
     use parking_lot::RwLock;
     use std::error::Error;
     use std::sync::Arc;
@@ -1154,23 +1154,6 @@ mod complex_behaviour {
                 .ok_or("Failed to create order_items table")?;
 
             Ok(())
-        }
-
-        fn debug_plan(&mut self, sql: &str) -> Result<(), Box<dyn Error>> {
-            info!("Generating plan for SQL: {}", sql);
-            match self.planner.explain(sql) {
-                Ok(plan) => {
-                    info!("Generated plan:\n{}", plan);
-                    Ok(())
-                }
-                Err(e) => {
-                    warn!("Failed to generate plan: {}", e);
-                    Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        e.to_string(),
-                    )))
-                }
-            }
         }
     }
 
