@@ -17,7 +17,6 @@ use std::sync::Arc;
 pub struct InsertExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<InsertNode>,
-    txn_table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
     schema_manager: SchemaManager,
@@ -33,35 +32,6 @@ impl InsertExecutor {
         );
         debug!("Target schema: {:?}", plan.get_output_schema());
 
-        // First, make a brief read to get the catalog reference
-        debug!("Acquiring context read lock");
-        let catalog = {
-            let context_guard = context.read();
-            debug!("Context lock acquired, getting catalog reference");
-            context_guard.get_catalog().clone()
-        };
-        debug!("Released context read lock");
-
-        // Then briefly read from catalog to get the TableInfo
-        debug!("Acquiring catalog read lock");
-        let txn_table_heap = {
-            let catalog_guard = catalog.read();
-            debug!("Catalog lock acquired, getting table info");
-            let table_info = catalog_guard
-                .get_table(&plan.get_table_name())
-                .expect(&format!("Table '{}' not found", plan.get_table_name()));
-            debug!(
-                "Found table '{}' with schema: {:?}",
-                plan.get_table_name(),
-                table_info.get_table_schema()
-            );
-            Arc::new(TransactionalTableHeap::new(
-                table_info.get_table_heap(),
-                table_info.get_table_oidt(),
-            ))
-        };
-        debug!("Released catalog read lock");
-
         debug!(
             "Successfully created InsertExecutor for table '{}'",
             plan.get_table_name()
@@ -70,7 +40,6 @@ impl InsertExecutor {
         Self {
             context,
             plan,
-            txn_table_heap,
             initialized: false,
             child_executor: None,
             schema_manager: SchemaManager::new(),
@@ -117,6 +86,95 @@ impl InsertExecutor {
 
         trace!("Successfully completed bulk insert of {} rows", successful_inserts);
         Ok(successful_inserts)
+    }
+
+    /// Validates foreign key constraints for the given values
+    fn validate_foreign_key_constraints_with_context(
+        context: &Arc<RwLock<ExecutionContext>>,
+        values: &[crate::types_db::value::Value],
+        schema: &Schema
+    ) -> Result<(), String> {
+        for (column_index, column) in schema.get_columns().iter().enumerate() {
+            if let Some(foreign_key_constraint) = column.get_foreign_key() {
+                if column_index >= values.len() {
+                    return Err(format!(
+                        "Value index {} out of bounds for foreign key validation",
+                        column_index
+                    ));
+                }
+
+                let value = &values[column_index];
+
+                // NULL values are allowed for foreign keys (unless column is NOT NULL)
+                if value.is_null() {
+                    continue;
+                }
+
+                // Validate that the foreign key value exists in the referenced table
+                if !Self::validate_foreign_key_reference_with_context(
+                    context,
+                    &value,
+                    &foreign_key_constraint.referenced_table,
+                    &foreign_key_constraint.referenced_column
+                )? {
+                    return Err(format!(
+                        "Foreign key constraint violation for column '{}': value '{}' does not exist in table '{}' column '{}'",
+                        column.get_name(),
+                        value,
+                        foreign_key_constraint.referenced_table,
+                        foreign_key_constraint.referenced_column
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate that a foreign key value exists in the referenced table
+    fn validate_foreign_key_reference_with_context(
+        context: &Arc<RwLock<ExecutionContext>>,
+        value: &crate::types_db::value::Value,
+        referenced_table: &str,
+        referenced_column: &str,
+    ) -> Result<bool, String> {
+        let context_guard = context.read();
+        let catalog_guard = context_guard.get_catalog().read();
+
+        // Get the referenced table info
+        let table_info = catalog_guard
+            .get_table(referenced_table)
+            .ok_or_else(|| format!("Referenced table '{}' not found", referenced_table))?;
+
+        let referenced_schema = table_info.get_table_schema();
+
+        // Find the referenced column index
+        let column_index = referenced_schema.get_columns()
+            .iter()
+            .position(|col| col.get_name() == referenced_column)
+            .ok_or_else(|| format!("Referenced column '{}' not found in table '{}'", referenced_column, referenced_table))?;
+
+        // Get transaction context
+        let txn_context = context_guard.get_transaction_context().clone();
+
+        // Create transactional table heap for the referenced table
+        let referenced_table_heap = TransactionalTableHeap::new(
+            table_info.get_table_heap(),
+            table_info.get_table_oidt()
+        );
+
+        // Check if the value exists in the referenced table
+        let iterator = referenced_table_heap.make_iterator(Some(txn_context));
+
+        for item in iterator {
+            let (_, tuple) = item;
+            let existing_value = tuple.get_value(column_index);
+            if existing_value == *value {
+                return Ok(true); // Found the referenced value
+            }
+        }
+
+        Ok(false) // Referenced value not found
     }
 }
 
@@ -316,96 +374,6 @@ impl AbstractExecutor for InsertExecutor {
     }
 }
 
-impl InsertExecutor {
-    /// Validates foreign key constraints for the given values
-    fn validate_foreign_key_constraints_with_context(
-        context: &Arc<RwLock<ExecutionContext>>, 
-        values: &[crate::types_db::value::Value], 
-        schema: &Schema
-    ) -> Result<(), String> {
-        for (column_index, column) in schema.get_columns().iter().enumerate() {
-            if let Some(foreign_key_constraint) = column.get_foreign_key() {
-                if column_index >= values.len() {
-                    return Err(format!(
-                        "Value index {} out of bounds for foreign key validation",
-                        column_index
-                    ));
-                }
-
-                let value = &values[column_index];
-
-                // NULL values are allowed for foreign keys (unless column is NOT NULL)
-                if value.is_null() {
-                    continue;
-                }
-
-                // Validate that the foreign key value exists in the referenced table
-                if !Self::validate_foreign_key_reference_with_context(
-                    context,
-                    &value, 
-                    &foreign_key_constraint.referenced_table, 
-                    &foreign_key_constraint.referenced_column
-                )? {
-                    return Err(format!(
-                        "Foreign key constraint violation for column '{}': value '{}' does not exist in table '{}' column '{}'",
-                        column.get_name(),
-                        value,
-                        foreign_key_constraint.referenced_table,
-                        foreign_key_constraint.referenced_column
-                    ));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Validate that a foreign key value exists in the referenced table
-    fn validate_foreign_key_reference_with_context(
-        context: &Arc<RwLock<ExecutionContext>>,
-        value: &crate::types_db::value::Value,
-        referenced_table: &str,
-        referenced_column: &str,
-    ) -> Result<bool, String> {
-        let context_guard = context.read();
-        let catalog_guard = context_guard.get_catalog().read();
-        
-        // Get the referenced table info
-        let table_info = catalog_guard
-            .get_table(referenced_table)
-            .ok_or_else(|| format!("Referenced table '{}' not found", referenced_table))?;
-        
-        let referenced_schema = table_info.get_table_schema();
-        
-        // Find the referenced column index
-        let column_index = referenced_schema.get_columns()
-            .iter()
-            .position(|col| col.get_name() == referenced_column)
-            .ok_or_else(|| format!("Referenced column '{}' not found in table '{}'", referenced_column, referenced_table))?;
-        
-        // Get transaction context
-        let txn_context = context_guard.get_transaction_context().clone();
-        
-        // Create transactional table heap for the referenced table
-        let referenced_table_heap = TransactionalTableHeap::new(
-            table_info.get_table_heap(),
-            table_info.get_table_oidt()
-        );
-        
-        // Check if the value exists in the referenced table
-        let iterator = referenced_table_heap.make_iterator(Some(txn_context));
-        
-        for item in iterator {
-            let (_, tuple) = item;
-            let existing_value = tuple.get_value(column_index);
-            if existing_value == *value {
-                return Ok(true); // Found the referenced value
-            }
-        }
-        
-        Ok(false) // Referenced value not found
-    }
-}
 
 #[cfg(test)]
 mod tests {
