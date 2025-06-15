@@ -98,7 +98,7 @@ impl Type for StructType {
         }
 
         if val.is_struct() {
-            if let Some(struct_data) = &val.struct_data {
+            if let Some(_struct_data) = &val.struct_data {
                 let mut result = String::from("{");
 
                 let field_names = val.get_struct_field_names();
