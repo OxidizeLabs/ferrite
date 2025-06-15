@@ -179,7 +179,7 @@ impl TableHeap {
         let page = page_guard.read();
 
         // Get the current version for visibility check
-        let (current_meta, current_tuple) = page.get_tuple(&rid)?;
+        let (current_meta, current_tuple) = page.get_tuple(&rid, false)?;
 
         // Check if the tuple is deleted
         if current_meta.is_deleted() {
@@ -258,7 +258,7 @@ impl TableHeap {
         let mut page = page_guard.write();
 
         // First, get the current tuple meta to check visibility
-        let (current_meta, _) = page.get_tuple(&rid)?;
+        let (current_meta, _) = page.get_tuple(&rid, false)?;
 
         // Check visibility rules:
         // 1. If the current transaction created the tuple, allow update
@@ -295,7 +295,7 @@ impl TableHeap {
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
 
-        let (meta, tuple) = page.get_tuple(&rid)?;
+        let (meta, tuple) = page.get_tuple(&rid, false)?;
 
         // Check if the tuple is deleted
         if meta.is_deleted() {
@@ -318,7 +318,7 @@ impl TableHeap {
         // First get the latest version
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
-        let (meta, tuple) = page.get_tuple(&rid)?;
+        let (meta, tuple) = page.get_tuple(&rid, false)?;
 
         // Check if the tuple is deleted
         if meta.is_deleted() {
@@ -400,7 +400,7 @@ impl TableHeap {
         let page = page_guard.read();
 
         // Get the tuple meta
-        let (meta, _) = page.get_tuple(&rid)?;
+        let (meta, _) = page.get_tuple(&rid, false)?;
 
         // Check if the tuple is deleted
         if meta.is_deleted() {
@@ -538,7 +538,7 @@ impl TableHeap {
     ///
     /// A pair containing the meta and tuple.
     pub fn get_tuple_with_lock_acquired(&self, rid: RID, page: &TablePage) -> (TupleMeta, Tuple) {
-        page.get_tuple(&rid).unwrap()
+        page.get_tuple(&rid, false).unwrap()
     }
 
     /// Gets a tuple meta with the lock acquired.
@@ -552,7 +552,7 @@ impl TableHeap {
     ///
     /// The tuple meta.
     pub fn get_tuple_meta_with_lock_acquired(&self, rid: RID, page: &TablePage) -> TupleMeta {
-        page.get_tuple(&rid).unwrap().0
+        page.get_tuple(&rid, false).unwrap().0
     }
 
     /// Helper method to get the number of pages
@@ -819,10 +819,10 @@ impl TableHeap {
             .map_err(|e| format!("Failed to update tuple: {}", e))
     }
 
-    pub fn get_tuple_internal(&self, rid: RID) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
+    pub fn get_tuple_internal(&self, rid: RID, allow_deleted: bool) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
-        let (meta, tuple) = page.get_tuple(&rid)?;
+        let (meta, tuple) = page.get_tuple(&rid, allow_deleted)?;
         Ok((Arc::new(meta), Arc::new(tuple)))
     }
 
@@ -1382,7 +1382,7 @@ mod tests {
 
         // Test direct page access
         let (stored_meta, stored_tuple) =
-            page.get_tuple(&rid).expect("Failed to get tuple from page");
+            page.get_tuple(&rid, false).expect("Failed to get tuple from page");
         assert_eq!(stored_meta, meta);
         assert_eq!(stored_tuple, tuple);
     }

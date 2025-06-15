@@ -359,11 +359,12 @@ impl TablePage {
     /// # Parameters
     ///
     /// - `rid`: The RID of the tuple to get.
+    /// - `allow_deleted`: If true, allows retrieving deleted tuples.
     ///
     /// # Returns
     ///
     /// A Result containing the tuple meta and tuple, or a String error message.
-    pub fn get_tuple(&self, rid: &RID) -> Result<(TupleMeta, Tuple), String> {
+    pub fn get_tuple(&self, rid: &RID, allow_deleted: bool) -> Result<(TupleMeta, Tuple), String> {
         // First verify the RID is valid for this page
         if rid.get_page_id() != self.header.page_id {
             return Err(format!(
@@ -386,7 +387,7 @@ impl TablePage {
         let (offset, size, meta) = &self.tuple_info[slot_num];
 
         // Check if tuple is deleted
-        if meta.is_deleted() {
+        if meta.is_deleted() && !allow_deleted {
             return Err("Tuple has been deleted".to_string());
         }
 
@@ -1004,7 +1005,7 @@ mod unit_tests {
         let tuple_id = page.insert_tuple(&meta, &mut tuple).unwrap();
         assert_eq!(page.header.num_tuples, 1);
 
-        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id).unwrap();
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id, false).unwrap();
         assert_eq!(
             retrieved_meta.get_commit_timestamp(),
             meta.get_commit_timestamp()
@@ -1112,7 +1113,7 @@ mod unit_tests {
         }
 
         // Verify the update
-        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid, false).unwrap();
         assert_eq!(
             retrieved_meta.get_commit_timestamp(),
             new_meta.get_commit_timestamp()
@@ -1154,7 +1155,7 @@ mod unit_tests {
         let invalid_rid = RID::new(1, 999); // Invalid slot number
 
         // Test getting an invalid tuple
-        match page.get_tuple(&invalid_rid) {
+        match page.get_tuple(&invalid_rid, false) {
             Ok(_) => panic!("Expected error for invalid tuple"),
             Err(err) => {
                 assert!(
@@ -1241,7 +1242,7 @@ mod tuple_operation_tests {
         let (meta, mut tuple) = create_test_tuple(1);
 
         let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
-        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid, false).unwrap();
 
         assert_eq!(
             retrieved_meta.get_commit_timestamp(),
@@ -1288,7 +1289,7 @@ mod tuple_operation_tests {
                 .unwrap();
         }
 
-        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid, false).unwrap();
         assert_eq!(
             retrieved_meta.get_commit_timestamp(),
             new_meta.get_commit_timestamp()
@@ -1318,7 +1319,7 @@ mod tuple_operation_tests {
         assert_eq!(rid, next_rid);
 
         // Retrieve and verify
-        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid).unwrap();
+        let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid, false).unwrap();
         assert_eq!(
             retrieved_meta.get_commit_timestamp(),
             meta.get_commit_timestamp()
@@ -1372,7 +1373,7 @@ mod error_handling_tests {
     fn test_invalid_tuple_retrieval() {
         let page = TablePage::new(1);
         let invalid_rid = RID::new(1, 100);
-        assert!(matches!(page.get_tuple(&invalid_rid), Err(..)));
+        assert!(matches!(page.get_tuple(&invalid_rid, false), Err(..)));
     }
 
     #[test]
@@ -1562,7 +1563,7 @@ mod serialization_tests {
 
         // Verify tuple
         debug!("Retrieving tuple from deserialized page");
-        let (deserialized_meta, deserialized_tuple) = deserialized_page.get_tuple(&rid).unwrap();
+        let (deserialized_meta, deserialized_tuple) = deserialized_page.get_tuple(&rid, false).unwrap();
 
         debug!("Comparing metadata");
         assert_eq!(
@@ -1592,7 +1593,7 @@ mod serialization_tests {
             page_guard.insert_tuple(&meta, &mut tuple).unwrap();
 
             // Verify initial insertion
-            let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid).unwrap();
+            let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid, false).unwrap();
             assert_eq!(initial_meta.get_commit_timestamp(), 123);
             assert_eq!(initial_tuple.get_value(0), Value::new(42));
         }
@@ -1613,7 +1614,7 @@ mod serialization_tests {
                     }
                 };
 
-                match page_guard.get_tuple(&rid) {
+                match page_guard.get_tuple(&rid, false) {
                     Ok((retrieved_meta, retrieved_tuple)) => {
                         debug!(
                             "Thread {} - Retrieved meta timestamp: {:?}",
@@ -1694,7 +1695,7 @@ mod serialization_tests {
         // Now update all tuples to have a different status (simulating UPDATE without WHERE)
         for (i, &rid) in rids.iter().enumerate() {
             // Get the current tuple
-            let (current_meta, current_tuple) = page.get_tuple(&rid).unwrap();
+            let (current_meta, current_tuple) = page.get_tuple(&rid, false).unwrap();
 
             // Create updated tuple with new status
             let updated_values = vec![
@@ -1729,7 +1730,7 @@ mod serialization_tests {
         assert_eq!(final_page.get_num_tuples(), 3);
 
         for (i, &rid) in rids.iter().enumerate() {
-            let (_meta, tuple) = final_page.get_tuple(&rid).unwrap();
+            let (_meta, tuple) = final_page.get_tuple(&rid, false).unwrap();
             assert_eq!(tuple.get_value(0), Value::from(i as i32 + 1)); // ID unchanged
             assert_eq!(tuple.get_value(2), Value::from("updated")); // Status changed
         }
@@ -1790,7 +1791,7 @@ mod serialization_tests {
         );
 
         let final_page = deserialized_result.unwrap();
-        let (_, final_tuple) = final_page.get_tuple(&rid).unwrap();
+        let (_, final_tuple) = final_page.get_tuple(&rid, false).unwrap();
 
         // Verify the updated data is correct
         assert_eq!(final_tuple.get_value(0), Value::from(1));
@@ -1848,7 +1849,7 @@ mod serialization_tests {
         );
 
         let final_page = deserialized_result.unwrap();
-        let (_, final_tuple) = final_page.get_tuple(&rid).unwrap();
+        let (_, final_tuple) = final_page.get_tuple(&rid, false).unwrap();
 
         // Verify the updated data is correct
         assert_eq!(final_tuple.get_value(0), Value::from(1));
@@ -1903,7 +1904,7 @@ mod page_type_tests {
         assert_eq!(deserialized.data[PAGE_TYPE_OFFSET], PageType::Table as u8);
 
         // Verify tuple can still be read after deserialization
-        let (_, retrieved_tuple) = deserialized.get_tuple(&rid).unwrap();
+        let (_, retrieved_tuple) = deserialized.get_tuple(&rid, false).unwrap();
         assert_eq!(retrieved_tuple.get_value(0), Value::new(1));
         assert_eq!(retrieved_tuple.get_value(1), Value::new("test"));
     }

@@ -136,7 +136,15 @@ impl ExpressionOps for SubqueryExpression {
             }
             SubqueryType::InList => {
                 // Get list of values from subquery
-                self.subquery.evaluate(tuple, schema)
+                let result = self.subquery.evaluate(tuple, schema)?;
+                
+                // Convert the result to a vector if it's not already one
+                match result.get_val() {
+                    Val::Vector(_) => Ok(result),
+                    Val::Null => Ok(Value::new_vector(vec![Value::new(Val::Null)])),
+                    // For a scalar result, wrap it in a vector
+                    _ => Ok(Value::new_vector(vec![result])),
+                }
             }
             SubqueryType::Quantified => {
                 // Handle ANY/ALL comparison
@@ -179,9 +187,30 @@ impl ExpressionOps for SubqueryExpression {
                 )?;
                 Ok(Value::new(!result.is_null()))
             }
-            SubqueryType::InList | SubqueryType::Quantified => {
-                self.subquery
-                    .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
+            SubqueryType::InList => {
+                // Get list of values from subquery for join evaluation
+                let result = self.subquery.evaluate_join(
+                    left_tuple, 
+                    left_schema, 
+                    right_tuple, 
+                    right_schema
+                )?;
+                
+                // Convert the result to a vector if it's not already one
+                match result.get_val() {
+                    Val::Vector(_) => Ok(result),
+                    Val::Null => Ok(Value::new_vector(vec![Value::new(Val::Null)])),
+                    // For a scalar result, wrap it in a vector
+                    _ => Ok(Value::new_vector(vec![result])),
+                }
+            }
+            SubqueryType::Quantified => {
+                self.subquery.evaluate_join(
+                    left_tuple,
+                    left_schema,
+                    right_tuple,
+                    right_schema
+                )
             }
         }
     }

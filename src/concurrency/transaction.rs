@@ -57,24 +57,8 @@ pub struct UndoLog {
     pub ts: TimeStampOidT,
     /// Undo log previous version.
     pub prev_version: UndoLink,
-}
-
-/// Represents a transaction.
-#[derive(Debug)]
-pub struct Transaction {
-    // Immutable fields
-    txn_id: TxnId,
-    isolation_level: IsolationLevel,
-    thread_id: thread::ThreadId,
-
-    // Mutable fields with interior mutability
-    state: RwLock<TransactionState>,
-    read_ts: RwLock<Timestamp>,
-    commit_ts: RwLock<Timestamp>,
-    undo_logs: Mutex<Vec<Arc<UndoLog>>>,
-    write_set: Mutex<HashMap<TableOidT, HashSet<RID>>>,
-    scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
-    prev_lsn: RwLock<Lsn>,
+    /// Original RID for deleted tuples (used for restoring deleted tuples during rollback)
+    pub original_rid: Option<RID>,
 }
 
 impl UndoLog {
@@ -92,6 +76,26 @@ impl UndoLog {
             tuple,
             ts,
             prev_version,
+            original_rid: None,
+        }
+    }
+
+    /// Creates a new UndoLog entry for a deleted tuple
+    pub fn new_for_delete(
+        is_deleted: bool,
+        modified_fields: Vec<bool>,
+        tuple: Arc<Tuple>,
+        ts: TimeStampOidT,
+        prev_version: UndoLink,
+        rid: RID,
+    ) -> Self {
+        Self {
+            is_deleted,
+            modified_fields,
+            tuple,
+            ts,
+            prev_version,
+            original_rid: Some(rid),
         }
     }
 }
@@ -120,6 +124,24 @@ impl IsolationLevel {
             _ => None,
         }
     }
+}
+
+/// Represents a transaction.
+#[derive(Debug)]
+pub struct Transaction {
+    // Immutable fields
+    txn_id: TxnId,
+    isolation_level: IsolationLevel,
+    thread_id: thread::ThreadId,
+
+    // Mutable fields with interior mutability
+    state: RwLock<TransactionState>,
+    read_ts: RwLock<Timestamp>,
+    commit_ts: RwLock<Timestamp>,
+    undo_logs: Mutex<Vec<Arc<UndoLog>>>,
+    write_set: Mutex<HashMap<TableOidT, HashSet<RID>>>,
+    scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
+    prev_lsn: RwLock<Lsn>,
 }
 
 impl Transaction {
