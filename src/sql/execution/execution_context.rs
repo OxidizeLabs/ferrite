@@ -575,7 +575,6 @@ mod tests {
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         catalog: Arc<RwLock<Catalog>>,
-        transaction_context: Arc<TransactionContext>,
         execution_context: Arc<RwLock<ExecutionContext>>,
         _temp_dir: TempDir,
     }
@@ -632,7 +631,6 @@ mod tests {
             Self {
                 bpm,
                 catalog,
-                transaction_context,
                 execution_context,
                 _temp_dir: temp_dir,
             }
