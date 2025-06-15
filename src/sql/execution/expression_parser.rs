@@ -3127,7 +3127,6 @@ mod tests {
     use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
-        catalog: Arc<RwLock<Catalog>>,
         _temp_dir: TempDir,
         expression_parser: ExpressionParser,
     }
@@ -3173,16 +3172,11 @@ mod tests {
             let expression_parser = ExpressionParser::new(catalog.clone());
 
             Self {
-                catalog,
                 _temp_dir: temp_dir,
                 expression_parser,
             }
         }
-
-        pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
-            self.catalog.clone()
-        }
-
+        
         pub fn expression_parser(&self) -> &ExpressionParser {
             &self.expression_parser
         }
@@ -3402,7 +3396,7 @@ mod tests {
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
-            ("age = 25", TypeId::Integer),
+            ("age = 25", TypeId::TinyInt),
             ("name = 'John'", TypeId::VarChar),
             ("salary > 50000.0", TypeId::Decimal),
         ];
