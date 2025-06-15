@@ -214,7 +214,6 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -364,9 +363,7 @@ mod tests {
 
         for (id, value) in test_data {
             let values = vec![Value::new(id), Value::new(value)];
-
-            let tuple_meta = Arc::new(TupleMeta::new(ctx.transaction_context.get_transaction_id()));
-
+            
             txn_table_heap
                 .insert_tuple_from_values(values, &schema, ctx.transaction_context.clone())
                 .expect("Failed to insert tuple");
