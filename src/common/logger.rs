@@ -12,7 +12,7 @@ pub fn initialize_logger() {
             .filter_level(LevelFilter::Info)
             .filter_module("tkdb", LevelFilter::Debug)
             .filter_module("tkdb::buffer", LevelFilter::Info)
-            .filter_module("tkdb::storage", LevelFilter::Info)
+            .filter_module("tkdb::storage", LevelFilter::Debug)
             .filter_module("tkdb::concurrency", LevelFilter::Info)
             .filter_module("tkdb::recovery", LevelFilter::Info)
             .filter_module("rustyline", LevelFilter::Info)

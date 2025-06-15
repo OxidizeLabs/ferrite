@@ -10,8 +10,8 @@ use std::fmt::{Debug, Formatter};
 /// Leaf page structure for B+ Tree
 pub struct BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de>,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     // Array of keys
@@ -44,8 +44,8 @@ impl<
     C: Fn(&K, &K) -> Ordering + 'static + Send + Sync,
 > PageTypeId for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de>,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     const TYPE_ID: PageType = PageType::BTreeLeaf;
@@ -53,8 +53,8 @@ where
 
 impl<K, V, C> BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + Debug + for<'de> Deserialize<'de>,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     pub fn new_with_options(page_id: PageId, max_size: usize, comparator: C) -> Self {
@@ -241,8 +241,10 @@ where
         cursor += max_size_bytes.len();
 
         // Write next_page_id
-        let next_page_id_bytes =
-            bincode::serialize(&self.next_page_id).expect("Failed to serialize next_page_id");
+        let next_page_id_bytes = bincode::encode_to_vec(
+            &self.next_page_id, 
+            bincode::config::standard()
+        ).expect("Failed to serialize next_page_id");
         let next_page_id_len = next_page_id_bytes.len() as u32;
         buffer[cursor..cursor + 4].copy_from_slice(&next_page_id_len.to_ne_bytes());
         cursor += 4;
@@ -253,15 +255,20 @@ where
         for i in 0..self.size {
             // This is a simplified approach and assumes KeyType and ValueType can be serialized
             // In a real implementation, you might need type-specific serialization logic
-            let key_bytes = bincode::serialize(&self.keys[i]).expect("Failed to serialize key");
+            let key_bytes = bincode::encode_to_vec(
+                &self.keys[i], 
+                bincode::config::standard()
+            ).expect("Failed to serialize key");
             let key_len = key_bytes.len() as u32;
             buffer[cursor..cursor + 4].copy_from_slice(&key_len.to_ne_bytes());
             cursor += 4;
             buffer[cursor..cursor + key_bytes.len()].copy_from_slice(&key_bytes);
             cursor += key_bytes.len();
 
-            let value_bytes =
-                bincode::serialize(&self.values[i]).expect("Failed to serialize value");
+            let value_bytes = bincode::encode_to_vec(
+                &self.values[i], 
+                bincode::config::standard()
+            ).expect("Failed to serialize value");
             let value_len = value_bytes.len() as u32;
             buffer[cursor..cursor + 4].copy_from_slice(&value_len.to_ne_bytes());
             cursor += 4;
@@ -290,8 +297,11 @@ where
         next_page_id_len_bytes.copy_from_slice(&buffer[cursor..cursor + 4]);
         let next_page_id_len = u32::from_ne_bytes(next_page_id_len_bytes) as usize;
         cursor += 4;
-        self.next_page_id = bincode::deserialize(&buffer[cursor..cursor + next_page_id_len])
-            .expect("Failed to deserialize next_page_id");
+        let (next_page_id, _): (Option<PageId>, _) = bincode::decode_from_slice(
+            &buffer[cursor..cursor + next_page_id_len],
+            bincode::config::standard()
+        ).expect("Failed to deserialize next_page_id");
+        self.next_page_id = next_page_id;
         cursor += next_page_id_len;
 
         // Clear existing keys and values
@@ -308,16 +318,20 @@ where
             key_len_bytes.copy_from_slice(&buffer[cursor..cursor + 4]);
             let key_len = u32::from_ne_bytes(key_len_bytes) as usize;
             cursor += 4;
-            let key: K = bincode::deserialize(&buffer[cursor..cursor + key_len])
-                .expect("Failed to deserialize key");
+            let (key, _): (K, _) = bincode::decode_from_slice(
+                &buffer[cursor..cursor + key_len],
+                bincode::config::standard()
+            ).expect("Failed to deserialize key");
             cursor += key_len;
 
             let mut value_len_bytes = [0u8; 4];
             value_len_bytes.copy_from_slice(&buffer[cursor..cursor + 4]);
             let value_len = u32::from_ne_bytes(value_len_bytes) as usize;
             cursor += 4;
-            let value: V = bincode::deserialize(&buffer[cursor..cursor + value_len])
-                .expect("Failed to deserialize value");
+            let (value, _): (V, _) = bincode::decode_from_slice(
+                &buffer[cursor..cursor + value_len],
+                bincode::config::standard()
+            ).expect("Failed to deserialize value");
             cursor += value_len;
 
             self.keys.push(key);
@@ -383,8 +397,8 @@ where
 
 impl<K, V, C> Debug for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + Debug,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -413,8 +427,8 @@ where
 
 impl<K, V, C> PageTrait for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + Debug,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     fn get_page_id(&self) -> PageId {
@@ -495,8 +509,8 @@ where
 
 impl<K, V, C> Page for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + Debug,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de>,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
     fn new(_page_id: PageId) -> Self {

@@ -6,10 +6,11 @@ use std::sync::Arc;
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use bincode::{Encode, Decode};
 
 /// The type of the log record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogRecordType {
     Invalid = 0,
     Insert,
@@ -23,212 +24,48 @@ pub enum LogRecordType {
     NewPage,
 }
 
-/// For every write operation on the table page, you should write ahead a corresponding log record.
+/// A log record is the unit of logging. It's used to log operations that need to be persisted.
 ///
-/// For EACH log record, HEADER is like (5 fields in common, 20 bytes in total).
-///---------------------------------------------
-/// | size | LSN | transID | prevLSN | LogType |
-///---------------------------------------------
-/// For insert type log record
-///---------------------------------------------------------------
-/// | HEADER | tuple_rid | tuple_size | tuple_data (byte array) |
-///---------------------------------------------------------------
-/// For delete type (including markdelete, rollbackdelete, applydelete)
-///----------------------------------------------------------------
-/// | HEADER | tuple_rid | tuple_size | tuple_data (byte array) |
-///---------------------------------------------------------------
-/// For update type log record
-///-----------------------------------------------------------------------------------
-/// | HEADER | tuple_rid | tuple_size | old_tuple_data | tuple_size | new_tuple_data |
-///-----------------------------------------------------------------------------------
-/// For new page type log record
-///--------------------------
-/// | HEADER | prev_page_id | page_id |
-///--------------------------
+/// Each log record has a header that consists of:
+/// - size: The size of the log record in bytes, including the header.
+/// - LSN: Log Sequence Number.
+/// - txn_id: Transaction ID.
+/// - prev_lsn: Previous LSN of the transaction.
+/// - log_record_type: The type of the log record.
+///
+/// Based on the record type, different additional information is stored.
 #[derive(Debug)]
 pub struct LogRecord {
     size: i32,
-    lsn: AtomicU64, // Changed from Lsn to AtomicU64
+    lsn: AtomicU64, // Use AtomicU64 for interior mutability
     txn_id: TxnId,
     prev_lsn: Lsn,
     log_record_type: LogRecordType,
 
     // Fields for different types of log records
     delete_rid: Option<RID>,
-    delete_tuple: Option<Arc<Tuple>>,
+    delete_tuple: Option<Tuple>, // Store as Tuple for serialization
     insert_rid: Option<RID>,
-    insert_tuple: Option<Arc<Tuple>>,
+    insert_tuple: Option<Tuple>, // Store as Tuple for serialization
     update_rid: Option<RID>,
-    old_tuple: Option<Arc<Tuple>>,
-    new_tuple: Option<Arc<Tuple>>,
+    old_tuple: Option<Tuple>,    // Store as Tuple for serialization
+    new_tuple: Option<Tuple>,    // Store as Tuple for serialization
     prev_page_id: Option<PageId>,
     page_id: Option<PageId>,
-}
-
-// Helper function to serialize an Option<Arc<Tuple>>
-fn serialize_arc_tuple<S>(tuple: &Option<Arc<Tuple>>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    match tuple {
-        Some(arc_tuple) => {
-            // Get a reference to the tuple and serialize it directly
-            let tuple_ref = arc_tuple.as_ref();
-            // Serialize as Some(tuple)
-            Some(tuple_ref).serialize(serializer)
-        }
-        None => {
-            // Serialize None
-            Option::<Tuple>::None.serialize(serializer)
-        }
-    }
-}
-
-// Helper function to deserialize into Option<Arc<Tuple>>
-fn deserialize_arc_tuple<'de, D>(deserializer: D) -> Result<Option<Arc<Tuple>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    // First deserialize to Option<Tuple>
-    let option_tuple: Option<Tuple> = Deserialize::deserialize(deserializer)?;
-
-    // Convert Option<Tuple> to Option<Arc<Tuple>>
-    let result = option_tuple.map(Arc::new);
-    Ok(result)
-}
-
-// Helper for serializing AtomicU64
-fn serialize_atomic_u64<S>(atomic: &AtomicU64, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let value = atomic.load(Ordering::SeqCst);
-    serializer.serialize_u64(value)
-}
-
-// Helper for deserializing AtomicU64
-fn deserialize_atomic_u64<'de, D>(deserializer: D) -> Result<AtomicU64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = u64::deserialize(deserializer)?;
-    Ok(AtomicU64::new(value))
-}
-
-// Custom serialization implementation for LogRecord
-impl Serialize for LogRecord {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Create a serializable struct that uses our helper functions
-        #[derive(Serialize)]
-        struct SerializableLogRecord<'a> {
-            size: i32,
-            #[serde(serialize_with = "serialize_atomic_u64")]
-            lsn: &'a AtomicU64,
-            txn_id: TxnId,
-            prev_lsn: Lsn,
-            log_record_type: LogRecordType,
-            delete_rid: &'a Option<RID>,
-            #[serde(serialize_with = "serialize_arc_tuple")]
-            delete_tuple: &'a Option<Arc<Tuple>>,
-            insert_rid: &'a Option<RID>,
-            #[serde(serialize_with = "serialize_arc_tuple")]
-            insert_tuple: &'a Option<Arc<Tuple>>,
-            update_rid: &'a Option<RID>,
-            #[serde(serialize_with = "serialize_arc_tuple")]
-            old_tuple: &'a Option<Arc<Tuple>>,
-            #[serde(serialize_with = "serialize_arc_tuple")]
-            new_tuple: &'a Option<Arc<Tuple>>,
-            prev_page_id: &'a Option<PageId>,
-            page_id: &'a Option<PageId>,
-        }
-
-        let serializable = SerializableLogRecord {
-            size: self.size,
-            lsn: &self.lsn,
-            txn_id: self.txn_id,
-            prev_lsn: self.prev_lsn,
-            log_record_type: self.log_record_type,
-            delete_rid: &self.delete_rid,
-            delete_tuple: &self.delete_tuple,
-            insert_rid: &self.insert_rid,
-            insert_tuple: &self.insert_tuple,
-            update_rid: &self.update_rid,
-            old_tuple: &self.old_tuple,
-            new_tuple: &self.new_tuple,
-            prev_page_id: &self.prev_page_id,
-            page_id: &self.page_id,
-        };
-
-        serializable.serialize(serializer)
-    }
-}
-
-// Custom deserialization implementation for LogRecord
-impl<'de> Deserialize<'de> for LogRecord {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Create a deserializable struct that uses our helper functions
-        #[derive(Deserialize)]
-        struct DeserializableLogRecord {
-            size: i32,
-            #[serde(deserialize_with = "deserialize_atomic_u64")]
-            lsn: AtomicU64,
-            txn_id: TxnId,
-            prev_lsn: Lsn,
-            log_record_type: LogRecordType,
-            delete_rid: Option<RID>,
-            #[serde(deserialize_with = "deserialize_arc_tuple")]
-            delete_tuple: Option<Arc<Tuple>>,
-            insert_rid: Option<RID>,
-            #[serde(deserialize_with = "deserialize_arc_tuple")]
-            insert_tuple: Option<Arc<Tuple>>,
-            update_rid: Option<RID>,
-            #[serde(deserialize_with = "deserialize_arc_tuple")]
-            old_tuple: Option<Arc<Tuple>>,
-            #[serde(deserialize_with = "deserialize_arc_tuple")]
-            new_tuple: Option<Arc<Tuple>>,
-            prev_page_id: Option<PageId>,
-            page_id: Option<PageId>,
-        }
-
-        let d = DeserializableLogRecord::deserialize(deserializer)?;
-
-        Ok(LogRecord {
-            size: d.size,
-            lsn: d.lsn,
-            txn_id: d.txn_id,
-            prev_lsn: d.prev_lsn,
-            log_record_type: d.log_record_type,
-            delete_rid: d.delete_rid,
-            delete_tuple: d.delete_tuple,
-            insert_rid: d.insert_rid,
-            insert_tuple: d.insert_tuple,
-            update_rid: d.update_rid,
-            old_tuple: d.old_tuple,
-            new_tuple: d.new_tuple,
-            prev_page_id: d.prev_page_id,
-            page_id: d.page_id,
-        })
-    }
 }
 
 impl LogRecord {
     const HEADER_SIZE: usize = 20;
 
-    /// Creates a new `LogRecord` for transaction type (BEGIN/COMMIT/ABORT).
+    /// Creates a new transaction log record.
     ///
     /// # Parameters
     /// - `txn_id`: The transaction ID.
-    /// - `prev_lsn`: The previous log sequence number.
-    /// - `log_record_type`: The type of the log record.
+    /// - `prev_lsn`: The previous LSN of the transaction.
+    /// - `log_record_type`: The type of the transaction log record.
     ///
     /// # Returns
-    /// A new `LogRecord` instance.
+    /// A new transaction log record.
     pub fn new_transaction_record(
         txn_id: TxnId,
         prev_lsn: Lsn,
@@ -252,30 +89,35 @@ impl LogRecord {
         }
     }
 
-    /// Creates a new `LogRecord` for INSERT/DELETE type.
+    /// Creates a new insert or delete log record.
     ///
     /// # Parameters
     /// - `txn_id`: The transaction ID.
-    /// - `prev_lsn`: The previous log sequence number.
+    /// - `prev_lsn`: The previous LSN of the transaction.
     /// - `log_record_type`: The type of the log record.
-    /// - `rid`: The row ID.
-    /// - `tuple`: The tuple.
+    /// - `rid`: The RID of the tuple being inserted or deleted.
+    /// - `tuple`: The tuple being inserted or deleted.
     ///
     /// # Returns
-    /// A new `LogRecord` instance.
+    /// A new insert or delete log record.
     pub fn new_insert_delete_record(
         txn_id: TxnId,
         prev_lsn: Lsn,
         log_record_type: LogRecordType,
         rid: RID,
-        tuple: Arc<Tuple>,
+        tuple_arc: Arc<Tuple>,
     ) -> Self {
-        let size = Self::HEADER_SIZE as i32
-            + size_of::<RID>() as i32
-            + size_of::<i32>() as i32
-            + tuple.get_length().unwrap() as i32;
-        if log_record_type == LogRecordType::Insert {
-            Self {
+        // Calculate size
+        let mut size = Self::HEADER_SIZE as i32;
+        size += size_of::<RID>() as i32;
+        size += size_of::<i32>() as i32;
+        size += tuple_arc.get_length().unwrap_or(0) as i32;
+
+        // Clone the tuple from the Arc to store directly in the record
+        let tuple = (*tuple_arc).clone();
+
+        match log_record_type {
+            LogRecordType::Insert | LogRecordType::RollbackDelete => Self {
                 size,
                 lsn: AtomicU64::new(INVALID_LSN),
                 txn_id,
@@ -290,14 +132,8 @@ impl LogRecord {
                 new_tuple: None,
                 prev_page_id: None,
                 page_id: None,
-            }
-        } else {
-            assert!(
-                log_record_type == LogRecordType::ApplyDelete
-                    || log_record_type == LogRecordType::MarkDelete
-                    || log_record_type == LogRecordType::RollbackDelete
-            );
-            Self {
+            },
+            LogRecordType::MarkDelete | LogRecordType::ApplyDelete => Self {
                 size,
                 lsn: AtomicU64::new(INVALID_LSN),
                 txn_id,
@@ -312,35 +148,59 @@ impl LogRecord {
                 new_tuple: None,
                 prev_page_id: None,
                 page_id: None,
-            }
+            },
+            _ => Self {
+                size: Self::HEADER_SIZE as i32,
+                lsn: AtomicU64::new(INVALID_LSN),
+                txn_id,
+                prev_lsn,
+                log_record_type: LogRecordType::Invalid,
+                delete_rid: None,
+                delete_tuple: None,
+                insert_rid: None,
+                insert_tuple: None,
+                update_rid: None,
+                old_tuple: None,
+                new_tuple: None,
+                prev_page_id: None,
+                page_id: None,
+            },
         }
     }
 
-    /// Creates a new `LogRecord` for UPDATE type.
+    /// Creates a new update log record.
     ///
     /// # Parameters
     /// - `txn_id`: The transaction ID.
-    /// - `prev_lsn`: The previous log sequence number.
+    /// - `prev_lsn`: The previous LSN of the transaction.
     /// - `log_record_type`: The type of the log record.
-    /// - `update_rid`: The row ID of the updated row.
+    /// - `update_rid`: The RID of the tuple being updated.
     /// - `old_tuple`: The old tuple.
     /// - `new_tuple`: The new tuple.
     ///
     /// # Returns
-    /// A new `LogRecord` instance.
+    /// A new update log record.
     pub fn new_update_record(
         txn_id: TxnId,
         prev_lsn: Lsn,
         log_record_type: LogRecordType,
         update_rid: RID,
-        old_tuple: Arc<Tuple>,
-        new_tuple: Arc<Tuple>,
+        old_tuple_arc: Arc<Tuple>,
+        new_tuple_arc: Arc<Tuple>,
     ) -> Self {
-        let size = Self::HEADER_SIZE as i32
-            + size_of::<RID>() as i32
-            + old_tuple.get_length().unwrap() as i32
-            + new_tuple.get_length().unwrap() as i32
-            + 2 * size_of::<i32>() as i32;
+        // Clone the tuples from the Arc to store directly in the record
+        let old_tuple = (*old_tuple_arc).clone();
+        let new_tuple = (*new_tuple_arc).clone();
+
+        // Calculate size
+        let mut size = Self::HEADER_SIZE as i32;
+        size += size_of::<RID>() as i32;
+
+        // Add size of tuples
+        size += old_tuple.get_length().unwrap_or(0) as i32;
+        size += new_tuple.get_length().unwrap_or(0) as i32;
+        size += (size_of::<i32>() * 2) as i32;
+
         Self {
             size,
             lsn: AtomicU64::new(INVALID_LSN),
@@ -359,17 +219,17 @@ impl LogRecord {
         }
     }
 
-    /// Creates a new `LogRecord` for NEWPAGE type.
+    /// Creates a new page log record.
     ///
     /// # Parameters
     /// - `txn_id`: The transaction ID.
-    /// - `prev_lsn`: The previous log sequence number.
+    /// - `prev_lsn`: The previous LSN of the transaction.
     /// - `log_record_type`: The type of the log record.
     /// - `prev_page_id`: The previous page ID.
-    /// - `page_id`: The new page ID.
+    /// - `page_id`: The page ID.
     ///
     /// # Returns
-    /// A new `LogRecord` instance.
+    /// A new page log record.
     pub fn new_page_record(
         txn_id: TxnId,
         prev_lsn: Lsn,
@@ -377,7 +237,8 @@ impl LogRecord {
         prev_page_id: PageId,
         page_id: PageId,
     ) -> Self {
-        let size = Self::HEADER_SIZE as i32 + 2 * size_of::<PageId>() as i32;
+        let size = Self::HEADER_SIZE as i32 + (2 * size_of::<PageId>() as i32);
+
         Self {
             size,
             lsn: AtomicU64::new(INVALID_LSN),
@@ -396,104 +257,100 @@ impl LogRecord {
         }
     }
 
-    /// Returns the page id
+    /// Gets the page ID.
     pub fn get_page_id(&self) -> Option<&PageId> {
         self.page_id.as_ref()
     }
 
-    /// Returns the delete tuple.
+    /// Gets the delete tuple.
     pub fn get_delete_tuple(&self) -> Option<&Tuple> {
-        self.delete_tuple.as_ref().map(|arc| arc.as_ref())
+        self.delete_tuple.as_ref()
     }
 
-    /// Returns the delete RID.
+    /// Gets the delete RID.
     pub fn get_delete_rid(&self) -> Option<&RID> {
         self.delete_rid.as_ref()
     }
 
-    /// Returns the insert tuple.
+    /// Gets the insert tuple.
     pub fn get_insert_tuple(&self) -> Option<&Tuple> {
-        self.insert_tuple.as_ref().map(|arc| arc.as_ref())
+        self.insert_tuple.as_ref()
     }
 
-    /// Returns the insert RID.
+    /// Gets the insert RID.
     pub fn get_insert_rid(&self) -> Option<&RID> {
         self.insert_rid.as_ref()
     }
 
-    /// Returns the original tuple.
+    /// Gets the original tuple in an update record.
     pub fn get_original_tuple(&self) -> Option<&Tuple> {
-        self.old_tuple.as_ref().map(|arc| arc.as_ref())
+        self.old_tuple.as_ref()
     }
 
-    /// Returns the update tuple.
+    /// Gets the new tuple in an update record.
     pub fn get_update_tuple(&self) -> Option<&Tuple> {
-        self.new_tuple.as_ref().map(|arc| arc.as_ref())
+        self.new_tuple.as_ref()
     }
 
-    /// Returns the update RID.
+    /// Gets the update RID.
     pub fn get_update_rid(&self) -> Option<&RID> {
         self.update_rid.as_ref()
     }
 
-    /// Returns the new page record's previous page ID.
+    /// Gets the previous page ID in a new page record.
     pub fn get_new_page_record(&self) -> Option<PageId> {
         self.prev_page_id
     }
 
-    /// Returns the size of the log record.
+    /// Gets the size of the log record.
     pub fn get_size(&self) -> i32 {
         self.size
     }
 
-    /// Returns the log sequence number (LSN).
+    /// Gets the LSN of the log record.
     pub fn get_lsn(&self) -> Lsn {
         self.lsn.load(Ordering::SeqCst)
     }
 
-    /// Sets the log sequence number (LSN).
-    /// Now thread-safe due to interior mutability.
+    /// Sets the LSN of the log record.
     pub fn set_lsn(&self, lsn: Lsn) {
         self.lsn.store(lsn, Ordering::SeqCst);
     }
 
-    /// Returns the transaction ID.
+    /// Gets the transaction ID.
     pub fn get_txn_id(&self) -> TxnId {
         self.txn_id
     }
 
-    /// Returns the previous log sequence number (LSN).
+    /// Gets the previous LSN of the transaction.
     pub fn get_prev_lsn(&self) -> Lsn {
         self.prev_lsn
     }
 
-    /// Returns the log record type.
+    /// Gets the type of the log record.
     pub fn get_log_record_type(&self) -> LogRecordType {
         self.log_record_type
     }
 
-    /// Returns a string representation of the log record for debugging purposes.
+    /// Gets a string representation of the log record.
     pub fn to_string(&self) -> String {
         format!(
             "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
-            self.size,
-            self.get_lsn(),
-            self.txn_id,
-            self.prev_lsn,
-            self.log_record_type as i32,
+            self.size, self.lsn.load(Ordering::SeqCst), self.txn_id, self.prev_lsn, self.log_record_type as i32
         )
     }
 
+    /// Checks if the log record is a commit record.
     pub fn is_commit(&self) -> bool {
-        matches!(self.log_record_type, LogRecordType::Commit)
+        self.log_record_type == LogRecordType::Commit
     }
 
     /// Serializes the log record to bytes using bincode.
     ///
     /// # Returns
     /// A vector of bytes representing the serialized log record, or an error if serialization fails.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::error::EncodeError> {
+        bincode::encode_to_vec(self, bincode::config::standard())
     }
 
     /// Deserializes a log record from bytes using bincode.
@@ -503,8 +360,93 @@ impl LogRecord {
     ///
     /// # Returns
     /// A deserialized log record, or an error if deserialization fails.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::Error> {
-        bincode::deserialize(bytes)
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
+        bincode::decode_from_slice(bytes, bincode::config::standard())
+            .map(|(record, _)| record)
+    }
+}
+
+impl bincode::Encode for LogRecord {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        // Encode all fields in the same order as the struct definition
+        self.size.encode(encoder)?;
+        self.lsn.load(Ordering::SeqCst).encode(encoder)?; // Encode the u64 value from AtomicU64
+        self.txn_id.encode(encoder)?;
+        self.prev_lsn.encode(encoder)?;
+        self.log_record_type.encode(encoder)?;
+        self.delete_rid.encode(encoder)?;
+        self.delete_tuple.encode(encoder)?;
+        self.insert_rid.encode(encoder)?;
+        self.insert_tuple.encode(encoder)?;
+        self.update_rid.encode(encoder)?;
+        self.old_tuple.encode(encoder)?;
+        self.new_tuple.encode(encoder)?;
+        self.prev_page_id.encode(encoder)?;
+        self.page_id.encode(encoder)?;
+        Ok(())
+    }
+}
+
+impl bincode::Decode<()> for LogRecord {
+    fn decode<D: bincode::de::Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        // Decode all fields in the same order as they were encoded
+        let size = bincode::Decode::decode(decoder)?;
+        let lsn: u64 = bincode::Decode::decode(decoder)?;
+        let txn_id = bincode::Decode::decode(decoder)?;
+        let prev_lsn = bincode::Decode::decode(decoder)?;
+        let log_record_type = bincode::Decode::decode(decoder)?;
+        let delete_rid = bincode::Decode::decode(decoder)?;
+        let delete_tuple = bincode::Decode::decode(decoder)?;
+        let insert_rid = bincode::Decode::decode(decoder)?;
+        let insert_tuple = bincode::Decode::decode(decoder)?;
+        let update_rid = bincode::Decode::decode(decoder)?;
+        let old_tuple = bincode::Decode::decode(decoder)?;
+        let new_tuple = bincode::Decode::decode(decoder)?;
+        let prev_page_id = bincode::Decode::decode(decoder)?;
+        let page_id = bincode::Decode::decode(decoder)?;
+        
+        Ok(Self {
+            size,
+            lsn: AtomicU64::new(lsn), // Create AtomicU64 from decoded u64
+            txn_id,
+            prev_lsn,
+            log_record_type,
+            delete_rid,
+            delete_tuple,
+            insert_rid,
+            insert_tuple,
+            update_rid,
+            old_tuple,
+            new_tuple,
+            prev_page_id,
+            page_id,
+        })
+    }
+}
+
+// Add manual implementations of Encode and Decode for LogRecordType
+impl bincode::Encode for LogRecordType {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        (*self as i32).encode(encoder)
+    }
+}
+
+impl bincode::Decode<()> for LogRecordType {
+    fn decode<D: bincode::de::Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        let value: i32 = bincode::Decode::decode(decoder)?;
+        match value {
+            0 => Ok(LogRecordType::Invalid),
+            1 => Ok(LogRecordType::Insert),
+            2 => Ok(LogRecordType::MarkDelete),
+            3 => Ok(LogRecordType::ApplyDelete),
+            4 => Ok(LogRecordType::RollbackDelete),
+            5 => Ok(LogRecordType::Update),
+            6 => Ok(LogRecordType::Begin),
+            7 => Ok(LogRecordType::Commit),
+            8 => Ok(LogRecordType::Abort),
+            9 => Ok(LogRecordType::NewPage),
+            _ => Err(bincode::error::DecodeError::Other("Invalid LogRecordType value")),
+        }
     }
 }
 

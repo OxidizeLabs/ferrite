@@ -106,8 +106,10 @@ impl ExtendableHTableBucketPage {
         // Write entries
         for (value, rid) in &self.entries {
             // Serialize value
-            let value_bytes =
-                bincode::serialize(value).map_err(|_| PageError::SerializationError)?;
+            let value_bytes = bincode::encode_to_vec(
+                value, 
+                bincode::config::standard()
+            ).map_err(|_| PageError::SerializationError)?;
             let value_size = value_bytes.len();
 
             // Write value size and data
@@ -148,9 +150,10 @@ impl ExtendableHTableBucketPage {
             offset += 4;
 
             // Deserialize value
-            let value: Value =
-                bincode::deserialize(&self.data[offset..offset + value_size as usize])
-                    .map_err(|_| PageError::DeserializationError)?;
+            let (value, _): (Value, _) = bincode::decode_from_slice(
+                &self.data[offset..offset + value_size as usize],
+                bincode::config::standard()
+            ).map_err(|_| PageError::DeserializationError)?;
             offset += value_size as usize;
 
             // Read RID

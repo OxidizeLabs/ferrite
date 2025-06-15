@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
+use bincode::{Encode, Decode};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct Column {
     column_name: String,
     column_type: TypeId,
@@ -22,7 +23,7 @@ pub struct Column {
 }
 
 /// Foreign key constraint information
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub struct ForeignKeyConstraint {
     pub referenced_table: String,
     pub referenced_column: String,
@@ -31,7 +32,7 @@ pub struct ForeignKeyConstraint {
 }
 
 /// Referential actions for foreign key constraints
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
 pub enum ReferentialAction {
     Cascade,
     SetNull,
