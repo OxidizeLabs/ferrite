@@ -1175,10 +1175,6 @@ impl Value {
         }
     }
 
-    fn copy(&self, val: &Value) -> Value {
-        val.clone_optimized()
-    }
-
     /// Helper function to convert a sqlparser::ast::Value to a string
     pub fn from_sqlparser_value(value: &sqlparser::ast::Value) -> Result<String, String> {
         match value {
