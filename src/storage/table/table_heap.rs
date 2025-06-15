@@ -1,11 +1,10 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
-use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID, INVALID_TXN_ID};
+use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::IsolationLevel;
-use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction::UndoLink;
 use crate::concurrency::transaction::UndoLog;
 use crate::concurrency::transaction_manager::TransactionManager;
@@ -601,42 +600,6 @@ impl TableHeap {
         self.table_oid
     }
 
-    fn get_tuple_version(
-        &self,
-        rid: RID,
-        txn: &Transaction,
-        txn_manager: &TransactionManager,
-    ) -> Result<(TupleMeta, Arc<Tuple>), String> {
-        // Get the current version
-        let page_guard = self.get_page(rid.get_page_id())?;
-        let page = page_guard.read();
-
-        match page.get_tuple(&rid) {
-            Ok((meta, tuple)) => {
-                // Check if this version is visible to the transaction
-                if meta.get_creator_txn_id() == INVALID_TXN_ID
-                    || meta.get_creator_txn_id() == txn.get_transaction_id()
-                {
-                    // Tuple was created by this transaction or has no creator
-                    Ok((meta, Arc::new(tuple)))
-                } else {
-                    // Check commit timestamp visibility
-                    let creator_commit_ts = txn_manager
-                        .get_transaction(&meta.get_creator_txn_id())
-                        .map(|info| info.commit_ts())
-                        .unwrap_or(0);
-
-                    if creator_commit_ts <= txn.read_ts() {
-                        Ok((meta, Arc::new(tuple)))
-                    } else {
-                        Err("No visible version found for transaction".to_string())
-                    }
-                }
-            }
-            Err(e) => Err(format!("Failed to get tuple: {}", e)),
-        }
-    }
-
     fn create_new_page_and_insert(&self, meta: &TupleMeta, tuple: &Tuple) -> Result<RID, String> {
         // First check if tuple is too large for any page
         let temp_page = TablePage::new(0); // Temporary page just for size check
@@ -803,23 +766,6 @@ impl TableHeap {
     /// Acquires a write lock on a specific page
     pub fn acquire_page_write_lock(&self, rid: RID) -> Result<PageGuard<TablePage>, String> {
         self.get_page(rid.get_page_id())
-    }
-
-    // Internal methods use these instead of accessing latch directly
-    fn with_read_lock<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce() -> R,
-    {
-        let _guard = self.latch.read();
-        f()
-    }
-
-    fn with_write_lock<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce() -> R,
-    {
-        let _guard = self.latch.write();
-        f()
     }
 
     // Basic storage operations without transaction logic
