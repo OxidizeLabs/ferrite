@@ -7,22 +7,18 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
-use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct UpdateExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<UpdateNode>,
-    table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     child_executor: Option<Box<dyn AbstractExecutor>>,
-    updated_rids: HashSet<RID>,
     executed: bool,
     rows_updated: usize,
 }
@@ -34,38 +30,6 @@ impl UpdateExecutor {
             plan.get_table_name()
         );
         debug!("Target schema: {:?}", plan.get_output_schema());
-
-        // First, make a brief read to get the catalog reference
-        debug!("Acquiring context read lock");
-        let catalog = {
-            let context_guard = context.read();
-            debug!("Context lock acquired, getting catalog reference");
-            context_guard.get_catalog().clone()
-        };
-        debug!("Released context read lock");
-
-        // Then briefly read from catalog to get the TableInfo
-        debug!("Acquiring catalog read lock");
-        let table_heap = {
-            let catalog_guard = catalog.read();
-            debug!("Catalog lock acquired, getting table info");
-            let table_info = catalog_guard
-                .get_table(plan.get_table_name())
-                .unwrap_or_else(|| panic!("Table {} not found", plan.get_table_name()));
-            debug!(
-                "Found table '{}' with schema: {:?}",
-                plan.get_table_name(),
-                table_info.get_table_schema()
-            );
-
-            // Create TransactionalTableHeap
-            Arc::new(TransactionalTableHeap::new(
-                table_info.get_table_heap(),
-                table_info.get_table_oidt(),
-            ))
-        };
-        debug!("Released catalog read lock");
-
         debug!(
             "Successfully created UpdateExecutor for table '{}'",
             plan.get_table_name()
@@ -74,42 +38,10 @@ impl UpdateExecutor {
         Self {
             context,
             plan,
-            table_heap,
             initialized: false,
             child_executor: None,
-            updated_rids: HashSet::new(),
             executed: false,
             rows_updated: 0,
-        }
-    }
-
-    /// Evaluates an update expression against a tuple to get the new value
-    fn evaluate_update_expression(
-        &self,
-        expr: &crate::sql::execution::expressions::abstract_expression::Expression,
-        tuple: &Tuple,
-    ) -> Option<Value> {
-        // This is a simplified implementation - in reality, this would be more complex
-        // For now, we'll handle constant expressions and column references
-        match expr {
-            crate::sql::execution::expressions::abstract_expression::Expression::Constant(
-                const_expr,
-            ) => Some(const_expr.get_value().clone()),
-            crate::sql::execution::expressions::abstract_expression::Expression::ColumnRef(
-                col_ref,
-            ) => {
-                let col_idx = col_ref.get_column_index();
-                if col_idx < tuple.get_column_count() {
-                    Some(tuple.get_value(col_idx).clone())
-                } else {
-                    None
-                }
-            }
-            _ => {
-                // For other expression types, we'd need to implement full expression evaluation
-                warn!("Unsupported update expression type: {:?}", expr);
-                None
-            }
         }
     }
 }
@@ -307,6 +239,7 @@ mod tests {
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::types::KeyType;
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
