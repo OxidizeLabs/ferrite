@@ -258,9 +258,7 @@ mod tests {
         )));
 
         let assignment = AssignmentExpression::new(2, target_column.clone(), value_expr.clone());
-
-        let child = assignment.get_child_at(0);
-        // We can't directly compare Arc<Expression> easily, but we can check it exists
+        
         assert_eq!(assignment.get_children().len(), 1);
     }
 
