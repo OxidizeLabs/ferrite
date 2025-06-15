@@ -675,12 +675,10 @@ mod tests {
 
         let mut index_executor = CreateIndexExecutor::new(exec_ctx.clone(), index_plan, false);
         index_executor.init();
-        index_executor.next(); // Execute index creation
 
         // Populate the index with data from right table
         {
             let catalog = ctx.catalog.read();
-            let table_info = catalog.get_table("right_table").unwrap();
             let index_info = catalog.get_table_indexes("right_table")[0].clone();
 
             // Create a sequential scan to iterate through all tuples
@@ -704,10 +702,7 @@ mod tests {
                     for &col_idx in &key_columns {
                         key_values.push(tuple.get_values()[col_idx].clone());
                     }
-
-                    // Create key tuple with just the indexed column
-                    let key_schema = index_info.get_key_schema();
-
+                    
                     // Extract the key value for the B+ tree
                     let key_value = key_values[0].clone();
 
