@@ -2,9 +2,10 @@ use crate::common::config::{PageId, INVALID_PAGE_ID};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::Hash;
+use bincode::{Decode, Encode};
 
 /// Represents a Record ID (RID) in the table.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Ord, Serialize, Deserialize, Encode, Decode)]
 pub struct RID {
     page_id: PageId,
     slot_num: u32,
