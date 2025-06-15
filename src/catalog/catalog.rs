@@ -319,7 +319,6 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
-    use crate::concurrency::lock_manager::LockManager;
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use tempfile::TempDir;
@@ -328,7 +327,6 @@ mod tests {
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
         txn_manager: Arc<TransactionManager>,
-        lock_manager: Arc<LockManager>,
         _temp_dir: TempDir,
     }
 
@@ -361,15 +359,12 @@ mod tests {
                 Arc::from(disk_manager.unwrap()),
                 replacer.clone(),
             ).unwrap());
-
-            // Create log manager and transaction manager
-            let lock_manager = Arc::new(LockManager::new());
+            
             let txn_manager = Arc::new(TransactionManager::new());
 
             Self {
                 bpm,
                 txn_manager,
-                lock_manager,
                 _temp_dir: temp_dir,
             }
         }
@@ -380,10 +375,6 @@ mod tests {
 
         pub fn txn_manager(&self) -> Arc<TransactionManager> {
             Arc::clone(&self.txn_manager)
-        }
-
-        pub fn lock_manager(&self) -> Arc<LockManager> {
-            Arc::clone(&self.lock_manager)
         }
     }
 
