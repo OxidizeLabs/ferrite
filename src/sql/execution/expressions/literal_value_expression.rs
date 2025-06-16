@@ -26,11 +26,10 @@ impl LiteralValueExpression {
         let (value, type_id) = match sql_value {
             SQLValue::Number(n, _) => {
                 if n.contains('.') {
-                    // Parse as decimal if it contains a decimal point
-                    (
-                        Value::from(n.parse::<f64>().map_err(|e| e.to_string())?),
-                        TypeId::Decimal,
-                    )
+                    // Parse as float to ensure compatibility with Float columns
+                    let parsed_value = n.parse::<f64>().map_err(|e| e.to_string())?;
+                    let float_val = parsed_value as f32;
+                    (Value::new_with_type(Val::Float(float_val), TypeId::Float), TypeId::Float)
                 } else {
                     // Try parsing as integer types in order of size
                     // Start with smallest type that can hold the value
@@ -62,6 +61,7 @@ impl LiteralValueExpression {
             Val::Integer(i) => format!("{}", i),
             Val::BigInt(i) => format!("{}", i),
             Val::Decimal(d) => format!("{}", d),
+            Val::Float(f) => format!("{}", f),
             Val::VarLen(s) => format!("'{}'", s),
             Val::Null => "NULL".to_string(),
             _ => "literal".to_string(),
@@ -83,6 +83,7 @@ impl LiteralValueExpression {
             Val::Integer(i) => format!("{}", i),
             Val::BigInt(i) => format!("{}", i),
             Val::Decimal(d) => format!("{}", d),
+            Val::Float(f) => format!("{}", f),
             Val::VarLen(s) => format!("'{}'", s),
             Val::Null => "NULL".to_string(),
             _ => "literal".to_string(),
@@ -154,12 +155,21 @@ impl Display for LiteralValueExpression {
             Val::Integer(i) => write!(f, "{}", i),
             Val::BigInt(i) => write!(f, "{}", i),
             Val::Decimal(d) => write!(f, "{}", d),
-            Val::Timestamp(ts) => write!(f, "TIMESTAMP '{}'", ts),
+            Val::Float(fl) => write!(f, "{}", fl),
+            Val::Timestamp(ts) => write!(f, "TIMESTAMP {}", ts),
             Val::VarLen(s) | Val::ConstLen(s) => write!(f, "'{}'", s),
             Val::Vector(v) => write!(f, "{:?}", v),
             Val::Null => write!(f, "NULL"),
             Val::Struct => write!(f, "STRUCT"),
-            _ => todo!(),
+            Val::Date(d) => write!(f, "DATE {}", d),
+            Val::Time(t) => write!(f, "TIME {}", t),
+            Val::Interval(i) => write!(f, "INTERVAL {}", i),
+            Val::Binary(b) => write!(f, "BIN {:?}", b),
+            Val::JSON(j) => write!(f, "JSON {}", j),
+            Val::UUID(u) => write!(f, "UUID {}", u),
+            Val::Array(a) => write!(f, "[ {:?} ]", a),
+            Val::Enum(a, b) => write!(f, "ENUM '{}: {}'", a, b),
+            Val::Point(a, b) => write!(f, "POINT ({},{})", a, b),
         }
     }
 }
@@ -181,7 +191,7 @@ mod tests {
         let float_expr =
             LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
         assert_eq!(float_expr.get_value(), &Value::new(3.14));
-        assert_eq!(float_expr.get_return_type().get_type(), TypeId::Decimal);
+        assert_eq!(float_expr.get_return_type().get_type(), TypeId::Float);
 
         // Test string literals
         let str_expr =
