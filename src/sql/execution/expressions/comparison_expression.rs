@@ -191,7 +191,16 @@ impl ExpressionOps for ComparisonExpression {
             | (TypeId::TinyInt, TypeId::Decimal)
             | (TypeId::Decimal, TypeId::TinyInt)
             | (TypeId::TinyInt, TypeId::BigInt)
-            | (TypeId::BigInt, TypeId::TinyInt) => Ok(()),
+            | (TypeId::BigInt, TypeId::TinyInt)
+            | (TypeId::Float, TypeId::Float)
+            | (TypeId::Float, TypeId::Decimal)
+            | (TypeId::Decimal, TypeId::Float)
+            | (TypeId::Float, TypeId::Integer)
+            | (TypeId::Integer, TypeId::Float)
+            | (TypeId::Float, TypeId::BigInt)
+            | (TypeId::BigInt, TypeId::Float)
+            | (TypeId::Float, TypeId::TinyInt)
+            | (TypeId::TinyInt, TypeId::Float) => Ok(()),
             _ => Err(ExpressionError::TypeMismatch {
                 expected: left_type,
                 actual: right_type,
