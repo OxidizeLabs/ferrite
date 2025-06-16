@@ -41,6 +41,7 @@ use crate::sql::execution::expressions::interval_expression::IntervalExpression;
 use crate::sql::execution::expressions::interval_expression::IntervalField;
 use crate::sql::execution::expressions::is_check_expression::{IsCheckExpression, IsCheckType};
 use crate::sql::execution::expressions::is_distinct_expression::IsDistinctExpression;
+use crate::sql::execution::expressions::like_expression::LikeExpression;
 use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
 use crate::sql::execution::expressions::map_access_expression::{
@@ -63,7 +64,7 @@ use crate::sql::execution::expressions::typed_string_expression::TypedStringExpr
 use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::value::{Val, Value};
+use crate::types_db::value::Value;
 use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::{
@@ -330,71 +331,56 @@ impl ExpressionParser {
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
 
-                        match (left_type, right_type) {
-                            (TypeId::Integer, TypeId::Integer)
-                            | (TypeId::Decimal, TypeId::Decimal)
-                            | (TypeId::VarChar, TypeId::VarChar)
-                            | (TypeId::Char, TypeId::Char)
-                            | (TypeId::Boolean, TypeId::Boolean)
-                            | (TypeId::Integer, TypeId::Decimal)
-                            | (TypeId::Decimal, TypeId::Integer)
-                            | (TypeId::BigInt, TypeId::BigInt)
-                            | (TypeId::BigInt, TypeId::Integer)
-                            | (TypeId::Integer, TypeId::BigInt)
-                            | (TypeId::BigInt, TypeId::Decimal)
-                            | (TypeId::Decimal, TypeId::BigInt)
-                            // Add support for TinyInt comparisons
-                            | (TypeId::TinyInt, TypeId::TinyInt)
-                            | (TypeId::TinyInt, TypeId::SmallInt)
-                            | (TypeId::SmallInt, TypeId::TinyInt)
-                            | (TypeId::TinyInt, TypeId::Integer)
-                            | (TypeId::Integer, TypeId::TinyInt)
-                            | (TypeId::TinyInt, TypeId::BigInt)
-                            | (TypeId::BigInt, TypeId::TinyInt)
-                            | (TypeId::TinyInt, TypeId::Decimal)
-                            | (TypeId::Decimal, TypeId::TinyInt)
-                            // Add support for SmallInt comparisons
-                            | (TypeId::SmallInt, TypeId::SmallInt)
-                            | (TypeId::SmallInt, TypeId::Integer)
-                            | (TypeId::Integer, TypeId::SmallInt)
-                            | (TypeId::SmallInt, TypeId::BigInt)
-                            | (TypeId::BigInt, TypeId::SmallInt)
-                            | (TypeId::SmallInt, TypeId::Decimal)
-                            | (TypeId::Decimal, TypeId::SmallInt) => {
-                                let comp_type = match op {
-                                    BinaryOperator::Eq => ComparisonType::Equal,
-                                    BinaryOperator::NotEq => ComparisonType::NotEqual,
-                                    BinaryOperator::Lt => ComparisonType::LessThan,
-                                    BinaryOperator::LtEq => ComparisonType::LessThanOrEqual,
-                                    BinaryOperator::Gt => ComparisonType::GreaterThan,
-                                    BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
-                                    _ => unreachable!(),
-                                };
+                        // Check if types are compatible for comparison
+                        let types_compatible = match (left_type, right_type) {
+                            // Same types are compatible
+                            (l, r) if l == r => true,
+                            // Numeric types are compatible with each other
+                            (TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Float, 
+                             TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Float) => true,
+                            // String types are compatible with each other
+                            (TypeId::VarChar | TypeId::Char, TypeId::VarChar | TypeId::Char) => true,
+                            // Date/time types are compatible with each other
+                            (TypeId::Date | TypeId::Timestamp, TypeId::Date | TypeId::Timestamp) => true,
+                            // All other combinations are incompatible
+                            _ => false,
+                        };
 
-                                // Convert right_expr to ConstantExpression if it's a LiteralValueExpression
-                                let right_expr = match right_expr.as_ref() {
-                                    Expression::Literal(lit) => {
-                                        Arc::new(Expression::Constant(ConstantExpression::new(
-                                            lit.get_value().clone(),
-                                            lit.get_return_type().clone(),
-                                            vec![],
-                                        )))
-                                    }
-                                    _ => right_expr,
-                                };
-
-                                Ok(Expression::Comparison(ComparisonExpression::new(
-                                    left_expr.clone(),
-                                    right_expr.clone(),
-                                    comp_type,
-                                    vec![left_expr, right_expr],
-                                )))
-                            }
-                            _ => Err(format!(
+                        if !types_compatible {
+                            return Err(format!(
                                 "Type mismatch: Cannot compare values of types {:?} and {:?}",
                                 left_type, right_type
-                            )),
+                            ));
                         }
+
+                        let comp_type = match op {
+                            BinaryOperator::Eq => ComparisonType::Equal,
+                            BinaryOperator::NotEq => ComparisonType::NotEqual,
+                            BinaryOperator::Lt => ComparisonType::LessThan,
+                            BinaryOperator::LtEq => ComparisonType::LessThanOrEqual,
+                            BinaryOperator::Gt => ComparisonType::GreaterThan,
+                            BinaryOperator::GtEq => ComparisonType::GreaterThanOrEqual,
+                            _ => unreachable!(),
+                        };
+
+                        // Convert right_expr to ConstantExpression if it's a LiteralValueExpression
+                        let right_expr = match right_expr.as_ref() {
+                            Expression::Literal(lit) => {
+                                Arc::new(Expression::Constant(ConstantExpression::new(
+                                    lit.get_value().clone(),
+                                    lit.get_return_type().clone(),
+                                    vec![],
+                                )))
+                            }
+                            _ => right_expr,
+                        };
+
+                        Ok(Expression::Comparison(ComparisonExpression::new(
+                            left_expr.clone(),
+                            right_expr.clone(),
+                            comp_type,
+                            vec![left_expr, right_expr],
+                        )))
                     }
                     // Handle other binary operators
                     _ => Ok(Expression::BinaryOp(BinaryOpExpression::new(
@@ -518,10 +504,18 @@ impl ExpressionParser {
                     vec![expr.clone(), high],
                 ));
 
+                let logic_type = if *negated {
+                    // For NOT BETWEEN, we should use OR logic
+                    // NOT (expr >= low AND expr <= high) is equivalent to (expr < low OR expr > high)
+                    LogicType::Or
+                } else {
+                    LogicType::And
+                };
+
                 let result = Expression::Logic(LogicExpression::new(
                     Arc::new(low_compare.clone()),
                     Arc::new(high_compare.clone()),
-                    LogicType::And,
+                    logic_type,
                     vec![Arc::new(low_compare), Arc::new(high_compare)],
                 ));
 
@@ -965,16 +959,160 @@ impl ExpressionParser {
                 negated,
             } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
+                let mut list_values = Vec::new();
                 let mut list_exprs = Vec::new();
+                
+                // Get the type of the expression we're comparing against
+                let expr_type = expr.get_return_type().get_type();
+                
+                // Parse each item in the list
                 for item in list {
-                    list_exprs.push(Arc::new(self.parse_expression(item, schema)?));
+                    let item_expr = self.parse_expression(item, schema)?;
+                    let item_arc = Arc::new(item_expr.clone());
+                    
+                    // For constant expressions, extract the actual value
+                    if let Expression::Literal(literal_expr) = &item_expr {
+                        let mut value = literal_expr.get_value().clone();
+                        
+                        // If the types don't match, try to convert the value to the expression type
+                        if value.get_type_id() != expr_type {
+                            value = match (expr_type, value.get_type_id()) {
+                                (TypeId::Integer, TypeId::TinyInt) => {
+                                    // Convert tinyint to integer
+                                    if let crate::types_db::value::Val::TinyInt(n) = value.get_val() {
+                                        let new_val = Value::new(*n as i32);
+                                        println!("DEBUG: Converted TinyInt({}) to Integer({})", n, *n as i32);
+                                        new_val
+                                    } else {
+                                        value
+                                    }
+                                },
+                                (TypeId::Integer, TypeId::SmallInt) => {
+                                    // Convert smallint to integer
+                                    if let crate::types_db::value::Val::SmallInt(n) = value.get_val() {
+                                        let new_val = Value::new(*n as i32);
+                                        println!("DEBUG: Converted SmallInt({}) to Integer({})", n, *n as i32);
+                                        new_val
+                                    } else {
+                                        value
+                                    }
+                                },
+                                (TypeId::Integer, TypeId::BigInt) => {
+                                    // Convert bigint to integer if it fits
+                                    if let crate::types_db::value::Val::BigInt(n) = value.get_val() {
+                                        if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
+                                            let new_val = Value::new(*n as i32);
+                                            println!("DEBUG: Converted BigInt({}) to Integer({})", n, *n as i32);
+                                            new_val
+                                        } else {
+                                            value
+                                        }
+                                    } else {
+                                        value
+                                    }
+                                },
+                                (TypeId::Integer, TypeId::Decimal) => {
+                                    // Convert decimal to integer if it's a whole number
+                                    if let crate::types_db::value::Val::Decimal(n) = value.get_val() {
+                                        if *n == (*n as i32) as f64 {
+                                            let new_val = Value::new(*n as i32);
+                                            println!("DEBUG: Converted Decimal({}) to Integer({})", n, *n as i32);
+                                            new_val
+                                        } else {
+                                            value
+                                        }
+                                    } else {
+                                        value
+                                    }
+                                },
+                                // Add other type conversions as needed
+                                _ => value
+                            };
+                        }
+                        
+                        println!("DEBUG: Adding value to list: {:?}", value);
+                        list_values.push(value);
+                    } else if let Expression::Constant(const_expr) = &item_expr {
+                        println!("DEBUG: Found constant expression with value: {:?}", const_expr.get_value());
+                        let mut value = const_expr.get_value().clone();
+                        
+                        // If the types don't match, try to convert the value to the expression type
+                        if value.get_type_id() != expr_type {
+                            println!("DEBUG: Converting from {:?} to {:?}", value.get_type_id(), expr_type);
+                            value = match (expr_type, value.get_type_id()) {
+                                (TypeId::Integer, TypeId::TinyInt) => {
+                                    // Convert tinyint to integer
+                                    if let crate::types_db::value::Val::TinyInt(n) = value.get_val() {
+                                        let new_val = Value::new(*n as i32);
+                                        println!("DEBUG: Converted TinyInt({}) to Integer({})", n, *n as i32);
+                                        new_val
+                                    } else {
+                                        value
+                                    }
+                                },
+                                (TypeId::Integer, TypeId::SmallInt) => {
+                                    // Convert smallint to integer
+                                    if let crate::types_db::value::Val::SmallInt(n) = value.get_val() {
+                                        let new_val = Value::new(*n as i32);
+                                        println!("DEBUG: Converted SmallInt({}) to Integer({})", n, *n as i32);
+                                        new_val
+                                    } else {
+                                        value
+                                    }
+                                },
+                                (TypeId::Integer, TypeId::BigInt) => {
+                                    // Convert bigint to integer if it fits
+                                    if let crate::types_db::value::Val::BigInt(n) = value.get_val() {
+                                        if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
+                                            let new_val = Value::new(*n as i32);
+                                            println!("DEBUG: Converted BigInt({}) to Integer({})", n, *n as i32);
+                                            new_val
+                                        } else {
+                                            value
+                                        }
+                                    } else {
+                                        value
+                                    }
+                                },
+                                (TypeId::Integer, TypeId::Decimal) => {
+                                    // Convert decimal to integer if it's a whole number
+                                    if let crate::types_db::value::Val::Decimal(n) = value.get_val() {
+                                        if *n == (*n as i32) as f64 {
+                                            let new_val = Value::new(*n as i32);
+                                            println!("DEBUG: Converted Decimal({}) to Integer({})", n, *n as i32);
+                                            new_val
+                                        } else {
+                                            value
+                                        }
+                                    } else {
+                                        value
+                                    }
+                                },
+                                // Add other type conversions as needed
+                                _ => value
+                            };
+                        }
+                        
+                        println!("DEBUG: Adding value to list: {:?}", value);
+                        list_values.push(value);
+                    } else {
+                        // For non-constant expressions, we'll need to evaluate them at runtime
+                        // For now, add a placeholder NULL value
+                        println!("DEBUG: Non-constant expression, adding NULL placeholder");
+                        list_values.push(Value::new(crate::types_db::value::Val::Null));
+                    }
+                    
+                    list_exprs.push(item_arc);
                 }
-                // Create a vector expression from the list
-                let list_expr = Arc::new(Expression::Constant(ConstantExpression::new(
-                    Value::new_vector(list_exprs.iter().map(|e| Value::new(Val::Null))),
-                    Column::new("list", TypeId::Vector),
+                
+                println!("DEBUG: Final list_values: {:?}", list_values);
+                
+                // Create a vector expression from the list using the new helper method
+                let list_expr = Arc::new(Expression::Constant(ConstantExpression::new_vector(
+                    list_values,
                     list_exprs,
                 )));
+                
                 Ok(Expression::In(InExpression::new_list(
                     expr,
                     list_expr,
@@ -1020,13 +1158,17 @@ impl ExpressionParser {
                 expr,
                 pattern,
                 escape_char,
-            } => Ok(Expression::Regex(RegexExpression::new(
-                Arc::new(self.parse_expression(expr, schema)?),
-                Arc::new(self.parse_expression(pattern, schema)?),
-                RegexOperator::RLike,
-                escape_char.clone(),
-                Column::new("like", TypeId::Boolean),
-            ))),
+            } => {
+                let escape_char = escape_char.as_ref().and_then(|s| s.chars().next());
+                Ok(Expression::Like(LikeExpression::new(
+                    Arc::new(self.parse_expression(expr, schema)?),
+                    Arc::new(self.parse_expression(pattern, schema)?),
+                    escape_char,
+                    *negated,
+                    false, // case_insensitive by default (like most SQL databases)
+                    Column::new("like", TypeId::Boolean),
+                )))
+            }
 
             Expr::ILike {
                 negated,
@@ -1034,13 +1176,17 @@ impl ExpressionParser {
                 expr,
                 pattern,
                 escape_char,
-            } => Ok(Expression::Regex(RegexExpression::new(
-                Arc::new(self.parse_expression(expr, schema)?),
-                Arc::new(self.parse_expression(pattern, schema)?),
-                RegexOperator::RLike,
-                escape_char.clone(),
-                Column::new("ilike", TypeId::Boolean),
-            ))),
+            } => {
+                let escape_char = escape_char.as_ref().and_then(|s| s.chars().next());
+                Ok(Expression::Like(LikeExpression::new(
+                    Arc::new(self.parse_expression(expr, schema)?),
+                    Arc::new(self.parse_expression(pattern, schema)?),
+                    escape_char,
+                    *negated,
+                    false, // case_insensitive for ILIKE
+                    Column::new("ilike", TypeId::Boolean),
+                )))
+            }
 
             Expr::Extract {
                 field,
@@ -3687,12 +3833,12 @@ mod tests {
         let schema = ctx.setup_test_schema();
 
         let test_cases = vec![
-            "age BETWEEN 20 AND 30",
-            "salary BETWEEN 30000 AND 50000",
-            "age NOT BETWEEN 10 AND 18",
+            ("age BETWEEN 20 AND 30", LogicType::And),
+            ("salary BETWEEN 30000 AND 50000", LogicType::And),
+            ("age NOT BETWEEN 10 AND 18", LogicType::Or),
         ];
 
-        for expr_str in test_cases {
+        for (expr_str, expected_logic_type) in test_cases {
             let expr = ctx
                 .parse_expression(expr_str, &schema)
                 .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", expr_str, e));
@@ -3701,9 +3847,10 @@ mod tests {
                 Expression::Logic(logic) => {
                     assert_eq!(
                         logic.get_logic_type(),
-                        LogicType::And,
-                        "BETWEEN expression '{}' should use AND",
-                        expr_str
+                        expected_logic_type,
+                        "BETWEEN expression '{}' should use {:?}",
+                        expr_str,
+                        expected_logic_type
                     );
 
                     let children = logic.get_children();
