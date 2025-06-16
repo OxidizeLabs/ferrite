@@ -2270,15 +2270,15 @@ fn extract_join_keys(
                         left_keys.push(left_key);
                         right_keys.push(right_key);
 
-                        return Ok((left_keys, right_keys, fixed_predicate));
+                        Ok((left_keys, right_keys, fixed_predicate))
                     } else {
-                        return Err("Join predicate must compare column references".to_string());
+                        Err("Join predicate must compare column references".to_string())
                     }
                 } else {
-                    return Err("Comparison must have exactly two operands".to_string());
+                    Err("Comparison must have exactly two operands".to_string())
                 }
             } else {
-                return Err("Join predicate must use equality comparison".to_string());
+                Err("Join predicate must use equality comparison".to_string())
             }
         }
 
@@ -2309,21 +2309,21 @@ fn extract_join_keys(
                         children.clone(),
                     )));
 
-                    return Ok((left_keys, right_keys, combined_predicate));
+                    Ok((left_keys, right_keys, combined_predicate))
                 } else {
-                    return Err("Logic expression must have exactly two operands".to_string());
+                    Err("Logic expression must have exactly two operands".to_string())
                 }
             } else {
-                return Err("Only AND is supported for combining join conditions".to_string());
+                Err("Only AND is supported for combining join conditions".to_string())
             }
         }
 
         // Step 2.3: Error for unsupported expression types
         _ => {
-            return Err(format!(
+            Err(format!(
                 "Unsupported join predicate expression type: {:?}",
                 predicate
-            ));
+            ))
         }
     }
 }
@@ -3763,5 +3763,269 @@ mod test_extract_join_keys {
 
         let result = extract_join_keys(&predicate);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_different_column_names() {
+        // Test with different column names that don't match the special "d.id" pattern
+        let left_col = create_column_ref(0, 1, "employees.emp_id");
+        let right_col = create_column_ref(0, 2, "departments.dept_head");
+        let predicate = create_comparison(left_col, right_col, ComparisonType::Equal);
+
+        let result = extract_join_keys(&predicate).unwrap();
+
+        // Verify we got one key from each side
+        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.1.len(), 1);
+
+        // Check that the right column index is preserved (not fixed to 0)
+        if let Expression::Comparison(comp) = result.2.as_ref() {
+            if let Expression::ColumnRef(right) = comp.get_children()[1].as_ref() {
+                assert_eq!(right.get_tuple_index(), 1);
+                assert_eq!(right.get_column_index(), 2); // Should preserve original index
+                assert_eq!(right.get_return_type().get_name(), "departments.dept_head");
+            } else {
+                panic!("Expected column reference for right side");
+            }
+        } else {
+            panic!("Expected comparison expression");
+        }
+    }
+
+    #[test]
+    fn test_or_logic_expression_error() {
+        // a.id = b.id OR a.value = b.value (should fail - only AND is supported)
+        let left_col1 = create_column_ref(0, 0, "a.id");
+        let right_col1 = create_column_ref(0, 1, "b.id");
+        let pred1 = create_comparison(left_col1, right_col1, ComparisonType::Equal);
+
+        let left_col2 = create_column_ref(0, 2, "a.value");
+        let right_col2 = create_column_ref(0, 3, "b.value");
+        let pred2 = create_comparison(left_col2, right_col2, ComparisonType::Equal);
+
+        let combined_pred = create_logic(pred1, pred2, LogicType::Or);
+
+        let result = extract_join_keys(&combined_pred);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Only AND is supported"));
+    }
+
+    #[test]
+    fn test_comparison_with_wrong_operand_count() {
+        // Create a comparison with wrong number of children (should be handled gracefully)
+        let left_col = create_column_ref(0, 0, "a.id");
+        let right_col = create_column_ref(0, 1, "b.id");
+        
+        // Create comparison with only one child (malformed)
+        let malformed_comp = Arc::new(Expression::Comparison(ComparisonExpression::new(
+            left_col.clone(),
+            right_col.clone(),
+            ComparisonType::Equal,
+            vec![left_col.clone()], // Only one child instead of two
+        )));
+
+        let result = extract_join_keys(&malformed_comp);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exactly two operands"));
+    }
+
+    #[test]
+    fn test_logic_with_wrong_operand_count() {
+        // Create a logic expression with wrong number of children
+        let left_col = create_column_ref(0, 0, "a.id");
+        let right_col = create_column_ref(0, 1, "b.id");
+        let pred1 = create_comparison(left_col, right_col, ComparisonType::Equal);
+
+        // Create logic with only one child (malformed)
+        let malformed_logic = Arc::new(Expression::Logic(LogicExpression::new(
+            pred1.clone(),
+            pred1.clone(),
+            LogicType::And,
+            vec![pred1.clone()], // Only one child instead of two
+        )));
+
+        let result = extract_join_keys(&malformed_logic);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exactly two operands"));
+    }
+
+    #[test]
+    fn test_multiple_inequality_comparisons() {
+        // Test various inequality operators
+        let test_cases = vec![
+            (ComparisonType::NotEqual, "not equal"),
+            (ComparisonType::LessThan, "less than"), 
+            (ComparisonType::LessThanOrEqual, "less than or equal"),
+            (ComparisonType::GreaterThanOrEqual, "greater than or equal"),
+        ];
+
+        for (comp_type, desc) in test_cases {
+            let left_col = create_column_ref(0, 0, "a.id");
+            let right_col = create_column_ref(0, 1, "b.id");
+            let predicate = create_comparison(left_col, right_col, comp_type);
+
+            let result = extract_join_keys(&predicate);
+            assert!(result.is_err(), "Expected error for {} comparison", desc);
+            assert!(result.unwrap_err().contains("equality comparison"));
+        }
+    }
+
+    #[test]
+    fn test_mixed_expression_types_in_comparison() {
+        // Left side is column, right side is constant (should fail)
+        let left_col = create_column_ref(0, 0, "a.id");
+        let right_const = Arc::new(Expression::Constant(ConstantExpression::new(
+            Value::new(42),
+            Column::new("const", TypeId::Integer),
+            vec![],
+        )));
+        let predicate = create_comparison(left_col, right_const, ComparisonType::Equal);
+
+        let result = extract_join_keys(&predicate);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("column references"));
+    }
+
+    #[test]
+    fn test_complex_column_names() {
+        // Test with complex table and column names
+        let scenarios = vec![
+            ("schema1.table1.col1", "schema2.table2.col2"),
+            ("t1.very_long_column_name", "t2.another_long_name"),
+            ("Table_With_Underscores.Column_Name", "AnotherTable.AnotherColumn"),
+        ];
+
+        for (left_name, right_name) in scenarios {
+            let left_col = create_column_ref(0, 0, left_name);
+            let right_col = create_column_ref(0, 1, right_name);
+            let predicate = create_comparison(left_col, right_col, ComparisonType::Equal);
+
+            let result = extract_join_keys(&predicate);
+            assert!(result.is_ok(), "Failed for column names: {} = {}", left_name, right_name);
+
+            let (left_keys, right_keys, _) = result.unwrap();
+            assert_eq!(left_keys.len(), 1);
+            assert_eq!(right_keys.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_three_way_and_logic() {
+        // Test nested AND logic: (a.id = b.id) AND ((a.val1 = b.val1) AND (a.val2 = b.val2))
+        let pred1 = create_comparison(
+            create_column_ref(0, 0, "a.id"),
+            create_column_ref(0, 1, "b.id"),
+            ComparisonType::Equal,
+        );
+
+        let pred2 = create_comparison(
+            create_column_ref(0, 2, "a.val1"),
+            create_column_ref(0, 3, "b.val1"),
+            ComparisonType::Equal,
+        );
+
+        let pred3 = create_comparison(
+            create_column_ref(0, 4, "a.val2"),
+            create_column_ref(0, 5, "b.val2"),
+            ComparisonType::Equal,
+        );
+
+        // Create nested structure: pred2 AND pred3
+        let nested_and = create_logic(pred2, pred3, LogicType::And);
+        
+        // Create final structure: pred1 AND (pred2 AND pred3)
+        let final_pred = create_logic(pred1, nested_and, LogicType::And);
+
+        let result = extract_join_keys(&final_pred).unwrap();
+
+        // Should extract keys from all three comparisons in the nested structure
+        assert_eq!(result.0.len(), 3); // Three left keys (from all comparisons)
+        assert_eq!(result.1.len(), 3); // Three right keys (from all comparisons)
+    }
+
+    #[test]
+    fn test_special_d_id_variations() {
+        // Test variations of the special "d.id" case
+        let test_cases = vec![
+            ("d.id", true),      // Should be fixed to index 0
+            ("D.ID", false),     // Case sensitive - should not be fixed
+            ("d.identifier", false), // Different column name - should not be fixed
+            ("dept.id", false),  // Different table alias - should not be fixed
+            ("td.id", false),    // Different table alias - should not be fixed
+        ];
+
+        for (col_name, should_fix) in test_cases {
+            let left_col = create_column_ref(0, 0, "a.foreign_key");
+            let right_col = create_column_ref(0, 5, col_name); // Start with index 5
+            let predicate = create_comparison(left_col, right_col, ComparisonType::Equal);
+
+            let result = extract_join_keys(&predicate).unwrap();
+
+            if let Expression::Comparison(comp) = result.2.as_ref() {
+                if let Expression::ColumnRef(right) = comp.get_children()[1].as_ref() {
+                    let expected_index = if should_fix { 0 } else { 5 };
+                    assert_eq!(
+                        right.get_column_index(), 
+                        expected_index,
+                        "Column {} should {} have its index fixed to 0",
+                        col_name,
+                        if should_fix { "" } else { "not" }
+                    );
+                } else {
+                    panic!("Expected column reference for right side");
+                }
+            } else {
+                panic!("Expected comparison expression");
+            }
+        }
+    }
+
+    #[test]
+    fn test_unsupported_expression_type() {
+        // Test with an aggregate expression (unsupported)
+        let agg_expr = Arc::new(Expression::Aggregate(
+            crate::sql::execution::expressions::aggregate_expression::AggregateExpression::new(
+                crate::sql::execution::expressions::aggregate_expression::AggregationType::Count,
+                vec![create_column_ref(0, 0, "a.id")],
+                Column::new("count", TypeId::Integer),
+                "COUNT".to_string(),
+            )
+        ));
+
+        let result = extract_join_keys(&agg_expr);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported join predicate expression type"));
+    }
+
+    #[test]
+    fn test_tuple_index_preservation() {
+        // Test that original tuple indices are correctly transformed to 0 and 1
+        let scenarios = vec![
+            (0, 0, 0, 1), // Standard case
+            (5, 10, 0, 1), // Higher original indices should still become 0 and 1
+            (2, 3, 0, 1),  // Mid-range indices
+        ];
+
+        for (left_tuple, right_tuple, expected_left, expected_right) in scenarios {
+            let left_col = create_column_ref(left_tuple, 0, "left.col");
+            let right_col = create_column_ref(right_tuple, 1, "right.col");
+            let predicate = create_comparison(left_col, right_col, ComparisonType::Equal);
+
+            let result = extract_join_keys(&predicate).unwrap();
+
+            if let Expression::Comparison(comp) = result.2.as_ref() {
+                if let (Expression::ColumnRef(left), Expression::ColumnRef(right)) = (
+                    comp.get_children()[0].as_ref(),
+                    comp.get_children()[1].as_ref(),
+                ) {
+                    assert_eq!(left.get_tuple_index(), expected_left);
+                    assert_eq!(right.get_tuple_index(), expected_right);
+                } else {
+                    panic!("Expected column references in fixed predicate");
+                }
+            } else {
+                panic!("Expected comparison expression");
+            }
+        }
     }
 }
