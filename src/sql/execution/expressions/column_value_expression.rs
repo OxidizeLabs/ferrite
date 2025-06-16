@@ -76,23 +76,37 @@ impl ExpressionOps for ColumnRefExpression {
         );
 
         // Get the appropriate tuple and schema based on tuple_index
-        let (tuple, _schema) = match self.tuple_index {
-            0 => (left_tuple, left_schema),
-            1 => (right_tuple, right_schema),
+        let (tuple, schema, actual_column_index) = match self.tuple_index {
+            0 => {
+                // Left tuple - column_index should be within left schema bounds
+                (left_tuple, left_schema, self.column_index)
+            }
+            1 => {
+                // Right tuple - need to map combined schema index to right tuple index
+                let left_column_count = left_schema.get_column_count() as usize;
+                let actual_index = if self.column_index >= left_column_count {
+                    // This is a right table column, map it to right tuple index
+                    self.column_index - left_column_count
+                } else {
+                    // This shouldn't happen for tuple_index 1, but handle gracefully
+                    self.column_index
+                };
+                (right_tuple, right_schema, actual_index)
+            }
             idx => return Err(ExpressionError::InvalidTupleIndex(idx)),
         };
 
-        // Get the value from the tuple
+        // Get the value from the tuple using the actual column index
         let values = tuple.get_values();
-        if self.column_index >= values.len() {
-            return Err(ExpressionError::InvalidColumnIndex(self.column_index));
+        if actual_column_index >= values.len() {
+            return Err(ExpressionError::InvalidColumnIndex(actual_column_index));
         }
 
         trace!(
-            "Selected tuple values: {:?}, using column_index: {}",
-            values, self.column_index
+            "Selected tuple values: {:?}, using actual_column_index: {} (original: {})",
+            values, actual_column_index, self.column_index
         );
-        Ok(values[self.column_index].clone())
+        Ok(values[actual_column_index].clone())
     }
 
     fn get_child_at(&self, child_idx: usize) -> &Arc<Expression> {
