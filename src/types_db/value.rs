@@ -1369,26 +1369,39 @@ impl Type for Value {
             (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 <= *b),
             (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 <= *b),
             (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+            (Val::TinyInt(a), Val::Float(b)) => CmpBool::from(*a as f32 <= *b),
 
-            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as i16),
             (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 <= *b),
             (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 <= *b),
             (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+            (Val::SmallInt(a), Val::Float(b)) => CmpBool::from(*a as f32 <= *b),
 
             (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as i32),
             (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as i32),
             (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 <= *b),
             (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+            (Val::Integer(a), Val::Float(b)) => CmpBool::from(*a as f32 <= *b),
 
             (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as i64),
             (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as i64),
             (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a <= *b as i64),
             (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 <= *b),
+            (Val::BigInt(a), Val::Float(b)) => CmpBool::from(*a as f32 <= *b),
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as f64),
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as f64),
+            
+            (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as f32),
+            (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as f32),
+            (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a <= *b as f32),
+            (Val::Float(a), Val::BigInt(b)) => CmpBool::from(*a <= *b as f32),
+            (Val::Float(a), Val::Decimal(b)) => CmpBool::from(*a <= *b as f32),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a <= *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a <= *b as f64),
+            (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a <= *b as f64),
+            
+            (Val::Float(a), Val::Float(b)) => CmpBool::from(*a <= *b),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1469,11 +1482,20 @@ impl Type for Value {
             (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as i64),
             (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a >= *b as i64),
             (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+            (Val::BigInt(a), Val::Float(b)) => CmpBool::from(*a as f32 >= *b),
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as f64),
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as f64),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a >= *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a >= *b as f64),
+            (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a >= *b as f64),
+            
+            (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as f32),
+            (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as f32),
+            (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a >= *b as f32),
+            (Val::Float(a), Val::BigInt(b)) => CmpBool::from(*a >= *b as f32),
+            (Val::Float(a), Val::Decimal(b)) => CmpBool::from(*a >= *b as f32),
+            (Val::Float(a), Val::Float(b)) => CmpBool::from(*a >= *b),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
