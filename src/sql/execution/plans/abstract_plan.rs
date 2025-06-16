@@ -11,6 +11,7 @@ use crate::sql::execution::executors::index_scan_executor::IndexScanExecutor;
 use crate::sql::execution::executors::insert_executor::InsertExecutor;
 use crate::sql::execution::executors::limit_executor::LimitExecutor;
 use crate::sql::execution::executors::mock_executor::MockExecutor;
+use crate::sql::execution::executors::offset_executor::OffsetExecutor;
 use crate::sql::execution::executors::nested_index_join_executor::NestedIndexJoinExecutor;
 use crate::sql::execution::executors::nested_loop_join_executor::NestedLoopJoinExecutor;
 use crate::sql::execution::executors::projection_executor::ProjectionExecutor;
@@ -34,6 +35,7 @@ use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::execution::plans::limit_plan::LimitNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
+use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
@@ -61,6 +63,7 @@ pub enum PlanType {
     Delete,
     Aggregation,
     Limit,
+    Offset,
     NestedLoopJoin,
     NestedIndexJoin,
     HashJoin,
@@ -90,6 +93,7 @@ pub enum PlanNode {
     Delete(DeleteNode),
     Aggregation(AggregationPlanNode),
     Limit(LimitNode),
+    Offset(OffsetNode),
     NestedLoopJoin(NestedLoopJoinNode),
     NestedIndexJoin(NestedIndexJoinNode),
     HashJoin(HashJoinNode),
@@ -155,6 +159,7 @@ impl PlanNode {
             PlanNode::Update(node) => node,
             PlanNode::Delete(node) => node,
             PlanNode::Limit(node) => node,
+            PlanNode::Offset(node) => node,
             PlanNode::NestedIndexJoin(node) => node,
             PlanNode::HashJoin(node) => node,
             PlanNode::Values(node) => node,
@@ -357,6 +362,18 @@ impl PlanNode {
             PlanNode::Limit(node) => {
                 result.push_str(&format!("{}→ Limit\n", indent));
                 result.push_str(&format!("{}   Limit: {}\n", indent, node.get_limit()));
+                result.push_str(
+                    &node
+                        .get_children()
+                        .iter()
+                        .map(|_| self.explain_internal(depth + 1))
+                        .collect::<Vec<String>>()
+                        .join(" "),
+                );
+            }
+            PlanNode::Offset(node) => {
+                result.push_str(&format!("{}→ Offset\n", indent));
+                result.push_str(&format!("{}   Offset: {}\n", indent, node.get_offset()));
                 result.push_str(
                     &node
                         .get_children()
@@ -695,6 +712,29 @@ impl PlanNode {
                 };
 
                 Ok(Box::new(LimitExecutor::new(
+                    child_executor,
+                    context,
+                    Arc::new(node.clone()),
+                )))
+            }
+            PlanNode::Offset(node) => {
+                let child_plan = node
+                    .get_children()
+                    .first()
+                    .ok_or_else(|| "Offset node must have a child".to_string())?;
+
+                // Create the child executor with proper error handling to avoid recursion issues
+                let child_executor = match child_plan.create_executor(context.clone()) {
+                    Ok(executor) => executor,
+                    Err(e) => {
+                        return Err(format!(
+                            "Failed to create child executor for Offset node: {}",
+                            e
+                        ));
+                    }
+                };
+
+                Ok(Box::new(OffsetExecutor::new(
                     child_executor,
                     context,
                     Arc::new(node.clone()),
