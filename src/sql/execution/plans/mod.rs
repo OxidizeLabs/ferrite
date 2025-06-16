@@ -10,6 +10,7 @@ pub mod index_scan_plan;
 pub mod insert_plan;
 pub mod limit_plan;
 pub mod mock_scan_plan;
+pub mod offset_plan;
 pub mod nested_index_join_plan;
 pub mod nested_loop_join_plan;
 pub mod projection_plan;

@@ -11,6 +11,7 @@ pub mod index_scan_executor;
 pub mod insert_executor;
 pub mod limit_executor;
 pub mod mock_executor;
+pub mod offset_executor;
 pub mod mock_scan_executor;
 pub mod nested_index_join_executor;
 pub mod nested_loop_join_executor;
