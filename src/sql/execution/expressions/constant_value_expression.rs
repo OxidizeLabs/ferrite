@@ -3,6 +3,7 @@ use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
+use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -26,6 +27,16 @@ impl ConstantExpression {
 
     pub fn get_value(&self) -> &Value {
         &self.value
+    }
+    
+    // Helper method to create a vector constant from literal values
+    pub fn new_vector(values: Vec<Value>, children: Vec<Arc<Expression>>) -> Self {
+        let vector_value = Value::new_vector(values);
+        Self {
+            value: vector_value,
+            ret_type: Column::new("list", TypeId::Vector),
+            children,
+        }
     }
 }
 
