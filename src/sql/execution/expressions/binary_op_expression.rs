@@ -79,16 +79,33 @@ impl BinaryOpExpression {
             BinaryOperator::Plus
             | BinaryOperator::Minus
             | BinaryOperator::Multiply
-            | BinaryOperator::Divide => match (left_type, right_type) {
-                (TypeId::Integer, TypeId::Integer) => {
+            | BinaryOperator::Divide
+            | BinaryOperator::Modulo => match (left_type, right_type) {
+                (TypeId::Integer, TypeId::Integer)
+                | (TypeId::Integer, TypeId::TinyInt)
+                | (TypeId::TinyInt, TypeId::Integer)
+                | (TypeId::TinyInt, TypeId::TinyInt)
+                | (TypeId::Integer, TypeId::SmallInt)
+                | (TypeId::SmallInt, TypeId::Integer)
+                | (TypeId::SmallInt, TypeId::SmallInt) => {
                     Ok(Column::new("arithmetic_result", TypeId::Integer))
                 }
                 (TypeId::Decimal, TypeId::Decimal)
                 | (TypeId::Integer, TypeId::Decimal)
-                | (TypeId::Decimal, TypeId::Integer) => {
+                | (TypeId::Decimal, TypeId::Integer)
+                | (TypeId::TinyInt, TypeId::Decimal)
+                | (TypeId::Decimal, TypeId::TinyInt)
+                | (TypeId::SmallInt, TypeId::Decimal)
+                | (TypeId::Decimal, TypeId::SmallInt) => {
                     Ok(Column::new("arithmetic_result", TypeId::Decimal))
                 }
-                (TypeId::BigInt, TypeId::BigInt) => {
+                (TypeId::BigInt, TypeId::BigInt)
+                | (TypeId::BigInt, TypeId::Integer)
+                | (TypeId::Integer, TypeId::BigInt)
+                | (TypeId::BigInt, TypeId::TinyInt)
+                | (TypeId::TinyInt, TypeId::BigInt)
+                | (TypeId::BigInt, TypeId::SmallInt)
+                | (TypeId::SmallInt, TypeId::BigInt) => {
                     Ok(Column::new("arithmetic_result", TypeId::BigInt))
                 }
                 (TypeId::BigInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::BigInt) => {
@@ -130,6 +147,7 @@ impl BinaryOpExpression {
             BinaryOperator::Divide => left_val
                 .divide(right_val)
                 .map_err(|e| ExpressionError::InvalidOperation(e)),
+            BinaryOperator::Modulo => Ok(left_val.modulo(right_val)),
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Invalid arithmetic operator: {:?}",
                 self.op
@@ -194,7 +212,8 @@ impl ExpressionOps for BinaryOpExpression {
             BinaryOperator::Plus
             | BinaryOperator::Minus
             | BinaryOperator::Multiply
-            | BinaryOperator::Divide => self.evaluate_arithmetic(&left_val, &right_val),
+            | BinaryOperator::Divide
+            | BinaryOperator::Modulo => self.evaluate_arithmetic(&left_val, &right_val),
 
             BinaryOperator::Eq
             | BinaryOperator::NotEq
