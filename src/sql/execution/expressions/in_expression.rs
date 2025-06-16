@@ -4,7 +4,7 @@ use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::{CmpBool, Type};
+use crate::types_db::types::Type;
 use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -77,10 +77,14 @@ impl InExpression {
 
     fn evaluate_list(&self, value: &Value, list_result: Value) -> Result<Value, ExpressionError> {
         // Get the list values as a vector
+        let mut owned_values = Vec::new();
         let list_values = match list_result.get_val() {
             Val::Vector(values) => values,
             // If single value, wrap in vector
-            _ => &vec![list_result],
+            _ => {
+                owned_values.push(list_result);
+                &owned_values
+            }
         };
 
         self.check_value_in_list(value, list_values)
@@ -131,28 +135,91 @@ impl InExpression {
                 has_null = true;
                 continue;
             }
+            
+            // Handle type conversion for comparison
+            // For example, if comparing Integer with TinyInt
+            let comparable_value = if value.get_type_id() != list_value.get_type_id() {
+                // Try to convert the list value to the same type as the column value
+                match (value.get_type_id(), list_value.get_type_id()) {
+                    (TypeId::Integer, TypeId::TinyInt) => {
+                        // Convert TinyInt to Integer
+                        if let Val::TinyInt(n) = list_value.get_val() {
+                            Value::new(*n as i32)
+                        } else {
+                            list_value.clone()
+                        }
+                    },
+                    (TypeId::Integer, TypeId::SmallInt) => {
+                        // Convert SmallInt to Integer
+                        if let Val::SmallInt(n) = list_value.get_val() {
+                            Value::new(*n as i32)
+                        } else {
+                            list_value.clone()
+                        }
+                    },
+                    (TypeId::Integer, TypeId::BigInt) => {
+                        // Convert BigInt to Integer if it fits
+                        if let Val::BigInt(n) = list_value.get_val() {
+                            if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
+                                Value::new(*n as i32)
+                            } else {
+                                list_value.clone()
+                            }
+                        } else {
+                            list_value.clone()
+                        }
+                    },
+                    (TypeId::Integer, TypeId::Decimal) => {
+                        // Convert Decimal to Integer if it's a whole number
+                        if let Val::Decimal(n) = list_value.get_val() {
+                            if *n == (*n as i32) as f64 {
+                                Value::new(*n as i32)
+                            } else {
+                                list_value.clone()
+                            }
+                        } else {
+                            list_value.clone()
+                        }
+                    },
+                    // Add more type conversions as needed
+                    _ => list_value.clone()
+                }
+            } else {
+                list_value.clone()
+            };
 
-            match value.compare_equals(list_value) {
-                CmpBool::CmpTrue => {
+            // Compare the values
+            match value.compare_equals(&comparable_value) {
+                crate::types_db::types::CmpBool::CmpTrue => {
                     found = true;
                     break;
                 }
-                CmpBool::CmpNull => {
+                crate::types_db::types::CmpBool::CmpFalse => {
+                    // Continue checking other values
+                }
+                crate::types_db::types::CmpBool::CmpNull => {
                     has_null = true;
                 }
-                CmpBool::CmpFalse => {}
             }
         }
 
-        let result = if found {
-            !self.negated
+        if found {
+            Ok(Value::new(true))
         } else if has_null {
-            return Ok(Value::new(Val::Null));
+            Ok(Value::new(Val::Null))
         } else {
-            self.negated
-        };
+            Ok(Value::new(false))
+        }
+    }
 
-        Ok(Value::new(result))
+    fn negate_result(&self, result: Value) -> Result<Value, ExpressionError> {
+        match result.get_val() {
+            Val::Boolean(b) => Ok(Value::new(!b)),
+            Val::Null => Ok(Value::new(Val::Null)), // NULL NOT IN anything is still NULL
+            _ => Err(ExpressionError::InvalidOperation(
+                "Cannot negate non-boolean IN expression result".to_string(),
+            )),
+        }
     }
 }
 
@@ -160,7 +227,7 @@ impl ExpressionOps for InExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         let value = self.expr.evaluate(tuple, schema)?;
 
-        match &self.operand {
+        let result = match &self.operand {
             InOperand::List(list_expr) => {
                 let list_result = list_expr.evaluate(tuple, schema)?;
                 self.evaluate_list(&value, list_result)
@@ -173,6 +240,13 @@ impl ExpressionOps for InExpression {
                 let unnest_result = array_expr.evaluate(tuple, schema)?;
                 self.evaluate_unnest(&value, unnest_result)
             }
+        }?;
+
+        // Apply negation if this is a NOT IN expression
+        if self.negated {
+            self.negate_result(result)
+        } else {
+            Ok(result)
         }
     }
 
@@ -187,7 +261,7 @@ impl ExpressionOps for InExpression {
             .expr
             .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
 
-        match &self.operand {
+        let result = match &self.operand {
             InOperand::List(list_expr) => {
                 let list_result =
                     list_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
@@ -207,6 +281,13 @@ impl ExpressionOps for InExpression {
                     array_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
                 self.evaluate_unnest(&value, unnest_result)
             }
+        }?;
+
+        // Apply negation if this is a NOT IN expression
+        if self.negated {
+            self.negate_result(result)
+        } else {
+            Ok(result)
         }
     }
 
