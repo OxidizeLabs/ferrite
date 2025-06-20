@@ -4,6 +4,7 @@ pub mod commit_transaction_plan;
 pub mod create_index_plan;
 pub mod create_table_plan;
 pub mod delete_plan;
+pub mod distinct_plan;
 pub mod filter_plan;
 pub mod hash_join_plan;
 pub mod index_scan_plan;

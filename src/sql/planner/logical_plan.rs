@@ -13,6 +13,7 @@ use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::sql::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::sql::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::sql::execution::plans::delete_plan::DeleteNode;
+use crate::sql::execution::plans::distinct_plan::DistinctNode;
 use crate::sql::execution::plans::filter_plan::FilterNode;
 use crate::sql::execution::plans::hash_join_plan::HashJoinNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
@@ -137,6 +138,9 @@ pub enum LogicalPlanType {
     },
     Limit {
         limit: usize,
+        schema: Schema,
+    },
+    Distinct {
         schema: Schema,
     },
     TopN {
@@ -348,6 +352,10 @@ impl LogicalPlan {
             }
             LogicalPlanType::Limit { limit, schema } => {
                 result.push_str(&format!("{}→ Limit: {}\n", indent_str, limit));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Distinct { schema } => {
+                result.push_str(&format!("{}→ Distinct\n", indent_str));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
             LogicalPlanType::Insert {
@@ -1025,6 +1033,13 @@ impl LogicalPlan {
         ))
     }
 
+    pub fn distinct(schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Distinct { schema },
+            vec![input],
+        ))
+    }
+
     pub fn top_n(
         k: usize,
         sort_expressions: Vec<Arc<Expression>>,
@@ -1234,6 +1249,7 @@ impl LogicalPlan {
             LogicalPlanType::Filter { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Sort { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Limit { schema, .. } => Some(schema.clone()),
+        LogicalPlanType::Distinct { schema } => Some(schema.clone()),
             LogicalPlanType::TopN { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Aggregate { schema, .. } => Some(schema.clone()),
             LogicalPlanType::TopNPerGroup { schema, .. } => Some(schema.clone()),
@@ -2134,6 +2150,10 @@ impl<'a> PlanConverter<'a> {
             LogicalPlanType::Use { db_name } => {
                 // Create a dummy plan that will use database
                 Ok(PlanNode::CommandResult(format!("USE {}", db_name)))
+            }
+
+            LogicalPlanType::Distinct { schema } => {
+                Ok(PlanNode::Distinct(DistinctNode::new(schema.clone()).with_children(child_plans)))
             }
 
             LogicalPlanType::Explain { plan } => {

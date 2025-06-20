@@ -5,6 +5,7 @@ pub mod commit_transaction_executor;
 pub mod create_index_executor;
 pub mod create_table_executor;
 pub mod delete_executor;
+pub mod distinct_executor;
 pub mod filter_executor;
 pub mod hash_join_executor;
 pub mod index_scan_executor;
