@@ -287,6 +287,9 @@ impl LogicalPlanBuilder {
                 );
 
             // Create aggregation plan node
+            // Clone agg_exprs before moving it into the aggregate plan
+            let agg_exprs_for_having = agg_exprs.clone();
+            
             current_plan = LogicalPlan::aggregate(
                 group_by_exprs.into_iter().map(|e| Arc::new(e)).collect(),
                 agg_exprs,
@@ -302,11 +305,18 @@ impl LogicalPlanBuilder {
                     .expression_parser
                     .parse_expression(having, &original_schema)?;
 
+                // Replace aggregate functions in the HAVING expression with column references
+                // to the pre-computed aggregate values from the aggregation output
+                let current_schema = current_plan.get_schema().clone().unwrap();
+                let transformed_having_expr = self
+                    .expression_parser
+                    .replace_aggregates_with_column_refs(&having_expr, &current_schema, &agg_exprs_for_having)?;
+
                 current_plan = LogicalPlan::filter(
-                    current_plan.get_schema().clone().unwrap(),
+                    current_schema,
                     String::new(), // table_name
                     0,             // table_oid
-                    Arc::new(having_expr),
+                    Arc::new(transformed_having_expr),
                     current_plan,
                 );
             }
