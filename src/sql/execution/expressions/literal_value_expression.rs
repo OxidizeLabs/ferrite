@@ -26,10 +26,9 @@ impl LiteralValueExpression {
         let (value, type_id) = match sql_value {
             SQLValue::Number(n, _) => {
                 if n.contains('.') {
-                    // Parse as float to ensure compatibility with Float columns
+                    // Parse as decimal to ensure compatibility with Decimal columns
                     let parsed_value = n.parse::<f64>().map_err(|e| e.to_string())?;
-                    let float_val = parsed_value as f32;
-                    (Value::new_with_type(Val::Float(float_val), TypeId::Float), TypeId::Float)
+                    (Value::new(parsed_value), TypeId::Decimal)
                 } else {
                     // Try parsing as integer types in order of size
                     // Start with smallest type that can hold the value
@@ -191,7 +190,7 @@ mod tests {
         let float_expr =
             LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
         assert_eq!(float_expr.get_value(), &Value::new(3.14));
-        assert_eq!(float_expr.get_return_type().get_type(), TypeId::Float);
+        assert_eq!(float_expr.get_return_type().get_type(), TypeId::Decimal);
 
         // Test string literals
         let str_expr =
