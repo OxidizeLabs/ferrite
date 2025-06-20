@@ -5,6 +5,7 @@ use crate::sql::execution::executors::aggregation_executor::AggregationExecutor;
 use crate::sql::execution::executors::create_index_executor::CreateIndexExecutor;
 use crate::sql::execution::executors::create_table_executor::CreateTableExecutor;
 use crate::sql::execution::executors::delete_executor::DeleteExecutor;
+use crate::sql::execution::executors::distinct_executor::DistinctExecutor;
 use crate::sql::execution::executors::filter_executor::FilterExecutor;
 use crate::sql::execution::executors::hash_join_executor::HashJoinExecutor;
 use crate::sql::execution::executors::index_scan_executor::IndexScanExecutor;
@@ -29,6 +30,7 @@ use crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlan
 use crate::sql::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::sql::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::sql::execution::plans::delete_plan::DeleteNode;
+use crate::sql::execution::plans::distinct_plan::DistinctNode;
 use crate::sql::execution::plans::filter_plan::FilterNode;
 use crate::sql::execution::plans::hash_join_plan::HashJoinNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
@@ -75,6 +77,7 @@ pub enum PlanType {
     TopNPerGroup,
     MockScan,
     // InitCheck,
+    Distinct,
     Window,
     CreateTable,
     CreateIndex,
@@ -104,6 +107,7 @@ pub enum PlanNode {
     TopN(TopNNode),
     TopNPerGroup(TopNPerGroupNode),
     MockScan(MockScanNode),
+    Distinct(DistinctNode),
     Window(WindowNode),
     CreateTable(CreateTablePlanNode),
     CreateIndex(CreateIndexPlanNode),
@@ -168,6 +172,7 @@ impl PlanNode {
             PlanNode::TopN(node) => node,
             PlanNode::TopNPerGroup(node) => node,
             PlanNode::MockScan(node) => node,
+            PlanNode::Distinct(node) => node,
             PlanNode::Window(node) => node,
             PlanNode::CreateTable(node) => node,
             PlanNode::CreateIndex(node) => node,
@@ -546,6 +551,22 @@ impl PlanNode {
                         .join("\n"),
                 );
             }
+            PlanNode::Distinct(node) => {
+                result.push_str(&format!("{}→ Distinct\n", indent));
+                result.push_str(&format!(
+                    "{}   Schema: {}\n",
+                    indent,
+                    node.get_output_schema()
+                ));
+                result.push_str(
+                    &node
+                        .get_children()
+                        .iter()
+                        .map(|child| child.explain_internal(depth + 1))
+                        .collect::<Vec<String>>()
+                        .join("\n"),
+                );
+            }
             PlanNode::StartTransaction(node) => {
                 result.push_str(&format!("{}→ StartTransaction\n", indent));
                 if let Some(level) = node.get_isolation_level() {
@@ -782,6 +803,18 @@ impl PlanNode {
                 context,
                 Arc::new(node.clone()),
             ))),
+            PlanNode::Distinct(node) => {
+                let child_plan = node
+                    .get_children()
+                    .first()
+                    .ok_or_else(|| "Distinct node must have a child".to_string())?;
+                let child_executor = child_plan.create_executor(context.clone())?;
+
+                Ok(Box::new(DistinctExecutor::new(
+                    node.get_output_schema().clone(),
+                    child_executor,
+                )))
+            }
             PlanNode::Window(node) => Ok(Box::new(WindowExecutor::new(
                 context,
                 Arc::new(node.clone()),
