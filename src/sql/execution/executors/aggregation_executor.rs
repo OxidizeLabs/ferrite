@@ -85,7 +85,7 @@ impl AggregationExecutor {
         let agg_value = agg_map
             .entry(key.clone())
             .or_insert_with(|| AggregateValues {
-                values: vec![Value::from(TypeId::Invalid); aggregates.len()],
+                values: vec![Value::new(Val::Null); aggregates.len()],
             });
 
         debug!("Current aggregate values: {:?}", agg_value.values);
@@ -150,7 +150,7 @@ impl AggregationExecutor {
                                 *current_count += 1;
 
                                 if agg_value.values[i].is_null() {
-                                    // First value - store as sum
+                                    // First value - store as sum with proper type
                                     agg_value.values[i] = arg_val;
                                 } else {
                                     // Add to the sum
@@ -289,23 +289,58 @@ impl AbstractExecutor for AggregationExecutor {
 
         // Take the next group from the Vec
         if let Some((key, mut value)) = self.groups_to_return.pop() {
+            debug!("Processing group with key: {:?}, values: {:?}", key, value.values);
             // Process Average aggregates: divide sum by count
             for (i, agg_expr) in self.aggregate_exprs.iter().enumerate() {
                 if let Expression::Aggregate(agg) = agg_expr.as_ref() {
                     if let AggregationType::Avg = agg.get_agg_type() {
+                        debug!("Processing AVG aggregate at index {}", i);
                         // Find the count for this average
                         if let Some(&count) = self.avg_counts.get(&(key.clone(), i)) {
+                            debug!("Found count {} for group {:?}, aggregate {}", count, key, i);
+                            debug!("Current value: {:?}", value.values[i]);
                             if count > 0 && !value.values[i].is_null() {
-                                // Divide sum by count to get average
+                                // Convert sum to decimal and divide by count to get average
+                                let sum_as_decimal = match value.values[i].get_type_id() {
+                                    TypeId::Integer => {
+                                        let int_val = value.values[i].as_integer().unwrap();
+                                        Value::new(int_val as f64)
+                                    }
+                                    TypeId::BigInt => {
+                                        let bigint_val = value.values[i].as_bigint().unwrap();
+                                        Value::new(bigint_val as f64)
+                                    }
+                                    TypeId::Decimal => value.values[i].clone(),
+                                    _ => {
+                                        debug!("Unexpected sum type for AVG: {:?}", value.values[i].get_type_id());
+                                        Value::new(Val::Null)
+                                    }
+                                };
+                                
                                 let count_value = Value::new(count as f64);
-                                match value.values[i].divide(&count_value) {
-                                    Ok(avg_result) => value.values[i] = avg_result,
-                                    Err(_) => value.values[i] = Value::new(Val::Null),
+                                debug!("Dividing sum_as_decimal {:?} by count {:?}", sum_as_decimal, count_value);
+                                
+                                if !sum_as_decimal.is_null() {
+                                    match sum_as_decimal.divide(&count_value) {
+                                        Ok(avg_result) => {
+                                            debug!("Division successful: {:?}", avg_result);
+                                            value.values[i] = avg_result;
+                                        },
+                                        Err(e) => {
+                                            debug!("Division failed: {}", e);
+                                            value.values[i] = Value::new(Val::Null);
+                                        }
+                                    }
+                                } else {
+                                    debug!("Sum is null, setting average to NULL");
+                                    value.values[i] = Value::new(Val::Null);
                                 }
                             } else {
+                                debug!("Count is 0 or value is null, setting to NULL");
                                 value.values[i] = Value::new(Val::Null);
                             }
                         } else {
+                            debug!("No count found for group {:?}, aggregate {}", key, i);
                             value.values[i] = Value::new(Val::Null);
                         }
                     }
