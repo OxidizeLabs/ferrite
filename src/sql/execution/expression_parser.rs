@@ -3284,6 +3284,112 @@ impl ExpressionParser {
             TableObject::TableFunction(_) => Err("Table functions are not supported".to_string()),
         }
     }
+
+    /// Replace aggregate functions in HAVING clause expressions with column references
+    /// to the pre-computed aggregate values from the aggregation output schema
+    pub fn replace_aggregates_with_column_refs(
+        &self,
+        expr: &Expression,
+        aggregation_schema: &Schema,
+        original_aggregates: &[Arc<Expression>],
+    ) -> Result<Expression, String> {
+        match expr {
+            Expression::Aggregate(agg) => {
+                // Find the matching aggregate in the original aggregates list
+                for (agg_idx, orig_agg) in original_aggregates.iter().enumerate() {
+                    if let Expression::Aggregate(orig_agg_expr) = orig_agg.as_ref() {
+                        // Check if this aggregate matches the one we're looking for
+                        if agg.get_agg_type() == orig_agg_expr.get_agg_type() {
+                            // For COUNT(*), match only if both are COUNT(*)
+                            if matches!(agg.get_agg_type(), AggregationType::CountStar) {
+                                // Calculate the correct column index in the aggregation schema
+                                // The aggregation schema has: [group_by_columns..., aggregate_columns...]
+                                // We need to find how many group by columns there are to offset the aggregate index
+                                let group_by_count = aggregation_schema.get_column_count() - original_aggregates.len() as u32;
+                                let column_idx = group_by_count + agg_idx as u32;
+                                
+                                if let Some(agg_column) = aggregation_schema.get_column(column_idx as usize) {
+                                    return Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                                        0, // tuple_index
+                                        column_idx as usize,
+                                        agg_column.clone(),
+                                        vec![],
+                                    )));
+                                }
+                            } else if agg.get_children().len() == orig_agg_expr.get_children().len() {
+                                // For other aggregates, check if the arguments match
+                                let mut args_match = true;
+                                for (arg1, arg2) in agg.get_children().iter().zip(orig_agg_expr.get_children().iter()) {
+                                    // Simple equality check - this could be made more sophisticated
+                                    if format!("{}", arg1) != format!("{}", arg2) {
+                                        args_match = false;
+                                        break;
+                                    }
+                                }
+                                if args_match {
+                                    // Calculate the correct column index in the aggregation schema
+                                    let group_by_count = aggregation_schema.get_column_count() - original_aggregates.len() as u32;
+                                    let column_idx = group_by_count + agg_idx as u32;
+                                    
+                                    if let Some(agg_column) = aggregation_schema.get_column(column_idx as usize) {
+                                        return Ok(Expression::ColumnRef(ColumnRefExpression::new(
+                                            0, // tuple_index
+                                            column_idx as usize,
+                                            agg_column.clone(),
+                                            vec![],
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // If we couldn't find a match, return an error
+                Err(format!("Aggregate function {} not found in aggregation output", agg.get_function_name()))
+            }
+            Expression::Comparison(comp) => {
+                let left = self.replace_aggregates_with_column_refs(
+                    comp.get_left(), 
+                    aggregation_schema, 
+                    original_aggregates
+                )?;
+                let right = self.replace_aggregates_with_column_refs(
+                    comp.get_right(), 
+                    aggregation_schema, 
+                    original_aggregates
+                )?;
+                
+                Ok(Expression::Comparison(ComparisonExpression::new(
+                    Arc::new(left),
+                    Arc::new(right),
+                    comp.get_comp_type(),
+                    vec![],
+                )))
+            }
+            Expression::Logic(logic) => {
+                let left = self.replace_aggregates_with_column_refs(
+                    logic.get_left(), 
+                    aggregation_schema, 
+                    original_aggregates
+                )?;
+                let right = self.replace_aggregates_with_column_refs(
+                    logic.get_right(), 
+                    aggregation_schema, 
+                    original_aggregates
+                )?;
+                
+                Ok(Expression::Logic(LogicExpression::new(
+                    Arc::new(left),
+                    Arc::new(right),
+                    logic.get_logic_type(),
+                    vec![],
+                )))
+            }
+            // For non-aggregate expressions, return as-is
+            _ => Ok(expr.clone()),
+        }
+    }
 }
 
 #[cfg(test)]
