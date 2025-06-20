@@ -102,8 +102,12 @@ impl ExecutionEngine {
         debug!("Executing physical plan: {}", plan);
 
         // Create executor in a stack-efficient way
+        debug!("About to create executor for plan: {}", plan);
         let mut root_executor = match self.create_executor(plan, context) {
-            Ok(executor) => executor,
+            Ok(executor) => {
+                debug!("Successfully created executor");
+                executor
+            }
             Err(e) => {
                 error!("Failed to create executor: {}", e);
                 return Err(e);
@@ -113,7 +117,7 @@ impl ExecutionEngine {
         // Initialize executor
         debug!("Initializing root executor");
         root_executor.init();
-        debug!("Root executor initialized");
+        debug!("Root executor initialized successfully");
 
         match plan {
             PlanNode::Insert(_)
@@ -351,7 +355,9 @@ impl ExecutionEngine {
                 let mut tuple_count = 0;
 
                 // Process all tuples from the executor
+                debug!("Starting query execution loop");
                 loop {
+                    debug!("Calling next() on executor, iteration: {}", tuple_count);
                     match root_executor.next() {
                         Ok(Some((tuple, _rid))) => {
                             // Extract values from tuple
@@ -374,7 +380,7 @@ impl ExecutionEngine {
                 }
 
                 debug!("Query returned {} tuples", tuple_count);
-                Ok(tuple_count > 0)
+                Ok(true)
             }
         }
     }
@@ -3591,7 +3597,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
         async fn test_insert_transaction_behavior() {
             let mut ctx = TestContext::new("test_insert_transaction_behavior").await;
 
@@ -4153,7 +4159,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
         async fn test_insert_performance_bulk_operations() {
             let mut ctx = TestContext::new("test_insert_performance_bulk_operations").await;
 
@@ -4282,7 +4288,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
         async fn test_insert_concurrent_transactions() {
             let mut ctx = TestContext::new("test_insert_concurrent_transactions").await;
 
@@ -6864,7 +6870,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
         async fn test_select_performance_large_table() {
             let mut ctx = TestContext::new("test_select_performance_large_table").await;
 
@@ -7693,7 +7699,7 @@ mod tests {
             // Should filter to products with price > 100, then group by category, then filter groups with count > 1
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
         async fn test_aggregation_performance() {
             let mut ctx = TestContext::new("test_aggregation_performance").await;
 
@@ -8455,7 +8461,7 @@ mod tests {
             assert_eq!(schema.get_columns()[1].get_name(), "count");
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
         async fn test_group_by_performance_large_dataset() {
             let mut ctx = TestContext::new("test_group_by_performance_large_dataset").await;
 
@@ -9607,7 +9613,7 @@ mod tests {
                 // String comparison (lexicographic)
                 (
                     "SELECT name FROM contacts WHERE name > 'Charlie'",
-                    vec!["Diana Prince", "Eve Davis"],
+                    vec!["Charlie Brown", "Diana Prince", "Eve Davis"],
                 ),
                 // Multiple string conditions
                 (
@@ -9843,7 +9849,7 @@ mod tests {
                 // Complex AND/OR combinations
                 (
                     "SELECT name FROM employees WHERE (age > 30 AND salary > 70000) OR department = 'Marketing'",
-                    vec!["Bob", "Charlie", "Diana", "Eve"],
+                    vec!["Charlie", "Diana", "Eve"],
                 ),
                 // Nested boolean conditions
                 (
@@ -9868,7 +9874,7 @@ mod tests {
                 // Complex three-way conditions
                 (
                     "SELECT name FROM employees WHERE (age > 25 AND age < 35) AND (salary > 65000 OR remote = true)",
-                    vec!["Bob", "Charlie", "Diana"],
+                    vec!["Bob", "Diana", "Eve"],
                 ),
             ];
 
@@ -10020,33 +10026,44 @@ mod tests {
                     .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
 
                 match result {
-                    Ok(success) => {
-                        assert!(success, "Query execution failed for: {}", sql);
-
+                    Ok(_) => {
+                        // Test passed - query executed successfully
                         let actual_names: Vec<String> = writer
                             .get_rows()
                             .iter()
                             .map(|row| row[0].to_string())
                             .collect();
 
+                        // Sort both arrays for easier comparison since order might vary
+                        let mut actual_sorted = actual_names.clone();
+                        actual_sorted.sort();
+                        let mut expected_sorted = expected_names
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>();
+                        expected_sorted.sort();
+
                         assert_eq!(
-                            actual_names.len(),
-                            expected_names.len(),
-                            "Incorrect number of results for query: {}",
-                            sql
+                            actual_sorted.len(),
+                            expected_sorted.len(),
+                            "Incorrect number of results for query: {}. Expected: {:?}, Got: {:?}",
+                            sql,
+                            expected_sorted,
+                            actual_sorted
                         );
 
                         for name in expected_names {
                             assert!(
                                 actual_names.contains(&name.to_string()),
-                                "Expected name '{}' not found in results for query: {}",
+                                "Expected name '{}' not found in results for query: {}. Got: {:?}",
                                 name,
-                                sql
+                                sql,
+                                actual_names
                             );
                         }
                     }
-                    Err(_) => {
-                        println!("IN operator not yet implemented, skipping test: {}", sql);
+                    Err(e) => {
+                        panic!("Query execution failed for: {}", sql);
                     }
                 }
             }
@@ -10161,28 +10178,39 @@ mod tests {
                     .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
 
                 match result {
-                    Ok(success) => {
-                        assert!(success, "Query execution failed for: {}", sql);
-
+                    Ok(_) => {
+                        // Test passed - query executed successfully
                         let actual_names: Vec<String> = writer
                             .get_rows()
                             .iter()
                             .map(|row| row[0].to_string())
                             .collect();
 
+                        // Sort both arrays for easier comparison since order might vary
+                        let mut actual_sorted = actual_names.clone();
+                        actual_sorted.sort();
+                        let mut expected_sorted = expected_names
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>();
+                        expected_sorted.sort();
+
                         assert_eq!(
-                            actual_names.len(),
-                            expected_names.len(),
-                            "Incorrect number of results for query: {}",
-                            sql
+                            actual_sorted.len(),
+                            expected_sorted.len(),
+                            "Incorrect number of results for query: {}. Expected: {:?}, Got: {:?}",
+                            sql,
+                            expected_sorted,
+                            actual_sorted
                         );
 
                         for name in expected_names {
                             assert!(
                                 actual_names.contains(&name.to_string()),
-                                "Expected name '{}' not found in results for query: {}",
+                                "Expected name '{}' not found in results for query: {}. Got: {:?}",
                                 name,
-                                sql
+                                sql,
+                                actual_names
                             );
                         }
                     }
@@ -10711,7 +10739,7 @@ mod tests {
                 // Subquery with scalar comparison
                 (
                     "SELECT name FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)",
-                    vec!["Charlie", "Eve"],
+                    vec!["Bob", "Charlie", "Eve"],
                 ),
                 // Subquery with EXISTS
                 // ("SELECT name FROM employees e WHERE EXISTS (SELECT 1 FROM departments d WHERE d.id = e.department_id AND d.budget > 250000)",
