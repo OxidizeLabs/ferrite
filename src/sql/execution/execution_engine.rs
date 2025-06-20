@@ -10908,8 +10908,53 @@ mod tests {
 
             let rows = writer.get_rows();
 
+            // Should return only North (370000) region - East is exactly 200000, not > 200000
+            assert_eq!(rows.len(), 1, "Expected 1 region with sales > 200000");
+        }
+
+        #[tokio::test]
+        async fn test_having_with_sum_greater_equal() {
+            let mut ctx = TestContext::new("test_having_with_sum_gte").await;
+
+            // Create sales table
+            let table_schema = Schema::new(vec![
+                Column::new("region", TypeId::VarChar),
+                Column::new("sales_amount", TypeId::Integer),
+                Column::new("sales_month", TypeId::Integer),
+            ]);
+
+            let table_name = "sales";
+            ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new("North"), Value::new(100000), Value::new(1)],
+                vec![Value::new("North"), Value::new(150000), Value::new(2)],
+                vec![Value::new("North"), Value::new(120000), Value::new(3)],
+                vec![Value::new("South"), Value::new(80000), Value::new(1)],
+                vec![Value::new("South"), Value::new(90000), Value::new(2)],
+                vec![Value::new("East"), Value::new(200000), Value::new(1)],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema)
+                .unwrap();
+
+            // Test HAVING with SUM condition using >= to include East
+            let sql = "SELECT region, SUM(sales_amount) as total_sales FROM sales GROUP BY region HAVING SUM(sales_amount) >= 200000";
+            let mut writer = TestResultWriter::new();
+
+            if let Err(e) = ctx
+                .engine
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+            {
+                println!("HAVING with SUM >= query failed: {:?}", e);
+                return; // Expected to fail in current implementation
+            }
+
+            let rows = writer.get_rows();
+
             // Should return North (370000) and East (200000) regions
-            assert_eq!(rows.len(), 2, "Expected 2 regions with sales > 200000");
+            assert_eq!(rows.len(), 2, "Expected 2 regions with sales >= 200000");
         }
 
         #[tokio::test]
