@@ -24,7 +24,7 @@ use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
-use crate::sql::execution::plans::sort_plan::SortNode;
+use crate::sql::execution::plans::sort_plan::{SortNode, OrderBySpec};
 use crate::sql::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
@@ -133,7 +133,7 @@ pub enum LogicalPlanType {
         join_type: JoinOperator,
     },
     Sort {
-        sort_expressions: Vec<Arc<Expression>>,
+        sort_specifications: Vec<OrderBySpec>,
         schema: Schema,
     },
     Limit {
@@ -145,12 +145,12 @@ pub enum LogicalPlanType {
     },
     TopN {
         k: usize,
-        sort_expressions: Vec<Arc<Expression>>,
+        sort_specifications: Vec<OrderBySpec>,
         schema: Schema,
     },
     TopNPerGroup {
         k: usize,
-        sort_expressions: Vec<Arc<Expression>>,
+        sort_specifications: Vec<OrderBySpec>,
         groups: Vec<Arc<Expression>>,
         schema: Schema,
     },
@@ -460,49 +460,49 @@ impl LogicalPlan {
                 ));
             }
             LogicalPlanType::Sort {
-                sort_expressions,
+                sort_specifications,
                 schema,
             } => {
                 result.push_str(&format!("{}→ Sort\n", indent_str));
                 result.push_str(&format!("{}   Order By: [", indent_str));
-                for (i, expr) in sort_expressions.iter().enumerate() {
+                for (i, spec) in sort_specifications.iter().enumerate() {
                     if i > 0 {
                         result.push_str(", ");
                     }
-                    result.push_str(&expr.to_string());
+                    result.push_str(&spec.to_string());
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
             LogicalPlanType::TopN {
                 k,
-                sort_expressions,
+                sort_specifications,
                 schema,
             } => {
                 result.push_str(&format!("{}→ TopN: {}\n", indent_str, k));
                 result.push_str(&format!("{}   Order By: [", indent_str));
-                for (i, expr) in sort_expressions.iter().enumerate() {
+                for (i, spec) in sort_specifications.iter().enumerate() {
                     if i > 0 {
                         result.push_str(", ");
                     }
-                    result.push_str(&expr.to_string());
+                    result.push_str(&spec.to_string());
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
             LogicalPlanType::TopNPerGroup {
                 k,
-                sort_expressions,
+                sort_specifications,
                 groups,
                 schema,
             } => {
                 result.push_str(&format!("{}→ TopNPerGroup: {}\n", indent_str, k));
                 result.push_str(&format!("{}   Order By: [", indent_str));
-                for (i, expr) in sort_expressions.iter().enumerate() {
+                for (i, spec) in sort_specifications.iter().enumerate() {
                     if i > 0 {
                         result.push_str(", ");
                     }
-                    result.push_str(&expr.to_string());
+                    result.push_str(&spec.to_string());
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Group By: [", indent_str));
@@ -1013,17 +1013,31 @@ impl LogicalPlan {
     }
 
     pub fn sort(
-        sort_expressions: Vec<Arc<Expression>>,
+        sort_specifications: Vec<OrderBySpec>,
         schema: Schema,
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Sort {
-                sort_expressions,
+                sort_specifications,
                 schema,
             },
             vec![input],
         ))
+    }
+
+    /// Create a sort plan with expressions (defaults to ASC order) for backward compatibility
+    pub fn sort_with_expressions(
+        sort_expressions: Vec<Arc<Expression>>,
+        schema: Schema,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        let sort_specifications = sort_expressions
+            .into_iter()
+            .map(|expr| OrderBySpec::new(expr, crate::sql::execution::plans::sort_plan::OrderDirection::Asc))
+            .collect();
+        
+        Self::sort(sort_specifications, schema, input)
     }
 
     pub fn limit(limit: usize, schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
@@ -1042,23 +1056,38 @@ impl LogicalPlan {
 
     pub fn top_n(
         k: usize,
-        sort_expressions: Vec<Arc<Expression>>,
+        sort_specifications: Vec<OrderBySpec>,
         schema: Schema,
         input: Box<LogicalPlan>,
     ) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::TopN {
                 k,
-                sort_expressions,
+                sort_specifications,
                 schema,
             },
             vec![input],
         ))
     }
 
-    pub fn top_n_per_group(
+    /// Create a TopN plan with expressions (defaults to ASC order) for backward compatibility
+    pub fn top_n_with_expressions(
         k: usize,
         sort_expressions: Vec<Arc<Expression>>,
+        schema: Schema,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        let sort_specifications = sort_expressions
+            .into_iter()
+            .map(|expr| OrderBySpec::new(expr, crate::sql::execution::plans::sort_plan::OrderDirection::Asc))
+            .collect();
+        
+        Self::top_n(k, sort_specifications, schema, input)
+    }
+
+    pub fn top_n_per_group(
+        k: usize,
+        sort_specifications: Vec<OrderBySpec>,
         groups: Vec<Arc<Expression>>,
         schema: Schema,
         input: Box<LogicalPlan>,
@@ -1066,12 +1095,28 @@ impl LogicalPlan {
         Box::new(Self::new(
             LogicalPlanType::TopNPerGroup {
                 k,
-                sort_expressions,
+                sort_specifications,
                 groups,
                 schema,
             },
             vec![input],
         ))
+    }
+
+    /// Create a TopNPerGroup plan with expressions (defaults to ASC order) for backward compatibility
+    pub fn top_n_per_group_with_expressions(
+        k: usize,
+        sort_expressions: Vec<Arc<Expression>>,
+        groups: Vec<Arc<Expression>>,
+        schema: Schema,
+        input: Box<LogicalPlan>,
+    ) -> Box<Self> {
+        let sort_specifications = sort_expressions
+            .into_iter()
+            .map(|expr| OrderBySpec::new(expr, crate::sql::execution::plans::sort_plan::OrderDirection::Asc))
+            .collect();
+        
+        Self::top_n_per_group(k, sort_specifications, groups, schema, input)
     }
 
     pub fn window(
@@ -1875,11 +1920,11 @@ impl<'a> PlanConverter<'a> {
             }
 
             LogicalPlanType::Sort {
-                sort_expressions,
+                sort_specifications,
                 schema,
             } => Ok(PlanNode::Sort(SortNode::new(
                 schema.clone(),
-                sort_expressions.clone(),
+                sort_specifications.clone(),
                 child_plans,
             ))),
 
@@ -1891,27 +1936,43 @@ impl<'a> PlanConverter<'a> {
 
             LogicalPlanType::TopN {
                 k,
-                sort_expressions,
+                sort_specifications,
                 schema,
-            } => Ok(PlanNode::TopN(TopNNode::new(
-                schema.clone(),
-                sort_expressions.clone(),
-                *k,
-                child_plans,
-            ))),
+            } => {
+                // Convert OrderBySpec to expressions for backward compatibility with TopNNode
+                let sort_expressions = sort_specifications
+                    .iter()
+                    .map(|spec| spec.get_expression().clone())
+                    .collect();
+                    
+                Ok(PlanNode::TopN(TopNNode::new(
+                    schema.clone(),
+                    sort_expressions,
+                    *k,
+                    child_plans,
+                )))
+            }
 
             LogicalPlanType::TopNPerGroup {
                 k,
-                sort_expressions,
+                sort_specifications,
                 groups,
                 schema,
-            } => Ok(PlanNode::TopNPerGroup(TopNPerGroupNode::new(
-                *k,
-                sort_expressions.clone(),
-                groups.clone(),
-                schema.clone(),
-                child_plans,
-            ))),
+            } => {
+                // Convert OrderBySpec to expressions for backward compatibility with TopNPerGroupNode
+                let sort_expressions = sort_specifications
+                    .iter()
+                    .map(|spec| spec.get_expression().clone())
+                    .collect();
+                    
+                Ok(PlanNode::TopNPerGroup(TopNPerGroupNode::new(
+                    *k,
+                    sort_expressions,
+                    groups.clone(),
+                    schema.clone(),
+                    child_plans,
+                )))
+            }
 
             LogicalPlanType::Window {
                 group_by,
@@ -2985,17 +3046,17 @@ mod tests {
             vec![],
         )));
 
-        let sort_expressions = vec![sort_expr.clone()];
+        let sort_specifications = vec![OrderBySpec::new(sort_expr.clone(), crate::sql::execution::plans::sort_plan::OrderDirection::Asc)];
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
 
-        let sort_plan = LogicalPlan::sort(sort_expressions.clone(), schema.clone(), scan_plan);
+        let sort_plan = LogicalPlan::sort(sort_specifications.clone(), schema.clone(), scan_plan);
 
         match sort_plan.plan_type {
             LogicalPlanType::Sort {
-                sort_expressions: se,
+                sort_specifications: se,
                 schema: s,
             } => {
-                assert_eq!(sort_expressions, se);
+                assert_eq!(sort_specifications, se);
                 assert_eq!(schema, s);
             }
             _ => panic!("Expected Sort plan"),
@@ -3036,19 +3097,19 @@ mod tests {
             vec![],
         )));
 
-        let sort_expressions = vec![sort_expr.clone()];
+        let sort_specifications = vec![OrderBySpec::new(sort_expr.clone(), crate::sql::execution::plans::sort_plan::OrderDirection::Asc)];
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
 
-        let top_n_plan = LogicalPlan::top_n(5, sort_expressions.clone(), schema.clone(), scan_plan);
+        let top_n_plan = LogicalPlan::top_n(5, sort_specifications.clone(), schema.clone(), scan_plan);
 
         match top_n_plan.plan_type {
             LogicalPlanType::TopN {
                 k,
-                sort_expressions: se,
+                sort_specifications: se,
                 schema: s,
             } => {
                 assert_eq!(k, 5);
-                assert_eq!(sort_expressions, se);
+                assert_eq!(sort_specifications, se);
                 assert_eq!(schema, s);
             }
             _ => panic!("Expected TopN plan"),
@@ -3079,13 +3140,13 @@ mod tests {
             vec![],
         )));
 
-        let sort_expressions = vec![sort_expr.clone()];
+        let sort_specifications = vec![OrderBySpec::new(sort_expr.clone(), crate::sql::execution::plans::sort_plan::OrderDirection::Asc)];
         let groups = vec![group_expr.clone()];
         let scan_plan = LogicalPlan::table_scan("products".to_string(), schema.clone(), 1);
 
         let top_n_per_group_plan = LogicalPlan::top_n_per_group(
             3,
-            sort_expressions.clone(),
+            sort_specifications.clone(),
             groups.clone(),
             schema.clone(),
             scan_plan,
@@ -3094,12 +3155,12 @@ mod tests {
         match top_n_per_group_plan.plan_type {
             LogicalPlanType::TopNPerGroup {
                 k,
-                sort_expressions: se,
+                sort_specifications: se,
                 groups: g,
                 schema: s,
             } => {
                 assert_eq!(k, 3);
-                assert_eq!(sort_expressions, se);
+                assert_eq!(sort_specifications, se);
                 assert_eq!(groups, g);
                 assert_eq!(schema, s);
             }
