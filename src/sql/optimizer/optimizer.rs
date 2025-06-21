@@ -280,7 +280,7 @@ impl Optimizer {
     ) -> Result<Box<LogicalPlan>, DBError> {
         match &plan.plan_type {
             LogicalPlanType::Sort {
-                sort_expressions,
+                sort_specifications,
                 schema,
             } => {
                 if let Some(child) = plan.children.pop() {
@@ -289,7 +289,7 @@ impl Optimizer {
                         return Ok(Box::new(LogicalPlan::new(
                             LogicalPlanType::TopN {
                                 k: limit,
-                                sort_expressions: sort_expressions.clone(),
+                                sort_specifications: sort_specifications.clone(),
                                 schema: schema.clone(),
                             },
                             vec![self.optimize_sort_and_limit(child)?],
@@ -500,10 +500,10 @@ impl Optimizer {
             }
             LogicalPlanType::TopN {
                 k,
-                sort_expressions,
+                sort_specifications,
                 ..
             } => {
-                if *k == 0 || sort_expressions.is_empty() {
+                if *k == 0 || sort_specifications.is_empty() {
                     warn!("TopN validation failed: invalid specification");
                     return Err(DBError::Validation(
                         "Invalid TopN specification".to_string(),
