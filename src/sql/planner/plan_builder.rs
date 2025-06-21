@@ -96,37 +96,85 @@ impl LogicalPlanBuilder {
             }
         }
 
-        // Handle LIMIT if present
+        // Handle LIMIT and OFFSET if present
         if let Some(limit_clause) = &query.limit_clause {
             let Some(schema) = current_plan.get_schema() else {
                 todo!()
             };
 
-            // Extract the limit expression based on the LimitClause variant
-            let limit_expr = match limit_clause {
-                sqlparser::ast::LimitClause::LimitOffset { limit, .. } => {
-                    if let Some(expr) = limit {
-                        expr
-                    } else {
-                        return Err("LIMIT clause has no limit value".to_string());
+            match limit_clause {
+                LimitClause::LimitOffset { limit, offset, .. } => {
+                    // Handle OFFSET first if present
+                    if let Some(offset_obj) = offset {
+                        if let Expr::Value(value_with_span) = &offset_obj.value {
+                            if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
+                                if let Ok(offset_val) = n.parse::<usize>() {
+                                    current_plan = LogicalPlan::offset(offset_val, schema.clone(), current_plan);
+                                } else {
+                                    return Err("Invalid OFFSET value".to_string());
+                                }
+                            } else {
+                                return Err("OFFSET must be a number".to_string());
+                            }
+                        } else {
+                            return Err("OFFSET must be a number".to_string());
+                        }
                     }
-                }
-                sqlparser::ast::LimitClause::OffsetCommaLimit { limit, .. } => limit,
-            };
 
-            // Process the limit expression
-            if let Expr::Value(value_with_span) = limit_expr {
-                if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
-                    if let Ok(limit_val) = n.parse::<usize>() {
-                        current_plan = LogicalPlan::limit(limit_val, schema, current_plan);
-                    } else {
-                        return Err("Invalid LIMIT value".to_string());
+                    // Handle LIMIT if present
+                    if let Some(limit_expr) = limit {
+                        let Some(current_schema) = current_plan.get_schema() else {
+                            todo!()
+                        };
+                        if let Expr::Value(value_with_span) = limit_expr {
+                            if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
+                                if let Ok(limit_val) = n.parse::<usize>() {
+                                    current_plan = LogicalPlan::limit(limit_val, current_schema.clone(), current_plan);
+                                } else {
+                                    return Err("Invalid LIMIT value".to_string());
+                                }
+                            } else {
+                                return Err("LIMIT must be a number".to_string());
+                            }
+                        } else {
+                            return Err("LIMIT must be a number".to_string());
+                        }
                     }
-                } else {
-                    return Err("LIMIT must be a number".to_string());
                 }
-            } else {
-                return Err("LIMIT must be a number".to_string());
+                sqlparser::ast::LimitClause::OffsetCommaLimit { limit, offset } => {
+                    // Handle OFFSET first 
+                    if let Expr::Value(value_with_span) = offset {
+                        if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
+                            if let Ok(offset_val) = n.parse::<usize>() {
+                                current_plan = LogicalPlan::offset(offset_val, schema.clone(), current_plan);
+                            } else {
+                                return Err("Invalid OFFSET value".to_string());
+                            }
+                        } else {
+                            return Err("OFFSET must be a number".to_string());
+                        }
+                    } else {
+                        return Err("OFFSET must be a number".to_string());
+                    }
+
+                    // Handle LIMIT
+                    let Some(current_schema) = current_plan.get_schema() else {
+                        todo!()
+                    };
+                    if let Expr::Value(value_with_span) = limit {
+                        if let sqlparser::ast::Value::Number(n, _) = &value_with_span.value {
+                            if let Ok(limit_val) = n.parse::<usize>() {
+                                current_plan = LogicalPlan::limit(limit_val, current_schema.clone(), current_plan);
+                            } else {
+                                return Err("Invalid LIMIT value".to_string());
+                            }
+                        } else {
+                            return Err("LIMIT must be a number".to_string());
+                        }
+                    } else {
+                        return Err("LIMIT must be a number".to_string());
+                    }
+                }
             }
         }
 
