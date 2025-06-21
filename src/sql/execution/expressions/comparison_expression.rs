@@ -76,19 +76,57 @@ impl ComparisonExpression {
     }
 
     fn perform_comparison(&self, lhs: &Value, rhs: &Value) -> Result<CmpBool, ExpressionError> {
-        match self.comp_type {
-            ComparisonType::Equal => Ok(lhs.compare_equals(rhs)),
-            ComparisonType::NotEqual => Ok(lhs.compare_not_equals(rhs)),
-            ComparisonType::LessThan => Ok(lhs.compare_less_than(rhs)),
-            ComparisonType::LessThanOrEqual => Ok(lhs.compare_less_than_equals(rhs)),
-            ComparisonType::GreaterThan => Ok(lhs.compare_greater_than(rhs)),
-            ComparisonType::GreaterThanOrEqual => Ok(lhs.compare_greater_than_equals(rhs)),
-            ComparisonType::IsNotNull => Ok(if lhs.is_null() {
-                CmpBool::CmpFalse
-            } else {
-                CmpBool::CmpTrue
-            }),
+        // Try direct comparison first
+        let result = match self.comp_type {
+            ComparisonType::Equal => lhs.compare_equals(rhs),
+            ComparisonType::NotEqual => lhs.compare_not_equals(rhs),
+            ComparisonType::LessThan => lhs.compare_less_than(rhs),
+            ComparisonType::LessThanOrEqual => lhs.compare_less_than_equals(rhs),
+            ComparisonType::GreaterThan => lhs.compare_greater_than(rhs),
+            ComparisonType::GreaterThanOrEqual => lhs.compare_greater_than_equals(rhs),
+            ComparisonType::IsNotNull => {
+                return Ok(if lhs.is_null() {
+                    CmpBool::CmpFalse
+                } else {
+                    CmpBool::CmpTrue
+                });
+            }
+        };
+
+        // If direct comparison failed due to type mismatch, try automatic casting
+        if result == CmpBool::CmpFalse && lhs.get_type_id() != rhs.get_type_id() {
+            // Try casting left to right type
+            if let Ok(cast_lhs) = lhs.cast_to(rhs.get_type_id()) {
+                let cast_result = match self.comp_type {
+                    ComparisonType::Equal => cast_lhs.compare_equals(rhs),
+                    ComparisonType::NotEqual => cast_lhs.compare_not_equals(rhs),
+                    ComparisonType::LessThan => cast_lhs.compare_less_than(rhs),
+                    ComparisonType::LessThanOrEqual => cast_lhs.compare_less_than_equals(rhs),
+                    ComparisonType::GreaterThan => cast_lhs.compare_greater_than(rhs),
+                    ComparisonType::GreaterThanOrEqual => cast_lhs.compare_greater_than_equals(rhs),
+                    ComparisonType::IsNotNull => unreachable!(),
+                };
+                if cast_result != CmpBool::CmpFalse {
+                    return Ok(cast_result);
+                }
+            }
+
+            // Try casting right to left type
+            if let Ok(cast_rhs) = rhs.cast_to(lhs.get_type_id()) {
+                let cast_result = match self.comp_type {
+                    ComparisonType::Equal => lhs.compare_equals(&cast_rhs),
+                    ComparisonType::NotEqual => lhs.compare_not_equals(&cast_rhs),
+                    ComparisonType::LessThan => lhs.compare_less_than(&cast_rhs),
+                    ComparisonType::LessThanOrEqual => lhs.compare_less_than_equals(&cast_rhs),
+                    ComparisonType::GreaterThan => lhs.compare_greater_than(&cast_rhs),
+                    ComparisonType::GreaterThanOrEqual => lhs.compare_greater_than_equals(&cast_rhs),
+                    ComparisonType::IsNotNull => unreachable!(),
+                };
+                return Ok(cast_result);
+            }
         }
+
+        Ok(result)
     }
 }
 

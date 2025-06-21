@@ -934,11 +934,23 @@ impl LogicalPlanBuilder {
         &mut self,
         create_index: &CreateIndex,
     ) -> Result<Box<LogicalPlan>, String> {
-        let index_name = create_index
-            .clone()
-            .name
-            .expect("Index Name not available")
-            .to_string();
+        let index_name = match &create_index.name {
+            Some(name) => name.to_string(),
+            None => {
+                // Auto-generate index name if not provided
+                let table_name = match &create_index.table_name {
+                    ObjectName(parts) if parts.len() == 1 => parts[0].to_string(),
+                    _ => return Err("Only single table indices are supported".to_string()),
+                };
+                let columns_str = create_index
+                    .columns
+                    .iter()
+                    .map(|col| col.to_string())
+                    .collect::<Vec<_>>()
+                    .join("_");
+                format!("{}_{}_idx", table_name, columns_str)
+            }
+        };
         let table_name = match &create_index.table_name {
             ObjectName(parts) if parts.len() == 1 => parts[0].to_string(),
             _ => return Err("Only single table indices are supported".to_string()),

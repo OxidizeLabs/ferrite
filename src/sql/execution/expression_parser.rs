@@ -328,23 +328,89 @@ impl ExpressionParser {
                     | BinaryOperator::LtEq
                     | BinaryOperator::Gt
                     | BinaryOperator::GtEq => {
-                        // Validate that the types are comparable
+                        // Validate that the types are comparable and handle automatic type casting
                         let left_type = left_expr.get_return_type().get_type();
                         let right_type = right_expr.get_return_type().get_type();
 
-                        // Check if types are compatible for comparison
-                        let types_compatible = match (left_type, right_type) {
+                        // Check if types are compatible for comparison or can be cast
+                        let (types_compatible, mut cast_left_expr, mut cast_right_expr) = match (left_type, right_type) {
                             // Same types are compatible
-                            (l, r) if l == r => true,
+                            (l, r) if l == r => (true, left_expr.clone(), right_expr.clone()),
                             // Numeric types are compatible with each other
                             (TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Float, 
-                             TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Float) => true,
+                             TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Float) => (true, left_expr.clone(), right_expr.clone()),
                             // String types are compatible with each other
-                            (TypeId::VarChar | TypeId::Char, TypeId::VarChar | TypeId::Char) => true,
+                            (TypeId::VarChar | TypeId::Char, TypeId::VarChar | TypeId::Char) => (true, left_expr.clone(), right_expr.clone()),
                             // Date/time types are compatible with each other
-                            (TypeId::Date | TypeId::Timestamp, TypeId::Date | TypeId::Timestamp) => true,
-                            // All other combinations are incompatible
-                            _ => false,
+                            (TypeId::Date | TypeId::Timestamp, TypeId::Date | TypeId::Timestamp) => (true, left_expr.clone(), right_expr.clone()),
+                            
+                            // Handle automatic type casting for literals
+                            // If right side is a literal/constant that can be cast to left column type
+                            (column_type, literal_type) => {
+                                if let Expression::Literal(literal) = right_expr.as_ref() {
+                                    // Try to cast the literal value to the column type
+                                    match literal.get_value().cast_to(column_type) {
+                                        Ok(cast_value) => {
+                                            let cast_right = Arc::new(Expression::Constant(
+                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                    cast_value,
+                                                    Column::new("cast_literal", column_type),
+                                                    vec![]
+                                                )
+                                            ));
+                                            (true, left_expr.clone(), cast_right)
+                                        },
+                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
+                                    }
+                                } else if let Expression::Constant(constant) = right_expr.as_ref() {
+                                    // Try to cast the constant value to the column type
+                                    match constant.get_value().cast_to(column_type) {
+                                        Ok(cast_value) => {
+                                            let cast_right = Arc::new(Expression::Constant(
+                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                    cast_value,
+                                                    Column::new("cast_constant", column_type),
+                                                    vec![]
+                                                )
+                                            ));
+                                            (true, left_expr.clone(), cast_right)
+                                        },
+                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
+                                    }
+                                } else if let Expression::Literal(literal) = left_expr.as_ref() {
+                                    // Try to cast the left literal to the right column type
+                                    match literal.get_value().cast_to(literal_type) {
+                                        Ok(cast_value) => {
+                                            let cast_left = Arc::new(Expression::Constant(
+                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                    cast_value,
+                                                    Column::new("cast_literal", literal_type),
+                                                    vec![]
+                                                )
+                                            ));
+                                            (true, cast_left, right_expr.clone())
+                                        },
+                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
+                                    }
+                                } else if let Expression::Constant(constant) = left_expr.as_ref() {
+                                    // Try to cast the left constant to the right column type
+                                    match constant.get_value().cast_to(literal_type) {
+                                        Ok(cast_value) => {
+                                            let cast_left = Arc::new(Expression::Constant(
+                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                    cast_value,
+                                                    Column::new("cast_constant", literal_type),
+                                                    vec![]
+                                                )
+                                            ));
+                                            (true, cast_left, right_expr.clone())
+                                        },
+                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
+                                    }
+                                } else {
+                                    (false, left_expr.clone(), right_expr.clone())
+                                }
+                            },
                         };
 
                         if !types_compatible {
@@ -364,8 +430,8 @@ impl ExpressionParser {
                             _ => unreachable!(),
                         };
 
-                        // Convert right_expr to ConstantExpression if it's a LiteralValueExpression
-                        let right_expr = match right_expr.as_ref() {
+                        // Convert any remaining LiteralValueExpressions to ConstantExpressions
+                        let final_left_expr = match cast_left_expr.as_ref() {
                             Expression::Literal(lit) => {
                                 Arc::new(Expression::Constant(ConstantExpression::new(
                                     lit.get_value().clone(),
@@ -373,14 +439,25 @@ impl ExpressionParser {
                                     vec![],
                                 )))
                             }
-                            _ => right_expr,
+                            _ => cast_left_expr,
+                        };
+
+                        let final_right_expr = match cast_right_expr.as_ref() {
+                            Expression::Literal(lit) => {
+                                Arc::new(Expression::Constant(ConstantExpression::new(
+                                    lit.get_value().clone(),
+                                    lit.get_return_type().clone(),
+                                    vec![],
+                                )))
+                            }
+                            _ => cast_right_expr,
                         };
 
                         Ok(Expression::Comparison(ComparisonExpression::new(
-                            left_expr.clone(),
-                            right_expr.clone(),
+                            final_left_expr.clone(),
+                            final_right_expr.clone(),
                             comp_type,
-                            vec![left_expr, right_expr],
+                            vec![final_left_expr, final_right_expr],
                         )))
                     }
                     // Handle other binary operators
