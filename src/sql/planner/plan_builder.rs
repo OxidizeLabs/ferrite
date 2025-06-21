@@ -80,26 +80,19 @@ impl LogicalPlanBuilder {
                     todo!()
                 };
 
-                // Build sort expressions manually
-                let mut sort_exprs = Vec::new();
-
-                // Access expressions based on the OrderByKind
-                match &order_by.kind {
+                // Build sort specifications with ASC/DESC support
+                let sort_specifications = match &order_by.kind {
                     OrderByKind::Expressions(order_by_exprs) => {
-                        for order_item in order_by_exprs {
-                            let expr = self
-                                .expression_parser
-                                .parse_expression(&order_item.expr, &schema)?;
-                            sort_exprs.push(Arc::new(expr));
-                        }
+                        self.expression_parser
+                            .parse_order_by_specifications(order_by_exprs, &schema)?
                     }
                     OrderByKind::All(_) => {
                         // Handle ALL case if needed
                         return Err("ORDER BY ALL is not supported yet".to_string());
                     }
-                }
+                };
 
-                current_plan = LogicalPlan::sort(sort_exprs, schema.clone(), current_plan);
+                current_plan = LogicalPlan::sort(sort_specifications, schema.clone(), current_plan);
             }
         }
 
@@ -356,28 +349,44 @@ impl LogicalPlanBuilder {
                 todo!()
             };
 
-            // Build sort expressions using fallback parsing
-            let mut sort_exprs = Vec::new();
-
-            // Access expressions based on the OrderByKind
-            match &order_by.kind {
+            // Build sort specifications with ASC/DESC support using fallback parsing
+            let sort_specifications = match &order_by.kind {
                 OrderByKind::Expressions(order_by_exprs) => {
-                    for order_item in order_by_exprs {
-                        let expr = self.expression_parser.parse_expression_with_fallback(
-                            &order_item.expr,
-                            &projection_schema,
-                            &original_schema,
-                        )?;
-                        sort_exprs.push(Arc::new(expr));
+                    // Try to parse with the projection schema first, then fallback to original schema
+                    match self.expression_parser.parse_order_by_specifications(order_by_exprs, &projection_schema) {
+                        Ok(specs) => specs,
+                        Err(_) => {
+                            // Fallback: manually parse with fallback logic for each expression
+                            let mut specs = Vec::new();
+                            for order_item in order_by_exprs {
+                                let expr = self.expression_parser.parse_expression_with_fallback(
+                                    &order_item.expr,
+                                    &projection_schema,
+                                    &original_schema,
+                                )?;
+                                
+                                // Determine direction from ASC field
+                                let direction = match order_item.options.asc {
+                                    None | Some(true) => crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+                                    Some(false) => crate::sql::execution::plans::sort_plan::OrderDirection::Desc,
+                                };
+                                
+                                specs.push(crate::sql::execution::plans::sort_plan::OrderBySpec::new(
+                                    Arc::new(expr),
+                                    direction,
+                                ));
+                            }
+                            specs
+                        }
                     }
                 }
                 OrderByKind::All(_) => {
                     // Handle ALL case if needed
                     return Err("ORDER BY ALL is not supported yet".to_string());
                 }
-            }
+            };
 
-            current_plan = LogicalPlan::sort(sort_exprs, projection_schema.clone(), current_plan);
+            current_plan = LogicalPlan::sort(sort_specifications, projection_schema.clone(), current_plan);
         }
 
         // Apply SORT BY if it exists (Hive-specific)
@@ -385,7 +394,7 @@ impl LogicalPlanBuilder {
             let Some(projection_schema) = current_plan.get_schema() else {
                 todo!()
             };
-            let sort_exprs = select
+            let sort_specifications = select
                 .sort_by
                 .iter()
                 .map(|expr| {
@@ -394,13 +403,17 @@ impl LogicalPlanBuilder {
                         &projection_schema,
                         &original_schema,
                     )?;
-                    Ok(Arc::new(parsed_expr))
+                    // SORT BY defaults to ASC
+                    Ok(crate::sql::execution::plans::sort_plan::OrderBySpec::new(
+                        Arc::new(parsed_expr),
+                        crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+                    ))
                 })
                 .collect::<Result<Vec<_>, String>>()?;
 
-            if !sort_exprs.is_empty() {
+            if !sort_specifications.is_empty() {
                 current_plan =
-                    LogicalPlan::sort(sort_exprs, projection_schema.clone(), current_plan);
+                    LogicalPlan::sort(sort_specifications, projection_schema.clone(), current_plan);
             }
         }
 
@@ -6559,10 +6572,10 @@ mod tests {
             // Verify sort
             match &plan.children[0].plan_type {
                 LogicalPlanType::Sort {
-                    sort_expressions,
+                    sort_specifications,
                     schema,
                 } => {
-                    assert_eq!(sort_expressions.len(), 1);
+                    assert_eq!(sort_specifications.len(), 1);
                     assert_eq!(schema.get_column_count(), 2);
                 }
                 _ => panic!("Expected Sort node"),
