@@ -20,6 +20,7 @@ use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::execution::plans::limit_plan::LimitNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
+use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
@@ -138,6 +139,10 @@ pub enum LogicalPlanType {
     },
     Limit {
         limit: usize,
+        schema: Schema,
+    },
+    Offset {
+        offset: usize,
         schema: Schema,
     },
     Distinct {
@@ -352,6 +357,10 @@ impl LogicalPlan {
             }
             LogicalPlanType::Limit { limit, schema } => {
                 result.push_str(&format!("{}→ Limit: {}\n", indent_str, limit));
+                result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
+            }
+            LogicalPlanType::Offset { offset, schema } => {
+                result.push_str(&format!("{}→ Offset: {}\n", indent_str, offset));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
             }
             LogicalPlanType::Distinct { schema } => {
@@ -1047,6 +1056,13 @@ impl LogicalPlan {
         ))
     }
 
+    pub fn offset(offset: usize, schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
+        Box::new(Self::new(
+            LogicalPlanType::Offset { offset, schema },
+            vec![input],
+        ))
+    }
+
     pub fn distinct(schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Distinct { schema },
@@ -1294,7 +1310,8 @@ impl LogicalPlan {
             LogicalPlanType::Filter { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Sort { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Limit { schema, .. } => Some(schema.clone()),
-        LogicalPlanType::Distinct { schema } => Some(schema.clone()),
+            LogicalPlanType::Offset { schema, .. } => Some(schema.clone()),
+            LogicalPlanType::Distinct { schema } => Some(schema.clone()),
             LogicalPlanType::TopN { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Aggregate { schema, .. } => Some(schema.clone()),
             LogicalPlanType::TopNPerGroup { schema, .. } => Some(schema.clone()),
@@ -1930,6 +1947,12 @@ impl<'a> PlanConverter<'a> {
 
             LogicalPlanType::Limit { limit, schema } => Ok(PlanNode::Limit(LimitNode::new(
                 *limit,
+                schema.clone(),
+                child_plans,
+            ))),
+
+            LogicalPlanType::Offset { offset, schema } => Ok(PlanNode::Offset(OffsetNode::new(
+                *offset,
                 schema.clone(),
                 child_plans,
             ))),
