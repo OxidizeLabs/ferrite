@@ -63,6 +63,7 @@ use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 use crate::sql::execution::expressions::typed_string_expression::TypedStringExpression;
 use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
+use crate::sql::execution::plans::sort_plan::{OrderBySpec, OrderDirection};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::debug;
@@ -2864,6 +2865,31 @@ impl ExpressionParser {
         ))
     }
 
+    /// Parse ORDER BY expressions with direction specifications
+    pub fn parse_order_by_specifications(
+        &self,
+        order_exprs: &[OrderByExpr],
+        schema: &Schema,
+    ) -> Result<Vec<OrderBySpec>, String> {
+        debug!("Parsing order by specifications: {:?}", order_exprs);
+        let mut specifications = Vec::new();
+        for order_expr in order_exprs {
+            let parsed_expr = Arc::new(self.parse_expression(&order_expr.expr, schema)?);
+            
+            // Extract sort direction from the OrderByExpr
+            // asc: Option<bool> where None/Some(true) = ASC, Some(false) = DESC
+            let direction = match order_expr.options.asc {
+                None | Some(true) => OrderDirection::Asc,
+                Some(false) => OrderDirection::Desc,
+            };
+            
+            let spec = OrderBySpec::new(parsed_expr, direction);
+            specifications.push(spec);
+        }
+        Ok(specifications)
+    }
+
+    /// Parse ORDER BY expressions (backward compatibility - returns just expressions with default ASC)
     fn parse_order_by_expressions(
         &self,
         order_exprs: &[OrderByExpr],
