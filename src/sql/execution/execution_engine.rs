@@ -2513,9 +2513,17 @@ mod tests {
                 Err(_) => println!("Duplicate index names correctly rejected"),
             }
 
-            // Test 5: Invalid SQL syntax for CREATE INDEX
+            // Test 5: Test auto-generated index name
+            let auto_name_sql = "CREATE INDEX ON test_table (id)";
+            let mut writer = TestResultWriter::new();
+            let success = ctx
+                .engine
+                .execute_sql(auto_name_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
+            assert!(success, "CREATE INDEX with auto-generated name should succeed");
+
+            // Test 6: Invalid SQL syntax for CREATE INDEX
             let invalid_syntax_cases = vec![
-                "CREATE INDEX ON test_table (id)",        // Missing index name
                 "CREATE INDEX idx_test test_table (id)",  // Missing ON keyword
                 "CREATE INDEX idx_test ON test_table",    // Missing column list
                 "CREATE INDEX idx_test ON test_table ()", // Empty column list
@@ -10856,6 +10864,19 @@ mod tests {
             }
 
             let rows = writer.get_rows();
+
+            // Debug output
+            println!("DEBUG: Query returned {} rows", rows.len());
+            for (i, row) in rows.iter().enumerate() {
+                println!("DEBUG: Row {}: {:?}", i, row);
+                if row.len() > 1 {
+                    println!("DEBUG: Row {} column 1 type: {:?}, value: {:?}", i, row[1].get_type_id(), row[1]);
+                    match row[1].as_integer() {
+                        Ok(val) => println!("DEBUG: Row {} column 1 as_integer: {}", i, val),
+                        Err(e) => println!("DEBUG: Row {} column 1 as_integer error: {}", i, e),
+                    }
+                }
+            }
 
             // Should only return IT department which has 3 employees (> 2)
             assert_eq!(
