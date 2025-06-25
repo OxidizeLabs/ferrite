@@ -656,17 +656,13 @@ impl<
     /// Borrow a key from the left sibling and a key from the parent to maintain B+ tree properties
     ///
     /// Parameters:
-    /// - parent_key_idx: The index of the parent key that separates this node from its left sibling
     /// - parent_key: The key to borrow from the parent
-    /// - sibling_key: The rightmost key from the left sibling
     /// - sibling_rightmost_child: The rightmost child pointer from the left sibling (only for internal nodes)
     ///
     /// Returns true if the borrow operation was successful
     pub fn borrow_from_left(
         &mut self,
-        parent_key_idx: usize,
         parent_key: KeyType,
-        sibling_key: KeyType,
         sibling_rightmost_child: PageId,
     ) -> bool {
         if self.size >= self.max_size {
@@ -691,17 +687,13 @@ impl<
     /// Borrow a key from the right sibling and a key from the parent to maintain B+ tree properties
     ///
     /// Parameters:
-    /// - parent_key_idx: The index of the parent key that separates this node from its right sibling
     /// - parent_key: The key to borrow from the parent
-    /// - sibling_key: The leftmost key from the right sibling
     /// - sibling_leftmost_child: The leftmost child pointer from the right sibling (only for internal nodes)
     ///
     /// Returns true if the borrow operation was successful
     pub fn borrow_from_right(
         &mut self,
-        parent_key_idx: usize,
         parent_key: KeyType,
-        sibling_key: KeyType,
         sibling_leftmost_child: PageId,
     ) -> bool {
         if self.size >= self.max_size {
@@ -726,7 +718,6 @@ impl<
     /// Merges this node with a right sibling using a parent key
     ///
     /// Parameters:
-    /// - parent_key_idx: The index of the parent key that separates this node from its right sibling
     /// - parent_key: The key from the parent that separates the two nodes
     /// - right_sibling_keys: The keys from the right sibling
     /// - right_sibling_values: The child pointers from the right sibling
@@ -734,7 +725,6 @@ impl<
     /// Returns true if the merge operation was successful
     pub fn merge_with_right_sibling(
         &mut self,
-        parent_key_idx: usize,
         parent_key: KeyType,
         right_sibling_keys: Vec<KeyType>,
         right_sibling_values: Vec<PageId>,
@@ -1452,10 +1442,9 @@ mod tests {
 
         // Test borrowing from left sibling
         let parent_key = 15;
-        let sibling_key = 10;
         let sibling_rightmost_child = 150;
 
-        assert!(node.borrow_from_left(0, parent_key, sibling_key, sibling_rightmost_child));
+        assert!(node.borrow_from_left(parent_key, sibling_rightmost_child));
         assert_eq!(node.get_size(), 3);
         assert_eq!(node.get_first_key(), Some(15)); // Parent key should now be first
         assert_eq!(node.get_value_at(0), Some(150)); // Sibling's rightmost child becomes leftmost
@@ -1467,10 +1456,9 @@ mod tests {
 
         // Test borrowing from right sibling
         let parent_key = 50;
-        let sibling_key = 60;
         let sibling_leftmost_child = 600;
 
-        assert!(node.borrow_from_right(2, parent_key, sibling_key, sibling_leftmost_child));
+        assert!(node.borrow_from_right(parent_key, sibling_leftmost_child));
         assert_eq!(node.get_size(), 4);
         assert_eq!(node.get_last_key(), Some(50)); // Parent key should now be last
         assert_eq!(node.get_value_at(4), Some(600)); // Sibling's leftmost child becomes rightmost
@@ -1502,7 +1490,6 @@ mod tests {
         );
 
         let result = node.merge_with_right_sibling(
-            3,
             parent_key,
             right_sibling.keys.clone(),
             right_sibling.values.clone(),

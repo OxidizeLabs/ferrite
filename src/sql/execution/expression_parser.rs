@@ -333,7 +333,7 @@ impl ExpressionParser {
                         let right_type = right_expr.get_return_type().get_type();
 
                         // Check if types are compatible for comparison or can be cast
-                        let (types_compatible, mut cast_left_expr, mut cast_right_expr) = match (left_type, right_type) {
+                        let (types_compatible, cast_left_expr, cast_right_expr) = match (left_type, right_type) {
                             // Same types are compatible
                             (l, r) if l == r => (true, left_expr.clone(), right_expr.clone()),
                             // Numeric types are compatible with each other
@@ -605,8 +605,7 @@ impl ExpressionParser {
             Expr::Case {
                 operand,
                 conditions,
-                else_result,
-            } => {
+                else_result, case_token, end_token } => {
                 // Parse the base expression if present
                 let base_expr = match operand {
                     Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
@@ -1501,6 +1500,7 @@ impl ExpressionParser {
                             DataType::Trigger => TypeId::Invalid,
                             DataType::AnyType => TypeId::Invalid,
                             DataType::GeometricType(_) => TypeId::Invalid,
+                            DataType::NamedTable { .. } => TypeId::Invalid,
                         },
                     ),
                 )))

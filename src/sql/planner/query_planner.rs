@@ -109,8 +109,7 @@ impl QueryPlanner {
                 only,
                 operations,
                 location,
-                on_cluster,
-            } => self
+                on_cluster, iceberg } => self
                 .plan_builder
                 .build_alter_table_plan(name, if_exists, only, operations, location, on_cluster),
             Statement::CreateView {

@@ -3,6 +3,7 @@ use crate::common::exception::DBError;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
+use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
@@ -14,7 +15,6 @@ pub struct MockExecutor {
     plan: Arc<MockScanNode>,
     current_index: usize,
     tuples: Vec<(Vec<Value>, RID)>,
-    schema: Schema,
     initialized: bool,
     current_tuple_idx: usize,
 }
@@ -25,14 +25,13 @@ impl MockExecutor {
         plan: Arc<MockScanNode>,
         current_index: usize,
         tuples: Vec<(Vec<Value>, RID)>,
-        schema: Schema,
+        _schema: Schema, // Keep for backward compatibility but don't store
     ) -> Self {
         Self {
             context,
             plan,
             current_index,
             tuples,
-            schema,
             initialized: false,
             current_tuple_idx: 0,
         }
@@ -57,13 +56,13 @@ impl AbstractExecutor for MockExecutor {
         let (values, rid) = &self.tuples[self.current_tuple_idx];
         self.current_tuple_idx += 1;
 
-        let tuple = Arc::new(Tuple::new(values, &self.schema, *rid));
+        let tuple = Arc::new(Tuple::new(values, self.plan.get_output_schema(), *rid));
 
         Ok(Some((tuple, *rid)))
     }
 
     fn get_output_schema(&self) -> &Schema {
-        &self.schema
+        self.plan.get_output_schema()
     }
 
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {

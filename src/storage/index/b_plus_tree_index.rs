@@ -20,7 +20,6 @@ use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use thiserror::Error;
-use bincode::{Encode, Decode};
 
 // Error type for B+Tree operations
 #[derive(Debug, Error)]
@@ -218,13 +217,11 @@ where
             })?;
 
         let root_page_id;
-        let tree_height;
         let num_keys;
 
         {
             let header = header_page.read();
             root_page_id = header.get_root_page_id();
-            tree_height = header.get_tree_height();
             num_keys = header.get_num_keys();
         }
 
@@ -654,7 +651,7 @@ where
             };
             
             // Remove the moved keys from the original leaf
-            for i in split_point..current_size {
+            for _i in split_point..current_size {
                 leaf_write.remove_key_value_at(split_point);
             }
         }
@@ -854,7 +851,7 @@ where
         
         // 1. Acquire write locks on all pages
         let mut left_write = left_page.write();
-        let mut right_write = right_page.write();
+        let right_write = right_page.write();
         let mut parent_write = parent_page.write();
 
         // 2. Validate preconditions for merging
@@ -912,11 +909,6 @@ where
             drop(left_write);
             drop(right_write);
             drop(parent_write);
-            
-            // Explicitly drop page guards to ensure they're unpinned
-            drop(left_page);
-            drop(right_page);
-            drop(parent_page);
 
             let header_page = self
                 .buffer_pool_manager
@@ -956,13 +948,6 @@ where
         drop(left_write);
         drop(parent_write);
         drop(right_write);
-        
-        // Explicitly drop all page guards except right_page which we'll delete
-        drop(left_page);
-        drop(parent_page);
-        
-        // Ensure right_page guard is dropped before trying to delete it
-        drop(right_page);
 
         // Now safe to delete the right page
         self.buffer_pool_manager
@@ -1137,7 +1122,7 @@ where
         
         // 1. Acquire write locks on all pages
         let mut left_write = left_page.write();
-        let mut right_write = right_page.write();
+        let right_write = right_page.write();
         let mut parent_write = parent_page.write();
 
         // 2. Validate preconditions for merging
@@ -1197,11 +1182,6 @@ where
             drop(left_write);
             drop(right_write);
             drop(parent_write);
-            
-            // Explicitly drop page guards to ensure they're unpinned
-            drop(left_page);
-            drop(right_page);
-            drop(parent_page);
 
             let header_page = self
                 .buffer_pool_manager
@@ -1239,13 +1219,6 @@ where
         drop(left_write);
         drop(parent_write);
         drop(right_write);
-        
-        // Explicitly drop page guards before deleting
-        drop(left_page);
-        drop(parent_page);
-        
-        // Make sure right_page is fully dropped before deletion
-        drop(right_page);
 
         // Delete the right page as it's no longer needed
         self.buffer_pool_manager
@@ -1344,7 +1317,7 @@ where
 
             // Update right page: remove moved keys and update leftmost child
             // We need to keep the old rightmost child of right page as its new leftmost child
-            let new_right_first_child = right_write
+            right_write
                 .get_value_at(additional_keys_to_move + 1)
                 .ok_or_else(|| {
                     BPlusTreeError::BufferPoolError("Invalid right page layout".to_string())
@@ -1373,7 +1346,7 @@ where
             let keys_to_move = left_size - target_size;
 
             // Save right page's leftmost child
-            let right_first_child = right_write.get_value_at(0).ok_or_else(|| {
+            right_write.get_value_at(0).ok_or_else(|| {
                 BPlusTreeError::BufferPoolError("Right page has no children".to_string())
             })?;
 

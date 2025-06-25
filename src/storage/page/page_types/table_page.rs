@@ -680,7 +680,7 @@ impl TablePage {
         }
         
         // If we reach here, we didn't find the magic number anywhere
-        return Err(format!("End magic marker not found"));
+        return Err("End magic marker not found".to_string());
         
         // This code is unreachable due to the return statements above
         // Keeping it for documentation purposes
@@ -691,7 +691,6 @@ impl TablePage {
             page.tuple_info.len()
         );
         */
-        Ok(page)
     }
 
     /// Updates a tuple in place without any safety checks.

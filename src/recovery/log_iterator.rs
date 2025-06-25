@@ -245,17 +245,10 @@ mod tests {
         }
 
         fn create_test_begin_record(&self, txn_id: TxnId) -> LogRecord {
-            let mut record =
+            let record =
                 LogRecord::new_transaction_record(txn_id, INVALID_LSN, LogRecordType::Begin);
             // Set a dummy LSN
             record.set_lsn(txn_id as Lsn);
-            record
-        }
-
-        fn create_test_commit_record(&self, txn_id: TxnId, prev_lsn: Lsn) -> LogRecord {
-            let mut record = LogRecord::new_transaction_record(txn_id, prev_lsn, LogRecordType::Commit);
-            // Set a dummy LSN
-            record.set_lsn((txn_id + 1) as Lsn);
             record
         }
     }
@@ -266,7 +259,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_empty_log_file() {
         let ctx = TestContext::new("empty_log_file").await;
         let mut iter = LogIterator::new(ctx.disk_manager.clone());
@@ -276,11 +269,7 @@ mod tests {
         assert!(iter.is_end());
     }
 
-    /*
-    // Comment out the rest of the tests for now since they depend on actual file I/O
-    // which the current AsyncDiskManager implementation doesn't fully support
-    
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_single_record() {
         let ctx = TestContext::new("single_record").await;
 
@@ -302,5 +291,4 @@ mod tests {
         assert!(iter.next().is_none());
         assert!(iter.is_end());
     }
-    */
 }

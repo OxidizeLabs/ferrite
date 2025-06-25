@@ -399,7 +399,7 @@ impl LogicalPlanBuilder {
                 .iter()
                 .map(|expr| {
                     let parsed_expr = self.expression_parser.parse_expression_with_fallback(
-                        expr,
+                        &expr.expr,
                         &projection_schema,
                         &original_schema,
                     )?;
@@ -1820,6 +1820,9 @@ impl LogicalPlanBuilder {
                         }
                         operation.push_str("))");
                     }
+                    SqlOption::Comment(_) => {}
+                    SqlOption::TableSpace(_) => {}
+                    SqlOption::NamedParenthesizedList(_) => {}
                 }
             }
             operation.push_str(")");
