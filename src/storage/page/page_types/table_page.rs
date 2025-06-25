@@ -680,7 +680,7 @@ impl TablePage {
         }
         
         // If we reach here, we didn't find the magic number anywhere
-        return Err("End magic marker not found".to_string());
+        Err("End magic marker not found".to_string())
         
         // This code is unreachable due to the return statements above
         // Keeping it for documentation purposes
@@ -771,7 +771,7 @@ impl TablePage {
 
     /// Gets the amount of free space available in the page
     pub fn get_free_space(&self) -> usize {
-        let header_size = TablePageHeader::size() as usize;
+        let header_size = TablePageHeader::size();
         let tuple_info_size = self.tuple_info_size() as usize;
         let tuple_data_size = self.get_tuple_data_size();
 
@@ -786,7 +786,7 @@ impl TablePage {
         }
 
         // Then check if this specific page has enough space
-        let tuple_info_size = std::mem::size_of::<(u16, u16, TupleMeta)>();
+        let tuple_info_size = size_of::<(u16, u16, TupleMeta)>();
         let tuple_size = tuple.get_length().unwrap_or(0); // Handle potential error
         let total_required_space = tuple_size + tuple_info_size;
         self.get_free_space() >= total_required_space

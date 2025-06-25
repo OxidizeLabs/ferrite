@@ -4,7 +4,7 @@
 //! advanced caching strategies, comprehensive performance metrics, and 
 //! cutting-edge optimizations including SIMD, NUMA awareness, and ML-based prefetching.
 
-use crate::common::config::{PageId, DB_PAGE_SIZE, Lsn, TxnId};
+use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::buffer::lru_k_replacer::{LRUKReplacer, AccessType};
 use crate::recovery::log_record::LogRecord;
 use std::collections::{HashMap, VecDeque, BinaryHeap};
@@ -272,7 +272,7 @@ impl MLPrefetcher {
             .map(|(page_id, _)| *page_id)
             .collect();
         
-        for i in 0..=(access_vec.len().saturating_sub(pattern_len + offset)) {
+        for i in 0..=access_vec.len().saturating_sub(pattern_len + offset) {
             if &access_vec[i..i + pattern_len] == pattern {
                 if let Some(&next_page) = access_vec.get(i + pattern_len + offset - 1) {
                     return Some(next_page);
@@ -2518,7 +2518,7 @@ impl AsyncIOEngine {
         
         // Try to read from the file using pread-like functionality
         // For Phase 1, we'll use a simplified approach
-        match tokio::fs::File::open("temp_placeholder").await {
+        match File::open("temp_placeholder").await {
             Ok(_) => {
                 // For Phase 1, just return empty data - this will be properly implemented
                 // when we have proper file handle management
@@ -2981,7 +2981,7 @@ impl AsyncDiskManager {
         let resource_manager = Arc::new(ResourceManager::new(&config));
         
         // Create shutdown signal
-        let shutdown_requested = Arc::new(AtomicBool::new(false));
+        Arc::new(AtomicBool::new(false));
         
         Ok(Self {
             io_engine,
@@ -3693,7 +3693,7 @@ impl AsyncDiskManager {
             }
             
             // Simulate write latency (in production, this would be the actual file I/O)
-            std::thread::sleep(std::time::Duration::from_micros(
+            std::thread::sleep(Duration::from_micros(
                 // Simulate realistic write latency based on data size
                 ((data_vec.len() as f64 / 1024.0) * 0.1) as u64 + 1
             ));
@@ -3975,6 +3975,7 @@ pub struct ComponentHealth {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use crate::common::config::{Lsn, TxnId};
 
     /// Helper function to create test configuration
     fn create_test_config() -> DiskManagerConfig {

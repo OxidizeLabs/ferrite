@@ -329,7 +329,7 @@ impl LogicalPlan {
             }
             LogicalPlanType::Filter {
                 schema,
-                table_oid,
+
                 table_name,
                 predicate,
                 ..
@@ -4089,7 +4089,7 @@ mod test_extract_join_keys {
         // Test with an aggregate expression (unsupported)
         let agg_expr = Arc::new(Expression::Aggregate(
             crate::sql::execution::expressions::aggregate_expression::AggregateExpression::new(
-                crate::sql::execution::expressions::aggregate_expression::AggregationType::Count,
+                AggregationType::Count,
                 vec![create_column_ref(0, 0, "a.id")],
                 Column::new("count", TypeId::Integer),
                 "COUNT".to_string(),

@@ -757,12 +757,10 @@ impl ExpressionOps for ArithmeticExpression {
     ) -> Result<Value, ExpressionError> {
         let left_value = self
             .get_left()
-            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            .unwrap();
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
         let right_value = self
             .get_right()
-            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            .unwrap();
+            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
 
         match (left_value.get_val(), right_value.get_val()) {
             (Val::Integer(l), Val::Integer(r)) => {
@@ -2153,11 +2151,11 @@ mod type_inference {
             (TypeId::Decimal, TypeId::Decimal, TypeId::Decimal),
             (TypeId::Integer, TypeId::Decimal, TypeId::Decimal),
             (TypeId::Decimal, TypeId::Integer, TypeId::Decimal),
-            (TypeId::BigInt, TypeId::BigInt, TypeId::BigInt),
-            (TypeId::BigInt, TypeId::Integer, TypeId::BigInt),
-            (TypeId::Integer, TypeId::BigInt, TypeId::BigInt),
-            (TypeId::BigInt, TypeId::Decimal, TypeId::Decimal),
-            (TypeId::Decimal, TypeId::BigInt, TypeId::Decimal),
+            (BigInt, BigInt, BigInt),
+            (BigInt, TypeId::Integer, BigInt),
+            (TypeId::Integer, BigInt, BigInt),
+            (BigInt, TypeId::Decimal, TypeId::Decimal),
+            (TypeId::Decimal, BigInt, TypeId::Decimal),
         ];
 
         for (left_type, right_type, expected_type) in valid_combinations {
@@ -2216,18 +2214,18 @@ mod type_inference {
 
         // Test type inference for SmallInt combinations
         let result = ArithmeticExpression::infer_return_type(
-            &Column::new("a", TypeId::SmallInt),
-            &Column::new("b", TypeId::SmallInt),
+            &Column::new("a", SmallInt),
+            &Column::new("b", SmallInt),
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().get_type(), TypeId::SmallInt);
+        assert_eq!(result.unwrap().get_type(), SmallInt);
 
         let result = ArithmeticExpression::infer_return_type(
-            &Column::new("a", TypeId::SmallInt),
-            &Column::new("b", TypeId::BigInt),
+            &Column::new("a", SmallInt),
+            &Column::new("b", BigInt),
         );
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().get_type(), TypeId::BigInt);
+        assert_eq!(result.unwrap().get_type(), BigInt);
 
         // Test type inference for Float combinations
         let result = ArithmeticExpression::infer_return_type(
@@ -3126,12 +3124,12 @@ mod special_numeric_values {
 
         // Test float operations with precision
         let float1 = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(Val::Float(3.14159)),
+            Value::new(Val::Float(std::f32::consts::PI)),
             Column::new("const", TypeId::Float),
             vec![],
         )));
         let float2 = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(Val::Float(2.71828)),
+            Value::new(Val::Float(std::f32::consts::E)),
             Column::new("const", TypeId::Float),
             vec![],
         )));

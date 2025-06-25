@@ -13,7 +13,6 @@ use tkdb::catalog::schema::Schema;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Once;
-use tokio::fs as async_fs;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";

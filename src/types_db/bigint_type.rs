@@ -21,7 +21,7 @@ impl Type for BigIntType {
             Val::Integer(r) => CmpBool::from(0 == *r as i64),
             Val::SmallInt(r) => CmpBool::from(0 == *r as i64),
             Val::TinyInt(r) => CmpBool::from(0 == *r as i64),
-            Val::Decimal(r) => CmpBool::from((0 as f64) == *r),
+            Val::Decimal(r) => CmpBool::from((0f64) == *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -41,7 +41,7 @@ impl Type for BigIntType {
             Val::Integer(r) => CmpBool::from(0 < *r as i64),
             Val::SmallInt(r) => CmpBool::from(0 < *r as i64),
             Val::TinyInt(r) => CmpBool::from(0 < *r as i64),
-            Val::Decimal(r) => CmpBool::from((0 as f64) < *r),
+            Val::Decimal(r) => CmpBool::from((0f64) < *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -53,7 +53,7 @@ impl Type for BigIntType {
             Val::Integer(r) => CmpBool::from(0 <= *r as i64),
             Val::SmallInt(r) => CmpBool::from(0 <= *r as i64),
             Val::TinyInt(r) => CmpBool::from(0 <= *r as i64),
-            Val::Decimal(r) => CmpBool::from((0 as f64) <= *r),
+            Val::Decimal(r) => CmpBool::from((0f64) <= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -65,7 +65,7 @@ impl Type for BigIntType {
             Val::Integer(r) => CmpBool::from(0 > *r as i64),
             Val::SmallInt(r) => CmpBool::from(0 > *r as i64),
             Val::TinyInt(r) => CmpBool::from(0 > *r as i64),
-            Val::Decimal(r) => CmpBool::from((0 as f64) > *r),
+            Val::Decimal(r) => CmpBool::from((0f64) > *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -77,7 +77,7 @@ impl Type for BigIntType {
             Val::Integer(r) => CmpBool::from(0 >= *r as i64),
             Val::SmallInt(r) => CmpBool::from(0 >= *r as i64),
             Val::TinyInt(r) => CmpBool::from(0 >= *r as i64),
-            Val::Decimal(r) => CmpBool::from((0 as f64) >= *r),
+            Val::Decimal(r) => CmpBool::from((0f64) >= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }

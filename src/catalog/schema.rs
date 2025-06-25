@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
-use bincode::{config, Decode, Encode};
+use bincode::{Decode, Encode};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct Schema {
@@ -275,7 +275,8 @@ impl AsRef<Schema> for Schema {
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
+    use bincode::config;
+use super::*;
     use crate::types_db::type_id::TypeId;
 
     #[test]

@@ -942,7 +942,7 @@ mod tests {
                 .unwrap();
 
             // Ensure verify_txn has a higher timestamp than the commit
-            thread::sleep(std::time::Duration::from_millis(1));
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
 
             // Get tuple with verification transaction - handle potential error
             let result = table_heap.get_tuple_with_txn(rid, txn_ctx);
@@ -2812,7 +2812,7 @@ mod tests {
                 }
 
                 // Small sleep to ensure timestamps are different
-                thread::sleep(std::time::Duration::from_millis(1));
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
             }
 
             // Commit remaining transactions
@@ -3363,7 +3363,7 @@ mod tests {
                                 read_result.err()
                             );
                             thread_tm.abort(txn);
-                            thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            thread_aborts.fetch_add(1, Ordering::SeqCst);
                             continue;
                         }
 
@@ -3381,7 +3381,7 @@ mod tests {
                                         i
                                     );
                                     thread_tm.abort(txn);
-                                    thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                    thread_aborts.fetch_add(1, Ordering::SeqCst);
                                     continue;
                                 }
                             },
@@ -3392,7 +3392,7 @@ mod tests {
                                     i
                                 );
                                 thread_tm.abort(txn);
-                                thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                thread_aborts.fetch_add(1, Ordering::SeqCst);
                                 continue;
                             }
                         };
@@ -3417,7 +3417,7 @@ mod tests {
                                 update_result.err()
                             );
                             thread_tm.abort(txn);
-                            thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            thread_aborts.fetch_add(1, Ordering::SeqCst);
                             continue;
                         }
 
@@ -3427,7 +3427,7 @@ mod tests {
 
                         if should_commit {
                             if thread_tm.commit(txn, thread_bpm.clone()) {
-                                thread_commits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                thread_commits.fetch_add(1, Ordering::SeqCst);
                                 thread_successes += 1;
                             } else {
                                 log::debug!(
@@ -3435,11 +3435,11 @@ mod tests {
                                     thread_id,
                                     i
                                 );
-                                thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                thread_aborts.fetch_add(1, Ordering::SeqCst);
                             }
                         } else {
                             thread_tm.abort(txn);
-                            thread_aborts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            thread_aborts.fetch_add(1, Ordering::SeqCst);
                             log::debug!(
                                 "Thread {} intentionally aborted on update {}",
                                 thread_id,
@@ -3452,7 +3452,7 @@ mod tests {
                     }
 
                     // Update global success counter
-                    thread_success.fetch_add(thread_successes, std::sync::atomic::Ordering::SeqCst);
+                    thread_success.fetch_add(thread_successes, Ordering::SeqCst);
                 });
 
                 handles.push(handle);
@@ -3481,9 +3481,9 @@ mod tests {
                     None => -1,
                 };
 
-                let total_commits = commit_counter.load(std::sync::atomic::Ordering::SeqCst);
-                let total_aborts = abort_counter.load(std::sync::atomic::Ordering::SeqCst);
-                let expected_success = success_counter.load(std::sync::atomic::Ordering::SeqCst);
+                let total_commits = commit_counter.load(Ordering::SeqCst);
+                let total_aborts = abort_counter.load(Ordering::SeqCst);
+                let expected_success = success_counter.load(Ordering::SeqCst);
 
                 log::debug!("Undo log stress test results:");
                 log::debug!("  Total commits: {}", total_commits);

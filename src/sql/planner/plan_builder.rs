@@ -104,14 +104,14 @@ impl LogicalPlanBuilder {
 
             // Extract the limit expression based on the LimitClause variant
             let limit_expr = match limit_clause {
-                sqlparser::ast::LimitClause::LimitOffset { limit, .. } => {
+                LimitClause::LimitOffset { limit, .. } => {
                     if let Some(expr) = limit {
                         expr
                     } else {
                         return Err("LIMIT clause has no limit value".to_string());
                     }
                 }
-                sqlparser::ast::LimitClause::OffsetCommaLimit { limit, .. } => limit,
+                LimitClause::OffsetCommaLimit { limit, .. } => limit,
             };
 
             // Process the limit expression
@@ -164,7 +164,7 @@ impl LogicalPlanBuilder {
     pub fn build_select_plan_with_order_by(
         &self,
         select: &Box<Select>,
-        order_by: Option<&sqlparser::ast::OrderBy>,
+        order_by: Option<&OrderBy>,
     ) -> Result<Box<LogicalPlan>, String> {
         let mut current_plan = {
             if select.from.is_empty() {
@@ -859,7 +859,7 @@ impl LogicalPlanBuilder {
                                 on_update: None,
                             };
                             column.set_foreign_key(Some(foreign_key_constraint));
-                            log::debug!("Set FOREIGN KEY constraint on column '{}' referencing '{}({})'", fk_col_name, referred_table, referred_col_name);
+                            debug!("Set FOREIGN KEY constraint on column '{}' referencing '{}({})'", fk_col_name, referred_table, referred_col_name);
                         }
                         None => {
                             return Err(format!(
@@ -2359,8 +2359,8 @@ impl LogicalPlanBuilder {
         for assignment in assignments {
             // Validate that the column being updated exists in the table schema
             let column_name = match &assignment.target {
-                sqlparser::ast::AssignmentTarget::ColumnName(obj_name) => obj_name.to_string(),
-                sqlparser::ast::AssignmentTarget::Tuple(_) => {
+                AssignmentTarget::ColumnName(obj_name) => obj_name.to_string(),
+                AssignmentTarget::Tuple(_) => {
                     return Err("Tuple assignments are not supported".to_string());
                 }
             };
@@ -3157,7 +3157,7 @@ mod tests {
             // Then verify the filter node
             match &plan.children[0].plan_type {
                 LogicalPlanType::Filter {
-                    schema,
+
                     output_schema,
                     predicate,
                     ..

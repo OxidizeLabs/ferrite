@@ -352,7 +352,7 @@ impl ExpressionParser {
                                     match literal.get_value().cast_to(column_type) {
                                         Ok(cast_value) => {
                                             let cast_right = Arc::new(Expression::Constant(
-                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                ConstantExpression::new(
                                                     cast_value,
                                                     Column::new("cast_literal", column_type),
                                                     vec![]
@@ -367,7 +367,7 @@ impl ExpressionParser {
                                     match constant.get_value().cast_to(column_type) {
                                         Ok(cast_value) => {
                                             let cast_right = Arc::new(Expression::Constant(
-                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                ConstantExpression::new(
                                                     cast_value,
                                                     Column::new("cast_constant", column_type),
                                                     vec![]
@@ -382,7 +382,7 @@ impl ExpressionParser {
                                     match literal.get_value().cast_to(literal_type) {
                                         Ok(cast_value) => {
                                             let cast_left = Arc::new(Expression::Constant(
-                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                ConstantExpression::new(
                                                     cast_value,
                                                     Column::new("cast_literal", literal_type),
                                                     vec![]
@@ -397,7 +397,7 @@ impl ExpressionParser {
                                     match constant.get_value().cast_to(literal_type) {
                                         Ok(cast_value) => {
                                             let cast_left = Arc::new(Expression::Constant(
-                                                crate::sql::execution::expressions::constant_value_expression::ConstantExpression::new(
+                                                ConstantExpression::new(
                                                     cast_value,
                                                     Column::new("cast_constant", literal_type),
                                                     vec![]
@@ -862,7 +862,7 @@ impl ExpressionParser {
                         _ => return Err("Unsupported datetime field".to_string()),
                     }),
                     CeilFloorKind::Scale(scale_expr) => {
-                        let scale_expr = Expr::Value(sqlparser::ast::ValueWithSpan {
+                        let scale_expr = Expr::Value(ValueWithSpan {
                             value: scale_expr.clone(),
                             span: Span {
                                 start: Location::new(0, 0),
@@ -1853,7 +1853,7 @@ impl ExpressionParser {
                                             _ => {
                                                 // For dynamic keys, we'll need to use a different approach
                                                 // Let's wrap the index expression in a function or method call
-                                                let func_name = format!("access_at_index");
+                                                let func_name = "access_at_index".to_string();
                                                 expr =
                                                     Expression::Function(FunctionExpression::new(
                                                         func_name,
@@ -2455,7 +2455,7 @@ impl ExpressionParser {
             "Resolving column reference after join: {}.{}",
             table_alias, column_name
         );
-        log::debug!(
+        debug!(
             "Resolving column reference: table_alias='{}', column_name='{}' in schema with {} columns",
             table_alias,
             column_name,
@@ -2465,7 +2465,7 @@ impl ExpressionParser {
         // Debug: Print all columns in the schema
         for i in 0..schema.get_column_count() as usize {
             let col = schema.get_column(i).unwrap();
-            log::debug!(
+            debug!(
                 "Schema column {}: name='{}', type={:?}",
                 i,
                 col.get_name(),
@@ -2475,19 +2475,19 @@ impl ExpressionParser {
 
         // First, try to find a fully qualified column name
         let qualified_name = format!("{}.{}", table_alias, column_name);
-        log::debug!("Looking for qualified name: '{}'", qualified_name);
+        debug!("Looking for qualified name: '{}'", qualified_name);
 
         for i in 0..schema.get_column_count() as usize {
             let col = schema.get_column(i).unwrap();
             if col.get_name() == qualified_name {
-                log::debug!("Found qualified column '{}' at index {}", qualified_name, i);
+                debug!("Found qualified column '{}' at index {}", qualified_name, i);
                 return Ok(i);
             }
         }
-        log::debug!("Qualified column '{}' not found", qualified_name);
+        debug!("Qualified column '{}' not found", qualified_name);
 
         // Second, try to find any column that starts with the given table alias prefix
-        log::debug!("Looking for columns with prefix: '{}'", table_alias);
+        debug!("Looking for columns with prefix: '{}'", table_alias);
         for i in 0..schema.get_column_count() as usize {
             let col = schema.get_column(i).unwrap();
             let col_name = col.get_name();
@@ -2495,7 +2495,7 @@ impl ExpressionParser {
                 let prefix = &col_name[0..dot_pos];
                 let suffix = &col_name[dot_pos + 1..];
 
-                log::debug!(
+                debug!(
                     "Checking column '{}': prefix='{}', suffix='{}'",
                     col_name,
                     prefix,
@@ -2503,7 +2503,7 @@ impl ExpressionParser {
                 );
 
                 if prefix == table_alias && suffix == column_name {
-                    log::debug!(
+                    debug!(
                         "Found column with matching prefix and suffix at index {}",
                         i
                     );
@@ -2511,38 +2511,38 @@ impl ExpressionParser {
                 }
             }
         }
-        log::debug!("No column found with prefix '{}'", table_alias);
+        debug!("No column found with prefix '{}'", table_alias);
 
         // Third, try to find the column by its unqualified name
-        log::debug!("Looking for unqualified column name: '{}'", column_name);
+        debug!("Looking for unqualified column name: '{}'", column_name);
         for i in 0..schema.get_column_count() as usize {
             let col = schema.get_column(i).unwrap();
             if col.get_name() == column_name {
-                log::debug!("Found unqualified column '{}' at index {}", column_name, i);
+                debug!("Found unqualified column '{}' at index {}", column_name, i);
                 return Ok(i);
             }
         }
-        log::debug!("Unqualified column '{}' not found", column_name);
+        debug!("Unqualified column '{}' not found", column_name);
 
         // Fourth, check if the table alias refers to an actual table in the catalog
-        log::debug!(
+        debug!(
             "Checking if '{}' is a valid table in the catalog",
             table_alias
         );
         let catalog = self.catalog.read();
         if let Some(table) = catalog.get_table(table_alias) {
-            log::debug!("Found table '{}' in catalog", table_alias);
+            debug!("Found table '{}' in catalog", table_alias);
             let table_schema = table.get_table_schema();
 
             // Debug: Print all columns in the table schema
-            log::debug!(
+            debug!(
                 "Table '{}' schema has {} columns:",
                 table_alias,
                 table_schema.get_column_count()
             );
             for i in 0..table_schema.get_column_count() as usize {
                 let col = table_schema.get_column(i).unwrap();
-                log::debug!(
+                debug!(
                     "  Table column {}: name='{}', type={:?}",
                     i,
                     col.get_name(),
@@ -2551,7 +2551,7 @@ impl ExpressionParser {
             }
 
             if let Some(col_idx) = table_schema.get_column_index(column_name) {
-                log::debug!(
+                debug!(
                     "Found column '{}' in table '{}' schema at index {}",
                     column_name,
                     table_alias,
@@ -2562,7 +2562,7 @@ impl ExpressionParser {
                 for i in 0..schema.get_column_count() as usize {
                     let col = schema.get_column(i).unwrap();
                     let col_name = col.get_name();
-                    log::debug!(
+                    debug!(
                         "Checking if schema column '{}' matches table column '{}.{}'",
                         col_name,
                         table_alias,
@@ -2570,7 +2570,7 @@ impl ExpressionParser {
                     );
 
                     if col_name == column_name || col_name == qualified_name {
-                        log::debug!("Found matching column at index {}", i);
+                        debug!("Found matching column at index {}", i);
                         return Ok(i);
                     }
 
@@ -2579,43 +2579,43 @@ impl ExpressionParser {
                         let suffix = &col_name[dot_pos + 1..];
 
                         if prefix == table_alias && suffix == column_name {
-                            log::debug!("Found matching column with prefix at index {}", i);
+                            debug!("Found matching column with prefix at index {}", i);
                             return Ok(i);
                         }
                     }
                 }
             } else {
-                log::debug!(
+                debug!(
                     "Column '{}' not found in table '{}' schema",
                     column_name,
                     table_alias
                 );
             }
         } else {
-            log::debug!("Table '{}' not found in catalog", table_alias);
+            debug!("Table '{}' not found in catalog", table_alias);
         }
 
         // Fifth, try to find any column that ends with the column name, regardless of prefix
-        log::debug!("Looking for any column ending with: '{}'", column_name);
+        debug!("Looking for any column ending with: '{}'", column_name);
         for i in 0..schema.get_column_count() as usize {
             let col = schema.get_column(i).unwrap();
             let col_name = col.get_name();
             if let Some(dot_pos) = col_name.find('.') {
                 let suffix = &col_name[dot_pos + 1..];
 
-                log::debug!("Checking column '{}': suffix='{}'", col_name, suffix);
+                debug!("Checking column '{}': suffix='{}'", col_name, suffix);
 
                 if suffix == column_name {
-                    log::debug!("Found column with matching suffix at index {}", i);
+                    debug!("Found column with matching suffix at index {}", i);
                     return Ok(i);
                 }
             }
         }
-        log::debug!("No column found ending with '{}'", column_name);
+        debug!("No column found ending with '{}'", column_name);
 
         // If we get here, we couldn't find the column
         let error_msg = format!("Column {}.{} not found in schema", table_alias, column_name);
-        log::debug!("{}", error_msg);
+        debug!("{}", error_msg);
         Err(error_msg)
     }
 
@@ -2675,7 +2675,7 @@ impl ExpressionParser {
 
         // Parse the timezone expression
         let timezone_expr = match timezone {
-            Expr::Value(sqlparser::ast::ValueWithSpan {
+            Expr::Value(ValueWithSpan {
                 value: tz_value,
                 span,
             }) => {
@@ -2833,16 +2833,16 @@ impl ExpressionParser {
             }
             
             // Check if it's an aggregate function
-            if let SelectItem::UnnamedExpr(Expr::Function(func)) = &select.projection[0] {
+            return if let SelectItem::UnnamedExpr(Expr::Function(func)) = &select.projection[0] {
                 let func_name = self.extract_table_name(&func.name)?;
 
                 // Handle common aggregate functions
                 match func_name.to_uppercase().as_str() {
                     "AVG" => {
-                        return Ok((
+                        Ok((
                             SubqueryType::Scalar,
                             Column::new("subquery_result", TypeId::Decimal),
-                        ));
+                        ))
                     }
                     "SUM" => {
                         // Determine type based on argument
@@ -2872,16 +2872,16 @@ impl ExpressionParser {
                         }
 
                         // Default to decimal if we can't determine the type
-                        return Ok((
+                        Ok((
                             SubqueryType::Scalar,
                             Column::new("subquery_result", TypeId::Decimal),
-                        ));
+                        ))
                     }
                     "COUNT" => {
-                        return Ok((
+                        Ok((
                             SubqueryType::Scalar,
                             Column::new("subquery_result", TypeId::Integer),
-                        ));
+                        ))
                     }
                     "MIN" | "MAX" => {
                         // Determine type based on argument
@@ -2901,16 +2901,16 @@ impl ExpressionParser {
                         }
 
                         // Default to integer if we can't determine the type
-                        return Ok((
+                        Ok((
                             SubqueryType::Scalar,
                             Column::new("subquery_result", TypeId::Integer),
-                        ));
+                        ))
                     }
                     _ => {
                         // For other functions, try to infer the return type
                         let expr = self.parse_expression(&Expr::Function(func.clone()), schema)?;
                         let return_type = expr.get_return_type().clone();
-                        return Ok((SubqueryType::Scalar, return_type));
+                        Ok((SubqueryType::Scalar, return_type))
                     }
                 }
             } else {
@@ -2929,9 +2929,9 @@ impl ExpressionParser {
                     schema,
                 )?;
                 let return_type = expr.get_return_type().clone();
-                
+
                 // Assume any single column non-aggregate subquery is likely to be used with IN
-                return Ok((SubqueryType::InList, return_type));
+                Ok((SubqueryType::InList, return_type))
             }
         }
 
@@ -4207,7 +4207,7 @@ mod tests {
         let second_schema = Schema::new(columns);
 
         // Test INNER JOIN with ON constraint
-        let on_expr = sqlparser::ast::Expr::BinaryOp {
+        let on_expr = Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new("id"))),
             op: BinaryOperator::Eq,
             right: Box::new(Expr::Identifier(Ident::new("id"))),

@@ -1127,7 +1127,7 @@ mod tests {
     #[test]
     fn test_empty_vector() {
         // Create an empty vector
-        let empty_vec = Value::new_vector(vec![] as Vec<Value>);
+        let empty_vec = Value::new_vector(vec![]);
         let vec_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             empty_vec,
             Column::new("empty_vec", TypeId::Vector),
