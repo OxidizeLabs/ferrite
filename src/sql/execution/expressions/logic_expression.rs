@@ -10,6 +10,7 @@ use crate::types_db::value::{Val, Value};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use log;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogicType {
@@ -124,10 +125,20 @@ impl LogicExpression {
 
 impl ExpressionOps for LogicExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
+        use log::debug;
+        
         let lhs = self.left.evaluate(tuple, schema)?;
         let rhs = self.right.evaluate(tuple, schema)?;
+        
+        debug!("LogicExpression evaluate - lhs: {:?}, rhs: {:?}, logic_type: {:?}", 
+               lhs, rhs, self.logic_type);
+        
         let comparison_result = self.perform_computation(&lhs, &rhs);
-        Ok(Value::new(comparison_result))
+        let result = Value::new(comparison_result);
+        
+        debug!("LogicExpression result: {:?}", result);
+        
+        Ok(result)
     }
 
     fn evaluate_join(
