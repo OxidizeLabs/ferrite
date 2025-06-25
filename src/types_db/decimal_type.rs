@@ -232,9 +232,68 @@ impl DecimalType {
     ) -> String {
         match val.get_val() {
             Val::Decimal(n) => {
+                // Handle precision validation if specified
+                if let Some(precision_val) = precision {
+                    let total_digits = Self::count_total_digits(*n);
+                    if total_digits > precision_val {
+                        return format!("ERROR: Value exceeds precision {}", precision_val);
+                    }
+                }
+
                 if let Some(scale_val) = scale {
-                    // Format with specified scale
-                    format!("{:.1$}", n, scale_val as usize)
+                    // Format with specified scale, respecting precision limits
+                    let formatted = format!("{:.1$}", n, scale_val as usize);
+                    
+                    // If precision is specified, ensure total width doesn't exceed it
+                    if let Some(precision_val) = precision {
+                        // Count significant digits (excluding decimal point and sign)
+                        let sign_chars = if *n < 0.0 { 1 } else { 0 };
+                        let decimal_chars = if scale_val > 0 { 1 } else { 0 }; // decimal point
+                        let max_total_chars = precision_val as usize + sign_chars + decimal_chars;
+                        
+                        if formatted.len() > max_total_chars {
+                            // Truncate to fit precision, but preserve scale
+                            let integer_part = n.trunc();
+                            let max_integer_digits = precision_val - scale_val;
+                            
+                            // Check if integer part fits
+                            let integer_digits = if integer_part == 0.0 { 1 } else {
+                                (integer_part.abs().log10().floor() + 1.0) as u8
+                            };
+                            
+                            if integer_digits > max_integer_digits {
+                                return format!("ERROR: Integer part exceeds precision limit");
+                            }
+                        }
+                    }
+                    
+                    formatted
+                } else if let Some(precision_val) = precision {
+                    // Only precision specified, use it to determine decimal places
+                    if n.fract() == 0.0 {
+                        // Whole number - format as integer but respect precision
+                        let integer_digits = if *n == 0.0 { 1 } else {
+                            (n.abs().log10().floor() + 1.0) as u8
+                        };
+                        if integer_digits <= precision_val {
+                            format!("{}", *n as i64)
+                        } else {
+                            format!("ERROR: Value exceeds precision {}", precision_val)
+                        }
+                    } else {
+                        // Decimal number - use precision to determine scale
+                        let integer_part = n.trunc();
+                        let integer_digits = if integer_part == 0.0 { 1 } else {
+                            (integer_part.abs().log10().floor() + 1.0) as u8
+                        };
+                        
+                        if integer_digits >= precision_val {
+                            format!("ERROR: Integer part exceeds precision {}", precision_val)
+                        } else {
+                            let available_decimal_places = precision_val - integer_digits;
+                            format!("{:.1$}", n, available_decimal_places as usize)
+                        }
+                    }
                 } else {
                     // Default behavior: natural formatting that preserves backward compatibility
                     if n.fract() == 0.0 {
@@ -499,5 +558,44 @@ mod tests {
         assert_eq!(decimal_type.to_string(&Value::new(0.0f64)), "0");
         assert_eq!(decimal_type.to_string(&Value::new(-5.0f64)), "-5");
         assert_eq!(decimal_type.to_string(&Value::new(-2.5f64)), "-2.5");
+    }
+
+    #[test]
+    fn test_precision_formatting() {
+        let decimal_type = DecimalType::new();
+        
+        // Test with scale only
+        let val1 = Value::new(123.456789);
+        assert_eq!(decimal_type.to_string_with_precision(&val1, None, Some(2)), "123.46");
+        assert_eq!(decimal_type.to_string_with_precision(&val1, None, Some(4)), "123.4568");
+        
+        // Test with precision only
+        let val2 = Value::new(123.456);
+        assert_eq!(decimal_type.to_string_with_precision(&val2, Some(5), None), "123.46"); // 5 total digits, 3 integer
+        assert_eq!(decimal_type.to_string_with_precision(&val2, Some(6), None), "123.456");
+        
+        // Test with both precision and scale
+        let val3 = Value::new(123.456789);
+        assert_eq!(decimal_type.to_string_with_precision(&val3, Some(6), Some(2)), "123.46");
+        
+        // Test precision validation
+        let val4 = Value::new(12345.67);
+        assert!(decimal_type.to_string_with_precision(&val4, Some(5), None).contains("ERROR"));
+        
+        // Test integer with precision
+        let val5 = Value::new(123.0);
+        assert_eq!(decimal_type.to_string_with_precision(&val5, Some(4), None), "123");
+        
+        // Test zero
+        let val6 = Value::new(0.0);
+        assert_eq!(decimal_type.to_string_with_precision(&val6, Some(3), Some(2)), "0.00");
+        
+        // Test negative numbers
+        let val7 = Value::new(-123.45);
+        assert_eq!(decimal_type.to_string_with_precision(&val7, Some(5), Some(2)), "-123.45");
+        
+        // Test null formatting
+        let null_val = Value::new(Val::Null);
+        assert_eq!(decimal_type.to_string_with_precision(&null_val, Some(5), Some(2)), "NULL");
     }
 }
