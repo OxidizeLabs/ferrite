@@ -1666,13 +1666,10 @@ mod tests {
             // Collect results from all threads
             let results: Vec<_> = handles
                 .into_iter()
-                .map(|h| match h.join() {
-                    Ok(count) => count,
-                    Err(_) => {
-                        log::debug!("Warning: Thread panicked");
-                        0
-                    }
-                })
+                .map(|h| h.join().unwrap_or_else(|_| {
+                    log::debug!("Warning: Thread panicked");
+                    0
+                }))
                 .collect();
 
             // Verify that at least some operations succeeded
@@ -1876,13 +1873,10 @@ mod tests {
             // Collect results
             let successful_updates: Vec<_> = handles
                 .into_iter()
-                .map(|h| match h.join() {
-                    Ok(count) => count,
-                    Err(_) => {
-                        log::debug!("Warning: Thread panicked");
-                        0
-                    }
-                })
+                .map(|h| h.join().unwrap_or_else(|_| {
+                    log::debug!("Warning: Thread panicked");
+                    0
+                }))
                 .collect();
 
             let total_successful_updates: usize = successful_updates.iter().sum();
@@ -1909,13 +1903,10 @@ mod tests {
             if let Ok((_, tuple)) = result {
                 let values = tuple.get_values();
                 let final_counter = match values.get(1) {
-                    Some(value) => match value.as_integer() {
-                        Ok(counter_val) => counter_val,
-                        Err(_) => {
-                            log::debug!("Failed to extract final counter value");
-                            0
-                        }
-                    },
+                    Some(value) => value.as_integer().unwrap_or_else(|_| {
+                        log::debug!("Failed to extract final counter value");
+                        0
+                    }),
                     None => {
                         log::debug!("Failed to get counter value from tuple");
                         0
@@ -2091,10 +2082,7 @@ mod tests {
                     let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
                     let id = match values.get(0) {
-                        Some(value) => match value.as_integer() {
-                            Ok(id_val) => id_val,
-                            Err(_) => 2, // Default value if extraction fails
-                        },
+                        Some(value) => value.as_integer().unwrap_or_else(|_| 2),
                         None => 2, // Default value if extraction fails
                     };
 
@@ -2184,10 +2172,7 @@ mod tests {
                     let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
                     let id = match values.get(0) {
-                        Some(value) => match value.as_integer() {
-                            Ok(id_val) => id_val,
-                            Err(_) => 1, // Default value if extraction fails
-                        },
+                        Some(value) => value.as_integer().unwrap_or_else(|_| 1),
                         None => 1, // Default value if extraction fails
                     };
 
@@ -2858,13 +2843,10 @@ mod tests {
                 // Calculate expected value based on actual number of successful updates
                 let expected_value = 100 + (successful_updates as i32) * 100;
                 let actual_value = match tuple.get_values().get(1) {
-                    Some(value) => match value.as_integer() {
-                        Ok(val) => val,
-                        Err(_) => {
-                            log::debug!("Failed to extract final value");
-                            -1
-                        }
-                    },
+                    Some(value) => value.as_integer().unwrap_or_else(|_| {
+                        log::debug!("Failed to extract final value");
+                        -1
+                    }),
                     None => {
                         log::debug!("No value found at index 1");
                         -1
@@ -3035,10 +3017,7 @@ mod tests {
 
                 if let Ok((_, tuple)) = result {
                     let value = match tuple.get_values().get(1) {
-                        Some(value) => match value.as_integer() {
-                            Ok(val) => val,
-                            Err(_) => -1,
-                        },
+                        Some(value) => value.as_integer().unwrap_or_else(|_| -1),
                         None => -1,
                     };
 
@@ -3498,10 +3477,7 @@ mod tests {
 
             if let Ok((_, tuple)) = final_read {
                 let counter = match tuple.get_values().get(1) {
-                    Some(value) => match value.as_integer() {
-                        Ok(val) => val,
-                        Err(_) => -1,
-                    },
+                    Some(value) => value.as_integer().unwrap_or_else(|_| -1),
                     None => -1,
                 };
 

@@ -129,10 +129,6 @@ impl ResultWriter for CliResultWriter {
 }
 
 impl ResultWriter for NetworkResultWriter {
-    fn write_message(&mut self, message: &str) {
-        self.messages.push(message.to_string());
-    }
-
     fn write_schema_header(&mut self, column_names: Vec<String>) {
         self.column_names = column_names;
     }
@@ -145,6 +141,10 @@ impl ResultWriter for NetworkResultWriter {
         // For network responses, we still store the original values
         // but the formatting will be handled when converting to strings
         self.rows.push(values);
+    }
+
+    fn write_message(&mut self, message: &str) {
+        self.messages.push(message.to_string());
     }
 }
 

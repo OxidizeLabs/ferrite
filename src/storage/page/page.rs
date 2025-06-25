@@ -262,8 +262,8 @@ mod tests {
 
     #[test]
     fn test_page_type_equality() {
-        assert!(PageType::Basic == PageType::Basic);
-        assert!(PageType::Table != PageType::Basic);
+        assert_eq!(PageType::Basic, PageType::Basic);
+        assert_ne!(PageType::Table, PageType::Basic);
 
         // Test that the enum values match their corresponding constants
         assert_eq!(PageType::Basic as u8, PAGE_TYPE_BASIC);

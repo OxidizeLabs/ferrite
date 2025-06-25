@@ -234,7 +234,7 @@ pub trait Type {
             Val::Enum(id, name) => format!("ENUM({}: {})", id, name),
             Val::Point(x, y) => format!("POINT({}, {})", x, y),
             Val::Null => "NULL".to_string(),
-            Val::Struct => format!("STRUCT"),
+            Val::Struct => "STRUCT".to_string(),
         }
     }
     

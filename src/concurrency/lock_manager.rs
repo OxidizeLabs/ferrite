@@ -276,25 +276,25 @@ impl LockRequestQueue {
             if existing.is_granted() && existing.get_txn_id() == txn_id {
                 //has_lock = true;
                 // Check if this is a valid lock upgrade
-                match (existing.get_lock_mode(), new_mode) {
+                return match (existing.get_lock_mode(), new_mode) {
                     // IS -> [S, X, IX, SIX]
-                    (LockMode::IntentionShared, _) => return true,
+                    (LockMode::IntentionShared, _) => true,
                     // S -> [X, SIX]
                     (
                         LockMode::Shared,
                         LockMode::Exclusive | LockMode::SharedIntentionExclusive,
-                    ) => return true,
+                    ) => true,
                     // IX -> [X, SIX]
                     (
                         LockMode::IntentionExclusive,
                         LockMode::Exclusive | LockMode::SharedIntentionExclusive,
-                    ) => return true,
+                    ) => true,
                     // SIX -> [X]
-                    (LockMode::SharedIntentionExclusive, LockMode::Exclusive) => return true,
+                    (LockMode::SharedIntentionExclusive, LockMode::Exclusive) => true,
                     // Same mode - already granted
-                    (mode1, mode2) if mode1 == mode2 => return true,
+                    (mode1, mode2) if mode1 == mode2 => true,
                     // Invalid upgrade
-                    _ => return false,
+                    _ => false,
                 }
             }
         }

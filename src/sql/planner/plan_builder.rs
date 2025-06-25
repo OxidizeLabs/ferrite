@@ -2056,22 +2056,22 @@ impl LogicalPlanBuilder {
                         // In this case, the parent_name is the schema and we need to get the table from elsewhere
                         // This would typically come from the filter_position
                         if let Some(filter_pos) = &show_options.filter_position {
-                            match filter_pos {
+                            return match filter_pos {
                                 ShowStatementFilterPosition::Infix(filter)
                                 | ShowStatementFilterPosition::Suffix(filter) => {
                                     match filter {
                                         ShowStatementFilter::NoKeyword(table) => {
                                             // Parent name is the schema, this is the table
-                                            return Ok(LogicalPlan::show_columns_with_options(
+                                            Ok(LogicalPlan::show_columns_with_options(
                                                 table.clone(),
                                                 Some(parent_name),
                                                 *extended,
                                                 *full,
-                                            ));
+                                            ))
                                         }
                                         _ => {
-                                            return Err("Table name is required for SHOW COLUMNS"
-                                                .to_string());
+                                            Err("Table name is required for SHOW COLUMNS"
+                                                .to_string())
                                         }
                                     }
                                 }
@@ -2093,23 +2093,23 @@ impl LogicalPlanBuilder {
                 // If there's no show_in clause, we need to extract the table name
                 // from the filter position if available
                 if let Some(filter_pos) = &show_options.filter_position {
-                    match filter_pos {
+                    return match filter_pos {
                         ShowStatementFilterPosition::Infix(filter)
                         | ShowStatementFilterPosition::Suffix(filter) => {
                             match filter {
                                 ShowStatementFilter::NoKeyword(table) => {
                                     // No schema provided, just the table
-                                    return Ok(LogicalPlan::show_columns_with_options(
+                                    Ok(LogicalPlan::show_columns_with_options(
                                         table.clone(),
                                         None,
                                         *extended,
                                         *full,
-                                    ));
+                                    ))
                                 }
                                 _ => {
-                                    return Err(
+                                    Err(
                                         "Table name is required for SHOW COLUMNS".to_string()
-                                    );
+                                    )
                                 }
                             }
                         }
@@ -2226,7 +2226,7 @@ impl LogicalPlanBuilder {
                 Statement::Insert { .. } => {
                     return Err("EXPLAIN INSERT not yet supported".to_string());
                 }
-                _ => return Err(format!("EXPLAIN for this statement type not yet supported")),
+                _ => return Err("EXPLAIN for this statement type not yet supported".to_string()),
             };
 
             // Use the helper method to create the explain plan

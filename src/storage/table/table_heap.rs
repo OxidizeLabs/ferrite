@@ -146,15 +146,15 @@ impl TableHeap {
         {
             let mut page = page_guard.write();
             if page.has_space_for(tuple) {
-                match page.insert_tuple(&meta, tuple) {
+                return match page.insert_tuple(&meta, tuple) {
                     Some(rid) => {
                         page.set_dirty(true);
-                        return Ok(rid);
+                        Ok(rid)
                     }
                     None => {
-                        return Err(
+                        Err(
                             "Failed to insert tuple into page despite having space".to_string()
-                        );
+                        )
                     }
                 }
             }
@@ -790,11 +790,11 @@ impl TableHeap {
         {
             let mut page = page_guard.write();
             if page.has_space_for(tuple) {
-                if let Some(rid) = page.insert_tuple(&meta, tuple) {
+                return if let Some(rid) = page.insert_tuple(&meta, tuple) {
                     page.set_dirty(true);
-                    return Ok(rid);
+                    Ok(rid)
                 } else {
-                    return Err("Failed to insert tuple into page".to_string());
+                    Err("Failed to insert tuple into page".to_string())
                 }
             }
         }

@@ -58,7 +58,7 @@ impl AbstractExecutor for TableScanExecutor {
 
         // Get the next tuple from the iterator
         loop {
-            match &mut self.iterator {
+            return match &mut self.iterator {
                 Some(iter) => {
                     match iter.next() {
                         Some((meta, tuple)) => {
@@ -67,17 +67,17 @@ impl AbstractExecutor for TableScanExecutor {
                                 continue; // Use continue instead of recursive call
                             }
                             debug!("Found tuple with RID: {:?}", tuple.get_rid());
-                            return Ok(Some((tuple.clone(), tuple.get_rid())));
+                            Ok(Some((tuple.clone(), tuple.get_rid())))
                         }
                         None => {
                             debug!("No more tuples to scan");
-                            return Ok(None);
+                            Ok(None)
                         }
                     }
                 }
                 None => {
                     error!("Iterator not initialized");
-                    return Err(DBError::Execution("Iterator not initialized".to_string()));
+                    Err(DBError::Execution("Iterator not initialized".to_string()))
                 }
             }
         }
