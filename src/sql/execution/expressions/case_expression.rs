@@ -95,6 +95,12 @@ impl ExpressionOps for CaseExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         use log::debug;
 
+        // Debug: show the tuple being processed
+        let tuple_data: Vec<String> = (0..schema.get_column_count() as usize)
+            .map(|i| tuple.get_value(i).to_string())
+            .collect();
+        debug!("CASE expression evaluating tuple: {:?}", tuple_data);
+
         // For CASE expr WHEN ... form, evaluate base expression
         let base_value = match &self.base_expr {
             Some(expr) => Some(expr.evaluate(tuple, schema)?),
@@ -110,7 +116,7 @@ impl ExpressionOps for CaseExpression {
                 // For CASE WHEN ... form, check if when_value is true
                 None => match when_value.get_val() {
                     Val::Boolean(b) => {
-                        debug!("CASE WHEN condition {} evaluated to: {}", i, b);
+                        debug!("CASE WHEN condition {} evaluated to: {} for tuple {:?}", i, b, tuple_data);
                         *b
                     }
                     _ => return Err(ExpressionError::InvalidType("Expected boolean".to_string())),
@@ -119,18 +125,24 @@ impl ExpressionOps for CaseExpression {
 
             if matches {
                 debug!(
-                    "CASE WHEN condition {} matched, evaluating THEN expression",
-                    i
+                    "CASE WHEN condition {} matched, evaluating THEN expression for tuple {:?}",
+                    i, tuple_data
                 );
-                // Return corresponding THEN result
-                return self.then_exprs[i].evaluate(tuple, schema);
+                // Return a corresponding THEN result
+                let result = self.then_exprs[i].evaluate(tuple, schema)?;
+                debug!("CASE WHEN condition {} THEN result: {} for tuple {:?}", i, result, tuple_data);
+                return Ok(result);
             }
         }
 
-        debug!("No CASE WHEN conditions matched, evaluating ELSE expression");
+        debug!("No CASE WHEN conditions matched, evaluating ELSE expression for tuple {:?}", tuple_data);
         // If no conditions matched, return ELSE result or NULL
         match &self.else_expr {
-            Some(expr) => expr.evaluate(tuple, schema),
+            Some(expr) => {
+                let result = expr.evaluate(tuple, schema)?;
+                debug!("CASE ELSE result: {} for tuple {:?}", result, tuple_data);
+                Ok(result)
+            },
             None => Ok(Value::new(Val::Null)),
         }
     }
