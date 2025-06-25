@@ -1,9 +1,10 @@
 use crate::types_db::value::{Val, Value};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
+use bincode::{Encode, Decode};
 
 // Every possible SQL type ID
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Encode, Decode)]
 pub enum TypeId {
     Boolean,
     TinyInt,

@@ -20,6 +20,7 @@ use std::fmt::{Debug, Display};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use thiserror::Error;
+use bincode::{Encode, Decode};
 
 // Error type for B+Tree operations
 #[derive(Debug, Error)]
@@ -109,8 +110,8 @@ where
 
 impl<K, V, C> BPlusTreeIndex<K, V, C>
 where
-    K: KeyType + Send + Sync + Debug + Display + 'static,
-    V: ValueType + Send + Sync + 'static + PartialEq,
+    K: KeyType + Send + Sync + Debug + Display + Serialize + for<'de> Deserialize<'de> + 'static + bincode::Encode + bincode::Decode<()>,
+    V: ValueType + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
     /// Create a new B+ Tree index
@@ -195,8 +196,8 @@ where
 
 impl<K, V, C> BPlusTreeIndex<K, V, C>
 where
-    K: KeyType + Send + Sync + Debug + Display + Serialize + for<'de> Deserialize<'de> + 'static,
-    V: ValueType + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static + PartialEq,
+    K: KeyType + Send + Sync + Debug + Display + Serialize + for<'de> Deserialize<'de> + 'static + bincode::Encode + bincode::Decode<()>,
+    V: ValueType + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
     /// Insert a key-value pair into the B+ tree
@@ -432,6 +433,8 @@ where
 
         // Release the lock on the leaf page
         drop(leaf);
+        // Explicitly drop the leaf page guard to ensure it's unpinned
+        drop(leaf_page);
 
         // Perform rebalancing if needed
         if needs_rebalancing {
@@ -552,50 +555,44 @@ where
         }
 
         // Traverse down to leaf
-        loop {
+        while tree_height > 1 {
             // First try as an internal page (since we know height > 1 and we're not at leaf level yet)
-            if let Some(internal_page) = self
+            let internal_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
+                .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))?;
+
+            // Find the child page id for the key
+            let child_page_id;
             {
-                // Find the child page id for the key
-                let child_page_id;
-                {
-                    let internal = internal_page.read();
-                    // Find the appropriate child page for the key
-                    child_page_id = internal.find_child_for_key(key);
-                }
-
-                // Get the child page id before dropping the internal page
-                let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
-                
-                // Drop the internal page before continuing
-                drop(internal_page);
-
-                // Try to fetch the child as a leaf page
-                if let Some(leaf_page) = self
-                    .buffer_pool_manager
-                    .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
-                {
-                    // If we successfully fetched a leaf page, return it
-                    return Ok(leaf_page);
-                }
-
-                // Continue with this child (it's another internal page)
-                current_page_id = next_page_id;
-            } else {
-                // Try as a leaf page as a fallback
-                if let Some(leaf_page) = self
-                    .buffer_pool_manager
-                    .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-                {
-                    return Ok(leaf_page);
-                }
-
-                // Neither a leaf nor an internal page, return error
-                return Err(BPlusTreeError::PageNotFound(current_page_id));
+                let internal = internal_page.read();
+                // Find the appropriate child page for the key
+                child_page_id = internal.find_child_for_key(key);
             }
+
+            // Get the child page id before dropping the internal page
+            let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+            
+            // Drop the internal page before continuing to next level
+            drop(internal_page);
+
+            // Try to fetch the child as a leaf page
+            if let Some(leaf_page) = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
+            {
+                // If we successfully fetched a leaf page, return it
+                return Ok(leaf_page);
+            }
+
+            // Continue with this child (it's another internal page)
+            current_page_id = next_page_id;
         }
+
+        // If we get here without finding a leaf, try one more time
+        self.buffer_pool_manager
+            .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
+            .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))
     }
 
     /// Split a leaf page when it becomes full
@@ -850,6 +847,11 @@ where
         parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
     ) -> Result<(), BPlusTreeError> {
+        // Store page IDs before acquiring any locks
+        let left_page_id = left_page.get_page_id();
+        let right_page_id = right_page.get_page_id();
+        let parent_page_id = parent_page.get_page_id();
+        
         // 1. Acquire write locks on all pages
         let mut left_write = left_page.write();
         let mut right_write = right_page.write();
@@ -857,8 +859,8 @@ where
 
         // 2. Validate preconditions for merging
         // Ensure pages are adjacently linked in the parent
-        if parent_write.get_value_at(parent_key_index) != Some(left_page.get_page_id())
-            || parent_write.get_value_at(parent_key_index + 1) != Some(right_page.get_page_id())
+        if parent_write.get_value_at(parent_key_index) != Some(left_page_id)
+            || parent_write.get_value_at(parent_key_index + 1) != Some(right_page_id)
         {
             return Err(BPlusTreeError::BufferPoolError(
                 "Leaf pages are not adjacent siblings in parent".to_string(),
@@ -910,6 +912,11 @@ where
             drop(left_write);
             drop(right_write);
             drop(parent_write);
+            
+            // Explicitly drop page guards to ensure they're unpinned
+            drop(left_page);
+            drop(right_page);
+            drop(parent_page);
 
             let header_page = self
                 .buffer_pool_manager
@@ -921,18 +928,18 @@ where
             {
                 let mut header_write = header_page.write();
                 let current_height = header_write.get_tree_height();
-                header_write.set_root_page_id(left_page.get_page_id());
+                header_write.set_root_page_id(left_page_id);
                 header_write.set_tree_height(current_height - 1);
             }
 
             // Release the parent page (it's no longer needed)
             self.buffer_pool_manager
-                .delete_page(parent_page.get_page_id())
+                .delete_page(parent_page_id)
                 .map_err(|e| BPlusTreeError::BufferPoolError(e.to_string()))?;
 
             // Release the right page (it's been merged)
             self.buffer_pool_manager
-                .delete_page(right_page.get_page_id())
+                .delete_page(right_page_id)
                 .map_err(|e| BPlusTreeError::BufferPoolError(e.to_string()))?;
 
             return Ok(());
@@ -944,14 +951,22 @@ where
         // Store parent information before dropping the write guard
         let parent_needs_rebalancing =
             !is_parent_root && parent_size < parent_write.get_max_size() / 2;
-        let parent_page_id = parent_page.get_page_id();
-
-        // Release the right page (it's been merged)
+        
+        // Release all write locks
         drop(left_write);
         drop(parent_write);
         drop(right_write);
+        
+        // Explicitly drop all page guards except right_page which we'll delete
+        drop(left_page);
+        drop(parent_page);
+        
+        // Ensure right_page guard is dropped before trying to delete it
+        drop(right_page);
+
+        // Now safe to delete the right page
         self.buffer_pool_manager
-            .delete_page(right_page.get_page_id())
+            .delete_page(right_page_id)
             .map_err(|e| BPlusTreeError::BufferPoolError(e.to_string()))?;
 
         // Check if parent needs rebalancing after removing a key
@@ -1115,6 +1130,11 @@ where
         parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
     ) -> Result<(), BPlusTreeError> {
+        // Store page IDs before acquiring any locks
+        let left_page_id = left_page.get_page_id();
+        let right_page_id = right_page.get_page_id();
+        let parent_page_id = parent_page.get_page_id();
+        
         // 1. Acquire write locks on all pages
         let mut left_write = left_page.write();
         let mut right_write = right_page.write();
@@ -1122,8 +1142,8 @@ where
 
         // 2. Validate preconditions for merging
         // Ensure the pages are adjacently linked in the parent
-        if parent_write.get_value_at(parent_key_index) != Some(left_page.get_page_id())
-            || parent_write.get_value_at(parent_key_index + 1) != Some(right_page.get_page_id())
+        if parent_write.get_value_at(parent_key_index) != Some(left_page_id)
+            || parent_write.get_value_at(parent_key_index + 1) != Some(right_page_id)
         {
             return Err(BPlusTreeError::BufferPoolError(
                 "Internal pages are not adjacent siblings in parent".to_string(),
@@ -1177,6 +1197,11 @@ where
             drop(left_write);
             drop(right_write);
             drop(parent_write);
+            
+            // Explicitly drop page guards to ensure they're unpinned
+            drop(left_page);
+            drop(right_page);
+            drop(parent_page);
 
             let header_page = self
                 .buffer_pool_manager
@@ -1188,17 +1213,17 @@ where
             {
                 let mut header_write = header_page.write();
                 let current_height = header_write.get_tree_height();
-                header_write.set_root_page_id(left_page.get_page_id());
+                header_write.set_root_page_id(left_page_id);
                 header_write.set_tree_height(current_height - 1);
             }
 
             // Release the parent page and right page
             self.buffer_pool_manager
-                .delete_page(parent_page.get_page_id())
+                .delete_page(parent_page_id)
                 .map_err(|e| BPlusTreeError::BufferPoolError(e.to_string()))?;
 
             self.buffer_pool_manager
-                .delete_page(right_page.get_page_id())
+                .delete_page(right_page_id)
                 .map_err(|e| BPlusTreeError::BufferPoolError(e.to_string()))?;
 
             return Ok(());
@@ -1209,16 +1234,22 @@ where
         // Store parent information before dropping the write guard
         let parent_needs_rebalancing =
             !is_parent_root && parent_size < parent_write.get_max_size() / 2;
-        let parent_page_id = parent_page.get_page_id();
 
-        // Release the page guards
+        // Release all locks
         drop(left_write);
         drop(parent_write);
         drop(right_write);
+        
+        // Explicitly drop page guards before deleting
+        drop(left_page);
+        drop(parent_page);
+        
+        // Make sure right_page is fully dropped before deletion
+        drop(right_page);
 
         // Delete the right page as it's no longer needed
         self.buffer_pool_manager
-            .delete_page(right_page.get_page_id())
+            .delete_page(right_page_id)
             .map_err(|e| BPlusTreeError::BufferPoolError(e.to_string()))?;
 
         // 8. Check if parent needs rebalancing after removing a key

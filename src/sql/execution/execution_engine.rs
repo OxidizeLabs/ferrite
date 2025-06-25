@@ -2535,6 +2535,22 @@ mod tests {
                     .execute_sql(invalid_sql, ctx.exec_ctx.clone(), &mut writer);
                 assert!(result.is_err(), "Invalid SQL should fail: {}", invalid_sql);
             }
+
+            // Test 6: Valid SQL with auto-generated index names
+            let auto_generated_index_cases = vec![
+                "CREATE INDEX ON test_table (id)",        // Auto-generated index name
+                "CREATE INDEX ON test_table (name)",      // Auto-generated index name
+                "CREATE INDEX ON test_table (id, name)",  // Auto-generated composite index name
+            ];
+
+            for create_sql in auto_generated_index_cases {
+                let mut writer = TestResultWriter::new();
+                let result = ctx
+                    .engine
+                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer);
+                assert!(result.is_ok(), "Auto-generated index name should succeed: {}", create_sql);
+                assert!(result.unwrap(), "Index creation should return true: {}", create_sql);
+            }
         }
 
         #[tokio::test]
@@ -2850,6 +2866,15 @@ mod tests {
 
             let table_name = "test_table";
             ctx.create_test_table(table_name, table_schema.clone())
+                .unwrap();
+
+            // Insert test data
+            let test_data = vec![
+                vec![Value::new(1), Value::new("Alice")],
+                vec![Value::new(2), Value::new("Bob")],
+                vec![Value::new(3), Value::new("Charlie")],
+            ];
+            ctx.insert_tuples(table_name, test_data, table_schema.clone())
                 .unwrap();
 
             // Test CREATE INDEX IF NOT EXISTS (if supported)

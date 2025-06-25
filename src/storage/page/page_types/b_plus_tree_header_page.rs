@@ -26,7 +26,8 @@ pub struct BPlusTreeHeaderPage {
     order: u32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(bincode::Encode, bincode::Decode)]
 pub struct HeaderData {
     pub root_page_id: PageId,
     pub tree_height: u32,
@@ -120,7 +121,7 @@ impl BPlusTreeHeaderPage {
         self.root_page_id == INVALID_PAGE_ID
     }
 
-    /// Serialize the header page to bytes for storage
+    /// Serialize the header page into bytes
     pub fn serialize(&self) -> Vec<u8> {
         // We're only serializing the essential data fields
         let header_data = HeaderData {
@@ -130,14 +131,18 @@ impl BPlusTreeHeaderPage {
             order: self.order,
         };
 
-        bincode::serialize(&header_data).expect("Failed to serialize BPlusTreeHeaderPage")
+        // Use bincode 2.0 API
+        bincode::encode_to_vec(&header_data, bincode::config::standard())
+            .expect("Failed to serialize BPlusTreeHeaderPage")
     }
 
     /// Deserialize bytes into a header page
     pub fn deserialize(data: &[u8], page_id: PageId) -> Self {
         // Deserialize just the data fields
-        let header_data: HeaderData =
-            bincode::deserialize(data).expect("Failed to deserialize BPlusTreeHeaderPage");
+        let (header_data, _): (HeaderData, usize) = bincode::decode_from_slice(
+            data, 
+            bincode::config::standard()
+        ).expect("Failed to deserialize BPlusTreeHeaderPage");
 
         // Create a new page with the deserialized data
         let mut page = Self::new_with_options(page_id);

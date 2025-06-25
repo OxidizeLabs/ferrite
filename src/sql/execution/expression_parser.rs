@@ -2221,15 +2221,15 @@ impl ExpressionParser {
                     let right_col = right_schema.get_column(right_col_idx).unwrap().clone();
 
                     let left_expr = Expression::ColumnRef(ColumnRefExpression::new(
-                        left_col_idx,
                         0, // tuple index for left table
+                        left_col_idx,
                         left_col.clone(),
                         vec![],
                     ));
 
                     let right_expr = Expression::ColumnRef(ColumnRefExpression::new(
-                        right_col_idx + left_schema.get_column_count() as usize,
                         1, // tuple index for right table
+                        right_col_idx,
                         right_col.clone(),
                         vec![],
                     ));
@@ -2281,15 +2281,15 @@ impl ExpressionParser {
 
                         // Create column references
                         let left_expr = Expression::ColumnRef(ColumnRefExpression::new(
-                            left_idx,
                             0, // tuple index for left table
+                            left_idx,
                             left_col.clone(),
                             vec![],
                         ));
 
                         let right_expr = Expression::ColumnRef(ColumnRefExpression::new(
-                            right_idx + left_schema.get_column_count() as usize,
                             1, // tuple index for right table
+                            right_idx,
                             right_col.clone(),
                             vec![],
                         ));
