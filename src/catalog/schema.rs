@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
+use bincode::{config, Decode, Encode};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct Schema {
     columns: Vec<Column>,
     length: u32,
@@ -285,8 +286,9 @@ mod unit_tests {
         ];
         let schema = Schema::new(columns);
 
-        let serialized = bincode::serialize(&schema).unwrap();
-        let deserialized: Schema = bincode::deserialize(&serialized).unwrap();
+        let config = config::standard();
+        let serialized = bincode::encode_to_vec(&schema, config).unwrap();
+        let (deserialized, _): (Schema, usize) = bincode::decode_from_slice(&serialized, config).unwrap();
 
         assert_eq!(schema, deserialized);
     }
@@ -438,8 +440,9 @@ mod unit_tests {
         schema.set_primary_key_columns(vec![0]);
 
         // Test that primary keys are preserved during serialization
-        let serialized = bincode::serialize(&schema).unwrap();
-        let deserialized: Schema = bincode::deserialize(&serialized).unwrap();
+        let config = config::standard();
+        let serialized = bincode::encode_to_vec(&schema, config).unwrap();
+        let (deserialized, _): (Schema, usize) = bincode::decode_from_slice(&serialized, config).unwrap();
 
         assert_eq!(
             schema.get_primary_key_columns(),

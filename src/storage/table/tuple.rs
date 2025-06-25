@@ -5,7 +5,7 @@ use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
 use crate::types_db::value::Value;
-use bincode;
+use bincode::{config, Decode, Encode};
 use log;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 /// Metadata associated with a tuple.
 #[derive(Clone, Debug, PartialEq, Copy, Serialize, Deserialize)]
+#[derive(bincode::Encode, bincode::Decode)]
 pub struct TupleMeta {
     creator_txn_id: TxnId,
     commit_timestamp: Timestamp,
@@ -134,7 +135,7 @@ impl TupleMeta {
 }
 
 /// Represents a tuple in the database.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tuple {
     values: Arc<RwLock<Vec<Value>>>,
     rid: RID,
@@ -160,6 +161,39 @@ impl<'de> Deserialize<'de> for Tuple {
     {
         // Deserialize from a tuple of (values, rid)
         let (values, rid): (Vec<Value>, RID) = Deserialize::deserialize(deserializer)?;
+        Ok(Self {
+            values: Arc::new(RwLock::new(values)),
+            rid,
+        })
+    }
+}
+
+// Implement bincode's Encode trait for Tuple
+impl bincode::Encode for Tuple {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        let values = self.values.read().clone();
+        (values, self.rid).encode(encoder)
+    }
+}
+
+// Implement bincode's Decode trait for Tuple
+impl<C> bincode::Decode<C> for Tuple {
+    fn decode<D: bincode::de::Decoder<Context = C>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        let (values, rid): (Vec<Value>, RID) = bincode::Decode::decode(decoder)?;
+        Ok(Self {
+            values: Arc::new(RwLock::new(values)),
+            rid,
+        })
+    }
+}
+
+// Provide a generic BorrowDecode implementation so Tuple works with bincode decode derives
+impl<'de, C> bincode::BorrowDecode<'de, C> for Tuple {
+    fn borrow_decode<D>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError>
+    where
+        D: bincode::de::BorrowDecoder<'de, Context = C>,
+    {
+        let (values, rid): (Vec<Value>, RID) = bincode::BorrowDecode::borrow_decode(decoder)?;
         Ok(Self {
             values: Arc::new(RwLock::new(values)),
             rid,
@@ -211,9 +245,9 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
-        // Use the Serialize trait implementation directly
-        let serialized =
-            bincode::serialize(self).map_err(|e| TupleError::SerializationError(e.to_string()))?;
+        let config = config::standard();
+        let serialized = bincode::encode_to_vec(self, config)
+            .map_err(|e| TupleError::SerializationError(e.to_string()))?;
 
         if storage.len() < serialized.len() {
             return Err(TupleError::BufferTooSmall);
@@ -229,8 +263,10 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
-        // Use the Deserialize trait implementation directly
-        bincode::deserialize(storage).map_err(|e| TupleError::DeserializationError(e.to_string()))
+        let config = config::standard();
+        bincode::decode_from_slice(storage, config)
+            .map_err(|e| TupleError::DeserializationError(e.to_string()))
+            .map(|(tuple, _)| tuple)
     }
 
     /// Returns the RID of the tuple.
@@ -249,9 +285,10 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
+        let config = config::standard();
         let values = self.values.read().clone();
-        bincode::serialized_size(&(values, self.rid))
-            .map(|size| size as usize)
+        bincode::encode_to_vec(&(values, self.rid), config)
+            .map(|vec| vec.len())
             .map_err(|e| TupleError::SerializationError(e.to_string()))
     }
 
@@ -469,12 +506,13 @@ mod tests {
     #[test]
     fn test_direct_bincode_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let (tuple, _) = create_sample_tuple();
+        let config = config::standard();
 
-        // Directly use bincode with the Serialize trait
-        let serialized = bincode::serialize(&tuple)?;
+        // Directly use bincode with the Encode trait
+        let serialized = bincode::encode_to_vec(&tuple, config)?;
 
-        // Directly use bincode with the Deserialize trait
-        let deserialized: Tuple = bincode::deserialize(&serialized)?;
+        // Directly use bincode with the Decode trait
+        let (deserialized, _): (Tuple, usize) = bincode::decode_from_slice(&serialized, config)?;
 
         // Verify the deserialized tuple matches the original
         assert_eq!(deserialized.get_rid(), tuple.get_rid());
@@ -517,8 +555,9 @@ mod tests {
     #[test]
     fn test_tuple_meta_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let meta = TupleMeta::new(1234567890);
-        let serialized = bincode::serialize(&meta)?;
-        let deserialized: TupleMeta = bincode::deserialize(&serialized)?;
+        let config = config::standard();
+        let serialized = bincode::encode_to_vec(&meta, config)?;
+        let (deserialized, _): (TupleMeta, usize) = bincode::decode_from_slice(&serialized, config)?;
 
         assert_eq!(meta.get_creator_txn_id(), deserialized.get_creator_txn_id());
         assert_eq!(meta.is_committed(), deserialized.is_committed());
