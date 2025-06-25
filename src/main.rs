@@ -10,7 +10,7 @@ use tkdb::client::client::DatabaseClient;
 use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
 use tkdb::common::logger::initialize_logger;
-use tkdb::server::ServerHandle;
+use tkdb::server::{ServerConfig, ServerHandle};
 use tokio::signal;
 
 #[derive(Parser)]
@@ -26,6 +26,8 @@ enum Commands {
     Server {
         #[arg(short = 'P', long, default_value = "5432")]
         port: u16,
+        #[arg(short = 'c', long)]
+        config: Option<String>,
     },
     /// Start an interactive client
     Client {
@@ -42,13 +44,13 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Server { port } => run_server(port).await,
+        Commands::Server { port, config } => run_server(port, config).await,
         Commands::Client { host, port } => run_client(&format!("{}:{}", host, port)).await,
         Commands::Cli => run_cli().await,
     }
 }
 
-async fn run_server(port: u16) -> Result<(), Box<dyn error::Error>> {
+async fn run_server(port: u16, config_path: Option<String>) -> Result<(), Box<dyn error::Error>> {
     // Initialize logger with custom format for server
     // Builder::new()
     //     .filter_level(log::LevelFilter::Debug)
@@ -64,18 +66,27 @@ async fn run_server(port: u16) -> Result<(), Box<dyn error::Error>> {
     //     })
     //     .init();
 
-    // Create config with server enabled
-    let mut config = DBConfig::default();
-    config.server_enabled = true;
-    config.server_port = port;
+    // Load server configuration
+    let server_config = if let Some(config_path) = config_path {
+        ServerConfig::load(std::path::Path::new(&config_path))?
+    } else {
+        let mut config = ServerConfig::default();
+        config.port = port; // Override with command line port
+        config
+    };
 
-    info!("Starting TKDB server on port {}", port);
+    // Create config with server enabled
+    let mut db_config = DBConfig::default();
+    db_config.server_enabled = true;
+    db_config.server_port = server_config.port;
+
+    info!("Starting TKDB server on port {}", server_config.port);
 
     // Create database instance
-    let db = Arc::new(DBInstance::new(config).await?);
+    let db = Arc::new(DBInstance::new(db_config).await?);
 
     // Create and start server
-    let mut server = ServerHandle::new(port);
+    let mut server = ServerHandle::new(server_config.port);
     server.start(db.clone())?;
 
     info!("Server is running. Press Ctrl+C to stop.");

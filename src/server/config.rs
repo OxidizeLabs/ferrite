@@ -17,4 +17,14 @@ impl ServerConfig {
         let config: ServerConfig = toml::from_str(&contents)?;
         Ok(config)
     }
+
+    pub fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 5432,
+            max_connections: 100,
+            buffer_pool_size: 8192,
+            log_level: "info".to_string(),
+        }
+    }
 }
