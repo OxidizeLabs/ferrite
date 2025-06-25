@@ -2822,7 +2822,7 @@ mod edge_cases {
     fn test_empty_vector_comparisons() {
         // Test empty vectors
         let empty_vec1 = Value::new_vector::<Vec<Value>>(vec![]);
-        let empty_vec2 = Value::new_vector(vec![]);
+        let empty_vec2 = Value::new_vector::<Vec<Value>>(vec![]);
         assert_eq!(empty_vec1.compare_equals(&empty_vec2), CmpBool::CmpTrue);
     }
 
