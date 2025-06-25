@@ -859,7 +859,7 @@ impl BufferPoolManager {
     /// Uses futures executor to avoid runtime conflicts
     fn run_async_operation<F, T>(&self, future: F) -> Result<T, std::io::Error>
     where
-        F: std::future::Future<Output = Result<T, std::io::Error>>,
+        F: Future<Output = Result<T, std::io::Error>>,
     {
         // Use futures::executor::block_on which doesn't conflict with tokio
         futures::executor::block_on(future)
