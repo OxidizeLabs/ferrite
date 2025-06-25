@@ -19,7 +19,7 @@ impl Type for FloatType {
 
     fn compare_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Float(r) => CmpBool::from(0.0 == *r as f32),
+            Val::Float(r) => CmpBool::from(0.0 == *r),
             Val::Decimal(r) => CmpBool::from(0.0 == *r as f32),
             Val::Integer(r) => CmpBool::from(0.0 == *r as f32),
             Val::TinyInt(r) => CmpBool::from(0.0 == *r as f32),
@@ -40,7 +40,7 @@ impl Type for FloatType {
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Float(r) => CmpBool::from(0.0 < *r as f32),
+            Val::Float(r) => CmpBool::from(0.0 < *r),
             Val::Decimal(r) => CmpBool::from(0.0 < *r as f32),
             Val::Integer(r) => CmpBool::from(0.0 < *r as f32),
             Val::TinyInt(r) => CmpBool::from(0.0 < *r as f32),
@@ -53,7 +53,7 @@ impl Type for FloatType {
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Float(r) => CmpBool::from(0.0 <= *r as f32),
+            Val::Float(r) => CmpBool::from(0.0 <= *r),
             Val::Decimal(r) => CmpBool::from(0.0 <= *r as f32),
             Val::Integer(r) => CmpBool::from(0.0 <= *r as f32),
             Val::TinyInt(r) => CmpBool::from(0.0 <= *r as f32),
@@ -66,7 +66,7 @@ impl Type for FloatType {
 
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Float(r) => CmpBool::from(0.0 > *r as f32),
+            Val::Float(r) => CmpBool::from(0.0 > *r),
             Val::Decimal(r) => CmpBool::from(0.0 > *r as f32),
             Val::Integer(r) => CmpBool::from(0.0 > *r as f32),
             Val::TinyInt(r) => CmpBool::from(0.0 > *r as f32),
@@ -79,7 +79,7 @@ impl Type for FloatType {
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Float(r) => CmpBool::from(0.0 >= *r as f32),
+            Val::Float(r) => CmpBool::from(0.0 >= *r),
             Val::Decimal(r) => CmpBool::from(0.0 >= *r as f32),
             Val::Integer(r) => CmpBool::from(0.0 >= *r as f32),
             Val::TinyInt(r) => CmpBool::from(0.0 >= *r as f32),

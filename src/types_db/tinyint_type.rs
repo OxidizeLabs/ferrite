@@ -40,7 +40,7 @@ impl Type for TinyIntType {
                     CmpBool::CmpFalse
                 }
             }
-            Val::Decimal(r) => CmpBool::from((0 as f64) == *r),
+            Val::Decimal(r) => CmpBool::from((0f64) == *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -78,7 +78,7 @@ impl Type for TinyIntType {
                     CmpBool::from(*r > 0)
                 }
             }
-            Val::Decimal(r) => CmpBool::from((0 as f64) < *r),
+            Val::Decimal(r) => CmpBool::from((0f64) < *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -108,7 +108,7 @@ impl Type for TinyIntType {
                     CmpBool::from(*r > 0)
                 }
             }
-            Val::Decimal(r) => CmpBool::from((0 as f64) <= *r),
+            Val::Decimal(r) => CmpBool::from((0f64) <= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -138,7 +138,7 @@ impl Type for TinyIntType {
                     CmpBool::from(*r < 0)
                 }
             }
-            Val::Decimal(r) => CmpBool::from((0 as f64) > *r),
+            Val::Decimal(r) => CmpBool::from((0f64) > *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -168,7 +168,7 @@ impl Type for TinyIntType {
                     CmpBool::from(*r < 0)
                 }
             }
-            Val::Decimal(r) => CmpBool::from((0 as f64) >= *r),
+            Val::Decimal(r) => CmpBool::from((0f64) >= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }

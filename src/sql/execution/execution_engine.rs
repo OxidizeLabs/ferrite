@@ -13661,7 +13661,7 @@ mod tests {
 
             // Verify changes were committed
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
-            let mut writer = TestResultWriter::new();
+            let writer = TestResultWriter::new();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "800",
@@ -13669,7 +13669,7 @@ mod tests {
             );
 
             let select_sql = "SELECT balance FROM accounts WHERE id = 2";
-            let mut writer = TestResultWriter::new();
+            let writer = TestResultWriter::new();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "700",
@@ -13684,11 +13684,11 @@ mod tests {
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
                 .unwrap();
             let rollback_sql = "ROLLBACK";
-            let mut writer = TestResultWriter::new();
+            let writer = TestResultWriter::new();
 
             // Verify changes were rolled back
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
-            let mut writer = TestResultWriter::new();
+            let writer = TestResultWriter::new();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "800",

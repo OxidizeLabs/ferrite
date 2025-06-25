@@ -718,7 +718,7 @@ impl SchemaManager {
             match item {
                 sqlparser::ast::SelectItem::ExprWithAlias { expr, alias } => {
                     // Handle direct aliases like "e.name AS employee"
-                    if let sqlparser::ast::Expr::CompoundIdentifier(idents) = expr {
+                    if let Expr::CompoundIdentifier(idents) = expr {
                         if idents.len() == 2 {
                             let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
                             alias_map.insert(qualified_name, alias.value.clone());
@@ -727,7 +727,7 @@ impl SchemaManager {
                 }
                 sqlparser::ast::SelectItem::UnnamedExpr(expr) => {
                     // For expressions without explicit aliases, check if they match GROUP BY expressions
-                    if let sqlparser::ast::Expr::CompoundIdentifier(idents) = expr {
+                    if let Expr::CompoundIdentifier(idents) = expr {
                         if idents.len() == 2 {
                             let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
 
@@ -2178,7 +2178,7 @@ mod tests {
 
         // Test custom VECTOR type
         let custom_vector = DataType::Custom(
-            sqlparser::ast::ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
+            ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
                 Ident::new("VECTOR"),
             )]),
             vec![],
@@ -2190,7 +2190,7 @@ mod tests {
 
         // Test unknown custom type
         let custom_unknown = DataType::Custom(
-            sqlparser::ast::ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
+            ObjectName(vec![sqlparser::ast::ObjectNamePart::Identifier(
                 Ident::new("UNKNOWN"),
             )]),
             vec![],
@@ -2676,7 +2676,7 @@ mod tests {
         for i in 0..50 {
             large_source_cols.push(Column::new(&format!("col_{}", i), TypeId::Integer));
             large_target_cols.push(Column::new(&format!("target_col_{}", i), TypeId::Integer));
-            source_values.push(crate::types_db::value::Value::from(i as i32));
+            source_values.push(crate::types_db::value::Value::from(i));
         }
 
         let large_source_schema = Schema::new(large_source_cols);

@@ -19,7 +19,6 @@ use crate::types_db::timestamp_type;
 use crate::types_db::tinyint_type;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::uuid_type;
-use crate::types_db::value::Val::Null;
 use crate::types_db::value::{Val, Value};
 use crate::types_db::varlen_type;
 use crate::types_db::vector_type;
@@ -185,8 +184,8 @@ pub trait Type {
             TypeId::Array => Value::from(Vec::<Value>::new()),
             TypeId::Enum => Value::from(Val::Enum(i32::MAX, String::new())),
             TypeId::Point => Value::from(Val::Point(f64::MAX, f64::MAX)),
-            TypeId::Invalid => Value::from(Val::Null),
-            TypeId::Struct => Value::from(Val::Null),
+            TypeId::Invalid => Value::from(Null),
+            TypeId::Struct => Value::from(Null),
         }
     }
     
@@ -233,17 +232,17 @@ pub trait Type {
             }
             Val::Enum(id, name) => format!("ENUM({}: {})", id, name),
             Val::Point(x, y) => format!("POINT({}, {})", x, y),
-            Val::Null => "NULL".to_string(),
+            Null => "NULL".to_string(),
             Val::Struct => "STRUCT".to_string(),
         }
     }
     
     fn sqrt(&self, _val: &Value) -> Value {
-        Value::new(Val::Null)
+        Value::new(Null)
     }
     
     fn operate_null(&self, _left: &Value, _right: &Value) -> Value {
-        Value::new(Val::Null)
+        Value::new(Null)
     }
     
     fn is_zero(&self, val: &Value) -> bool {
@@ -267,7 +266,7 @@ pub trait Type {
     
     fn cast_as(&self, val: &Value, type_id: TypeId) -> Value {
         if !self.is_coercible_from(type_id) {
-            return Value::new(Val::Null);
+            return Value::new(Null);
         }
         val.cast_to(self.get_type_id())
             .unwrap_or_else(|_| val.clone_optimized())

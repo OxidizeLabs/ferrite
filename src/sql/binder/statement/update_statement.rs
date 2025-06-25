@@ -64,7 +64,7 @@ impl Display for UpdateStatement {
 }
 
 impl Debug for UpdateStatement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("UpdateStatement")
             .field("table", &self.table)
             .field("filter_expr", &self.filter_expr.is_some())

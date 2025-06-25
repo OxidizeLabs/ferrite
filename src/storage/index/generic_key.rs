@@ -56,11 +56,11 @@ impl<T, const N: usize> GenericKey<T, N> {
             .expect("Invalid column index in Schema");
         let column_type = column.get_type();
         if column.is_inlined() {
-            let offset = column.get_offset() as usize;
+            let offset = column.get_offset();
             let data_slice = &self.data[offset..];
             Value::deserialize_from(data_slice, column_type)
         } else {
-            let offset = column.get_offset() as usize;
+            let offset = column.get_offset();
             // Read a 4-byte offset (i32) from the key's data.
             let raw_offset_bytes = &self.data[offset..offset + 4];
             let relative_offset =

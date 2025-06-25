@@ -349,7 +349,6 @@ mod tests {
     use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
     use crate::storage::disk::async_disk_manager::DiskManagerConfig;
-    use std::thread::sleep;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -922,7 +921,7 @@ mod tests {
 
         #[tokio::test]
         async fn test_concurrent_shutdown() {
-            let ctx = Arc::new(parking_lot::RwLock::new(
+            let ctx = Arc::new(RwLock::new(
                 TestContext::new("concurrent_shutdown_test").await,
             ));
 
@@ -1150,7 +1149,7 @@ mod tests {
 
         #[tokio::test]
         async fn test_flush_thread_concurrent_commits() {
-            let ctx = Arc::new(parking_lot::RwLock::new(
+            let ctx = Arc::new(RwLock::new(
                 TestContext::new("concurrent_commits_test").await,
             ));
 

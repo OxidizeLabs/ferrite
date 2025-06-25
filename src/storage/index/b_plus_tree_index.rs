@@ -350,9 +350,9 @@ where
             let key_at_index = leaf_page_read.get_key_at(key_index).unwrap();
             if (self.comparator)(key, &key_at_index) == Ordering::Equal {
                 // Key found, return the value
-                match leaf_page_read.get_value_at(key_index) {
-                    Some(value) => return Ok(Some(value.clone())),
-                    None => return Ok(None),
+                return match leaf_page_read.get_value_at(key_index) {
+                    Some(value) => Ok(Some(value.clone())),
+                    None => Ok(None),
                 }
             }
         }
@@ -775,7 +775,7 @@ where
             }
 
             // Now remove keys from original page: remove the middle key and all keys after it
-            for _ in (split_point)..current_size {
+            for _ in split_point..current_size {
                 internal_write.remove_key_value_at(split_point);
             }
         }
@@ -1633,9 +1633,9 @@ where
         // 2. Check if page is the root
         if page_id == root_page_id {
             // If this is the root page, handle special cases
-            if is_leaf {
+            return if is_leaf {
                 // If root is a leaf, it can have any number of keys (no underflow)
-                return Ok(false);
+                Ok(false)
             } else {
                 // If root is internal and has only one child, collapse the tree
                 let page = self
@@ -1721,9 +1721,9 @@ where
                 }
 
                 // If we get here, root has no keys and no children, which should never happen
-                return Err(BPlusTreeError::BufferPoolError(
+                Err(BPlusTreeError::BufferPoolError(
                     "Invalid root page state".to_string(),
-                ));
+                ))
             }
         }
 

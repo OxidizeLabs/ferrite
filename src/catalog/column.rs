@@ -802,14 +802,14 @@ mod unit_tests {
         let small_dims = vec![1, 2, 3];
         for dim in small_dims {
             let col = Column::new_varlen("vec", TypeId::Vector, dim);
-            assert_eq!(col.get_storage_size(), dim * std::mem::size_of::<f64>());
+            assert_eq!(col.get_storage_size(), dim * size_of::<f64>());
         }
 
         // Test power of 2 dimensions
         let pow2_dims = vec![2, 4, 8, 16, 32, 64];
         for dim in pow2_dims {
             let col = Column::new_varlen("vec", TypeId::Vector, dim);
-            assert_eq!(col.get_storage_size(), dim * std::mem::size_of::<f64>());
+            assert_eq!(col.get_storage_size(), dim * size_of::<f64>());
         }
     }
 

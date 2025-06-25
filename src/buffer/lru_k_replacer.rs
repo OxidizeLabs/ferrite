@@ -177,13 +177,13 @@ impl LRUKReplacer {
 
         let entry = store.entry(frame_id).or_insert_with(|| FrameEntry {
             access_count: 0,
-            access_history: VecDeque::with_capacity(self.k as usize),
+            access_history: VecDeque::with_capacity(self.k),
             is_evictable: false,
         });
 
         entry.access_count += 1;
         entry.access_history.push_back(now);
-        if entry.access_history.len() > self.k as usize {
+        if entry.access_history.len() > self.k {
             entry.access_history.pop_front();
         }
 

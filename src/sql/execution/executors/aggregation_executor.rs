@@ -303,11 +303,11 @@ impl AbstractExecutor for AggregationExecutor {
                                 // Convert sum to decimal and divide by count to get average
                                 let sum_as_decimal = match value.values[i].get_type_id() {
                                     TypeId::Integer => {
-                                        let int_val = value.values[i].as_integer().unwrap();
+                                        let int_val = value.values[i].as_integer()?;
                                         Value::new(int_val as f64)
                                     }
                                     TypeId::BigInt => {
-                                        let bigint_val = value.values[i].as_bigint().unwrap();
+                                        let bigint_val = value.values[i].as_bigint()?;
                                         Value::new(bigint_val as f64)
                                     }
                                     TypeId::Decimal => value.values[i].clone(),

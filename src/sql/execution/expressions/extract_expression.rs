@@ -53,7 +53,7 @@ impl ExtractExpression {
 
         // Extract the requested field
         let result = match self.field {
-            ExtractField::Year => timestamp.year() as i32,
+            ExtractField::Year => timestamp.year(),
             ExtractField::Month => timestamp.month() as i32,
             ExtractField::Day => timestamp.day() as i32,
             ExtractField::Hour => timestamp.hour() as i32,

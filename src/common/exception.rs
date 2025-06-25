@@ -116,7 +116,7 @@ pub enum DeletePageError {
 
 #[derive(Debug)]
 pub enum FlushError {
-    IoError(std::io::Error),
+    IoError(io::Error),
     PageNotFound,
     PageNotInTable,
 }

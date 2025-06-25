@@ -976,7 +976,7 @@ impl Index for BPlusTree {
         key: &Tuple,
         _transaction: &Transaction,
     ) -> Result<Vec<(Value, RID)>, String> {
-        let result = self.scan_range(key, key, true).unwrap();
+        let result = self.scan_range(key, key, true)?;
         debug!("Scan complete, found {} matching entries", result.len());
         Ok(result)
     }

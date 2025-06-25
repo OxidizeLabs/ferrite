@@ -304,7 +304,7 @@ impl Value {
             Date => {
                 if data.len() >= 4 {
                     let arr: [u8; 4] = data[0..4].try_into().expect("slice with incorrect length");
-                    Value::new_with_type(Val::Date(i32::from_le_bytes(arr)), TypeId::Date)
+                    Value::new_with_type(Val::Date(i32::from_le_bytes(arr)), Date)
                 } else {
                     Value::new(Val::Null)
                 }
@@ -312,7 +312,7 @@ impl Value {
             Time => {
                 if data.len() >= 4 {
                     let arr: [u8; 4] = data[0..4].try_into().expect("slice with incorrect length");
-                    Value::new_with_type(Val::Time(i32::from_le_bytes(arr)), TypeId::Time)
+                    Value::new_with_type(Val::Time(i32::from_le_bytes(arr)), Time)
                 } else {
                     Value::new(Val::Null)
                 }
@@ -320,7 +320,7 @@ impl Value {
             Interval => {
                 if data.len() >= 8 {
                     let arr: [u8; 8] = data[0..8].try_into().expect("slice with incorrect length");
-                    Value::new_with_type(Val::Interval(i64::from_le_bytes(arr)), TypeId::Interval)
+                    Value::new_with_type(Val::Interval(i64::from_le_bytes(arr)), Interval)
                 } else {
                     Value::new(Val::Null)
                 }
@@ -330,18 +330,18 @@ impl Value {
                     if column_type == VarChar {
                         Value::new(s)
                     } else {
-                        Value::new_with_type(Val::ConstLen(s.to_string()), TypeId::Char)
+                        Value::new_with_type(Val::ConstLen(s.to_string()), Char)
                     }
                 }
                 Err(_) => Value::new(Val::Null),
             },
-            Binary => Value::new_with_type(Val::Binary(data.to_vec()), TypeId::Binary),
+            Binary => Value::new_with_type(Val::Binary(data.to_vec()), Binary),
             JSON => match std::str::from_utf8(data) {
-                Ok(s) => Value::new_with_type(Val::JSON(s.to_string()), TypeId::JSON),
+                Ok(s) => Value::new_with_type(Val::JSON(s.to_string()), JSON),
                 Err(_) => Value::new(Val::Null),
             },
             UUID => match std::str::from_utf8(data) {
-                Ok(s) => Value::new_with_type(Val::UUID(s.to_string()), TypeId::UUID),
+                Ok(s) => Value::new_with_type(Val::UUID(s.to_string()), UUID),
                 Err(_) => Value::new(Val::Null),
             },
             Point => {
@@ -352,7 +352,7 @@ impl Value {
                         data[8..16].try_into().expect("slice with incorrect length");
                     let x = f64::from_le_bytes(x_arr);
                     let y = f64::from_le_bytes(y_arr);
-                    Value::new_with_type(Val::Point(x, y), TypeId::Point)
+                    Value::new_with_type(Val::Point(x, y), Point)
                 } else {
                     Value::new(Val::Null)
                 }
@@ -2822,7 +2822,7 @@ mod edge_cases {
     fn test_empty_vector_comparisons() {
         // Test empty vectors
         let empty_vec1 = Value::new_vector::<Vec<Value>>(vec![]);
-        let empty_vec2 = Value::new_vector(vec![] as Vec<Value>);
+        let empty_vec2 = Value::new_vector(vec![]);
         assert_eq!(empty_vec1.compare_equals(&empty_vec2), CmpBool::CmpTrue);
     }
 

@@ -27,7 +27,7 @@ impl<KeyType, ValueType, KeyComparator> HashTableBlockPage<KeyType, ValueType, K
 where
     KeyComparator: Fn(&KeyType, &KeyType) -> bool,
     KeyType: Clone + Default,
-    ValueType: Clone + Default + std::cmp::PartialEq,
+    ValueType: Clone + Default + PartialEq,
 {
     /// Creates a new `HashTableBlockPage` with the appropriate size.
     pub fn new() -> Self {

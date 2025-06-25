@@ -610,7 +610,7 @@ mod index_scan_executor_tests {
                     .unwrap();
 
                 // Insert into index
-                btree_guard.insert(Value::new(i as i32), rid);
+                btree_guard.insert(Value::new(i), rid);
             }
         }
 

@@ -53,7 +53,7 @@ where
 
 impl<K, V, C> BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
     V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
@@ -397,7 +397,7 @@ where
 
 impl<K, V, C> Debug for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
     V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
@@ -427,7 +427,7 @@ where
 
 impl<K, V, C> PageTrait for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
     V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
@@ -509,7 +509,7 @@ where
 
 impl<K, V, C> Page for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + std::fmt::Debug,
+    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
     V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
