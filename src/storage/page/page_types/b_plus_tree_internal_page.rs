@@ -271,18 +271,18 @@ impl<
         // Special case: if there's only one key, return the appropriate pointer
         if self.keys.len() == 1 {
             // For a single key K, compare the target key with K
-            match (self.comparator)(key, &self.keys[0]) {
+            return match (self.comparator)(key, &self.keys[0]) {
                 std::cmp::Ordering::Less => {
                     // Key is less than K, go to the left pointer
-                    return Some(self.values[0]);
+                    Some(self.values[0])
                 }
                 _ => {
                     // Key is greater than or equal to K, go to the right pointer
                     if self.values.len() > 1 {
-                        return Some(self.values[1]);
+                        Some(self.values[1])
                     } else {
                         // If we only have one pointer, use it for all keys
-                        return Some(self.values[0]);
+                        Some(self.values[0])
                     }
                 }
             }
@@ -302,10 +302,10 @@ impl<
             if (self.comparator)(key, &self.keys[i]) != std::cmp::Ordering::Less
                 && (self.comparator)(key, &self.keys[i + 1]) == std::cmp::Ordering::Less
             {
-                if i + 1 < self.values.len() {
-                    return Some(self.values[i + 1]);
+                return if i + 1 < self.values.len() {
+                    Some(self.values[i + 1])
                 } else {
-                    return Some(self.values[self.values.len() - 1]);
+                    Some(self.values[self.values.len() - 1])
                 }
             }
         }

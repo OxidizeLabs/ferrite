@@ -804,7 +804,7 @@ mod tests {
             };
 
             // Small delay between operations
-            thread::sleep(Duration::from_millis(1));
+            tokio::time::sleep(Duration::from_millis(1)).await;
 
             // Create and append commit record
             let commit_record = Arc::new(LogRecord::new_transaction_record(
@@ -816,7 +816,7 @@ mod tests {
             next_lsn += 1;
             assert_eq!(commit_lsn, 1);
 
-            sleep(Duration::from_millis(1));
+            tokio::time::sleep(Duration::from_millis(1)).await;
 
             // Create and append abort record
             let abort_record = Arc::new(LogRecord::new_transaction_record(
@@ -851,7 +851,7 @@ mod tests {
             ctx.log_manager.run_flush_thread();
 
             // Allow some time for thread to start
-            sleep(Duration::from_millis(100));
+            tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Append some log records
             for i in 0..3 {
@@ -979,7 +979,8 @@ mod tests {
             }
 
             // Wait for periodic flush to happen (slightly longer than the flush interval)
-            sleep(Duration::from_millis(15)); // Flush interval is 10ms
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            // Flush interval is 10ms
 
             // Check that persistent LSN has been updated
             let persistent_lsn = ctx.log_manager.get_persistent_lsn();
@@ -1053,14 +1054,11 @@ mod tests {
             }
 
             // Add a small delay to ensure all commits are processed
-            sleep(Duration::from_millis(20));
+            tokio::time::sleep(Duration::from_millis(20)).await;
 
             // Check that persistent LSN has been updated
             let persistent_lsn = ctx.log_manager.get_persistent_lsn();
-            assert!(
-                persistent_lsn != INVALID_LSN,
-                "Persistent LSN should be updated after buffer fills up"
-            );
+            assert_ne!(persistent_lsn, INVALID_LSN, "Persistent LSN should be updated after buffer fills up");
 
             ctx.log_manager.shut_down();
         }
@@ -1081,7 +1079,7 @@ mod tests {
             let init_lsn = ctx.log_manager.append_log_record(init_record);
 
             // Wait for initial record to be flushed
-            sleep(Duration::from_millis(50));
+            tokio::time::sleep(Duration::from_millis(50)).await;
 
             // Verify the flush thread is working
             let initial_persistent_lsn = ctx.log_manager.get_persistent_lsn();
@@ -1122,7 +1120,7 @@ mod tests {
                 batch_end_lsns.push(last_batch_lsn);
 
                 // Wait for flush to happen
-                sleep(Duration::from_millis(50));
+                tokio::time::sleep(Duration::from_millis(50)).await;
 
                 let end_persistent_lsn = ctx.log_manager.get_persistent_lsn();
 
@@ -1241,7 +1239,7 @@ mod tests {
             prev_lsn = ctx.log_manager.append_log_record(new_page_record);
 
             // Wait a bit to allow potential flush
-            sleep(Duration::from_millis(15));
+            tokio::time::sleep(Duration::from_millis(15)).await;
 
             // Another new page operation
             let another_page_record = Arc::new(LogRecord::new_page_record(

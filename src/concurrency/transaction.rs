@@ -734,7 +734,7 @@ mod tests {
             assert_eq!(txn.commit_ts(), commit_ts);
 
             // After commit, watermark should reflect that this transaction is no longer active
-            assert!(watermark.get_watermark() != read_ts);
+            assert_ne!(watermark.get_watermark(), read_ts);
         }
 
         #[test]
@@ -754,7 +754,7 @@ mod tests {
             assert_eq!(txn.get_state(), TransactionState::Aborted);
 
             // After abort, watermark should reflect that this transaction is no longer active
-            assert!(watermark.get_watermark() != read_ts);
+            assert_ne!(watermark.get_watermark(), read_ts);
         }
 
         #[test]

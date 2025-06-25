@@ -520,7 +520,7 @@ mod tests {
 
         // Drop guards one by one and verify pin count
         drop(guard3);
-        thread::sleep(Duration::from_millis(1)); // Small delay to ensure pin count update
+        tokio::time::sleep(Duration::from_millis(1)).await; // Small delay to ensure pin count update
         assert_eq!(
             guard1.read().get_pin_count(),
             2,
@@ -528,7 +528,7 @@ mod tests {
         );
 
         drop(guard2);
-        thread::sleep(Duration::from_millis(1)); // Small delay to ensure pin count update
+        tokio::time::sleep(Duration::from_millis(1)).await; // Small delay to ensure pin count update
         assert_eq!(
             guard1.read().get_pin_count(),
             1,

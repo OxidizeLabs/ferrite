@@ -1627,7 +1627,7 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a - b), TypeId::Decimal))
             }
-            (TypeId::Boolean, _) => Err(format!("Cannot subtract from Boolean type")),
+            (TypeId::Boolean, _) => Err("Cannot subtract from Boolean type".to_string()),
             (TypeId::Float, TypeId::Float) => {
                 let a = self.get_val();
                 let b = other.get_val();
@@ -1637,12 +1637,12 @@ impl Type for Value {
                         TypeId::Float,
                     ))
                 } else {
-                    Err(format!("Invalid Float values for subtraction"))
+                    Err("Invalid Float values for subtraction".to_string())
                 }
             }
-            (TypeId::Timestamp, _) => Err(format!("Cannot subtract from Timestamp type")),
-            (TypeId::Date, _) => Err(format!("Cannot subtract from Date type")),
-            (TypeId::Time, _) => Err(format!("Cannot subtract from Time type")),
+            (TypeId::Timestamp, _) => Err("Cannot subtract from Timestamp type".to_string()),
+            (TypeId::Date, _) => Err("Cannot subtract from Date type".to_string()),
+            (TypeId::Time, _) => Err("Cannot subtract from Time type".to_string()),
             (TypeId::Interval, TypeId::Interval) => {
                 let a = self.get_val();
                 let b = other.get_val();
@@ -1652,20 +1652,20 @@ impl Type for Value {
                         TypeId::Interval,
                     ))
                 } else {
-                    Err(format!("Invalid Interval values for subtraction"))
+                    Err("Invalid Interval values for subtraction".to_string())
                 }
             }
-            (TypeId::VarChar, _) => Err(format!("Cannot subtract from VarChar type")),
-            (TypeId::Char, _) => Err(format!("Cannot subtract from Char type")),
-            (TypeId::Binary, _) => Err(format!("Cannot subtract from Binary type")),
-            (TypeId::JSON, _) => Err(format!("Cannot subtract from JSON type")),
-            (TypeId::UUID, _) => Err(format!("Cannot subtract from UUID type")),
-            (TypeId::Vector, _) => Err(format!("Cannot subtract from Vector type")),
-            (TypeId::Array, _) => Err(format!("Cannot subtract from Array type")),
-            (TypeId::Enum, _) => Err(format!("Cannot subtract from Enum type")),
-            (TypeId::Point, _) => Err(format!("Cannot subtract from Point type")),
-            (TypeId::Invalid, _) => Err(format!("Cannot subtract from Invalid type")),
-            (TypeId::Struct, _) => Err(format!("Cannot subtract from Struct type")),
+            (TypeId::VarChar, _) => Err("Cannot subtract from VarChar type".to_string()),
+            (TypeId::Char, _) => Err("Cannot subtract from Char type".to_string()),
+            (TypeId::Binary, _) => Err("Cannot subtract from Binary type".to_string()),
+            (TypeId::JSON, _) => Err("Cannot subtract from JSON type".to_string()),
+            (TypeId::UUID, _) => Err("Cannot subtract from UUID type".to_string()),
+            (TypeId::Vector, _) => Err("Cannot subtract from Vector type".to_string()),
+            (TypeId::Array, _) => Err("Cannot subtract from Array type".to_string()),
+            (TypeId::Enum, _) => Err("Cannot subtract from Enum type".to_string()),
+            (TypeId::Point, _) => Err("Cannot subtract from Point type".to_string()),
+            (TypeId::Invalid, _) => Err("Cannot subtract from Invalid type".to_string()),
+            (TypeId::Struct, _) => Err("Cannot subtract from Struct type".to_string()),
             (_, _) => Err(format!(
                 "Cannot subtract values of types {:?} and {:?}",
                 self.get_type_id(),
@@ -1701,7 +1701,7 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a * b), TypeId::Decimal))
             }
-            (TypeId::Boolean, _) => Err(format!("Cannot multiply Boolean type")),
+            (TypeId::Boolean, _) => Err("Cannot multiply Boolean type".to_string()),
             (TypeId::Float, TypeId::Float) => {
                 let a = self.get_val();
                 let b = other.get_val();
@@ -1711,24 +1711,24 @@ impl Type for Value {
                         TypeId::Float,
                     ))
                 } else {
-                    Err(format!("Invalid Float values for multiplication"))
+                    Err("Invalid Float values for multiplication".to_string())
                 }
             }
-            (TypeId::Timestamp, _) => Err(format!("Cannot multiply Timestamp type")),
-            (TypeId::Date, _) => Err(format!("Cannot multiply Date type")),
-            (TypeId::Time, _) => Err(format!("Cannot multiply Time type")),
-            (TypeId::Interval, _) => Err(format!("Cannot multiply Interval type")),
-            (TypeId::VarChar, _) => Err(format!("Cannot multiply VarChar type")),
-            (TypeId::Char, _) => Err(format!("Cannot multiply Char type")),
-            (TypeId::Binary, _) => Err(format!("Cannot multiply Binary type")),
-            (TypeId::JSON, _) => Err(format!("Cannot multiply JSON type")),
-            (TypeId::UUID, _) => Err(format!("Cannot multiply UUID type")),
-            (TypeId::Vector, _) => Err(format!("Cannot multiply Vector type")),
-            (TypeId::Array, _) => Err(format!("Cannot multiply Array type")),
-            (TypeId::Enum, _) => Err(format!("Cannot multiply Enum type")),
-            (TypeId::Point, _) => Err(format!("Cannot multiply Point type")),
-            (TypeId::Invalid, _) => Err(format!("Cannot multiply Invalid type")),
-            (TypeId::Struct, _) => Err(format!("Cannot multiply Struct type")),
+            (TypeId::Timestamp, _) => Err("Cannot multiply Timestamp type".to_string()),
+            (TypeId::Date, _) => Err("Cannot multiply Date type".to_string()),
+            (TypeId::Time, _) => Err("Cannot multiply Time type".to_string()),
+            (TypeId::Interval, _) => Err("Cannot multiply Interval type".to_string()),
+            (TypeId::VarChar, _) => Err("Cannot multiply VarChar type".to_string()),
+            (TypeId::Char, _) => Err("Cannot multiply Char type".to_string()),
+            (TypeId::Binary, _) => Err("Cannot multiply Binary type".to_string()),
+            (TypeId::JSON, _) => Err("Cannot multiply JSON type".to_string()),
+            (TypeId::UUID, _) => Err("Cannot multiply UUID type".to_string()),
+            (TypeId::Vector, _) => Err("Cannot multiply Vector type".to_string()),
+            (TypeId::Array, _) => Err("Cannot multiply Array type".to_string()),
+            (TypeId::Enum, _) => Err("Cannot multiply Enum type".to_string()),
+            (TypeId::Point, _) => Err("Cannot multiply Point type".to_string()),
+            (TypeId::Invalid, _) => Err("Cannot multiply Invalid type".to_string()),
+            (TypeId::Struct, _) => Err("Cannot multiply Struct type".to_string()),
             (_, _) => Err(format!(
                 "Cannot multiply values of types {:?} and {:?}",
                 self.get_type_id(),
@@ -1767,7 +1767,7 @@ impl Type for Value {
                 let b = other.as_decimal()?;
                 Ok(Value::new_with_type(Val::Decimal(a / b), TypeId::Decimal))
             }
-            (TypeId::Boolean, _) => Err(format!("Cannot divide Boolean type")),
+            (TypeId::Boolean, _) => Err("Cannot divide Boolean type".to_string()),
             (TypeId::Float, TypeId::Float) => {
                 let a = self.get_val();
                 let b = other.get_val();
@@ -1780,24 +1780,24 @@ impl Type for Value {
                         TypeId::Float,
                     ))
                 } else {
-                    Err(format!("Invalid Float values for division"))
+                    Err("Invalid Float values for division".to_string())
                 }
             }
-            (TypeId::Timestamp, _) => Err(format!("Cannot divide Timestamp type")),
-            (TypeId::Date, _) => Err(format!("Cannot divide Date type")),
-            (TypeId::Time, _) => Err(format!("Cannot divide Time type")),
-            (TypeId::Interval, _) => Err(format!("Cannot divide Interval type")),
-            (TypeId::VarChar, _) => Err(format!("Cannot divide VarChar type")),
-            (TypeId::Char, _) => Err(format!("Cannot divide Char type")),
-            (TypeId::Binary, _) => Err(format!("Cannot divide Binary type")),
-            (TypeId::JSON, _) => Err(format!("Cannot divide JSON type")),
-            (TypeId::UUID, _) => Err(format!("Cannot divide UUID type")),
-            (TypeId::Vector, _) => Err(format!("Cannot divide Vector type")),
-            (TypeId::Array, _) => Err(format!("Cannot divide Array type")),
-            (TypeId::Enum, _) => Err(format!("Cannot divide Enum type")),
-            (TypeId::Point, _) => Err(format!("Cannot divide Point type")),
-            (TypeId::Invalid, _) => Err(format!("Cannot divide Invalid type")),
-            (TypeId::Struct, _) => Err(format!("Cannot divide Struct type")),
+            (TypeId::Timestamp, _) => Err("Cannot divide Timestamp type".to_string()),
+            (TypeId::Date, _) => Err("Cannot divide Date type".to_string()),
+            (TypeId::Time, _) => Err("Cannot divide Time type".to_string()),
+            (TypeId::Interval, _) => Err("Cannot divide Interval type".to_string()),
+            (TypeId::VarChar, _) => Err("Cannot divide VarChar type".to_string()),
+            (TypeId::Char, _) => Err("Cannot divide Char type".to_string()),
+            (TypeId::Binary, _) => Err("Cannot divide Binary type".to_string()),
+            (TypeId::JSON, _) => Err("Cannot divide JSON type".to_string()),
+            (TypeId::UUID, _) => Err("Cannot divide UUID type".to_string()),
+            (TypeId::Vector, _) => Err("Cannot divide Vector type".to_string()),
+            (TypeId::Array, _) => Err("Cannot divide Array type".to_string()),
+            (TypeId::Enum, _) => Err("Cannot divide Enum type".to_string()),
+            (TypeId::Point, _) => Err("Cannot divide Point type".to_string()),
+            (TypeId::Invalid, _) => Err("Cannot divide Invalid type".to_string()),
+            (TypeId::Struct, _) => Err("Cannot divide Struct type".to_string()),
             (_, _) => Err(format!(
                 "Cannot divide values of types {:?} and {:?}",
                 self.get_type_id(),

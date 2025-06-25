@@ -262,7 +262,7 @@ impl DecimalType {
                             };
                             
                             if integer_digits > max_integer_digits {
-                                return format!("ERROR: Integer part exceeds precision limit");
+                                return "ERROR: Integer part exceeds precision limit".to_string();
                             }
                         }
                     }
