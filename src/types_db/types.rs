@@ -184,8 +184,8 @@ pub trait Type {
             TypeId::Array => Value::from(Vec::<Value>::new()),
             TypeId::Enum => Value::from(Val::Enum(i32::MAX, String::new())),
             TypeId::Point => Value::from(Val::Point(f64::MAX, f64::MAX)),
-            TypeId::Invalid => Value::from(Null),
-            TypeId::Struct => Value::from(Null),
+            TypeId::Invalid => Value::from(Val::Null),
+            TypeId::Struct => Value::from(Val::Null),
         }
     }
     
@@ -232,17 +232,17 @@ pub trait Type {
             }
             Val::Enum(id, name) => format!("ENUM({}: {})", id, name),
             Val::Point(x, y) => format!("POINT({}, {})", x, y),
-            Null => "NULL".to_string(),
+            Val::Null => "NULL".to_string(),
             Val::Struct => "STRUCT".to_string(),
         }
     }
     
     fn sqrt(&self, _val: &Value) -> Value {
-        Value::new(Null)
+        Value::new(Val::Null)
     }
     
     fn operate_null(&self, _left: &Value, _right: &Value) -> Value {
-        Value::new(Null)
+        Value::new(Val::Null)
     }
     
     fn is_zero(&self, val: &Value) -> bool {
@@ -266,7 +266,7 @@ pub trait Type {
     
     fn cast_as(&self, val: &Value, type_id: TypeId) -> Value {
         if !self.is_coercible_from(type_id) {
-            return Value::new(Null);
+            return Value::new(Val::Null);
         }
         val.cast_to(self.get_type_id())
             .unwrap_or_else(|_| val.clone_optimized())
@@ -534,11 +534,11 @@ mod type_behavior_tests {
         assert_eq!(invalid_type.to_string(&Value::from(1)), "INVALID");
         assert_eq!(
             InvalidType::get_min_value(TypeId::Invalid),
-            Value::from(Null)
+            Value::from(Val::Null)
         );
         assert_eq!(
             InvalidType::get_max_value(TypeId::Invalid),
-            Value::from(Null)
+            Value::from(Val::Null)
         );
     }
 }

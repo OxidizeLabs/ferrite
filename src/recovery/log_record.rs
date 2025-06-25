@@ -3,13 +3,14 @@ use std::mem::size_of;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use bincode::{Encode, Decode};
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 
 /// The type of the log record.
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub enum LogRecordType {
     Invalid = 0,
     Insert,
@@ -33,10 +34,10 @@ pub enum LogRecordType {
 /// - log_record_type: The type of the log record.
 ///
 /// Based on the record type, different additional information is stored.
-#[derive(Debug)]
+#[derive(Debug, Encode, Decode)]
 pub struct LogRecord {
     size: i32,
-    lsn: AtomicU64, // Use AtomicU64 for interior mutability
+    lsn: AtomicU64, // AtomicU64 is supported by bincode 2.0 with atomic feature
     txn_id: TxnId,
     prev_lsn: Lsn,
     log_record_type: LogRecordType,
@@ -344,7 +345,7 @@ impl LogRecord {
         self.log_record_type == LogRecordType::Commit
     }
 
-    /// Serializes the log record to bytes using bincode.
+    /// Serializes the log record to bytes using bincode 2.0.
     ///
     /// # Returns
     /// A vector of bytes representing the serialized log record, or an error if serialization fails.
@@ -352,7 +353,7 @@ impl LogRecord {
         bincode::encode_to_vec(self, bincode::config::standard())
     }
 
-    /// Deserializes a log record from bytes using bincode.
+    /// Deserializes a log record from bytes using bincode 2.0.
     ///
     /// # Parameters
     /// - `bytes`: The bytes to deserialize.
@@ -360,92 +361,8 @@ impl LogRecord {
     /// # Returns
     /// A deserialized log record, or an error if deserialization fails.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
-        bincode::decode_from_slice(bytes, bincode::config::standard())
-            .map(|(record, _)| record)
-    }
-}
-
-impl bincode::Encode for LogRecord {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
-        // Encode all fields in the same order as the struct definition
-        self.size.encode(encoder)?;
-        self.lsn.load(Ordering::SeqCst).encode(encoder)?; // Encode the u64 value from AtomicU64
-        self.txn_id.encode(encoder)?;
-        self.prev_lsn.encode(encoder)?;
-        self.log_record_type.encode(encoder)?;
-        self.delete_rid.encode(encoder)?;
-        self.delete_tuple.encode(encoder)?;
-        self.insert_rid.encode(encoder)?;
-        self.insert_tuple.encode(encoder)?;
-        self.update_rid.encode(encoder)?;
-        self.old_tuple.encode(encoder)?;
-        self.new_tuple.encode(encoder)?;
-        self.prev_page_id.encode(encoder)?;
-        self.page_id.encode(encoder)?;
-        Ok(())
-    }
-}
-
-impl bincode::Decode<()> for LogRecord {
-    fn decode<D: bincode::de::Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
-        // Decode all fields in the same order as they were encoded
-        let size = bincode::Decode::decode(decoder)?;
-        let lsn: u64 = bincode::Decode::decode(decoder)?;
-        let txn_id = bincode::Decode::decode(decoder)?;
-        let prev_lsn = bincode::Decode::decode(decoder)?;
-        let log_record_type = bincode::Decode::decode(decoder)?;
-        let delete_rid = bincode::Decode::decode(decoder)?;
-        let delete_tuple = bincode::Decode::decode(decoder)?;
-        let insert_rid = bincode::Decode::decode(decoder)?;
-        let insert_tuple = bincode::Decode::decode(decoder)?;
-        let update_rid = bincode::Decode::decode(decoder)?;
-        let old_tuple = bincode::Decode::decode(decoder)?;
-        let new_tuple = bincode::Decode::decode(decoder)?;
-        let prev_page_id = bincode::Decode::decode(decoder)?;
-        let page_id = bincode::Decode::decode(decoder)?;
-        
-        Ok(Self {
-            size,
-            lsn: AtomicU64::new(lsn), // Create AtomicU64 from decoded u64
-            txn_id,
-            prev_lsn,
-            log_record_type,
-            delete_rid,
-            delete_tuple,
-            insert_rid,
-            insert_tuple,
-            update_rid,
-            old_tuple,
-            new_tuple,
-            prev_page_id,
-            page_id,
-        })
-    }
-}
-
-// Add manual implementations of Encode and Decode for LogRecordType
-impl bincode::Encode for LogRecordType {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
-        (*self as i32).encode(encoder)
-    }
-}
-
-impl bincode::Decode<()> for LogRecordType {
-    fn decode<D: bincode::de::Decoder<Context = ()>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
-        let value: i32 = bincode::Decode::decode(decoder)?;
-        match value {
-            0 => Ok(LogRecordType::Invalid),
-            1 => Ok(LogRecordType::Insert),
-            2 => Ok(LogRecordType::MarkDelete),
-            3 => Ok(LogRecordType::ApplyDelete),
-            4 => Ok(LogRecordType::RollbackDelete),
-            5 => Ok(LogRecordType::Update),
-            6 => Ok(LogRecordType::Begin),
-            7 => Ok(LogRecordType::Commit),
-            8 => Ok(LogRecordType::Abort),
-            9 => Ok(LogRecordType::NewPage),
-            _ => Err(bincode::error::DecodeError::Other("Invalid LogRecordType value")),
-        }
+        let (record, _) = bincode::decode_from_slice(bytes, bincode::config::standard())?;
+        Ok(record)
     }
 }
 

@@ -3,7 +3,6 @@ use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use bincode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
@@ -34,7 +33,54 @@ impl<'de> Deserialize<'de> for Record {
     {
         // Deserialize from a tuple of (values, rid)
         let (values, rid): (Vec<Value>, RID) = Deserialize::deserialize(deserializer)?;
-        let tuple = Tuple::from_values(values);
+        // Create a schema from the values - generate column names and types
+        let columns = values.iter().enumerate().map(|(i, value)| {
+            use crate::catalog::column::Column;
+            Column::new(&format!("col_{}", i), value.get_type_id())
+        }).collect();
+        let schema = Schema::new(columns);
+        let tuple = Tuple::new(&values, &schema, rid);
+        Ok(Self { tuple, rid })
+    }
+}
+
+// Implement bincode's Encode trait for Record
+impl bincode::Encode for Record {
+    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        let values = self.tuple.get_values();
+        (values, self.rid).encode(encoder)
+    }
+}
+
+// Implement bincode's Decode trait for Record
+impl<C> bincode::Decode<C> for Record {
+    fn decode<D: bincode::de::Decoder<Context = C>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+        let (values, rid): (Vec<Value>, RID) = bincode::Decode::decode(decoder)?;
+        // Create a schema from the values - generate column names and types
+        let columns = values.iter().enumerate().map(|(i, value)| {
+            use crate::catalog::column::Column;
+            Column::new(&format!("col_{}", i), value.get_type_id())
+        }).collect();
+        let schema = Schema::new(columns);
+        let tuple = Tuple::new(&values, &schema, rid);
+        Ok(Self { tuple, rid })
+    }
+}
+
+// Provide a generic BorrowDecode implementation so Record works with bincode decode derives
+impl<'de, C> bincode::BorrowDecode<'de, C> for Record {
+    fn borrow_decode<D>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError>
+    where
+        D: bincode::de::BorrowDecoder<'de, Context = C>,
+    {
+        let (values, rid): (Vec<Value>, RID) = bincode::BorrowDecode::borrow_decode(decoder)?;
+        // Create a schema from the values - generate column names and types
+        let columns = values.iter().enumerate().map(|(i, value)| {
+            use crate::catalog::column::Column;
+            Column::new(&format!("col_{}", i), value.get_type_id())
+        }).collect();
+        let schema = Schema::new(columns);
+        let tuple = Tuple::new(&values, &schema, rid);
         Ok(Self { tuple, rid })
     }
 }
@@ -59,22 +105,16 @@ impl Record {
     pub fn new(tuple: Tuple, rid: RID) -> Self {
         Self { tuple, rid }
     }
-
-    /// Creates a new `Record` instance from values, schema, and RID.
-    pub fn from_values(values: &[Value], schema: &Schema, rid: RID) -> Self {
-        let tuple = Tuple::new(values, schema);
-        Self { tuple, rid }
-    }
-
-    /// Serializes the record into the given storage buffer.
+    
+    /// Serializes the record into the given storage buffer using bincode 2.0.
     ///
     /// # Errors
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
-        // Use the Serialize trait implementation directly
-        let serialized =
-            bincode::serialize(self).map_err(|e| TupleError::SerializationError(e.to_string()))?;
+        let config = bincode::config::standard();
+        let serialized = bincode::encode_to_vec(self, config)
+            .map_err(|e| TupleError::SerializationError(e.to_string()))?;
 
         if storage.len() < serialized.len() {
             return Err(TupleError::BufferTooSmall);
@@ -84,14 +124,16 @@ impl Record {
         Ok(serialized.len())
     }
 
-    /// Deserializes a record from the given storage buffer.
+    /// Deserializes a record from the given storage buffer using bincode 2.0.
     ///
     /// # Errors
     ///
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
-        // Use the Deserialize trait implementation directly
-        bincode::deserialize(storage).map_err(|e| TupleError::DeserializationError(e.to_string()))
+        let config = bincode::config::standard();
+        let (record, _): (Self, usize) = bincode::decode_from_slice(storage, config)
+            .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
+        Ok(record)
     }
 
     /// Returns the RID of the record.
@@ -104,41 +146,22 @@ impl Record {
         self.rid = rid;
     }
 
-    /// Returns the tuple contained in this record.
-    pub fn get_tuple(&self) -> &Tuple {
-        &self.tuple
-    }
-
-    /// Returns a mutable reference to the tuple contained in this record.
-    pub fn get_tuple_mut(&mut self) -> &mut Tuple {
-        &mut self.tuple
-    }
-
-    /// Returns the length of the serialized record.
+    /// Returns the length of the serialized record using bincode 2.0.
     ///
     /// # Errors
     ///
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
+        let config = bincode::config::standard();
         let values = self.tuple.get_values();
-        bincode::serialized_size(&(values, self.rid))
-            .map(|size| size as usize)
-            .map_err(|e| TupleError::SerializationError(e.to_string()))
+        let serialized = bincode::encode_to_vec(&(values, self.rid), config)
+            .map_err(|e| TupleError::SerializationError(e.to_string()))?;
+        Ok(serialized.len())
     }
 
     /// Convenience method to get a value directly from the record.
     pub fn get_value(&self, column_index: usize) -> Value {
         self.tuple.get_value(column_index)
-    }
-
-    /// Convenience method to get all values from the record.
-    pub fn get_values(&self) -> Vec<Value> {
-        self.tuple.get_values()
-    }
-
-    /// Returns a string representation of the record.
-    pub fn to_string(&self, schema: Schema) -> String {
-        format!("RID: {}, {}", self.rid, self.tuple.to_string(schema))
     }
 
     /// Returns a detailed string representation of the record.
@@ -185,7 +208,8 @@ mod tests {
             Value::new(30),
             Value::new(true),
         ];
-        (Tuple::new(&values, &schema), schema)
+        let rid = RID::new(0, 0);
+        (Tuple::new(&values, &schema, rid), schema)
     }
 
     fn create_sample_record() -> (Record, Schema) {
@@ -249,11 +273,12 @@ mod tests {
     fn test_direct_bincode_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let (record, _) = create_sample_record();
 
-        // Directly use bincode with the Serialize trait
-        let serialized = bincode::serialize(&record)?;
+        let config = bincode::config::standard();
+        // Directly use bincode 2.0 API
+        let serialized = bincode::encode_to_vec(&record, config)?;
 
-        // Directly use bincode with the Deserialize trait
-        let deserialized: Record = bincode::deserialize(&serialized)?;
+        // Directly use bincode 2.0 API for deserialization
+        let (deserialized, _): (Record, usize) = bincode::decode_from_slice(&serialized, config)?;
 
         // Verify the deserialized record matches the original
         assert_eq!(deserialized.get_rid(), record.get_rid());
