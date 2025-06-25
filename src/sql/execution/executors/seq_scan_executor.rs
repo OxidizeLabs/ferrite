@@ -18,7 +18,6 @@ pub struct SeqScanExecutor {
     table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     iterator: Option<TableIterator>,
-    child_executor: Option<Box<dyn AbstractExecutor>>,
 }
 
 impl SeqScanExecutor {
@@ -58,7 +57,6 @@ impl SeqScanExecutor {
             table_heap,
             iterator: None,
             initialized: false,
-            child_executor: None,
         }
     }
 }

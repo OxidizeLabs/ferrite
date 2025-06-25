@@ -38,19 +38,19 @@ pub trait Type {
     
     // **NEW: Static methods that receive actual values**
     // These replace the broken instance methods for comparisons
-    fn compare_equals_static(left_val: &Val, right: &Value) -> CmpBool
+    fn compare_equals_static(_left_val: &Val, _right: &Value) -> CmpBool
     where Self: Sized {
         // Default implementation - types can override this
         panic!("Static method compare_equals_static not implemented for this type")
     }
     
-    fn compare_greater_than_static(left_val: &Val, right: &Value) -> CmpBool
+    fn compare_greater_than_static(_left_val: &Val, _right: &Value) -> CmpBool
     where Self: Sized {
         // Default implementation - types can override this
         panic!("Static method compare_greater_than_static not implemented for this type")
     }
     
-    fn compare_less_than_static(left_val: &Val, right: &Value) -> CmpBool
+    fn compare_less_than_static(_left_val: &Val, _right: &Value) -> CmpBool
     where Self: Sized {
         // Default implementation - types can override this
         panic!("Static method compare_less_than_static not implemented for this type")

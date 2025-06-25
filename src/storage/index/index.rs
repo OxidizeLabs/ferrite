@@ -176,9 +176,7 @@ pub trait Index: Send + Sync {
     ///
     /// # Returns
     /// Whether insertion is successful.
-    fn insert_entry(&mut self, key: &Tuple, rid: RID, transaction: &Transaction) -> bool {
-        unimplemented!()
-    }
+    fn insert_entry(&mut self, key: &Tuple, rid: RID, transaction: &Transaction) -> bool;
 
     /// Deletes an index entry by key.
     ///
@@ -186,9 +184,7 @@ pub trait Index: Send + Sync {
     /// - `key`: The index key.
     /// - `rid`: The RID associated with the key (unused).
     /// - `transaction`: The transaction context.
-    fn delete_entry(&self, key: &Tuple, rid: RID, transaction: &Transaction) -> bool {
-        unimplemented!()
-    }
+    fn delete_entry(&self, key: &Tuple, rid: RID, transaction: &Transaction) -> bool;
 
     /// Searches the index for the provided key.
     ///
@@ -200,19 +196,13 @@ pub trait Index: Send + Sync {
         &self,
         key: &Tuple,
         transaction: &Transaction,
-    ) -> Result<Vec<(Value, RID)>, String> {
-        unimplemented!()
-    }
+    ) -> Result<Vec<(Value, RID)>, String>;
 
     /// Creates an iterator for scanning the index
-    fn create_iterator(&self, start_key: Option<Tuple>, end_key: Option<Tuple>) -> IndexIterator {
-        unimplemented!()
-    }
+    fn create_iterator(&self, start_key: Option<Tuple>, end_key: Option<Tuple>) -> IndexIterator;
 
     /// Creates an iterator for scanning a specific key
-    fn create_point_iterator(&self, key: &Tuple) -> IndexIterator {
-        unimplemented!()
-    }
+    fn create_point_iterator(&self, key: &Tuple) -> IndexIterator;
 
     fn get_metadata(&self) -> Arc<IndexInfo>;
 }

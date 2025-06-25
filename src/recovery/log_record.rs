@@ -6,7 +6,6 @@ use std::sync::Arc;
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
-use bincode::{Encode, Decode};
 
 /// The type of the log record.
 #[repr(i32)]

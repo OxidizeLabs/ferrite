@@ -181,7 +181,6 @@ pub struct LockManager {
     deadlock_detector: DeadlockDetector,
     lock_state_manager: LockStateManager,
     lock_validator: LockValidator,
-    compatibility_checker: LockCompatibilityChecker,
 }
 
 impl LockRequest {
@@ -223,6 +222,31 @@ impl LockRequest {
             granted: false,
         }
     }
+
+    /// Gets the table OID for this lock request.
+    pub fn get_oid(&self) -> TableOidT {
+        self.oid
+    }
+
+    /// Gets the row ID for this lock request, if it's a row lock.
+    pub fn get_rid(&self) -> Option<RID> {
+        self.rid
+    }
+
+    /// Gets the transaction ID for this lock request.
+    pub fn get_txn_id(&self) -> TxnId {
+        self.txn_id
+    }
+
+    /// Gets the lock mode for this lock request.
+    pub fn get_lock_mode(&self) -> LockMode {
+        self.lock_mode
+    }
+
+    /// Checks if this lock request has been granted.
+    pub fn is_granted(&self) -> bool {
+        self.granted
+    }
 }
 
 impl LockRequestQueue {
@@ -237,8 +261,8 @@ impl LockRequestQueue {
 
     /// Checks if a new lock request is compatible with existing granted locks.
     pub fn compatible_with_existing_locks(&self, request: &LockRequest) -> bool {
-        let txn_id = request.txn_id;
-        let new_mode = request.lock_mode;
+        let txn_id = request.get_txn_id();
+        let new_mode = request.get_lock_mode();
 
         // If there's an upgrading transaction, no other locks can be granted
         if self.upgrading != INVALID_TXN_ID && self.upgrading != txn_id {
@@ -249,10 +273,10 @@ impl LockRequestQueue {
         let has_lock = false;
         for existing_req in &self.request_queue {
             let existing = existing_req.lock();
-            if existing.granted && existing.txn_id == txn_id {
+            if existing.is_granted() && existing.get_txn_id() == txn_id {
                 //has_lock = true;
                 // Check if this is a valid lock upgrade
-                match (existing.lock_mode, new_mode) {
+                match (existing.get_lock_mode(), new_mode) {
                     // IS -> [S, X, IX, SIX]
                     (LockMode::IntentionShared, _) => return true,
                     // S -> [X, SIX]
@@ -279,8 +303,8 @@ impl LockRequestQueue {
         if !has_lock {
             for existing_req in &self.request_queue {
                 let existing = existing_req.lock();
-                if existing.granted
-                    && !LockCompatibilityChecker::are_compatible(existing.lock_mode, new_mode)
+                if existing.is_granted()
+                    && !LockCompatibilityChecker::are_compatible(existing.get_lock_mode(), new_mode)
                 {
                     return false;
                 }
@@ -291,18 +315,18 @@ impl LockRequestQueue {
 
     /// Attempts to grant a lock request.
     pub fn grant_lock(&mut self, request: Arc<Mutex<LockRequest>>) -> bool {
-        let txn_id = request.lock().txn_id;
-        let lock_mode = request.lock().lock_mode;
+        let txn_id = request.lock().get_txn_id();
+        let lock_mode = request.lock().get_lock_mode();
 
         // Check for existing locks by this transaction
         let mut existing_lock = None;
         for (i, existing_req) in self.request_queue.iter().enumerate() {
             let existing = existing_req.lock();
-            if existing.granted && existing.txn_id == txn_id {
-                if existing.lock_mode == lock_mode {
+            if existing.is_granted() && existing.get_txn_id() == txn_id {
+                if existing.get_lock_mode() == lock_mode {
                     return true; // Already have this lock
                 }
-                existing_lock = Some((i, existing.lock_mode));
+                existing_lock = Some((i, existing.get_lock_mode()));
                 break;
             }
         }
@@ -543,7 +567,7 @@ impl LockStateManager {
             // Find and remove the lock request
             if let Some(pos) = queue_guard.request_queue.iter().position(|req| {
                 let req = req.lock();
-                req.txn_id == txn_id && req.granted
+                req.get_txn_id() == txn_id && req.is_granted()
             }) {
                 // Remove the lock request
                 queue_guard.request_queue.remove(pos);
@@ -558,7 +582,7 @@ impl LockStateManager {
                 let mut i = 0;
                 while i < queue_guard.request_queue.len() {
                     let request = queue_guard.request_queue[i].clone();
-                    if !request.lock().granted
+                    if !request.lock().is_granted()
                         && queue_guard.compatible_with_existing_locks(&request.lock())
                     {
                         request.lock().granted = true;
@@ -584,7 +608,7 @@ impl LockStateManager {
             // Find and remove the lock request
             if let Some(pos) = queue_guard.request_queue.iter().position(|req| {
                 let req = req.lock();
-                req.txn_id == txn_id && req.granted
+                req.get_txn_id() == txn_id && req.is_granted()
             }) {
                 queue_guard.request_queue.remove(pos);
 
@@ -608,7 +632,7 @@ impl LockStateManager {
         let mut i = 0;
         while i < queue.request_queue.len() {
             let request = queue.request_queue[i].clone();
-            if !request.lock().granted && queue.compatible_with_existing_locks(&request.lock()) {
+            if !request.lock().is_granted() && queue.compatible_with_existing_locks(&request.lock()) {
                 request.lock().granted = true;
                 // Don't increment i since we want to check the next request
             } else {
@@ -776,7 +800,6 @@ impl LockManager {
             deadlock_detector: detector,
             lock_state_manager: LockStateManager::new(),
             lock_validator: LockValidator::new(),
-            compatibility_checker: LockCompatibilityChecker,
         }
     }
 
@@ -1114,7 +1137,6 @@ impl Clone for LockManager {
                 txn_lock_sets: Mutex::new(self.lock_state_manager.txn_lock_sets.lock().clone()),
             },
             lock_validator: LockValidator {},
-            compatibility_checker: LockCompatibilityChecker,
         }
     }
 }

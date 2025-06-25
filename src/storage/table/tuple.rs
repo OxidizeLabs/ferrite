@@ -5,7 +5,7 @@ use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
 use crate::types_db::value::Value;
-use bincode::{config, Decode, Encode};
+use bincode::config;
 use log;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};

@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::sync::Arc;
+use crate::storage::index::index_iterator_mem::IndexIterator;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -978,6 +979,14 @@ impl Index for BPlusTree {
         let result = self.scan_range(key, key, true).unwrap();
         debug!("Scan complete, found {} matching entries", result.len());
         Ok(result)
+    }
+
+    fn create_iterator(&self, start_key: Option<Tuple>, end_key: Option<Tuple>) -> IndexIterator {
+        todo!()
+    }
+
+    fn create_point_iterator(&self, key: &Tuple) -> IndexIterator {
+        todo!()
     }
 
     fn get_metadata(&self) -> Arc<IndexInfo> {

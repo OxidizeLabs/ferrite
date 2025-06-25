@@ -353,13 +353,6 @@ mod tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
-    fn init_test_logger() {
-        let _ = env_logger::builder()
-            .filter_level(log::LevelFilter::Trace)
-            .is_test(true)
-            .try_init();
-    }
-
     struct TestContext {
         log_manager: LogManager,
         disk_manager: Arc<AsyncDiskManager>,
@@ -369,8 +362,6 @@ mod tests {
     impl TestContext {
         pub async fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 10;
-            const K: usize = 2;
 
             // Create temporary directory
             let temp_dir = TempDir::new().unwrap();

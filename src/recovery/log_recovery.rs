@@ -664,7 +664,7 @@ mod tests {
             txn.set_prev_lsn(begin_lsn);
 
             // Commit the transaction
-            let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
+            ctx.wal_manager.write_commit_record(&txn);
 
             // Simulate crash after commit
             ctx.simulate_crash();
@@ -753,7 +753,7 @@ mod tests {
             txn.set_prev_lsn(update_lsn);
 
             // Commit the transaction
-            let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
+            ctx.wal_manager.write_commit_record(&txn);
 
             // Simulate crash after commit
             ctx.simulate_crash();
@@ -789,7 +789,7 @@ mod tests {
             txn.set_prev_lsn(begin_lsn);
 
             // Commit the transaction
-            let commit_lsn = ctx.wal_manager.write_commit_record(&txn);
+            ctx.wal_manager.write_commit_record(&txn);
 
             // Simulate crash after commit
             ctx.simulate_crash();
@@ -867,7 +867,7 @@ mod tests {
                 .write_update_record(&txn1, rid1, old_tuple1, new_tuple1);
             txn1.set_prev_lsn(update_lsn1);
 
-            let commit_lsn1 = ctx.wal_manager.write_commit_record(&txn1);
+            ctx.wal_manager.write_commit_record(&txn1);
 
             // Transaction 2: Aborts explicitly
             let txn2 = ctx.create_test_transaction(2);
