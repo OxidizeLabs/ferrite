@@ -232,14 +232,6 @@ impl DecimalType {
     ) -> String {
         match val.get_val() {
             Val::Decimal(n) => {
-                // Handle precision validation if specified
-                if let Some(precision_val) = precision {
-                    let total_digits = Self::count_total_digits(*n);
-                    if total_digits > precision_val {
-                        return format!("ERROR: Value exceeds precision {}", precision_val);
-                    }
-                }
-
                 if let Some(scale_val) = scale {
                     // Format with specified scale, respecting precision limits
                     let formatted = format!("{:.1$}", n, scale_val as usize);
