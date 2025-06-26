@@ -8,12 +8,9 @@ use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
-use crate::sql::execution::plans::insert_plan::InsertNode;
-use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::optimizer::Optimizer;
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
 use crate::sql::planner::query_planner::QueryPlanner;
-use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::{debug, error, info};
@@ -21,6 +18,7 @@ use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
+use crate::sql::execution::transaction_context::TransactionContext;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
@@ -431,13 +429,6 @@ impl ExecutionEngine {
             .map_err(|e| DBError::OptimizeError(e))
     }
 
-    /// Clean up after execution
-    fn cleanup_after_execution(&self) {
-        debug!("Starting post-execution cleanup");
-        // Add cleanup logic here if needed
-        debug!("Post-execution cleanup complete");
-    }
-
     /// Prepare a SQL statement and validate syntax
     /// Returns empty parameter types for now since we don't support parameters yet
     pub fn prepare_statement(&mut self, sql: &str) -> Result<Vec<TypeId>, DBError> {
@@ -475,43 +466,6 @@ impl ExecutionEngine {
     ) -> Result<bool, DBError> {
         // For now, just execute as regular SQL since we don't support parameters
         self.execute_sql(sql, context, writer)
-    }
-
-    fn execute_insert(
-        &self,
-        plan: &mut InsertNode,
-        txn_ctx: Arc<TransactionContext>,
-    ) -> Result<(), DBError> {
-        debug!("Executing insert plan");
-
-        let binding = self.catalog.read();
-        let table_info = binding
-            .get_table(plan.get_table_name())
-            .ok_or_else(|| DBError::TableNotFound(plan.get_table_name().to_string()))?;
-
-        // Get the table schema
-        let schema = table_info.get_table_schema();
-
-        // Get the values to insert
-        let values_to_insert = plan.get_input_values();
-        if values_to_insert.is_empty() {
-            return Err(DBError::Execution("No values to insert".to_string()));
-        }
-
-        // Get table heap and create a transactional wrapper around it
-        let table_heap = table_info.get_table_heap();
-        let transactional_table_heap =
-            TransactionalTableHeap::new(table_heap.clone(), table_info.get_table_oidt());
-
-        // Insert each set of values
-        for value_set in values_to_insert {
-            transactional_table_heap
-                .insert_tuple_from_values(value_set.clone(), &schema, txn_ctx.clone())
-                .map_err(|e| DBError::Execution(format!("Insert failed: {}", e)))?;
-        }
-
-        debug!("Insert executed successfully");
-        Ok(())
     }
 
     fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
@@ -642,7 +596,6 @@ mod tests {
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
-    use crate::concurrency::transaction_manager::TransactionManager;
     use crate::recovery::log_manager::LogManager;
     use crate::storage::table::table_heap::TableInfo;
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
@@ -657,9 +610,6 @@ mod tests {
         engine: ExecutionEngine,
         catalog: Arc<RwLock<Catalog>>,
         exec_ctx: Arc<RwLock<ExecutionContext>>,
-        planner: QueryPlanner,
-        bpm: Arc<BufferPoolManager>,
-        txn_manager: Arc<TransactionManager>,
         _temp_dir: TempDir,
     }
 
@@ -735,15 +685,10 @@ mod tests {
                 wal_manager,
             );
 
-            let planner = QueryPlanner::new(catalog.clone());
-
             Self {
                 engine,
                 catalog,
                 exec_ctx,
-                planner,
-                bpm,
-                txn_manager,
                 _temp_dir: temp_dir,
             }
         }
@@ -777,10 +722,6 @@ mod tests {
                     .map_err(|e| e.to_string())?;
             }
             Ok(())
-        }
-
-        fn transaction_context(&self) -> Arc<TransactionContext> {
-            self.exec_ctx.read().get_transaction_context()
         }
 
         fn commit_current_transaction(&mut self) -> Result<(), String> {
@@ -13661,7 +13602,10 @@ mod tests {
 
             // Verify changes were committed
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
-            let writer = TestResultWriter::new();
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "800",
@@ -13669,30 +13613,14 @@ mod tests {
             );
 
             let select_sql = "SELECT balance FROM accounts WHERE id = 2";
-            let writer = TestResultWriter::new();
+            let mut writer = TestResultWriter::new();
+            ctx.engine
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
                 "700",
                 "Expected Bob's balance to be 700"
-            );
-
-            // Test rollback
-            let begin_sql = "BEGIN";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
-            let rollback_sql = "ROLLBACK";
-            let writer = TestResultWriter::new();
-
-            // Verify changes were rolled back
-            let select_sql = "SELECT balance FROM accounts WHERE id = 1";
-            let writer = TestResultWriter::new();
-            assert_eq!(
-                writer.get_rows()[0][0].to_string(),
-                "800",
-                "Expected Alice's balance to still be 800 after rollback"
             );
         }
 

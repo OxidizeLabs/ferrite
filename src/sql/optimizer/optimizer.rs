@@ -175,10 +175,10 @@ impl Optimizer {
                 self.apply_early_pruning_to_children(plan)
             }
             LogicalPlanType::Filter {
-                schema,
-                output_schema,
-                table_oid,
-                table_name,
+                schema: _,
+                output_schema: _,
+                table_oid: _,
+                table_name: _,
                 predicate,
             } => {
                 trace!("Examining filter predicate for simplification");
@@ -202,10 +202,10 @@ impl Optimizer {
     fn apply_rewrite_rules(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
         match &plan.plan_type {
             LogicalPlanType::Filter {
-                schema,
-                output_schema,
-                table_oid,
-                table_name,
+                schema: _,
+                output_schema: _,
+                table_oid: _,
+                table_name: _,
                 predicate,
             } => {
                 // Push down filter predicates
@@ -217,7 +217,7 @@ impl Optimizer {
             }
             LogicalPlanType::Projection {
                 expressions,
-                schema,
+                schema: _,
                 column_mappings: _,
             } => {
                 // Combine consecutive projections
@@ -372,10 +372,10 @@ impl Optimizer {
                 )))
             }
             LogicalPlanType::Filter {
-                schema,
-                output_schema,
-                table_oid,
-                table_name,
+                schema: _,
+                output_schema: _,
+                table_oid: _,
+                table_name: _,
                 predicate: existing_pred,
             } => {
                 // Combine predicates using AND
