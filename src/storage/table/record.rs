@@ -3,7 +3,6 @@ use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
 /// Represents a tuple that has been stored in the database with a record ID.
@@ -11,37 +10,6 @@ use std::fmt::{Display, Formatter};
 pub struct Record {
     tuple: Tuple,
     rid: RID,
-}
-
-// Custom Serialize implementation for Record
-impl Serialize for Record {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Serialize as a tuple of (values, rid)
-        let values = self.tuple.get_values();
-        (values, self.rid).serialize(serializer)
-    }
-}
-
-// Custom Deserialize implementation for Record
-impl<'de> Deserialize<'de> for Record {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize from a tuple of (values, rid)
-        let (values, rid): (Vec<Value>, RID) = Deserialize::deserialize(deserializer)?;
-        // Create a schema from the values - generate column names and types
-        let columns = values.iter().enumerate().map(|(i, value)| {
-            use crate::catalog::column::Column;
-            Column::new(&format!("col_{}", i), value.get_type_id())
-        }).collect();
-        let schema = Schema::new(columns);
-        let tuple = Tuple::new(&values, &schema, rid);
-        Ok(Self { tuple, rid })
-    }
 }
 
 // Implement bincode's Encode trait for Record
@@ -105,7 +73,7 @@ impl Record {
     pub fn new(tuple: Tuple, rid: RID) -> Self {
         Self { tuple, rid }
     }
-    
+
     /// Serializes the record into the given storage buffer using bincode 2.0.
     ///
     /// # Errors

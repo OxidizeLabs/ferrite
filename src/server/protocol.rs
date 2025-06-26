@@ -1,9 +1,9 @@
 use crate::concurrency::transaction::IsolationLevel;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use serde::{Deserialize, Serialize};
+use bincode::{Encode, Decode};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Encode, Decode)]
 pub enum DatabaseRequest {
     Query(String),
     BeginTransaction { isolation_level: IsolationLevel },
@@ -14,7 +14,7 @@ pub enum DatabaseRequest {
     Close(u64),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Encode, Decode)]
 pub enum DatabaseResponse {
     Results(QueryResults),
     PrepareOk {
@@ -24,7 +24,7 @@ pub enum DatabaseResponse {
     Error(String),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Encode, Decode)]
 pub struct QueryResults {
     pub column_names: Vec<String>,
     pub rows: Vec<Vec<Value>>,

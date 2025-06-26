@@ -9,10 +9,10 @@ use crate::storage::table::tuple::TupleMeta;
 use log;
 use log::debug;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
+use bincode::{Encode, Decode};
 
 /// Transaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,7 +26,7 @@ pub enum TransactionState {
 }
 
 /// Transaction isolation level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub enum IsolationLevel {
     ReadUncommitted,
     ReadCommitted,

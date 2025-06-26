@@ -158,7 +158,7 @@ async fn handle_client_request(
     client_id: u64,
 ) -> Result<DatabaseResponse, Box<dyn StdError>> {
     debug!("{}", format_log(client_id, "Request", "Parsing request"));
-    let request = serde_json::from_slice(data)?;
+    let (request, _) = bincode::decode_from_slice(data, bincode::config::standard())?;
 
     debug!(
         "{}",
@@ -183,7 +183,7 @@ async fn send_response(
     stream: &mut TcpStream,
     response: DatabaseResponse,
 ) -> Result<(), Box<dyn StdError>> {
-    let data = serde_json::to_vec(&response)?;
+    let data = bincode::encode_to_vec(&response, bincode::config::standard())?;
 
     // Send data in chunks if needed
     let mut offset = 0;

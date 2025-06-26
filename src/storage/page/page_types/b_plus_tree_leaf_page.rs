@@ -2,7 +2,6 @@ use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
 use crate::storage::index::types::{KeyComparator, KeyType};
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId};
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
@@ -10,8 +9,8 @@ use std::fmt::{Debug, Formatter};
 /// Leaf page structure for B+ Tree
 pub struct BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    K: Clone + Send + Sync + 'static + KeyType + bincode::Encode + bincode::Decode<()>,
+    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     // Array of keys
@@ -44,8 +43,8 @@ impl<
     C: Fn(&K, &K) -> Ordering + 'static + Send + Sync,
 > PageTypeId for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    K: Clone + Send + Sync + 'static + KeyType + bincode::Encode + bincode::Decode<()>,
+    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     const TYPE_ID: PageType = PageType::BTreeLeaf;
@@ -53,8 +52,8 @@ where
 
 impl<K, V, C> BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    K: Clone + Send + Sync + 'static + KeyType + bincode::Encode + bincode::Decode<()> + Debug,
+    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     pub fn new_with_options(page_id: PageId, max_size: usize, comparator: C) -> Self {
@@ -397,8 +396,8 @@ where
 
 impl<K, V, C> Debug for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    K: Clone + Send + Sync + 'static + KeyType + bincode::Encode + bincode::Decode<()> + Debug,
+    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -427,8 +426,8 @@ where
 
 impl<K, V, C> PageTrait for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    K: Clone + Send + Sync + 'static + KeyType + bincode::Encode + bincode::Decode<()> + Debug,
+    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
 {
     fn get_page_id(&self) -> PageId {
@@ -509,8 +508,8 @@ where
 
 impl<K, V, C> Page for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()> + Debug,
-    V: Clone + Send + Sync + 'static + Serialize + for<'de> Deserialize<'de> + bincode::Encode + bincode::Decode<()>,
+    K: Clone + Send + Sync + 'static + KeyType + bincode::Encode + bincode::Decode<()> + Debug,
+    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
     fn new(_page_id: PageId) -> Self {

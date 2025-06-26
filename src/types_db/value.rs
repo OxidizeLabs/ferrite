@@ -1,12 +1,11 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{get_type_size, CmpBool, Type};
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use bincode::{Encode, Decode};
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, Decode)]
 pub enum Val {
     Boolean(bool),
     TinyInt(i8),
@@ -32,13 +31,13 @@ pub enum Val {
     Struct,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, PartialOrd, Encode, Decode)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Encode, Decode)]
 pub enum Size {
     Length(usize),
     ElemTypeId(TypeId),
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Serialize, Deserialize, Encode, Decode)]
+#[derive(Clone, PartialEq, PartialOrd, Encode, Decode)]
 pub struct Value {
     pub value_: Val,
     pub size_: Size,

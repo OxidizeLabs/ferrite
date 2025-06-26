@@ -1,11 +1,10 @@
 use crate::catalog::column::Column;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 use bincode::{Decode, Encode};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct Schema {
     columns: Vec<Column>,
     length: u32,

@@ -1,12 +1,11 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 use bincode::{Encode, Decode};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub struct Column {
     column_name: String,
     column_type: TypeId,
@@ -23,7 +22,7 @@ pub struct Column {
 }
 
 /// Foreign key constraint information
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub struct ForeignKeyConstraint {
     pub referenced_table: String,
     pub referenced_column: String,
@@ -32,7 +31,7 @@ pub struct ForeignKeyConstraint {
 }
 
 /// Referential actions for foreign key constraints
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub enum ReferentialAction {
     Cascade,
     SetNull,
@@ -825,11 +824,9 @@ mod unit_tests {
 
     #[test]
     fn test_serialization_consistency() {
-        use serde_json;
-
         let original = Column::new("test", TypeId::Integer);
-        let serialized = serde_json::to_string(&original).unwrap();
-        let deserialized: Column = serde_json::from_str(&serialized).unwrap();
+        let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
+        let (deserialized, _): (Column, usize) = bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
 
         assert_eq!(original, deserialized);
         assert_eq!(original.get_name(), deserialized.get_name());
@@ -891,11 +888,9 @@ mod unit_tests {
 
     #[test]
     fn test_primary_key_serialization() {
-        use serde_json;
-
         let original = Column::new_primary_key("id", TypeId::Integer);
-        let serialized = serde_json::to_string(&original).unwrap();
-        let deserialized: Column = serde_json::from_str(&serialized).unwrap();
+        let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
+        let (deserialized, _): (Column, usize) = bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
 
         assert!(deserialized.is_primary_key());
         assert_eq!(original.get_name(), deserialized.get_name());
