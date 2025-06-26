@@ -12,7 +12,6 @@ use crate::storage::page::page_types::{
     b_plus_tree_leaf_page::BPlusTreeLeafPage,
 };
 use crate::types_db::type_id::TypeId;
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -109,8 +108,8 @@ where
 
 impl<K, V, C> BPlusTreeIndex<K, V, C>
 where
-    K: KeyType + Send + Sync + Debug + Display + Serialize + for<'de> Deserialize<'de> + 'static + bincode::Encode + bincode::Decode<()>,
-    V: ValueType + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
+    K: KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>,
+    V: ValueType + Send + Sync + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
     /// Create a new B+ Tree index
@@ -195,8 +194,8 @@ where
 
 impl<K, V, C> BPlusTreeIndex<K, V, C>
 where
-    K: KeyType + Send + Sync + Debug + Display + Serialize + for<'de> Deserialize<'de> + 'static + bincode::Encode + bincode::Decode<()>,
-    V: ValueType + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
+    K: KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>,
+    V: ValueType + Send + Sync + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
     /// Insert a key-value pair into the B+ tree

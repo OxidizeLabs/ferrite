@@ -8,12 +8,11 @@ use crate::types_db::value::Value;
 use bincode::config;
 use log;
 use parking_lot::{RwLock, RwLockWriteGuard};
-use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 /// Metadata associated with a tuple.
-#[derive(Clone, Debug, PartialEq, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 #[derive(bincode::Encode, bincode::Decode)]
 pub struct TupleMeta {
     creator_txn_id: TxnId,
@@ -139,33 +138,6 @@ impl TupleMeta {
 pub struct Tuple {
     values: Arc<RwLock<Vec<Value>>>,
     rid: RID,
-}
-
-// Custom Serialize implementation for Tuple
-impl Serialize for Tuple {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Serialize as a tuple of (values, rid)
-        let values = self.values.read().clone();
-        (values, self.rid).serialize(serializer)
-    }
-}
-
-// Custom Deserialize implementation for Tuple
-impl<'de> Deserialize<'de> for Tuple {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize from a tuple of (values, rid)
-        let (values, rid): (Vec<Value>, RID) = Deserialize::deserialize(deserializer)?;
-        Ok(Self {
-            values: Arc::new(RwLock::new(values)),
-            rid,
-        })
-    }
 }
 
 // Implement bincode's Encode trait for Tuple

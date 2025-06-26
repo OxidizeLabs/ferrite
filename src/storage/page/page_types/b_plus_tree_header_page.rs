@@ -1,7 +1,6 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 
 /// The header page for a B+ tree.
@@ -26,7 +25,7 @@ pub struct BPlusTreeHeaderPage {
     order: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 #[derive(bincode::Encode, bincode::Decode)]
 pub struct HeaderData {
     pub root_page_id: PageId,

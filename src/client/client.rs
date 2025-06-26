@@ -99,7 +99,7 @@ impl DatabaseClient {
 
     async fn send_request(&mut self, request: &DatabaseRequest) -> Result<(), DBError> {
         debug!("[Network] Serializing request");
-        let data = serde_json::to_vec(request).map_err(|e| {
+        let data = bincode::encode_to_vec(request, bincode::config::standard()).map_err(|e| {
             error!("[Network] Failed to serialize request: {}", e);
             DBError::Internal(format!("Failed to serialize request: {}", e))
         })?;
@@ -133,15 +133,16 @@ impl DatabaseClient {
 
             buffer.extend_from_slice(&temp_buffer[..n]);
 
-            match serde_json::from_slice(&buffer) {
-                Ok(response) => {
+            match bincode::decode_from_slice(&buffer, bincode::config::standard()) {
+                Ok((response, _)) => {
                     debug!("[Network] Received {} bytes total", buffer.len());
                     return Ok(response);
                 }
-                Err(ref e) if e.is_eof() => {
-                    continue;
-                }
                 Err(e) => {
+                    // For bincode, we assume we need more data if decoding fails
+                    if buffer.len() < 4096 {
+                        continue;
+                    }
                     error!("[Network] Failed to parse response: {}", e);
                     return Err(DBError::Internal(format!(
                         "Failed to parse response: {}",
