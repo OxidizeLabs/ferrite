@@ -1422,7 +1422,7 @@ impl LogicalPlanBuilder {
     pub fn build_alter_table_plan(
         &self,
         name: &ObjectName,
-        if_exists: &bool,
+        _if_exists: &bool,
         only: &bool,
         operations: &Vec<AlterTableOperation>,
         location: &Option<HiveSetLocation>,
@@ -1498,7 +1498,7 @@ impl LogicalPlanBuilder {
                     };
                     format!("RENAME TO {}", new_name)
                 }
-                AlterTableOperation::AlterColumn { column_name, op } => {
+                AlterTableOperation::AlterColumn { column_name, .. } => {
                     format!("ALTER COLUMN {}", column_name.value)
                 }
                 _ => {
@@ -1534,20 +1534,20 @@ impl LogicalPlanBuilder {
 
     pub fn build_create_view_plan(
         &self,
-        or_alter: &bool,
-        or_replace: &bool,
+        _or_alter: &bool,
+        _or_replace: &bool,
         materialized: &bool,
         name: &ObjectName,
         columns: &Vec<ViewColumnDef>,
         query: &Box<Query>,
-        options: &CreateTableOptions,
-        cluster_by: &Vec<Ident>,
-        comment: &Option<String>,
-        with_no_schema_binding: &bool,
+        _options: &CreateTableOptions,
+        _cluster_by: &Vec<Ident>,
+        _comment: &Option<String>,
+        _with_no_schema_binding: &bool,
         if_not_exists: &bool,
-        temporary: &bool,
-        to: &Option<ObjectName>,
-        params: &Option<CreateViewParams>,
+        _temporary: &bool,
+        _to: &Option<ObjectName>,
+        _params: &Option<CreateViewParams>,
     ) -> Result<Box<LogicalPlan>, String> {
         // Extract view name from ObjectName
         if name.0.is_empty() {
@@ -1977,7 +1977,7 @@ impl LogicalPlanBuilder {
         let plan = LogicalPlan::show_databases_with_options(*terse, *history);
 
         // Log any additional options that we're not using yet
-        if let Some(starts_with) = &show_options.starts_with {
+        if let Some(_starts_with) = &show_options.starts_with {
             debug!("STARTS WITH clause not fully implemented for SHOW DATABASES");
         }
 
@@ -1998,7 +1998,7 @@ impl LogicalPlanBuilder {
                             pattern
                         );
                     }
-                    ShowStatementFilter::Where(expr) => {
+                    ShowStatementFilter::Where(_expr) => {
                         debug!("WHERE clause not fully implemented for SHOW DATABASES");
                     }
                     ShowStatementFilter::NoKeyword(value) => {
@@ -2012,12 +2012,12 @@ impl LogicalPlanBuilder {
         }
 
         // Handle limit clause
-        if let Some(limit_expr) = &show_options.limit {
+        if let Some(_limit_expr) = &show_options.limit {
             debug!("LIMIT option not fully implemented for SHOW DATABASES");
         }
 
         // Handle limit from clause
-        if let Some(limit_from) = &show_options.limit_from {
+        if let Some(_limit_from) = &show_options.limit_from {
             debug!("LIMIT FROM option not fully implemented for SHOW DATABASES");
         }
 
@@ -2141,7 +2141,7 @@ impl LogicalPlanBuilder {
                                 pattern
                             );
                         }
-                        ShowStatementFilter::Where(expr) => {
+                        ShowStatementFilter::Where(_expr) => {
                             debug!("WHERE clause not fully implemented for SHOW COLUMNS");
                         }
                         ShowStatementFilter::NoKeyword(_) => {
@@ -2153,15 +2153,15 @@ impl LogicalPlanBuilder {
         }
 
         // Handle other options
-        if let Some(starts_with) = &show_options.starts_with {
+        if let Some(_starts_with) = &show_options.starts_with {
             debug!("STARTS WITH clause not fully implemented for SHOW COLUMNS");
         }
 
-        if let Some(limit_expr) = &show_options.limit {
+        if let Some(_limit_expr) = &show_options.limit {
             debug!("LIMIT option not fully implemented for SHOW COLUMNS");
         }
 
-        if let Some(limit_from) = &show_options.limit_from {
+        if let Some(_limit_from) = &show_options.limit_from {
             debug!("LIMIT FROM option not fully implemented for SHOW COLUMNS");
         }
 
@@ -2189,10 +2189,10 @@ impl LogicalPlanBuilder {
                     ObjectNamePart::Identifier(ident) => ident.value.clone(),
                 }
             }
-            Use::Warehouse(obj_name) => {
+            Use::Warehouse(_obj_name) => {
                 return Err("USE WAREHOUSE statement is not supported".to_string());
             }
-            Use::Role(obj_name) => {
+            Use::Role(_obj_name) => {
                 return Err("USE ROLE statement is not supported".to_string());
             }
             Use::SecondaryRoles(_) => {
@@ -2209,7 +2209,7 @@ impl LogicalPlanBuilder {
 
     // Add a helper method that directly creates the explain logical plan
     fn create_explain_plan(&self, inner_plan: &LogicalPlan) -> Box<LogicalPlan> {
-        let schema = Schema::new(vec![]);
+        let _schema = Schema::new(vec![]);
         // Create the Explain plan node using the static constructor
         Box::new(LogicalPlan::new(
             LogicalPlanType::Explain {
@@ -2234,11 +2234,6 @@ impl LogicalPlanBuilder {
         } else {
             Err("Expected EXPLAIN statement".to_string())
         }
-    }
-
-    pub fn build_explain_table_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
-        // TODO: Implement explain table plan
-        Err("ExplainTable not yet implemented".to_string())
     }
 
     pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
@@ -2316,10 +2311,10 @@ impl LogicalPlanBuilder {
         &self,
         table: &TableWithJoins,
         assignments: &Vec<Assignment>,
-        from: &Option<UpdateTableFromKind>,
+        _from: &Option<UpdateTableFromKind>,
         selection: &Option<Expr>,
-        returning: &Option<Vec<SelectItem>>,
-        or: &Option<SqliteOnConflict>,
+        _returning: &Option<Vec<SelectItem>>,
+        _or: &Option<SqliteOnConflict>,
     ) -> Result<Box<LogicalPlan>, String> {
         let table_name = match &table.relation {
             TableFactor::Table { name, .. } => name.to_string(),
@@ -2550,7 +2545,7 @@ mod tests {
 
             assert_eq!(schema.get_column_count() as usize, expected_columns.len());
 
-            for (i, (name, type_id)) in expected_columns.iter().enumerate() {
+            for (i, (name, _type_id)) in expected_columns.iter().enumerate() {
                 let column = schema.get_column(i).unwrap();
                 assert_eq!(column.get_name(), name);
             }
@@ -2909,17 +2904,6 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn test_create_table_duplicate_column_names() {
-            let mut fixture = TestContext::new("create_table_duplicate_columns").await;
-
-            // Test duplicate column names
-            let create_sql = "CREATE TABLE test_table (id INTEGER, id VARCHAR(255))";
-            let result = fixture.planner.create_logical_plan(create_sql);
-            // This might be handled by the parser or schema manager
-            // The test documents the expected behavior
-        }
-
-        #[tokio::test]
         async fn test_create_table_with_complex_constraints() {
             let mut fixture = TestContext::new("create_table_complex_constraints").await;
 
@@ -3019,27 +3003,6 @@ mod tests {
         fn setup_test_table(fixture: &mut TestContext) {
             fixture
                 .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false)
-                .unwrap();
-        }
-
-        // Helper function to set up multiple test tables
-        fn setup_multiple_test_tables(fixture: &mut TestContext) {
-            fixture
-                .create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false)
-                .unwrap();
-            fixture
-                .create_table(
-                    "products",
-                    "product_id INTEGER, name VARCHAR(255), price DECIMAL",
-                    false,
-                )
-                .unwrap();
-            fixture
-                .create_table(
-                    "orders",
-                    "order_id INTEGER, user_id INTEGER, product_id INTEGER, quantity INTEGER",
-                    false,
-                )
                 .unwrap();
         }
 
@@ -3406,7 +3369,7 @@ mod tests {
                     assert_eq!(schema.get_column_count(), 2);
 
                     // Check that aliases are handled properly
-                    let col_names: Vec<_> = (0..schema.get_column_count())
+                    let _col_names: Vec<_> = (0..schema.get_column_count())
                         .map(|i| schema.get_column(i as usize).unwrap().get_name())
                         .collect();
 
@@ -5660,7 +5623,7 @@ mod tests {
                         (AggregationType::Max, TypeId::VarChar),
                     ];
 
-                    for (i, (expected_agg_type, expected_return_type)) in
+                    for (i, (expected_agg_type, _expected_return_type)) in
                         expected_types.iter().enumerate()
                     {
                         if let Expression::Aggregate(agg) = aggregates[i].as_ref() {
@@ -5940,7 +5903,7 @@ mod tests {
                 .expect("Failed to create plan");
 
             // First verify the join node and its schemas
-            let join_node = match &plan.children[0].plan_type {
+            let _join_node = match &plan.children[0].plan_type {
                 LogicalPlanType::NestedLoopJoin {
                     left_schema,
                     right_schema,

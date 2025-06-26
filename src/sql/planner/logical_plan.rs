@@ -307,9 +307,9 @@ impl LogicalPlan {
             }
             LogicalPlanType::IndexScan {
                 table_name,
-                table_oid,
+                table_oid: _,
                 index_name,
-                index_oid,
+                index_oid: _,
                 schema,
                 predicate_keys,
             } => {
@@ -342,7 +342,7 @@ impl LogicalPlan {
             LogicalPlanType::Projection {
                 expressions,
                 schema,
-                column_mappings,
+                column_mappings: _,
             } => {
                 result.push_str(&format!("{}→ Projection\n", indent_str));
                 result.push_str(&format!("{}   Expressions: [", indent_str));
@@ -1317,7 +1317,7 @@ impl LogicalPlan {
             LogicalPlanType::TopNPerGroup { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Window { schema, .. } => Some(schema.clone()),
             LogicalPlanType::ShowTables {
-                schema_name: sn,
+                schema_name: _sn,
                 terse: _,
                 history: _,
                 extended: _,
@@ -1826,7 +1826,7 @@ impl<'a> PlanConverter<'a> {
             LogicalPlanType::Aggregate {
                 group_by,
                 aggregates,
-                schema,
+                schema: _,
             } => {
                 // Filter out duplicate expressions
                 let agg_exprs = aggregates
@@ -2051,10 +2051,10 @@ impl<'a> PlanConverter<'a> {
             LogicalPlanType::StartTransaction {
                 isolation_level,
                 read_only,
-                transaction_modifier,
-                statements,
-                exception_statements,
-                has_end_keyword,
+                transaction_modifier: _,
+                statements: _,
+                exception_statements: _,
+                has_end_keyword: _,
             } => {
                 // Create a StartTransaction plan node instead of a CommandResult
                 Ok(PlanNode::StartTransaction(
@@ -2068,7 +2068,7 @@ impl<'a> PlanConverter<'a> {
             LogicalPlanType::Commit {
                 chain,
                 end,
-                modifier,
+                modifier: _,
             } => {
                 // Create a CommitTransaction plan node
                 Ok(PlanNode::CommitTransaction(
