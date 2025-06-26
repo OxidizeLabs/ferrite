@@ -675,6 +675,8 @@ mod tests {
 
         let mut index_executor = CreateIndexExecutor::new(exec_ctx.clone(), index_plan, false);
         index_executor.init();
+        // Actually execute the create index executor to create the index
+        assert!(index_executor.next().unwrap().is_none());
 
         // Populate the index with data from right table
         {
