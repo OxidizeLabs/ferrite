@@ -76,7 +76,7 @@ impl ExpressionOps for ColumnRefExpression {
         );
 
         // Get the appropriate tuple and schema based on tuple_index
-        let (tuple, schema, actual_column_index) = match self.tuple_index {
+        let (tuple, _schema, actual_column_index) = match self.tuple_index {
             0 => {
                 // Left tuple - column_index should be within left schema bounds
                 (left_tuple, left_schema, self.column_index)

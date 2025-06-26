@@ -76,18 +76,18 @@ impl ComparisonExpression {
     }
 
     fn perform_comparison(&self, lhs: &Value, rhs: &Value) -> Result<CmpBool, ExpressionError> {
-        // Handle null values first
-        if lhs.is_null() || rhs.is_null() {
-            return Ok(CmpBool::CmpNull);
-        }
-
-        // Handle IS NOT NULL comparison
+        // Handle IS NOT NULL comparison first, as it needs to handle NULL values explicitly
         if self.comp_type == ComparisonType::IsNotNull {
             return Ok(if lhs.is_null() {
                 CmpBool::CmpFalse
             } else {
                 CmpBool::CmpTrue
             });
+        }
+
+        // Handle null values for other comparison types
+        if lhs.is_null() || rhs.is_null() {
+            return Ok(CmpBool::CmpNull);
         }
 
         // If types are different, try casting to make them comparable

@@ -4,11 +4,9 @@ use crate::catalog::catalog::Catalog;
 use crate::client::client::ClientSession;
 use crate::common::exception::DBError;
 use crate::common::result_writer::{CliResultWriter, NetworkResultWriter, ResultWriter};
-use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
-use crate::recovery::checkpoint_manager::CheckpointManager;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_recovery::LogRecoveryManager;
 use crate::recovery::wal_manager::WALManager;
@@ -50,7 +48,6 @@ pub struct DBInstance {
     catalog: Arc<RwLock<Catalog>>,
     transaction_factory: Arc<TransactionManagerFactory>,
     execution_engine: Arc<Mutex<ExecutionEngine>>,
-    checkpoint_manager: Option<Arc<CheckpointManager>>,
     log_manager: Arc<RwLock<LogManager>>,
     wal_manager: Arc<WALManager>,
     recovery_manager: Option<Arc<LogRecoveryManager>>,
@@ -170,7 +167,6 @@ impl DBInstance {
             catalog,
             transaction_factory,
             execution_engine,
-            checkpoint_manager: None,
             log_manager,
             wal_manager,
             recovery_manager,
@@ -342,10 +338,6 @@ impl DBInstance {
 
     pub fn get_transaction_factory(&self) -> &Arc<TransactionManagerFactory> {
         &self.transaction_factory
-    }
-
-    pub fn get_checkpoint_manager(&self) -> Option<&Arc<CheckpointManager>> {
-        self.checkpoint_manager.as_ref()
     }
 
     pub fn begin_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
@@ -559,16 +551,6 @@ impl DBInstance {
     }
 
 
-    fn create_log_manager(
-        disk_manager: &Arc<AsyncDiskManager>,
-    ) -> Result<Option<Arc<RwLock<LogManager>>>, DBError> {
-        Ok(if cfg!(not(feature = "disable-checkpoint-manager")) {
-            Some(Arc::new(RwLock::new(LogManager::new(disk_manager.clone()))))
-        } else {
-            None
-        })
-    }
-
     fn create_buffer_pool_manager(
         config: &DBConfig,
         disk_manager: &Arc<AsyncDiskManager>,
@@ -582,24 +564,6 @@ impl DBInstance {
         )?;
 
         Ok(Some(Arc::new(bpm)))
-    }
-
-    fn create_lock_manager() -> Result<Option<Arc<LockManager>>, DBError> {
-        Ok(if cfg!(not(feature = "disable-lock-manager")) {
-            let lock_manager = Arc::new(LockManager::new());
-            Some(lock_manager)
-        } else {
-            None
-        })
-    }
-
-    fn create_transaction_manager() -> Result<Option<Arc<TransactionManager>>, DBError> {
-        Ok(if cfg!(not(feature = "disable-transaction-manager")) {
-            let transaction_manager = Arc::new(TransactionManager::new());
-            Some(transaction_manager)
-        } else {
-            None
-        })
     }
 
     /// Add method to enable/disable debug output
