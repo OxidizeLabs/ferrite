@@ -63,6 +63,7 @@ use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 use crate::sql::execution::expressions::typed_string_expression::TypedStringExpression;
 use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
+use crate::sql::execution::plans::window_plan::WindowFunctionType;
 use crate::sql::execution::plans::sort_plan::{OrderBySpec, OrderDirection};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
@@ -73,7 +74,7 @@ use sqlparser::ast::{
     FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
     JoinOperator, ObjectName, ObjectNamePart, OrderByExpr, Query, Select, SelectItem, SetExpr,
     Subscript as SQLSubscript, TableFactor, TableObject, Value as SQLValue, ValueWithSpan,
-    WindowFrameBound, WindowType,
+    WindowType
 };
 use sqlparser::tokenizer::{Location, Span};
 use std::sync::Arc;
@@ -605,7 +606,7 @@ impl ExpressionParser {
             Expr::Case {
                 operand,
                 conditions,
-                else_result, case_token, end_token } => {
+                else_result, case_token: _, end_token: _ } => {
                 // Parse the base expression if present
                 let base_expr = match operand {
                     Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
@@ -1231,7 +1232,7 @@ impl ExpressionParser {
 
             Expr::Like {
                 negated,
-                any,
+                any: _,
                 expr,
                 pattern,
                 escape_char,
@@ -1249,7 +1250,7 @@ impl ExpressionParser {
 
             Expr::ILike {
                 negated,
-                any,
+                any: _,
                 expr,
                 pattern,
                 escape_char,
@@ -1267,7 +1268,7 @@ impl ExpressionParser {
 
             Expr::Extract {
                 field,
-                syntax,
+                syntax: _,
                 expr,
             } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
@@ -1280,7 +1281,7 @@ impl ExpressionParser {
                     sqlparser::ast::DateTimeField::Second => ExtractField::Second,
                     sqlparser::ast::DateTimeField::Timezone => ExtractField::Timezone,
                     sqlparser::ast::DateTimeField::Quarter => ExtractField::Quarter,
-                    sqlparser::ast::DateTimeField::Week(weekday) => ExtractField::Week,
+                    sqlparser::ast::DateTimeField::Week(_weekday) => ExtractField::Week,
                     sqlparser::ast::DateTimeField::Dow => ExtractField::DayOfWeek,
                     sqlparser::ast::DateTimeField::Doy => ExtractField::DayOfYear,
                     sqlparser::ast::DateTimeField::Epoch => ExtractField::Epoch,
@@ -1297,8 +1298,8 @@ impl ExpressionParser {
                 expr,
                 substring_from,
                 substring_for,
-                special,
-                shorthand,
+                special: _,
+                shorthand: _,
             } => {
                 let string_expr = Arc::new(self.parse_expression(expr, schema)?);
 
@@ -1324,7 +1325,7 @@ impl ExpressionParser {
             Expr::Trim {
                 expr,
                 trim_where,
-                trim_what,
+                trim_what: _,
                 trim_characters,
             } => {
                 let parsed_expr = Arc::new(self.parse_expression(expr, schema)?);
@@ -1671,10 +1672,7 @@ impl ExpressionParser {
                     elements.push(parsed_elem);
                 }
 
-                // If array is empty, default to integer array type
-                if element_type == TypeId::Invalid {
-                    element_type = TypeId::Integer;
-                }
+                // Note: empty arrays are allowed and will be represented as empty vectors
 
                 Ok(Expression::Array(ArrayExpression::new(
                     elements,
@@ -1705,7 +1703,7 @@ impl ExpressionParser {
                 )))
             }
 
-            Expr::Wildcard(token) => {
+            Expr::Wildcard(_token) => {
                 // Create a wildcard expression that will return all columns as a vector
                 Ok(Expression::Wildcard(WildcardExpression::new(Column::new(
                     "*",
@@ -1875,7 +1873,7 @@ impl ExpressionParser {
                                 SQLSubscript::Slice {
                                     lower_bound,
                                     upper_bound,
-                                    stride,
+                                    stride: _,
                                 } => {
                                     // Handle array slicing - convert SQL expressions to our expressions
                                     let lower_expr = lower_bound.as_ref().map(|e| {
@@ -2677,7 +2675,7 @@ impl ExpressionParser {
         let timezone_expr = match timezone {
             Expr::Value(ValueWithSpan {
                 value: tz_value,
-                span,
+                span: _,
             }) => {
                 debug!("Processing timezone string literal: {:?}", tz_value);
                 // Extract the string value from the sqlparser Value
@@ -3046,7 +3044,7 @@ impl ExpressionParser {
                     match arg {
                         FunctionArg::Named {
                             name: _,
-                            arg,
+                            arg: _,
                             operator: _,
                         } => {
                             return Err("Named function arguments not yet supported".to_string());
@@ -3068,7 +3066,7 @@ impl ExpressionParser {
                         }
                         FunctionArg::ExprNamed {
                             name: _,
-                            arg,
+                            arg: _,
                             operator: _,
                         } => {
                             return Err("Named function arguments not yet supported".to_string());
@@ -3095,64 +3093,32 @@ impl ExpressionParser {
         }
     }
 
-    fn parse_sql_window_specification(
-        &self,
-        spec: &WindowType,
-        schema: &Schema,
-    ) -> Result<Vec<Arc<Expression>>, String> {
-        debug!("Parsing SQL window specification: {:?}", spec);
-        let mut children = Vec::new();
-
-        // Extract the WindowSpec from WindowType
-        let window_spec = match spec {
-            WindowType::WindowSpec(spec) => spec,
-            WindowType::NamedWindow(_) => {
-                return Err("Named windows are not supported yet".to_string());
-            }
-        };
-
-        // Handle PARTITION BY
-        for partition_expr in &window_spec.partition_by {
-            let parsed_expr = self.parse_expression(partition_expr, schema)?;
-            children.push(Arc::new(parsed_expr));
-        }
-
-        // Handle ORDER BY
-        if !window_spec.order_by.is_empty() {
-            children.extend(self.parse_order_by_expressions(&window_spec.order_by, schema)?);
-        }
-
-        // Handle window frame
-        if let Some(frame) = &window_spec.window_frame {
-            match &frame.start_bound {
-                WindowFrameBound::CurrentRow => {}
-                WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => {
-                    if let Some(expr) = expr {
-                        let parsed_expr = self.parse_expression(expr, schema)?;
-                        children.push(Arc::new(parsed_expr));
-                    }
-                }
-            }
-
-            if let Some(end_bound) = &frame.end_bound {
-                match end_bound {
-                    WindowFrameBound::CurrentRow => {}
-                    WindowFrameBound::Preceding(expr) | WindowFrameBound::Following(expr) => {
-                        if let Some(expr) = expr {
-                            let parsed_expr = self.parse_expression(expr, schema)?;
-                            children.push(Arc::new(parsed_expr));
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(children)
-    }
-
     fn parse_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
         debug!("Parsing function: {:?}", func);
         let function_name = func.name.to_string().to_uppercase();
+        
+        // Check if this function has an OVER clause, which makes it a window function
+        if func.over.is_some() {
+            // Determine specific window function type based on function name
+            let window_type = match function_name.as_str() {
+                "ROW_NUMBER" => WindowFunctionType::RowNumber,
+                "RANK" => WindowFunctionType::Rank,
+                "DENSE_RANK" => WindowFunctionType::DenseRank,
+                "FIRST_VALUE" => WindowFunctionType::FirstValue,
+                "LAST_VALUE" => WindowFunctionType::LastValue,
+                "LEAD" => WindowFunctionType::Lead,
+                "LAG" => WindowFunctionType::Lag,
+                "SUM" => WindowFunctionType::Sum,
+                "MIN" => WindowFunctionType::Min,
+                "MAX" => WindowFunctionType::Max,
+                "COUNT" => WindowFunctionType::Count,
+                "AVG" => WindowFunctionType::Average,
+                _ => return Err(format!("Unknown window function: {}", function_name)),
+            };
+            return self.parse_window_function(func, window_type, schema);
+        }
+        
+        // If no OVER clause, use the normal function type classification
         let function_type = function_types::get_function_type(&function_name);
 
         match function_type {
@@ -3163,7 +3129,24 @@ impl ExpressionParser {
                 self.parse_aggregate_function(func, agg_type, schema)
             }
             FunctionType::Window(window_type) => {
-                Err("Window functions are not yet supported".to_string())
+                // Map from general window function type to specific window function type
+                let function_name = func.name.to_string().to_uppercase();
+                let specific_window_type = match (&window_type, function_name.as_str()) {
+                    (function_types::WindowFunctionType::Ranking, "ROW_NUMBER") => WindowFunctionType::RowNumber,
+                    (function_types::WindowFunctionType::Ranking, "RANK") => WindowFunctionType::Rank,
+                    (function_types::WindowFunctionType::Ranking, "DENSE_RANK") => WindowFunctionType::DenseRank,
+                    (function_types::WindowFunctionType::Analytic, "FIRST_VALUE") => WindowFunctionType::FirstValue,
+                    (function_types::WindowFunctionType::Analytic, "LAST_VALUE") => WindowFunctionType::LastValue,
+                    (function_types::WindowFunctionType::Analytic, "LEAD") => WindowFunctionType::Lead,
+                    (function_types::WindowFunctionType::Analytic, "LAG") => WindowFunctionType::Lag,
+                    (function_types::WindowFunctionType::Aggregate, "SUM") => WindowFunctionType::Sum,
+                    (function_types::WindowFunctionType::Aggregate, "MIN") => WindowFunctionType::Min,
+                    (function_types::WindowFunctionType::Aggregate, "MAX") => WindowFunctionType::Max,
+                    (function_types::WindowFunctionType::Aggregate, "COUNT") => WindowFunctionType::Count,
+                    (function_types::WindowFunctionType::Aggregate, "AVG") => WindowFunctionType::Average,
+                    _ => return Err(format!("Unsupported window function: {} with type {:?}", function_name, window_type)),
+                };
+                self.parse_window_function(func, specific_window_type, schema)
             }
         }
     }
@@ -3241,6 +3224,110 @@ impl ExpressionParser {
             return_type,
             function_name,
         )))
+    }
+
+    fn parse_window_function(
+        &self,
+        func: &Function,
+        window_type: WindowFunctionType,
+        schema: &Schema,
+    ) -> Result<Expression, String> {
+        debug!(
+            "Parsing window function: {:?}, type: {:?}",
+            func, window_type
+        );
+        
+        let function_name = func.name.to_string().to_uppercase();
+        let args = self.parse_function_arguments(&func.args, schema)?;
+        
+        // Check if this function has an OVER clause
+        let over_clause = match &func.over {
+            Some(window_spec) => window_spec,
+            None => return Err(format!("Window function {} requires an OVER clause", function_name)),
+        };
+
+        // Parse the window specification to separate partition and order expressions
+        let (partition_by, order_by) = self.parse_window_specification(over_clause, schema)?;
+        
+        // Get the function expression - for most window functions, it's the first argument
+        let function_expr = if args.is_empty() {
+            // For functions like ROW_NUMBER() that don't take arguments, create a constant
+            Arc::new(Expression::Constant(ConstantExpression::new(
+                Value::new(1),
+                Column::new("constant", TypeId::Integer),
+                vec![],
+            )))
+        } else {
+            args[0].clone()
+        };
+
+        // Determine the return type based on the window function type
+        let return_type = self.infer_window_return_type(&function_name)?;
+
+        // Import the WindowExpression
+        use crate::sql::execution::expressions::window_expression::WindowExpression;
+        
+        Ok(Expression::Window(WindowExpression::new(
+            window_type,
+            function_expr,
+            partition_by,
+            order_by,
+            return_type,
+        )))
+    }
+
+    fn parse_window_specification(
+        &self,
+        spec: &WindowType,
+        schema: &Schema,
+    ) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
+        debug!("Parsing window specification: {:?}", spec);
+        let mut partition_by = Vec::new();
+        let mut order_by = Vec::new();
+
+        // Extract the WindowSpec from WindowType
+        let window_spec = match spec {
+            WindowType::WindowSpec(spec) => spec,
+            WindowType::NamedWindow(_) => {
+                return Err("Named windows are not supported yet".to_string());
+            }
+        };
+
+        // Handle PARTITION BY
+        for partition_expr in &window_spec.partition_by {
+            let parsed_expr = self.parse_expression(partition_expr, schema)?;
+            partition_by.push(Arc::new(parsed_expr));
+        }
+
+        // Handle ORDER BY
+        for order_expr in &window_spec.order_by {
+            let parsed_expr = self.parse_expression(&order_expr.expr, schema)?;
+            order_by.push(Arc::new(parsed_expr));
+        }
+
+        Ok((partition_by, order_by))
+    }
+
+
+
+    fn infer_window_return_type(
+        &self,
+        function_name: &str,
+    ) -> Result<Column, String> {
+        debug!("Inferring window return type for function: {}", function_name);
+        match function_name {
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" => {
+                Ok(Column::new(function_name, TypeId::Integer))
+            }
+            "COUNT" => Ok(Column::new(function_name, TypeId::BigInt)),
+            "SUM" => Ok(Column::new(function_name, TypeId::BigInt)), // Default, should be inferred from argument
+            "AVG" => Ok(Column::new(function_name, TypeId::Decimal)),
+            "MIN" | "MAX" => Ok(Column::new(function_name, TypeId::Integer)), // Default, should be inferred from argument
+            "FIRST_VALUE" | "LAST_VALUE" | "LEAD" | "LAG" => {
+                Ok(Column::new(function_name, TypeId::Integer)) // Default, should be inferred from argument
+            }
+            _ => Err(format!("Unknown window function: {}", function_name)),
+        }
     }
 
     /// Helper method to check if an expression contains aggregate functions
@@ -3351,31 +3438,6 @@ impl ExpressionParser {
             }
             _ => false,
         }
-    }
-
-    fn parse_window_expr(&self, expr: &Expr, schema: &Schema) -> Option<Arc<Expression>> {
-        debug!("Parsing window expression: {:?}", expr);
-        match self.parse_expression(expr, schema) {
-            Ok(parsed_expr) => Some(Arc::new(parsed_expr)),
-            Err(_) => None,
-        }
-    }
-
-    fn create_count_star(&self) -> Result<Expression, String> {
-        debug!("Creating COUNT(*) expression");
-        // Create a constant expression for COUNT(*)
-        let constant = Expression::Constant(ConstantExpression::new(
-            Value::new(1),
-            Column::new("*", TypeId::Integer),
-            vec![],
-        ));
-
-        Ok(Expression::Aggregate(AggregateExpression::new(
-            AggregationType::CountStar,
-            vec![Arc::new(constant)],
-            Column::new("COUNT(*)", TypeId::BigInt),
-            "COUNT".to_string(),
-        )))
     }
 
     // Add a method to extract table name from TableObject
