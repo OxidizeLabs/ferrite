@@ -509,29 +509,32 @@ mod tests {
     use crate::concurrency::transaction::Transaction;
     use crate::recovery::wal_manager::WALManager;
     use crate::storage::table::tuple::Tuple;
-    use std::fs;
-    use std::path::Path;
     use std::thread::sleep;
     use std::time::Duration;
+    use chrono::Utc;
     use tempfile::TempDir;
+    use crate::catalog::catalog::Catalog;
     use crate::common::logger::initialize_logger;
+    use crate::concurrency::lock_manager::LockManager;
+    use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::async_disk_manager::DiskManagerConfig;
 
-    // Common test context for all test modules
-    pub struct TestContext {
-        pub log_path: String,
-        pub db_path: String,
-        pub disk_manager: Arc<AsyncDiskManager>,
-        pub buffer_pool_manager: Arc<BufferPoolManager>,
-        pub log_manager: Arc<RwLock<LogManager>>,
-        pub wal_manager: WALManager,
-        pub recovery_manager: LogRecoveryManager,
+    struct TestContext {
+        catalog: Arc<RwLock<Catalog>>,
+        transaction_context: Arc<TransactionContext>,
+        disk_manager: Arc<AsyncDiskManager>,
+        buffer_pool_manager: Arc<BufferPoolManager>,
+        log_manager: Arc<RwLock<LogManager>>,
+        wal_manager: WALManager,
+        recovery_manager: LogRecoveryManager,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
         pub async fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 100;
+            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -559,28 +562,42 @@ mod tests {
                 replacer.clone(),
             ).unwrap());
 
+            let transaction_manager = Arc::new(TransactionManager::new());
+            let lock_manager = Arc::new(LockManager::new());
+
+            let catalog = Arc::new(RwLock::new(Catalog::new(
+                bpm.clone(),
+                transaction_manager.clone(),
+            )));
+
+            // Create fresh transaction with unique ID
+            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
+            let transaction = Arc::new(Transaction::new(
+                timestamp.parse::<u64>().unwrap_or(0), // Unique transaction ID
+                IsolationLevel::ReadUncommitted,
+            ));
+
+            let transaction_context = Arc::new(TransactionContext::new(
+                transaction,
+                lock_manager.clone(),
+                transaction_manager.clone(),
+            ));
+
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
-            {
-                let mut lm = log_manager.write();
-                lm.run_flush_thread();
-            }
 
             let wal_manager = WALManager::new(log_manager.clone());
 
-            let recovery_manager = LogRecoveryManager::new(
-                disk_manager_arc.clone(),
-                bpm.clone(),
-                log_manager.clone(),
-            );
+            let recovery_manager = LogRecoveryManager::new(disk_manager_arc.clone(), bpm.clone(), log_manager.clone());
 
             Self {
-                log_path,
-                db_path,
+                catalog,
+                transaction_context,
                 disk_manager: disk_manager_arc,
-                buffer_pool_manager: bpm,
+                buffer_pool_manager: bpm.clone(),
                 log_manager,
                 wal_manager,
                 recovery_manager,
+                _temp_dir: temp_dir,
             }
         }
 
@@ -603,10 +620,6 @@ mod tests {
 
         /// Simulate a crash by stopping all active processes and destroying the context
         pub fn simulate_crash(&self) {
-            // Make sure we have a test directory
-            if let Some(parent) = Path::new(&self.log_path).parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
 
             // Force a flush of all log records by writing a commit record
             // Commit records in the WAL will trigger a flush
