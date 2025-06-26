@@ -59,7 +59,7 @@ pub struct TypedBPlusTreeIndex {
 }
 
 /// Tracks statistics during B+ tree validation
-struct ValidationStats {
+pub struct ValidationStats {
     /// Maximum depth encountered during validation
     max_depth: u32,
     /// Total number of keys counted in the tree
@@ -83,6 +83,41 @@ impl TypedBPlusTreeIndex {
         Self {
             type_id: TypeId::Integer,
             implementation: Box::new(index),
+        }
+    }
+
+    /// Get the type ID of this index
+    pub fn get_type_id(&self) -> TypeId {
+        self.type_id
+    }
+
+    /// Get a reference to the underlying implementation
+    pub fn get_implementation(&self) -> &Box<dyn Any + Send + Sync> {
+        &self.implementation
+    }
+
+    /// Get a mutable reference to the underlying implementation
+    pub fn get_implementation_mut(&mut self) -> &mut Box<dyn Any + Send + Sync> {
+        &mut self.implementation
+    }
+
+    /// Attempt to downcast to the specific index type
+    pub fn as_i32_index(&self) -> Option<&BPlusTreeIndex<i32, RID, I32Comparator>> {
+        if self.type_id == TypeId::Integer {
+            self.implementation
+                .downcast_ref::<BPlusTreeIndex<i32, RID, I32Comparator>>()
+        } else {
+            None
+        }
+    }
+
+    /// Attempt to downcast to the specific index type (mutable)
+    pub fn as_i32_index_mut(&mut self) -> Option<&mut BPlusTreeIndex<i32, RID, I32Comparator>> {
+        if self.type_id == TypeId::Integer {
+            self.implementation
+                .downcast_mut::<BPlusTreeIndex<i32, RID, I32Comparator>>()
+        } else {
+            None
         }
     }
 }
@@ -190,14 +225,7 @@ where
         let order = header_page.read().get_order();
         order as usize
     }
-}
 
-impl<K, V, C> BPlusTreeIndex<K, V, C>
-where
-    K: KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>,
-    V: ValueType + Send + Sync + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
-    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
-{
     /// Insert a key-value pair into the B+ tree
     pub fn insert(&self, key: K, value: V) -> Result<(), BPlusTreeError> {
         // If tree is not initialized, initialize it first
@@ -2383,6 +2411,302 @@ where
 
         Ok(())
     }
+
+    /// Validate the B+Tree structure and return validation statistics
+    pub fn validate_tree(&self) -> Result<ValidationStats, BPlusTreeError> {
+        // Check if tree is initialized
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Ok(ValidationStats::new());
+        }
+
+        // Get header page information
+        let header_page = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| {
+                BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
+            })?;
+
+        let (root_page_id, expected_height, expected_keys) = {
+            let header = header_page.read();
+            (
+                header.get_root_page_id(),
+                header.get_tree_height(),
+                header.get_num_keys(),
+            )
+        };
+
+        // If tree is empty, return empty stats
+        if root_page_id == INVALID_PAGE_ID {
+            let stats = ValidationStats::new();
+            if expected_keys != 0 || expected_height != 0 {
+                return Err(BPlusTreeError::ConversionError(
+                    "Header indicates non-empty tree but root is invalid".to_string(),
+                ));
+            }
+            return Ok(stats);
+        }
+
+        // Initialize validation stats
+        let mut stats = ValidationStats::new();
+
+        // Validate tree structure recursively
+        self.validate_node(root_page_id, 0, &mut stats)?;
+
+        // Verify consistency with header information
+        if stats.total_keys != expected_keys {
+            return Err(BPlusTreeError::ConversionError(format!(
+                "Key count mismatch: header says {}, validation found {}",
+                expected_keys, stats.total_keys
+            )));
+        }
+
+        if stats.max_depth + 1 != expected_height {
+            return Err(BPlusTreeError::ConversionError(format!(
+                "Height mismatch: header says {}, validation found {}",
+                expected_height,
+                stats.max_depth + 1
+            )));
+        }
+
+        // Validate that all leaves are at the same level
+        if let Some(leaf_level) = stats.leaf_level {
+            if leaf_level != stats.max_depth {
+                return Err(BPlusTreeError::ConversionError(format!(
+                    "Leaves not at same level: found leaves at level {} but max depth is {}",
+                    leaf_level, stats.max_depth
+                )));
+            }
+        }
+
+        Ok(stats)
+    }
+
+    /// Recursively validate a node and update statistics
+    fn validate_node(
+        &self,
+        page_id: PageId,
+        current_depth: u32,
+        stats: &mut ValidationStats,
+    ) -> Result<(), BPlusTreeError> {
+        // Update max depth
+        stats.max_depth = stats.max_depth.max(current_depth);
+
+        // Try to fetch as leaf page first
+        if let Some(leaf_page) = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeLeafPage<K, V, C>>(page_id)
+        {
+            return self.validate_leaf_page(leaf_page, current_depth, stats);
+        }
+
+        // Try to fetch as internal page
+        if let Some(internal_page) = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeInternalPage<K, C>>(page_id)
+        {
+            return self.validate_internal_page(internal_page, current_depth, stats);
+        }
+
+        Err(BPlusTreeError::InvalidPageType)
+    }
+
+    /// Validate a leaf page and update statistics
+    fn validate_leaf_page(
+        &self,
+        leaf_page: PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        current_depth: u32,
+        stats: &mut ValidationStats,
+    ) -> Result<(), BPlusTreeError> {
+        let leaf_read = leaf_page.read();
+
+        // Check if this is the first leaf we've encountered
+        if stats.leaf_level.is_none() {
+            stats.leaf_level = Some(current_depth);
+        } else if stats.leaf_level != Some(current_depth) {
+            return Err(BPlusTreeError::ConversionError(format!(
+                "Leaves at different levels: expected {}, found {}",
+                stats.leaf_level.unwrap(),
+                current_depth
+            )));
+        }
+
+        // Add keys to total count
+        stats.total_keys += leaf_read.get_size();
+
+        // Validate leaf page structure
+        let size = leaf_read.get_size();
+        let max_size = leaf_read.get_max_size();
+
+        // Check size constraints
+        if size > max_size {
+            return Err(BPlusTreeError::ConversionError(format!(
+                "Leaf page {} exceeds max size: {} > {}",
+                leaf_page.get_page_id(),
+                size,
+                max_size
+            )));
+        }
+
+        // Validate key ordering in leaf
+        for i in 1..size {
+            if let (Some(prev_key), Some(curr_key)) =
+                (leaf_read.get_key_at(i - 1), leaf_read.get_key_at(i))
+            {
+                if (self.comparator)(prev_key, curr_key) != Ordering::Less {
+                    return Err(BPlusTreeError::ConversionError(format!(
+                        "Keys not in order in leaf page {}: {} >= {}",
+                        leaf_page.get_page_id(),
+                        prev_key,
+                        curr_key
+                    )));
+                }
+            }
+        }
+
+        // Check that each key has a corresponding value
+        for i in 0..size {
+            if leaf_read.get_key_at(i).is_none() || leaf_read.get_value_at(i).is_none() {
+                return Err(BPlusTreeError::ConversionError(format!(
+                    "Missing key or value at index {} in leaf page {}",
+                    i,
+                    leaf_page.get_page_id()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate an internal page and update statistics
+    fn validate_internal_page(
+        &self,
+        internal_page: PageGuard<BPlusTreeInternalPage<K, C>>,
+        current_depth: u32,
+        stats: &mut ValidationStats,
+    ) -> Result<(), BPlusTreeError> {
+        let internal_read = internal_page.read();
+        let page_id = internal_page.get_page_id();
+
+        // Validate internal page structure
+        let size = internal_read.get_size();
+        let max_size = internal_read.get_max_size();
+
+        // Check size constraints
+        if size > max_size {
+            return Err(BPlusTreeError::ConversionError(format!(
+                "Internal page {} exceeds max size: {} > {}",
+                page_id, size, max_size
+            )));
+        }
+
+        // Internal page should have (size + 1) child pointers
+        for i in 0..=size {
+            if internal_read.get_value_at(i).is_none() {
+                return Err(BPlusTreeError::ConversionError(format!(
+                    "Missing child pointer at index {} in internal page {}",
+                    i, page_id
+                )));
+            }
+        }
+
+        // Validate key ordering in internal page
+        for i in 1..size {
+            if let (Some(prev_key), Some(curr_key)) =
+                (internal_read.get_key_at(i - 1), internal_read.get_key_at(i))
+            {
+                if (self.comparator)(&prev_key, &curr_key) != Ordering::Less {
+                    return Err(BPlusTreeError::ConversionError(format!(
+                        "Keys not in order in internal page {}: {} >= {}",
+                        page_id, prev_key, curr_key
+                    )));
+                }
+            }
+        }
+
+        // Recursively validate all children
+        for i in 0..=size {
+            if let Some(child_id) = internal_read.get_value_at(i) {
+                self.validate_node(child_id, current_depth + 1, stats)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate the linked list structure of leaf pages
+    pub fn validate_leaf_links(&self) -> Result<(), BPlusTreeError> {
+        // Find the leftmost leaf
+        let leftmost_leaf = match self.find_leftmost_leaf() {
+            Ok(leaf) => leaf,
+            Err(BPlusTreeError::BufferPoolError(_)) => return Ok(()), // Empty tree
+            Err(e) => return Err(e),
+        };
+
+        let mut current_leaf = leftmost_leaf;
+        let mut visited_pages = std::collections::HashSet::new();
+
+        // Traverse the leaf link list
+        loop {
+            let page_id = current_leaf.get_page_id();
+
+            // Check for cycles
+            if visited_pages.contains(&page_id) {
+                return Err(BPlusTreeError::ConversionError(format!(
+                    "Cycle detected in leaf links at page {}",
+                    page_id
+                )));
+            }
+            visited_pages.insert(page_id);
+
+            let next_page_id = {
+                let leaf_read = current_leaf.read();
+                leaf_read.get_next_page_id()
+            };
+
+            // If no next page, we're done
+            let next_id = match next_page_id {
+                Some(id) if id != INVALID_PAGE_ID => id,
+                _ => break,
+            };
+
+            // Fetch next page
+            current_leaf = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_id)
+                .ok_or_else(|| BPlusTreeError::PageNotFound(next_id))?;
+        }
+
+        Ok(())
+    }
+
+    /// Get metadata information
+    pub fn get_metadata(&self) -> &IndexInfo {
+        &self.metadata
+    }
+
+    /// Comprehensive tree health check
+    pub fn health_check(&self) -> Result<ValidationStats, BPlusTreeError> {
+        // Validate tree structure
+        let stats = self.validate_tree()?;
+
+        // Validate leaf links
+        self.validate_leaf_links()?;
+
+        // Additional checks could be added here:
+        // - Page utilization statistics
+        // - Key distribution analysis
+        // - Performance metrics
+
+        println!("B+Tree Health Check Results:");
+        println!("  Max Depth: {}", stats.max_depth);
+        println!("  Total Keys: {}", stats.total_keys);
+        println!("  Leaf Level: {:?}", stats.leaf_level);
+        println!("  Tree Height: {}", self.get_height());
+        println!("  All validations passed ✓");
+
+        Ok(stats)
+    }
 }
 
 impl ValidationStats {
@@ -2392,6 +2716,26 @@ impl ValidationStats {
             total_keys: 0,
             leaf_level: None,
         }
+    }
+
+    /// Get the maximum depth encountered during validation
+    pub fn get_max_depth(&self) -> u32 {
+        self.max_depth
+    }
+
+    /// Get the total number of keys counted
+    pub fn get_total_keys(&self) -> usize {
+        self.total_keys
+    }
+
+    /// Get the level at which leaf nodes are found
+    pub fn get_leaf_level(&self) -> Option<u32> {
+        self.leaf_level
+    }
+
+    /// Check if the tree is balanced (all leaves at same level)
+    pub fn is_balanced(&self) -> bool {
+        self.leaf_level.map_or(true, |level| level == self.max_depth)
     }
 }
 
@@ -2738,6 +3082,92 @@ mod tests {
             Ok(keys) => println!("All keys in tree: {:?}", keys),
             Err(e) => println!("Failed to get keys: {}", e),
         }
+    }
+
+    #[tokio::test]
+    async fn test_validation_stats_integration() {
+        let ctx = TestContext::new("test_validation_stats").await;
+        let bpm = ctx.bpm;
+    
+        // Create a simple schema
+        let key_schema = Schema::new(vec![]);
+
+        // Create metadata for index
+        let metadata = IndexInfo::new(
+            key_schema,
+            "test_validation_index".to_string(),
+            1, // index_oid
+            "test_table".to_string(),
+            4,     // key_size (4 bytes for i32)
+            false, // is_primary_key
+            IndexType::BPlusTreeIndex,
+            vec![0], // key_attrs
+        );
+
+        // Create B+ tree
+        let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
+            i32_comparator,
+            metadata,
+            bpm.clone(),
+        );
+
+        // Initialize tree with order 4
+        assert!(tree.init_with_order(4).is_ok());
+
+        // Validate empty tree
+        let stats = tree.validate_tree().unwrap();
+        assert_eq!(stats.get_total_keys(), 0);
+        assert_eq!(stats.get_max_depth(), 0);
+        assert!(stats.get_leaf_level().is_none());
+        assert!(stats.is_balanced());
+
+        // Insert some keys
+        for i in 1..=10 {
+            assert!(tree.insert(i, RID::new(1, i as u32)).is_ok());
+        }
+
+        // Validate tree structure
+        let stats = tree.validate_tree().unwrap();
+        assert_eq!(stats.get_total_keys(), 10);
+        assert!(stats.get_max_depth() > 0);
+        assert!(stats.get_leaf_level().is_some());
+        assert!(stats.is_balanced());
+
+        println!("Validation stats after inserting 10 keys:");
+        println!("  Total keys: {}", stats.get_total_keys());
+        println!("  Max depth: {}", stats.get_max_depth());
+        println!("  Leaf level: {:?}", stats.get_leaf_level());
+        println!("  Is balanced: {}", stats.is_balanced());
+
+        // Test health check functionality
+        let health_stats = tree.health_check().unwrap();
+        assert_eq!(health_stats.get_total_keys(), stats.get_total_keys());
+        assert_eq!(health_stats.get_max_depth(), stats.get_max_depth());
+
+        // Test typed index functionality
+        let typed_index = TypedBPlusTreeIndex::new_i32_index(
+            i32_comparator,
+            IndexInfo::new(
+                Schema::new(vec![]),
+                "typed_test".to_string(),
+                2,
+                "test_table".to_string(),
+                4,
+                false,
+                IndexType::BPlusTreeIndex,
+                vec![0],
+            ),
+            bpm.clone(),
+        );
+
+        assert_eq!(typed_index.get_type_id(), TypeId::Integer);
+        assert!(typed_index.as_i32_index().is_some());
+
+        // Test metadata access
+        let metadata_ref = tree.get_metadata();
+        assert_eq!(metadata_ref.get_index_name(), "test_validation_index");
+
+        println!("All validation tests passed!");
     }
 }
 
