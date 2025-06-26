@@ -816,14 +816,13 @@ impl SchemaManager {
     /// Detects whether name-based mapping should be used by checking for column name matches
     fn detect_name_based_mapping(&self, source_schema: &Schema, target_schema: &Schema) -> bool {
         let source_count = source_schema.get_column_count();
-        let mut matching_count = 0;
-
-        // If source schema has fewer columns than target, this is likely a 
-        // partial column specification INSERT, so we should use name-based mapping
-        if source_schema.get_column_count() < target_schema.get_column_count() {
-            // This is likely a partial INSERT with columns specified
-            return true;
+        
+        // If source schema is empty, we can't do name-based mapping
+        if source_count == 0 {
+            return false;
         }
+        
+        let mut matching_count = 0;
 
         // Count how many source columns have exact matches in target schema
         for source_col_idx in 0..source_count {
@@ -843,10 +842,10 @@ impl SchemaManager {
             }
         }
 
-        // Use name-based mapping if we find ANY matches between source and target columns
+        // Use name-based mapping if we find matches for ALL source columns
         // This ensures that partial column inserts will correctly map by name 
-        // when column names are specified
-        matching_count > 0
+        // when column names are specified, but prevents false positives
+        matching_count == source_count && matching_count > 0
     }
 
     /// Finds a value by column name in the source schema
