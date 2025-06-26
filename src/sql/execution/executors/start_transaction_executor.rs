@@ -15,17 +15,14 @@ use std::sync::Arc;
 pub struct StartTransactionExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: StartTransactionPlanNode,
-    schema: Schema,
     executed: bool,
 }
 
 impl StartTransactionExecutor {
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: StartTransactionPlanNode) -> Self {
-        let schema = plan.get_output_schema().clone();
         Self {
             context,
             plan,
-            schema,
             executed: false,
         }
     }
@@ -137,7 +134,6 @@ mod tests {
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
-        lock_manager: Arc<LockManager>,
         transaction_context: Arc<TransactionContext>,
         _temp_dir: TempDir,
     }
@@ -190,7 +186,6 @@ mod tests {
             Self {
                 bpm,
                 transaction_manager,
-                lock_manager,
                 transaction_context,
                 _temp_dir: temp_dir,
             }
@@ -446,7 +441,6 @@ mod tests {
         // This test verifies that multiple transactions can be started concurrently
         let test_context = TestContext::new("concurrent_transaction_starts_test").await;
         let transaction_manager = test_context.transaction_manager.clone();
-        let lock_manager = test_context.lock_manager.clone();
         let buffer_pool = test_context.bpm.clone();
 
         // Number of threads to create

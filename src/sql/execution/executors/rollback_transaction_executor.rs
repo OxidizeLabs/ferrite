@@ -109,7 +109,6 @@ mod tests {
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
         transaction_manager: Arc<TransactionManager>,
-        lock_manager: Arc<LockManager>,
         transaction_context: Arc<TransactionContext>,
         _temp_dir: TempDir,
     }
@@ -162,7 +161,6 @@ mod tests {
             Self {
                 bpm,
                 transaction_manager,
-                lock_manager,
                 transaction_context,
                 _temp_dir: temp_dir,
             }
@@ -537,8 +535,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_rollback_executions() {
-        // This test verifies that multiple rollback executors can run concurrently
-        let test_context = TestContext::new("concurrent_rollback_test").await;
 
         // Number of threads to create
         const NUM_THREADS: usize = 5;
