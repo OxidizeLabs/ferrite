@@ -13,7 +13,7 @@ pub struct FlushCoordinator {
     flush_in_progress: AtomicBool,
     flush_threshold: usize,
     flush_interval: Duration,
-    last_flush: Mutex<Instant>,
+    pub(crate) last_flush: Mutex<Instant>,
 }
 
 /// Flush decision result

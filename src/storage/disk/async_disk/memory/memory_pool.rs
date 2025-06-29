@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::alloc::{GlobalAlloc, Layout};
 
 /// NUMA-aware memory allocator for high-performance scenarios
+#[derive(Debug)]
 pub struct NumaAllocator {
     node_id: usize,
     allocated_bytes: AtomicUsize,
@@ -46,6 +47,7 @@ unsafe impl GlobalAlloc for NumaAllocator {
 }
 
 /// Memory pool for efficient allocation of database pages
+#[derive(Debug)]
 pub struct MemoryPool {
     pool_size_mb: usize,
     allocated_bytes: AtomicUsize,
