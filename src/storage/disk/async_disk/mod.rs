@@ -4,7 +4,6 @@
 // Core components
 pub mod manager;
 pub mod config;
-pub mod io;
 
 // Optimization components
 pub mod compression;
@@ -18,7 +17,7 @@ pub mod memory;
 
 // Metrics and monitoring
 pub mod metrics;
-
+pub mod io;
 
 // Re-export the main AsyncDiskManager for backward compatibility
 pub use manager::AsyncDiskManager;
