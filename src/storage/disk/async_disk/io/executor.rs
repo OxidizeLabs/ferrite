@@ -182,8 +182,12 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     async fn create_test_executor() -> (IOOperationExecutor, String, String) {
-        let db_path = format!("/tmp/test_executor_db_{}.dat", std::process::id());
-        let log_path = format!("/tmp/test_executor_log_{}.dat", std::process::id());
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        
+        let db_path = format!("/tmp/test_executor_db_{}_{}.dat", std::process::id(), unique_id);
+        let log_path = format!("/tmp/test_executor_log_{}_{}.dat", std::process::id(), unique_id);
 
         // Create and initialize test files
         let mut db_file = File::create(&db_path).await.unwrap();
