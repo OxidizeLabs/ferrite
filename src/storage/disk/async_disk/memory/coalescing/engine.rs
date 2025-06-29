@@ -45,6 +45,18 @@ pub struct CoalescingEngine {
     pub last_cleanup: Instant,
     // Size analyzer for coalescing decisions
     size_analyzer: SizeAnalyzer,
+    // Track cleanup metrics from last cleanup operation
+    last_cleanup_metrics: CleanupMetrics,
+}
+
+/// Cleanup metrics from a cleanup operation
+#[derive(Debug, Clone, Default)]
+pub struct CleanupMetrics {
+    pub cleaned_by_time: usize,
+    pub cleaned_by_memory: usize,
+    pub cleaned_by_access: usize,
+    pub total_data_size_freed: usize,
+    pub cleanup_timestamp: Option<Instant>,
 }
 
 impl CoalescingEngine {
@@ -58,6 +70,7 @@ impl CoalescingEngine {
             access_frequencies: HashMap::new(),
             last_cleanup: Instant::now(),
             size_analyzer: SizeAnalyzer::new(),
+            last_cleanup_metrics: CleanupMetrics::default(),
         }
     }
 
@@ -94,9 +107,9 @@ impl CoalescingEngine {
         for (&page_id, &timestamp) in &self.write_timestamps {
             if now.duration_since(timestamp) > self.coalesce_window {
                 expired_pages.push((page_id, CleanupReason::TimeExpired));
+                cleaned_by_time += 1;
             }
         }
-        cleaned_by_time = expired_pages.len();
         
         // Phase 2: Memory pressure detection and handling
         let max_pending_writes = self.calculate_max_pending_writes();
@@ -148,10 +161,19 @@ impl CoalescingEngine {
         // Update cleanup timestamp
         self.last_cleanup = now;
         
-        // Phase 5: Maintain data structure integrity
+        // Phase 5: Store cleanup metrics for monitoring and adaptive behavior
+        self.last_cleanup_metrics = CleanupMetrics {
+            cleaned_by_time,
+            cleaned_by_memory,
+            cleaned_by_access,
+            total_data_size_freed,
+            cleanup_timestamp: Some(now),
+        };
+        
+        // Phase 6: Maintain data structure integrity
         self.validate_coalescing_state()?;
         
-        // Phase 6: Log cleanup metrics (in production, this would go to metrics system)
+        // Phase 7: Log cleanup metrics (in production, this would go to metrics system)
         if total_data_size_freed > 0 {
             #[cfg(debug_assertions)]
             {
@@ -377,6 +399,7 @@ impl CoalescingEngine {
             oldest_write_age: self.get_oldest_write_age(),
             memory_pressure: self.detect_memory_pressure(self.calculate_memory_usage()),
             last_cleanup_age: self.last_cleanup.elapsed(),
+            last_cleanup_metrics: self.last_cleanup_metrics.clone(),
         }
     }
 
@@ -401,6 +424,7 @@ impl CoalescingEngine {
         self.write_timestamps.clear();
         self.access_frequencies.clear();
         self.last_cleanup = Instant::now();
+        self.last_cleanup_metrics = CleanupMetrics::default();
     }
 }
 
@@ -412,6 +436,7 @@ pub struct CoalescingStats {
     pub oldest_write_age: Duration,
     pub memory_pressure: f64,
     pub last_cleanup_age: Duration,
+    pub last_cleanup_metrics: CleanupMetrics,
 }
 
 #[cfg(test)]
@@ -559,9 +584,9 @@ mod tests {
     fn test_get_stats() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
         
-        // Add some writes
+        // Add some writes with non-adjacent pages to avoid coalescing
         engine.try_coalesce_write(1, vec![1, 2, 3, 4]).unwrap();
-        engine.try_coalesce_write(2, vec![5, 6, 7, 8]).unwrap();
+        engine.try_coalesce_write(10, vec![5, 6, 7, 8]).unwrap();
         
         let stats = engine.get_stats();
         assert_eq!(stats.pending_writes, 2);
@@ -582,9 +607,9 @@ mod tests {
     fn test_clear_all() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
         
-        // Add some writes
+        // Add some writes with non-adjacent pages to avoid coalescing
         engine.try_coalesce_write(1, vec![1, 2, 3, 4]).unwrap();
-        engine.try_coalesce_write(2, vec![5, 6, 7, 8]).unwrap();
+        engine.try_coalesce_write(10, vec![5, 6, 7, 8]).unwrap();
         
         assert_eq!(engine.pending_writes.len(), 2);
         
