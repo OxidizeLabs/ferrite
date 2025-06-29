@@ -907,7 +907,7 @@ mod tests {
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;

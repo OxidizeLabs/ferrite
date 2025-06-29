@@ -7,7 +7,7 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::storage::disk::async_disk_manager::AsyncDiskManager;
+use crate::storage::disk::async_disk::AsyncDiskManager;
 
 /// LogRecoveryManager is responsible for recovering the database from log records
 /// after a crash. It follows the ARIES recovery protocol:
@@ -518,7 +518,7 @@ mod tests {
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::async_disk_manager::DiskManagerConfig;
+    use crate::storage::disk::async_disk::DiskManagerConfig;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

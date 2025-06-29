@@ -452,7 +452,7 @@ mod index_scan_executor_tests {
     use std::sync::Arc;
     use tempfile::TempDir;
     use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         execution_context: Arc<RwLock<ExecutionContext>>,

@@ -705,7 +705,7 @@ mod tests {
     use crate::types_db::value::Value;
     use std::thread;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::sql::execution::transaction_context::TransactionContext;
 

@@ -2,7 +2,7 @@
 // use crate::common::config::INVALID_PAGE_ID;
 // use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 // use crate::common::exception::DeletePageError;
-// use crate::storage::disk::disk_manager::FileDiskManager;
+// use crate::storage::disk::async_disk::FileDiskManager;
 // use crate::storage::disk::disk_scheduler::DiskScheduler;
 // use crate::storage::page::page::{Page, PageTrait};
 // use crate::storage::page::page::{PageType, PAGE_TYPE_OFFSET};

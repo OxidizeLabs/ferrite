@@ -3570,7 +3570,7 @@ mod tests {
     use crate::sql::execution::expressions::logic_expression::LogicType;
     use sqlparser::ast::Ident;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         _temp_dir: TempDir,
