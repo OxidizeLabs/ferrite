@@ -282,7 +282,7 @@ mod tests {
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::table_heap::TableHeap;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;

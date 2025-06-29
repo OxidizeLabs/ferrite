@@ -146,7 +146,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>

@@ -101,7 +101,7 @@ mod tests {
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::buffer::lru_k_replacer::LRUKReplacer;
 
     async fn create_test_context() -> (

@@ -1296,7 +1296,7 @@ mod tests {
     use crate::types_db::value::Value;
     use std::collections::HashSet;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     /// Basic test context for storage-only tests
     struct StorageTestContext {

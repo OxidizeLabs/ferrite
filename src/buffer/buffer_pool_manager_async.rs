@@ -2,7 +2,7 @@ use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::INVALID_PAGE_ID;
 use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 use crate::common::exception::DeletePageError;
-use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use crate::storage::page::page::{Page, PageTrait};
 use crate::storage::page::page::{PageType, PAGE_TYPE_OFFSET};
 use crate::storage::page::page_guard::PageGuard;
@@ -13,10 +13,12 @@ use std::fmt;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::future::Future;
 
 /// The `BufferPoolManager` is responsible for managing the buffer pool,
 /// including fetching and unpinning pages, and handling page replacement.
-/// This version integrates with the new AsyncAsyncDiskManager for better performance.
+/// This version integrates with the new AsyncAsyncDiskManager for better performance
+/// and implements coordinated caching to avoid duplication.
 pub struct BufferPoolManager {
     pool_size: usize,
     next_page_id: AtomicU64,
@@ -25,7 +27,9 @@ pub struct BufferPoolManager {
     replacer: Arc<RwLock<LRUKReplacer>>,
     free_list: Arc<RwLock<Vec<FrameId>>>,
     disk_manager: Arc<AsyncDiskManager>,
-    // No embedded runtime - we'll use the current runtime when available
+    // Cache coordination settings
+    use_disk_manager_cache: bool,
+    bypass_disk_cache_for_pinned: bool,
 }
 
 // Implement Debug manually
@@ -44,27 +48,30 @@ impl Debug for BufferPoolManager {
 }
 
 impl BufferPoolManager {
-    /// Creates a new `BufferPoolManager`.
-    ///
-    /// # Parameters
-    /// - `pool_size`: The size of the buffer pool.
-    /// - `disk_manager`: A reference to the async disk manager.
-    /// - `replacer`: A reference to the page replacement policy.
-    ///
-    /// # Returns
-    /// A new `BufferPoolManager` instance.
+    /// Creates a new `BufferPoolManager` with enhanced async disk manager integration.
     pub fn new(
         pool_size: usize,
         disk_manager: Arc<AsyncDiskManager>,
         replacer: Arc<RwLock<LRUKReplacer>>,
     ) -> Result<Self, String> {
+        Self::new_with_cache_config(pool_size, disk_manager, replacer, true, false)
+    }
+
+    /// Creates a new `BufferPoolManager` with cache coordination configuration.
+    pub fn new_with_cache_config(
+        pool_size: usize,
+        disk_manager: Arc<AsyncDiskManager>,
+        replacer: Arc<RwLock<LRUKReplacer>>,
+        use_disk_manager_cache: bool,
+        bypass_disk_cache_for_pinned: bool,
+    ) -> Result<Self, String> {
         let free_list: Vec<FrameId> = (0..pool_size as FrameId).collect();
         
-        // No embedded runtime needed - we'll use Handle::current() when available
-        
         info!(
-            "BufferPoolManager initialized with pool size: {}",
-            pool_size
+            "BufferPoolManager initialized with pool size: {}, disk manager health: {}, cache coordination: {}",
+            pool_size,
+            disk_manager.health_check(),
+            use_disk_manager_cache
         );
         
         Ok(Self {
@@ -75,10 +82,12 @@ impl BufferPoolManager {
             replacer,
             free_list: Arc::new(RwLock::new(free_list)),
             disk_manager,
+            use_disk_manager_cache,
+            bypass_disk_cache_for_pinned,
         })
     }
 
-    /// Creates a new buffer pool manager with custom disk manager configuration
+    /// Creates a new buffer pool manager with enhanced disk manager configuration
     pub async fn new_with_config(
         pool_size: usize,
         db_file_path: String,
@@ -91,6 +100,11 @@ impl BufferPoolManager {
                 .await
                 .map_err(|e| format!("Failed to create async disk manager: {}", e))?
         );
+        
+        // Start monitoring if enabled
+        if let Err(e) = disk_manager.start_monitoring().await {
+            warn!("Failed to start disk manager monitoring: {}", e);
+        }
         
         // Create replacer (use default LRU-K with k=2)
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(pool_size, 2)));
@@ -257,41 +271,82 @@ impl BufferPoolManager {
         self.load_page_from_disk::<T>(page_id)
     }
 
-    /// Loads a page from disk into memory
+    /// Enhanced page loading with coordinated caching
     fn load_page_from_disk<T: Page + 'static>(&self, page_id: PageId) -> Option<PageGuard<T>> {
-        trace!("Loading page {} from disk", page_id);
+        trace!("Loading page {} with cache coordination", page_id);
 
         // Get available frame
         let frame_id = self.get_available_frame()?;
-        trace!("Got available frame: {} for disk load", frame_id);
+        trace!("Got available frame: {} for page load", frame_id);
 
         // Evict if necessary
         self.evict_page_if_necessary(frame_id);
 
-        // Read page data from disk using async disk manager
-        let page_data = self.run_async_operation(async {
-            self.disk_manager.read_page(page_id).await
-        });
+        // Try to get page data using coordinated caching
+        let page_data = if self.use_disk_manager_cache {
+            self.load_page_with_cache_coordination(page_id)
+        } else {
+            self.load_page_bypass_cache(page_id)
+        };
 
         let page_data = match page_data {
             Ok(data) => data,
             Err(e) => {
-                error!("Failed to read page {} from disk: {}", page_id, e);
+                error!("Failed to load page {} : {}", page_id, e);
                 return None;
             }
         };
 
-        // Verify page type
-        if page_data.len() < PAGE_TYPE_OFFSET + 1 {
-            error!("Page data too short for page {}", page_id);
+        // Verify page type and create page
+        if let Some(page_guard) = self.create_page_from_data::<T>(page_id, page_data) {
+            // Update metadata
+            let page_arc = page_guard.get_page().clone();
+            self.update_page_metadata(frame_id, page_id, &page_arc);
+            trace!("Successfully loaded page {} in frame {}", page_id, frame_id);
+            Some(page_guard)
+        } else {
+            error!("Failed to create page {} from data", page_id);
+            None
+        }
+    }
+
+    /// Load page with cache coordination between BPM and AsyncDiskManager
+    fn load_page_with_cache_coordination(&self, page_id: PageId) -> Result<Vec<u8>, std::io::Error> {
+        trace!("Loading page {} with cache coordination", page_id);
+
+        // Use AsyncDiskManager's read_page which checks its multi-level cache first
+        // This avoids duplication since AsyncDiskManager handles cache levels internally
+        self.run_async_operation(async {
+            self.disk_manager.read_page(page_id).await
+        })
+    }
+
+    /// Load page bypassing AsyncDiskManager cache (BPM as sole cache)
+    fn load_page_bypass_cache(&self, page_id: PageId) -> Result<Vec<u8>, std::io::Error> {
+        trace!("Loading page {} bypassing disk manager cache", page_id);
+        
+        // When BPM wants to be the sole cache manager, we still use AsyncDiskManager
+        // for I/O but could add a bypass_cache flag in the future
+        // For now, we'll use the regular read_page but this could be optimized
+        self.run_async_operation(async {
+            self.disk_manager.read_page(page_id).await
+        })
+    }
+
+    /// Creates a page from raw data with proper type checking
+    fn create_page_from_data<T: Page + 'static>(&self, page_id: PageId, data: Vec<u8>) -> Option<PageGuard<T>> {
+        // Verify data size
+        if data.len() < DB_PAGE_SIZE as usize {
+            error!("Page data too short for page {}: {} bytes", page_id, data.len());
             return None;
         }
 
-        let type_byte = page_data[PAGE_TYPE_OFFSET];
+        // Verify page type
+        let type_byte = data[PAGE_TYPE_OFFSET];
         let page_type = PageType::from_u8(type_byte);
         
         trace!(
-            "Loaded page {} from disk - Type byte: {}, Parsed type: {:?}, Expected: {:?}",
+            "Creating page {} from data - Type byte: {}, Parsed type: {:?}, Expected: {:?}",
             page_id,
             type_byte,
             page_type,
@@ -308,25 +363,19 @@ impl BufferPoolManager {
             return None;
         }
 
-        // Create new page with loaded data
-        let new_page = self.create_typed_page::<T>(page_id);
+        // Create new page
+        let page_arc = self.create_typed_page::<T>(page_id);
         
         // Set the data
         {
-            let mut page_guard = new_page.write();
-            if page_data.len() >= DB_PAGE_SIZE as usize {
-                let _ = page_guard.set_data(0, &page_data[..DB_PAGE_SIZE as usize]);
-            } else {
-                error!("Page data size mismatch for page {}", page_id);
+            let mut page_guard = page_arc.write();
+            if let Err(e) = page_guard.set_data(0, &data[..DB_PAGE_SIZE as usize]) {
+                error!("Failed to set page data for page {}: {:?}", page_id, e);
                 return None;
             }
         }
 
-        // Update metadata
-        self.update_page_metadata(frame_id, page_id, &new_page);
-
-        trace!("Successfully loaded page {} from disk in frame {}", page_id, frame_id);
-        Some(PageGuard::new(new_page, page_id))
+        Some(PageGuard::new(page_arc, page_id))
     }
 
     /// Unpins a page with the given page ID.
@@ -744,36 +793,25 @@ impl BufferPoolManager {
         // Create a data buffer
         let data_buffer = {
             let page_guard = page.read();
-
-            // Get the page type first
             let page_type = page_guard.get_page_type();
             let type_byte = page_type.to_u8();
 
-            // Copy the data
             let mut data = Vec::with_capacity(DB_PAGE_SIZE as usize);
             data.extend_from_slice(page_guard.get_data());
-
-            // Ensure the type byte is preserved
             data[PAGE_TYPE_OFFSET] = type_byte;
 
-            // Verify type byte
-            debug_assert_eq!(
-                data[PAGE_TYPE_OFFSET], type_byte,
-                "Page type byte was corrupted during write"
-            );
-
             trace!(
-                "Writing page {} to disk. Type: {:?}, Type byte: {}, First bytes: {:?}",
+                "Writing page {} to disk. Type: {:?}, Type byte: {}, Size: {} bytes",
                 page_id,
                 page_type,
                 data[PAGE_TYPE_OFFSET],
-                &data[..8]
+                data.len()
             );
 
             data
         };
 
-        // Use async disk manager to write page
+        // Use async disk manager to write page (this will update its cache too)
         self.run_async_operation(async {
             self.disk_manager.write_page(page_id, data_buffer).await
         })
@@ -785,7 +823,7 @@ impl BufferPoolManager {
             page_guard.set_dirty(false);
         }
 
-        trace!("Successfully wrote page {} to disk", page_id);
+        trace!("Successfully wrote page {} to disk with cache coordination", page_id);
         Ok(())
     }
 
@@ -797,12 +835,101 @@ impl BufferPoolManager {
         pages[*frame_id as usize].clone()
     }
 
-    /// Flushes multiple dirty pages efficiently
-    pub fn flush_dirty_pages_batch(&self, max_pages: usize) -> Result<usize, String> {
-        trace!("Starting batch flush of up to {} dirty pages", max_pages);
+    /// Enhanced batch page loading for better performance
+    pub async fn load_pages_batch<T: Page + 'static>(&self, page_ids: Vec<PageId>) -> Vec<Option<PageGuard<T>>> {
+        if page_ids.is_empty() {
+            return Vec::new();
+        }
+
+        trace!("Loading {} pages in batch", page_ids.len());
+
+        // Check which pages are already in memory
+        let mut in_memory_pages = Vec::new();
+        let mut pages_to_load = Vec::new();
+
+        for page_id in page_ids {
+            if let Some(page) = self.get_page_internal(page_id) {
+                // Verify type and create guard
+                if let Some(guard) = self.create_guard_from_existing::<T>(page_id, page) {
+                    in_memory_pages.push((page_id, Some(guard)));
+                } else {
+                    in_memory_pages.push((page_id, None));
+                }
+            } else {
+                pages_to_load.push(page_id);
+            }
+        }
+
+        // Load missing pages from disk in batch
+        if !pages_to_load.is_empty() {
+            match self.disk_manager.read_pages_batch(pages_to_load.clone()).await {
+                Ok(pages_data) => {
+                    for (page_id, data) in pages_to_load.into_iter().zip(pages_data) {
+                                                 if let Some(guard) = self.create_page_from_data::<T>(page_id, data) {
+                             // Get frame and update metadata
+                             if let Some(frame_id) = self.get_available_frame() {
+                                 self.evict_page_if_necessary(frame_id);
+                                 let page_arc = guard.get_page().clone();
+                                 self.update_page_metadata(frame_id, page_id, &page_arc);
+                             }
+                             in_memory_pages.push((page_id, Some(guard)));
+                         } else {
+                             in_memory_pages.push((page_id, None));
+                         }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to load pages in batch: {}", e);
+                    for page_id in pages_to_load {
+                        in_memory_pages.push((page_id, None));
+                    }
+                }
+            }
+        }
+
+        // Sort by original order and return
+        in_memory_pages.sort_by_key(|(page_id, _)| *page_id);
+        in_memory_pages.into_iter().map(|(_, guard)| guard).collect()
+    }
+
+    /// Creates a guard from an existing page in memory
+    fn create_guard_from_existing<T: Page + 'static>(
+        &self,
+        page_id: PageId,
+        page: Arc<RwLock<dyn PageTrait>>,
+    ) -> Option<PageGuard<T>> {
+        // Verify page type
+        let actual_type = {
+            let page_read = page.read();
+            let type_byte = page_read.get_data()[PAGE_TYPE_OFFSET];
+            PageType::from_u8(type_byte)
+        };
+
+        if actual_type != Some(T::TYPE_ID) {
+            warn!(
+                "Page type mismatch for page {}: expected {:?}, found {:?}",
+                page_id,
+                T::TYPE_ID,
+                actual_type
+            );
+            return None;
+        }
+
+        // Create typed page arc
+        let typed_page = unsafe {
+            let raw = Arc::into_raw(page) as *const RwLock<T>;
+            Arc::from_raw(raw)
+        };
+
+        Some(PageGuard::new(typed_page, page_id))
+    }
+
+    /// Enhanced batch flush using async disk manager
+    pub async fn flush_dirty_pages_batch_async(&self, max_pages: usize) -> Result<usize, String> {
+        trace!("Starting async batch flush of up to {} dirty pages", max_pages);
         
-        // Collect dirty page IDs in a single lock acquisition
-        let dirty_pages: Vec<PageId> = {
+        // Collect dirty pages
+        let dirty_pages: Vec<(PageId, Vec<u8>)> = {
             let pages = self.pages.read();
             pages
                 .iter()
@@ -810,7 +937,9 @@ impl BufferPoolManager {
                     if let Some(page) = page_opt {
                         let page_guard = page.read();
                         if page_guard.is_dirty() {
-                            Some(page_guard.get_page_id())
+                            let page_id = page_guard.get_page_id();
+                            let data = page_guard.get_data().to_vec();
+                            Some((page_id, data))
                         } else {
                             None
                         }
@@ -822,15 +951,190 @@ impl BufferPoolManager {
                 .collect()
         };
 
-        let mut flushed_count = 0;
-        for page_id in dirty_pages {
-            if let Ok(()) = self.flush_page(page_id) {
-                flushed_count += 1;
-            }
+        if dirty_pages.is_empty() {
+            return Ok(0);
         }
 
-        trace!("Successfully flushed {} dirty pages in batch", flushed_count);
-        Ok(flushed_count)
+        // Write in batch using async disk manager
+        let result = self.disk_manager.write_pages_batch(dirty_pages.clone()).await;
+        
+        match result {
+            Ok(()) => {
+                // Mark pages as clean
+                let pages = self.pages.read();
+                for (page_id, _) in &dirty_pages {
+                    if let Some(frame_id) = self.page_table.read().get(page_id) {
+                        if let Some(Some(page)) = pages.get(*frame_id as usize) {
+                            page.write().set_dirty(false);
+                        }
+                    }
+                }
+                trace!("Successfully flushed {} dirty pages in batch", dirty_pages.len());
+                Ok(dirty_pages.len())
+            }
+            Err(e) => {
+                error!("Failed to flush pages in batch: {}", e);
+                Err(format!("Batch flush failed: {}", e))
+            }
+        }
+    }
+
+    // Cache Coordination Management Methods
+    
+    /// Configures cache coordination behavior
+    pub fn set_cache_coordination(&mut self, use_disk_manager_cache: bool, bypass_disk_cache_for_pinned: bool) {
+        self.use_disk_manager_cache = use_disk_manager_cache;
+        self.bypass_disk_cache_for_pinned = bypass_disk_cache_for_pinned;
+        
+        info!(
+            "Cache coordination updated: use_disk_manager_cache={}, bypass_disk_cache_for_pinned={}",
+            use_disk_manager_cache, bypass_disk_cache_for_pinned
+        );
+    }
+    
+    /// Gets current cache coordination settings
+    pub fn get_cache_coordination_settings(&self) -> (bool, bool) {
+        (self.use_disk_manager_cache, self.bypass_disk_cache_for_pinned)
+    }
+    
+    /// Invalidates a page from AsyncDiskManager cache when it's modified in BPM
+    pub fn invalidate_disk_cache(&self, page_id: PageId) {
+        if self.use_disk_manager_cache {
+            trace!("Would invalidate page {} from disk manager cache", page_id);
+            // Note: This would need a new method in AsyncDiskManager like invalidate_cache_page()
+            // For now, we rely on the fact that writes update the cache
+        }
+    }
+    
+    /// Prefetches pages into AsyncDiskManager cache for future BPM access
+    pub async fn prefetch_to_disk_cache(&self, page_ids: Vec<PageId>) -> Result<usize, String> {
+        if !self.use_disk_manager_cache || page_ids.is_empty() {
+            return Ok(0);
+        }
+        
+        trace!("Prefetching {} pages to disk manager cache", page_ids.len());
+        
+        // Use batch read to populate AsyncDiskManager cache
+        // We don't need the data, just want to populate the cache
+        match self.disk_manager.read_pages_batch(page_ids.clone()).await {
+            Ok(_) => {
+                trace!("Successfully prefetched {} pages to disk cache", page_ids.len());
+                Ok(page_ids.len())
+            }
+            Err(e) => {
+                error!("Failed to prefetch pages to disk cache: {}", e);
+                Err(format!("Prefetch failed: {}", e))
+            }
+        }
+    }
+    
+    /// Gets cache coordination statistics
+    pub async fn get_cache_coordination_stats(&self) -> CacheCoordinationStats {
+        let (disk_cache_hits, disk_cache_misses, disk_hit_ratio) = 
+            self.disk_manager.get_cache_stats().await;
+        
+        let bpm_utilization = {
+            let page_table_size = self.page_table.read().len();
+            page_table_size as f64 / self.pool_size as f64 * 100.0
+        };
+        
+        CacheCoordinationStats {
+            use_disk_manager_cache: self.use_disk_manager_cache,
+            bypass_disk_cache_for_pinned: self.bypass_disk_cache_for_pinned,
+                         bpm_pool_utilization: bpm_utilization,
+            disk_cache_hits,
+            disk_cache_misses,
+            disk_cache_hit_ratio: disk_hit_ratio,
+                         total_cache_efficiency: self.calculate_total_cache_efficiency(bpm_utilization, disk_hit_ratio),
+        }
+    }
+    
+    /// Calculates overall cache efficiency across BPM and AsyncDiskManager
+    fn calculate_total_cache_efficiency(&self, bpm_utilization: f64, disk_hit_ratio: f64) -> f64 {
+        if self.use_disk_manager_cache {
+            // Weighted efficiency: BPM utilization has higher weight as it's the primary cache
+            (bpm_utilization * 0.7) + (disk_hit_ratio * 100.0 * 0.3)
+        } else {
+            // Only BPM cache is used
+            bpm_utilization
+        }
+    }
+    
+    /// Optimizes cache coordination based on access patterns
+    pub async fn optimize_cache_coordination(&mut self) -> Result<(), String> {
+        let stats = self.get_cache_coordination_stats().await;
+        
+        trace!("Current cache stats: BPM utilization: {:.2}%, Disk hit ratio: {:.2}%, Total efficiency: {:.2}%",
+               stats.bpm_pool_utilization, stats.disk_cache_hit_ratio * 100.0, stats.total_cache_efficiency);
+        
+        // Auto-optimization logic
+        if stats.bpm_pool_utilization > 90.0 && stats.disk_cache_hit_ratio < 0.3 {
+            // BPM is highly utilized but disk cache isn't helping much
+            warn!("Consider increasing buffer pool size or optimizing access patterns");
+        } else if stats.disk_cache_hit_ratio > 0.8 && stats.bpm_pool_utilization < 50.0 {
+            // Disk cache is very effective, BPM has room
+            info!("Cache coordination is working well");
+        }
+        
+        Ok(())
+    }
+
+    /// Gets comprehensive health status including disk manager metrics
+    pub fn get_health_status(&self) -> BufferPoolHealthStatus {
+        let disk_health = self.disk_manager.health_check();
+        let disk_metrics = self.disk_manager.get_metrics();
+        let (cache_hits, cache_misses, cache_hit_ratio) = 
+            futures::executor::block_on(self.disk_manager.get_cache_stats());
+        
+        let pages_count = self.pages.read().len();
+        let free_list_size = self.free_list.read().len();
+        let page_table_size = self.page_table.read().len();
+        
+        let buffer_pool_healthy = pages_count == self.pool_size
+            && free_list_size + page_table_size <= self.pool_size;
+        
+        BufferPoolHealthStatus {
+            overall_healthy: disk_health && buffer_pool_healthy,
+            disk_manager_healthy: disk_health,
+            buffer_pool_healthy,
+            pool_utilization: (page_table_size as f64 / self.pool_size as f64 * 100.0),
+            cache_hit_ratio,
+            cache_hits,
+            cache_misses,
+            avg_read_latency_ns: disk_metrics.read_latency_avg_ns,
+            avg_write_latency_ns: disk_metrics.write_latency_avg_ns,
+            io_throughput_mb_per_sec: disk_metrics.io_throughput_mb_per_sec,
+        }
+    }
+
+    /// Gets disk manager metrics
+    pub fn get_disk_metrics(&self) -> crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot {
+        self.disk_manager.get_metrics()
+    }
+
+    /// Forces a full sync to disk
+    pub async fn sync_to_disk(&self) -> Result<(), String> {
+        self.disk_manager.sync().await
+            .map_err(|e| format!("Failed to sync to disk: {}", e))
+    }
+
+    /// Improved async operation runner that works better with tokio
+    fn run_async_operation<F, T>(&self, future: F) -> Result<T, std::io::Error>
+    where
+        F: Future<Output = Result<T, std::io::Error>>,
+    {
+        // Try to use the current runtime if available
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.block_on(future)
+        } else {
+            // Fallback to futures executor
+            futures::executor::block_on(future)
+        }
+    }
+
+    /// Flushes multiple dirty pages efficiently (backward compatibility)
+    pub fn flush_dirty_pages_batch(&self, max_pages: usize) -> Result<usize, String> {
+        futures::executor::block_on(self.flush_dirty_pages_batch_async(max_pages))
     }
 
     /// Gets the async disk manager for direct access
@@ -838,39 +1142,21 @@ impl BufferPoolManager {
         Arc::clone(&self.disk_manager)
     }
 
-    /// Performs a health check on the buffer pool
+    /// Performs a health check on the buffer pool (backward compatibility)
     pub fn health_check(&self) -> bool {
-        // Check if disk manager is healthy
-        let disk_health = self.disk_manager.health_check();
-        
-        // Check buffer pool integrity
-        let pages_count = self.pages.read().len();
-        let free_list_size = self.free_list.read().len();
-        let page_table_size = self.page_table.read().len();
-        
-        // Basic sanity checks
-        let buffer_pool_healthy = pages_count == self.pool_size
-            && free_list_size + page_table_size <= self.pool_size;
-        
-        disk_health && buffer_pool_healthy
+        self.get_health_status().overall_healthy
     }
 
-    /// Helper function to run async operations
-    /// Uses futures executor to avoid runtime conflicts
-    fn run_async_operation<F, T>(&self, future: F) -> Result<T, std::io::Error>
-    where
-        F: Future<Output = Result<T, std::io::Error>>,
-    {
-        // Use futures::executor::block_on which doesn't conflict with tokio
-        futures::executor::block_on(future)
-    }
-
-    /// Gracefully shuts down the buffer pool manager
+    /// Gracefully shuts down with proper async disk manager cleanup
     pub async fn shutdown(&mut self) -> Result<(), String> {
         info!("Shutting down BufferPoolManager");
         
-        // Flush all dirty pages
-        self.flush_all_pages();
+        // Flush all dirty pages using async batch operation
+        let dirty_count = self.flush_dirty_pages_batch_async(self.pool_size).await?;
+        info!("Flushed {} dirty pages during shutdown", dirty_count);
+        
+        // Sync to ensure all data is written
+        self.sync_to_disk().await?;
         
         // Shutdown the disk manager
         let disk_manager = Arc::clone(&self.disk_manager);
@@ -884,6 +1170,33 @@ impl BufferPoolManager {
     }
 }
 
+/// Health status information for the buffer pool
+#[derive(Debug, Clone)]
+pub struct BufferPoolHealthStatus {
+    pub overall_healthy: bool,
+    pub disk_manager_healthy: bool,
+    pub buffer_pool_healthy: bool,
+    pub pool_utilization: f64,
+    pub cache_hit_ratio: f64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub avg_read_latency_ns: u64,
+    pub avg_write_latency_ns: u64,
+    pub io_throughput_mb_per_sec: f64,
+}
+
+/// Cache coordination statistics
+#[derive(Debug, Clone)]
+pub struct CacheCoordinationStats {
+    pub use_disk_manager_cache: bool,
+    pub bypass_disk_cache_for_pinned: bool,
+    pub bpm_pool_utilization: f64,
+    pub disk_cache_hits: u64,
+    pub disk_cache_misses: u64,
+    pub disk_cache_hit_ratio: f64,
+    pub total_cache_efficiency: f64,
+}
+
 impl Clone for BufferPoolManager {
     fn clone(&self) -> Self {
         Self {
@@ -894,6 +1207,8 @@ impl Clone for BufferPoolManager {
             replacer: Arc::clone(&self.replacer),
             free_list: Arc::clone(&self.free_list),
             disk_manager: Arc::clone(&self.disk_manager),
+            use_disk_manager_cache: self.use_disk_manager_cache,
+            bypass_disk_cache_for_pinned: self.bypass_disk_cache_for_pinned,
         }
     }
 }

@@ -133,7 +133,7 @@ mod tests {
     use crate::sql::execution::execution_context::ExecutionContext;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use std::sync::Arc;

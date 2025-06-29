@@ -22,7 +22,7 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]

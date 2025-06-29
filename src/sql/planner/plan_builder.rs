@@ -2445,7 +2445,7 @@ mod tests {
     use crate::sql::planner::query_planner::QueryPlanner;
     use crate::types_db::type_id::TypeId;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

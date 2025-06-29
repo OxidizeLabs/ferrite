@@ -1,6 +1,6 @@
 use crate::common::config::{Lsn, INVALID_LSN, LOG_BUFFER_SIZE};
 use crate::recovery::log_record::LogRecord;
-use crate::storage::disk::async_disk_manager::AsyncDiskManager;
+use crate::storage::disk::async_disk::AsyncDiskManager;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use log::{debug, error, trace, warn};
 use parking_lot::RwLock;
@@ -325,14 +325,23 @@ impl LogManager {
         match self.runtime_handle.block_on(async move {
             disk_manager.read_log(offset).await
         }) {
-            Ok(record) => {
-                debug!(
-                    "Successfully read log record: txn_id={}, type={:?}, size={}",
-                    record.get_txn_id(),
-                    record.get_log_record_type(),
-                    record.get_size()
-                );
-                Some(record)
+            Ok(bytes) => {
+                // Deserialize bytes into LogRecord
+                match LogRecord::from_bytes(&bytes) {
+                    Ok(record) => {
+                        debug!(
+                            "Successfully read log record: txn_id={}, type={:?}, size={}",
+                            record.get_txn_id(),
+                            record.get_log_record_type(),
+                            record.get_size()
+                        );
+                        Some(record)
+                    }
+                    Err(e) => {
+                        warn!("Failed to deserialize log record at offset {}: {}", offset, e);
+                        None
+                    }
+                }
             }
             Err(e) => {
                 warn!("Failed to read log from disk at offset {}: {}", offset, e);
@@ -348,7 +357,7 @@ mod tests {
     use crate::common::config::TxnId;
     use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
-    use crate::storage::disk::async_disk_manager::DiskManagerConfig;
+    use crate::storage::disk::async_disk::DiskManagerConfig;
     use std::time::Duration;
     use tempfile::TempDir;
 

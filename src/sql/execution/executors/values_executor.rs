@@ -114,7 +114,7 @@ mod tests {
         use crate::common::logger::initialize_logger;
         use crate::sql::execution::plans::abstract_plan::PlanNode;
         use crate::sql::execution::transaction_context::TransactionContext;
-        use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+        use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
         pub fn create_test_schema() -> Schema {
             Schema::new(vec![

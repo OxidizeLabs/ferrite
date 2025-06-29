@@ -393,7 +393,7 @@ mod tests {
     use crate::types_db::value::Val::{BigInt, Integer};
     use chrono::Utc;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk_manager::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
