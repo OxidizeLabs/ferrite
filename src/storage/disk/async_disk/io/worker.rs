@@ -8,6 +8,7 @@ use super::queue::IOQueueManager;
 use super::executor::IOOperationExecutor;
 use crate::storage::disk::async_disk::io::completion::CompletionTracker;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinSet;
 use tokio::sync::Semaphore;
 
@@ -27,6 +28,9 @@ pub struct IOWorkerManager {
     /// Signal used to coordinate worker shutdown
     shutdown_signal: Arc<tokio::sync::Notify>,
     
+    /// Atomic flag for reliable shutdown signaling
+    shutdown_flag: Arc<AtomicBool>,
+    
     /// Semaphore to limit concurrent I/O operations across all workers
     concurrency_limiter: Arc<Semaphore>,
 }
@@ -40,6 +44,7 @@ impl IOWorkerManager {
         Self {
             worker_tasks: JoinSet::new(),
             shutdown_signal: Arc::new(tokio::sync::Notify::new()),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
             concurrency_limiter: Arc::new(Semaphore::new(max_concurrent_operations)),
         }
     }
@@ -73,6 +78,7 @@ impl IOWorkerManager {
             let executor_clone = Arc::clone(&executor);
             let completion_tracker_clone = Arc::clone(&completion_tracker);
             let shutdown_signal_clone = Arc::clone(&self.shutdown_signal);
+            let shutdown_flag_clone = Arc::clone(&self.shutdown_flag);
             let concurrency_limiter_clone = Arc::clone(&self.concurrency_limiter);
 
             self.worker_tasks.spawn(async move {
@@ -82,6 +88,7 @@ impl IOWorkerManager {
                     executor_clone,
                     completion_tracker_clone,
                     shutdown_signal_clone,
+                    shutdown_flag_clone,
                     concurrency_limiter_clone,
                 ).await;
             });
@@ -103,6 +110,7 @@ impl IOWorkerManager {
     /// * `executor` - Executor for running operations
     /// * `completion_tracker` - Tracker for operation metrics
     /// * `shutdown_signal` - Signal for coordinated shutdown
+    /// * `shutdown_flag` - Atomic flag for reliable shutdown detection
     /// * `concurrency_limiter` - Semaphore for limiting concurrent operations
     async fn worker_loop(
         worker_id: usize,
@@ -110,11 +118,18 @@ impl IOWorkerManager {
         executor: Arc<IOOperationExecutor>,
         completion_tracker: Arc<CompletionTracker>,
         shutdown_signal: Arc<tokio::sync::Notify>,
+        shutdown_flag: Arc<AtomicBool>,
         concurrency_limiter: Arc<Semaphore>,
     ) {
         log::debug!("Worker {} started", worker_id);
         
         loop {
+            // Check shutdown flag at the beginning of each iteration
+            if shutdown_flag.load(Ordering::Relaxed) {
+                log::debug!("Worker {} detected shutdown flag", worker_id);
+                break;
+            }
+            
             tokio::select! {
                 // Check for shutdown signal
                 _ = shutdown_signal.notified() => {
@@ -128,8 +143,13 @@ impl IOWorkerManager {
                         log::trace!("Worker {} processing operation {}", worker_id, operation.id);
                         Self::process_operation(operation, &executor, &completion_tracker, &concurrency_limiter).await;
                     } else {
-                        // Queue is empty, yield control to allow other tasks to run
-                        tokio::task::yield_now().await;
+                        // Queue is empty, check shutdown flag again before sleeping
+                        if shutdown_flag.load(Ordering::Relaxed) {
+                            log::debug!("Worker {} detected shutdown flag while queue empty", worker_id);
+                            break;
+                        }
+                        // Sleep briefly to avoid tight polling loop
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
                     }
                 }
             }
@@ -202,7 +222,7 @@ impl IOWorkerManager {
     /// Signals all workers to shutdown gracefully
     /// 
     /// This method:
-    /// 1. Sends shutdown signal to all workers
+    /// 1. Sets shutdown flag and sends shutdown signal to all workers
     /// 2. Waits for all workers to complete current operations
     /// 3. Cleans up worker tasks
     pub async fn shutdown(&mut self) {
@@ -212,7 +232,10 @@ impl IOWorkerManager {
 
         log::info!("Shutting down {} I/O workers", self.worker_tasks.len());
         
-        // Signal all workers to shutdown
+        // Set shutdown flag for reliable signaling
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+        
+        // Also notify any workers waiting on the signal
         self.shutdown_signal.notify_waiters();
 
         // Wait for all workers to complete using JoinSet
@@ -224,6 +247,9 @@ impl IOWorkerManager {
             }
             worker_id += 1;
         }
+
+        // Reset shutdown flag for potential reuse
+        self.shutdown_flag.store(false, Ordering::Relaxed);
 
         log::info!("All I/O workers shut down");
     }
@@ -249,6 +275,9 @@ impl IOWorkerManager {
 
         log::warn!("Force shutting down {} I/O workers", self.worker_tasks.len());
         
+        // Set shutdown flag
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+        
         // Abort all worker tasks using JoinSet
         self.worker_tasks.abort_all();
         
@@ -260,6 +289,9 @@ impl IOWorkerManager {
                 Err(e) => log::warn!("Worker task failed during force shutdown: {}", e),
             }
         }
+
+        // Reset shutdown flag
+        self.shutdown_flag.store(false, Ordering::Relaxed);
 
         log::warn!("All I/O workers force shut down");
     }
@@ -302,19 +334,27 @@ mod tests {
         let db_path = format!("/tmp/test_worker_db_{}_{}.dat", std::process::id(), unique_id);
         let log_path = format!("/tmp/test_worker_log_{}_{}.dat", std::process::id(), unique_id);
 
+        println!("Test files: db: {}, log: {}", db_path, log_path);
+
         // Create test files
         let mut db_file = File::create(&db_path).await.unwrap();
         let mut log_file = File::create(&log_path).await.unwrap();
         
         db_file.write_all(&vec![0u8; 8192]).await.unwrap();
         log_file.write_all(b"initial").await.unwrap();
+
+        println!("Test files created");
         
         // Ensure files are flushed before closing
         db_file.flush().await.unwrap();
         log_file.flush().await.unwrap();
+
+        println!("Test files flushed");
         
         drop(db_file);
         drop(log_file);
+
+        println!("Test files dropped");
         
         let db_file = Arc::new(Mutex::new(
             File::options().read(true).write(true).open(&db_path).await.unwrap()
@@ -323,9 +363,13 @@ mod tests {
             File::options().read(true).write(true).open(&log_path).await.unwrap()
         ));
 
+        println!("Test files opened");
+
         let queue_manager = IOQueueManager::new();
         let executor = IOOperationExecutor::new(db_file, log_file);
         let completion_tracker = CompletionTracker::new();
+
+        println!("Test components created");
 
         (queue_manager, executor, completion_tracker, db_path, log_path)
     }
