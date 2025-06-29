@@ -13,7 +13,7 @@ use std::io::Result as IoResult;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
 use crate::storage::disk::async_disk::cache::CacheManager;
 use crate::storage::disk::async_disk::io::AsyncIOEngine;
-use crate::storage::disk::async_disk::memory::write_manager::{WriteBufferStats, WriteManager};
+use crate::storage::disk::async_disk::memory::{WriteBufferStats, WriteManager};
 use crate::storage::disk::async_disk::metrics::alerts::AlertSummary;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
 use crate::storage::disk::async_disk::metrics::dashboard::{CacheDashboard, ComponentHealth, DashboardData, HealthReport, PerformanceDashboard, StorageDashboard};
@@ -131,7 +131,7 @@ impl AsyncDiskManager {
         self.metrics_collector.record_write(elapsed, data.len() as u64);
         
         // Check if we need to flush
-        if self.write_manager.should_flush() {
+        if self.write_manager.should_flush().await {
             self.flush_writes_with_durability().await?;
         }
         
@@ -195,7 +195,7 @@ impl AsyncDiskManager {
         }
         
         // Flush if needed
-        if self.write_manager.should_flush() {
+        if self.write_manager.should_flush().await {
             self.flush_writes_with_durability().await?;
         }
         
@@ -242,7 +242,7 @@ impl AsyncDiskManager {
     
     /// Gets write buffer statistics
     pub async fn get_write_buffer_stats(&self) -> WriteBufferStats {
-        self.write_manager.get_buffer_stats()
+        self.write_manager.get_buffer_stats().await
     }
     
     /// Forces flush of all pending writes
