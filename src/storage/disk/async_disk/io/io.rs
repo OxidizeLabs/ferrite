@@ -38,7 +38,7 @@ impl AsyncIOEngine {
     pub fn new(db_file: Arc<Mutex<File>>, log_file: Arc<Mutex<File>>) -> IoResult<Self> {
         let queue_manager = Arc::new(IOQueueManager::new());
         let executor = Arc::new(IOOperationExecutor::new(db_file, log_file));
-        let worker_manager = IOWorkerManager::new();
+        let worker_manager = IOWorkerManager::new(64); // Allow up to 64 concurrent I/O operations
         let completion_tracker = Arc::new(CompletionTracker::new());
 
         Ok(Self {
