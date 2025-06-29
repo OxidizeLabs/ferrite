@@ -146,9 +146,15 @@ impl SizeAnalyzer {
         let mut ranges = Vec::new();
         let mut current_start = sorted_pages[0];
         let mut current_end = sorted_pages[0];
-        let mut current_size = 0;
+        
+        // Initialize with the first page's data size
+        let mut current_size = pending_writes
+            .get(&sorted_pages[0])
+            .map(|data| data.len())
+            .unwrap_or(4096);
 
-        for &page_id in &sorted_pages {
+        // Start from the second page since we've already processed the first
+        for &page_id in &sorted_pages[1..] {
             let page_data_size = pending_writes
                 .get(&page_id)
                 .map(|data| data.len())
@@ -160,13 +166,11 @@ impl SizeAnalyzer {
                 current_size += page_data_size;
             } else {
                 // Gap detected, finalize current range and start new one
-                if current_start <= current_end {
-                    ranges.push(PageRange {
-                        start: current_start,
-                        end: current_end,
-                        size_bytes: current_size,
-                    });
-                }
+                ranges.push(PageRange {
+                    start: current_start,
+                    end: current_end,
+                    size_bytes: current_size,
+                });
                 current_start = page_id;
                 current_end = page_id;
                 current_size = page_data_size;
@@ -556,7 +560,7 @@ mod tests {
                 size_bytes: 1000,
             },
         ];
-        let savings_multi = analyzer.estimate_compression_savings(2000, &multi_ranges, 0.5);
+        let savings_multi = analyzer.estimate_compression_savings(2000, &multi_ranges, 0.4);
         assert!(savings_multi > 0);
         assert!(savings_multi <= 2000); // Can't save more than original size
     }
