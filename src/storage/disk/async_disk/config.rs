@@ -4,16 +4,7 @@
 
 use std::time::Duration;
 use crate::common::config::PageId;
-
-/// Advanced compression algorithms
-#[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // Part of advanced API
-pub enum CompressionAlgorithm {
-    None,
-    LZ4,
-    Zstd,
-    Custom, // Our custom SIMD-optimized compression
-}
+use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
 
 /// Configuration for the disk manager with optimizations
 #[derive(Debug, Clone)]

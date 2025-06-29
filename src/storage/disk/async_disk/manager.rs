@@ -287,7 +287,7 @@ impl AsyncDiskManager {
     pub fn get_dashboard_data(&self) -> DashboardData {
 
         DashboardData {
-            timestamp: Instant::now(),
+            timestamp: Instant::now().into(),
             health_score: self.metrics_collector.calculate_health_score() as f64,
             performance: PerformanceDashboard {
                 avg_read_latency_ms: 0.0,

@@ -421,7 +421,7 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         // Enqueue an operation and get the receiver
-        let (id, mut receiver) = queue_manager.enqueue_operation(
+        let (id, receiver) = queue_manager.enqueue_operation(
             IOOperationType::ReadPage { page_id: 42 },
             10,
         ).await;
@@ -445,7 +445,7 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         // Enqueue an operation
-        let (_id, mut receiver) = queue_manager.enqueue_operation(
+        let (_id, receiver) = queue_manager.enqueue_operation(
             IOOperationType::ReadPage { page_id: 42 },
             10,
         ).await;

@@ -29,7 +29,7 @@ pub struct WriteManager {
     buffer_manager: Arc<Mutex<BufferManager>>,
 
     // Flush coordination component
-    flush_coordinator: Arc<FlushCoordinator>,
+    pub(crate) flush_coordinator: Arc<FlushCoordinator>,
 
     // Write coalescing component
     coalescing_engine: Arc<RwLock<CoalescingEngine>>,
