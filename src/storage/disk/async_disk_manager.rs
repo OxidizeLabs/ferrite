@@ -4,2550 +4,279 @@
 //! advanced caching strategies, comprehensive performance metrics, and 
 //! cutting-edge optimizations including SIMD, NUMA awareness, and ML-based prefetching.
 
-use crate::common::config::{PageId, DB_PAGE_SIZE};
-use crate::buffer::lru_k_replacer::{LRUKReplacer, AccessType};
-use crate::recovery::log_record::LogRecord;
-use std::collections::{HashMap, VecDeque, BinaryHeap};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Mutex, oneshot};
-use tokio::task::JoinHandle;
-use tokio::fs::File;
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use std::sync::atomic::{AtomicU64, AtomicUsize, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 use std::io::Result as IoResult;
-use std::cmp::Ordering as CmpOrdering;
-use std::alloc::{GlobalAlloc, Layout};
-// Phase 5: Advanced concurrency utilities
-
-
-// ============================================================================
-// PHASE 5: ADVANCED PERFORMANCE OPTIMIZATIONS AND FEATURES
-// ============================================================================
-
-/// Advanced compression algorithms for Phase 5
-#[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // Part of advanced API
-pub enum CompressionAlgorithm {
-    None,
-    LZ4,
-    Zstd,
-    Custom, // Our custom SIMD-optimized compression
-}
-
-/// SIMD-optimized data processing utilities
-#[allow(dead_code)] // Used in tests and advanced features
-pub struct SimdProcessor;
-
-impl SimdProcessor {
-    /// Fast memory comparison using optimized byte processing
-    pub fn fast_memcmp(a: &[u8], b: &[u8]) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
-
-        let len = a.len();
-        if len < 64 {
-            return a == b; // Fallback for small data
-        }
-
-        // Process 8-byte chunks using u64 comparison (faster than byte-by-byte)
-        let chunks = len / 8;
-        for i in 0..chunks {
-            let start = i * 8;
-            let a_chunk = u64::from_le_bytes(a[start..start + 8].try_into().unwrap());
-            let b_chunk = u64::from_le_bytes(b[start..start + 8].try_into().unwrap());
-
-            if a_chunk != b_chunk {
-                return false;
-            }
-        }
-
-        // Handle remaining bytes
-        let remainder = len % 8;
-        if remainder > 0 {
-            let start = chunks * 8;
-            return &a[start..] == &b[start..];
-        }
-
-        true
-    }
-
-    /// Fast zero detection using optimized processing
-    pub fn is_zero_page(data: &[u8]) -> bool {
-        if data.len() < 8 {
-            return data.iter().all(|&b| b == 0);
-        }
-
-        // Process 8-byte chunks
-        let chunks = data.len() / 8;
-        for i in 0..chunks {
-            let start = i * 8;
-            let chunk = u64::from_le_bytes(data[start..start + 8].try_into().unwrap());
-            if chunk != 0 {
-                return false;
-            }
-        }
-
-        // Check remainder
-        let remainder = data.len() % 8;
-        if remainder > 0 {
-            let start = chunks * 8;
-            return data[start..].iter().all(|&b| b == 0);
-        }
-
-        true
-    }
-
-    /// Fast checksum calculation using optimized processing
-    pub fn fast_checksum(data: &[u8]) -> u64 {
-        let mut checksum = 0u64;
-
-        // Process 8-byte chunks for better performance
-        let chunks = data.len() / 8;
-        for i in 0..chunks {
-            let start = i * 8;
-            let chunk = u64::from_le_bytes(data[start..start + 8].try_into().unwrap());
-            checksum = checksum.wrapping_add(chunk);
-        }
-
-        // Handle remainder
-        let remainder = data.len() % 8;
-        if remainder > 0 {
-            let start = chunks * 8;
-            for &byte in &data[start..] {
-                checksum = checksum.wrapping_add(byte as u64);
-            }
-        }
-
-        checksum
-    }
-}
-
-/// NUMA-aware memory allocator for high-performance scenarios
-pub struct NumaAllocator {
-    node_id: usize,
-    allocated_bytes: AtomicUsize,
-}
-
-impl NumaAllocator {
-    pub fn new(node_id: usize) -> Self {
-        Self {
-            node_id,
-            allocated_bytes: AtomicUsize::new(0),
-        }
-    }
-
-    pub fn allocated_bytes(&self) -> usize {
-        self.allocated_bytes.load(Ordering::Relaxed)
-    }
-}
-
-unsafe impl GlobalAlloc for NumaAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // In a real implementation, this would use NUMA-specific allocation
-        // For now, use standard allocator but track bytes
-        unsafe {
-            let ptr = std::alloc::System.alloc(layout);
-            if !ptr.is_null() {
-                self.allocated_bytes.fetch_add(layout.size(), Ordering::Relaxed);
-            }
-            ptr
-        }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe {
-            std::alloc::System.dealloc(ptr, layout);
-            self.allocated_bytes.fetch_sub(layout.size(), Ordering::Relaxed);
-        }
-    }
-}
-
-/// Advanced machine learning-based prefetcher
-#[derive(Debug)]
-pub struct MLPrefetcher {
-    access_history: VecDeque<(PageId, Instant)>,
-    pattern_weights: HashMap<Vec<PageId>, f64>,
-    prediction_accuracy: f64,
-    learning_rate: f64,
-    min_pattern_length: usize,
-    max_pattern_length: usize,
-    prefetch_distance: usize,
-}
-
-impl MLPrefetcher {
-    pub fn new() -> Self {
-        Self {
-            access_history: VecDeque::with_capacity(1000),
-            pattern_weights: HashMap::new(),
-            prediction_accuracy: 0.0,
-            learning_rate: 0.1,
-            min_pattern_length: 2,
-            max_pattern_length: 8,
-            prefetch_distance: 4,
-        }
-    }
-
-    /// Records a page access and updates learning model
-    pub fn record_access(&mut self, page_id: PageId) {
-        let now = Instant::now();
-        self.access_history.push_back((page_id, now));
-
-        // Maintain history size
-        while self.access_history.len() > 1000 {
-            self.access_history.pop_front();
-        }
-
-        // Update pattern weights
-        self.update_patterns();
-    }
-
-    /// Predicts next pages to prefetch based on learned patterns
-    pub fn predict_prefetch(&self, current_page: PageId) -> Vec<PageId> {
-        let mut predictions = Vec::new();
-
-        // Find patterns ending with current page
-        for (pattern, weight) in &self.pattern_weights {
-            if let Some(&last_page) = pattern.last() {
-                if last_page == current_page && *weight > 0.5 {
-                    // Predict next pages based on this pattern
-                    for i in 1..=self.prefetch_distance {
-                        if let Some(history_entry) = self.find_pattern_continuation(pattern, i) {
-                            predictions.push(history_entry);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Remove duplicates and limit predictions
-        predictions.sort_unstable();
-        predictions.dedup();
-        predictions.truncate(8); // Limit prefetch size
-
-        predictions
-    }
-
-    /// Updates pattern weights based on recent access history
-    fn update_patterns(&mut self) {
-        if self.access_history.len() < self.min_pattern_length {
-            return;
-        }
-
-        let recent_accesses: Vec<PageId> = self.access_history
-            .iter()
-            .rev()
-            .take(20)
-            .map(|(page_id, _)| *page_id)
-            .collect();
-
-        // Extract patterns of different lengths
-        for pattern_len in self.min_pattern_length..=self.max_pattern_length {
-            if recent_accesses.len() >= pattern_len {
-                for i in 0..=(recent_accesses.len() - pattern_len) {
-                    let pattern: Vec<PageId> = recent_accesses[i..i + pattern_len].to_vec();
-
-                    // Update pattern weight using exponential moving average
-                    let current_weight = self.pattern_weights.get(&pattern).unwrap_or(&0.0);
-                    let new_weight = current_weight * (1.0 - self.learning_rate) + self.learning_rate;
-                    self.pattern_weights.insert(pattern, new_weight);
-                }
-            }
-        }
-
-        // Decay old patterns
-        for weight in self.pattern_weights.values_mut() {
-            *weight *= 0.99; // Gradual decay
-        }
-
-        // Remove very low weight patterns
-        self.pattern_weights.retain(|_, &mut weight| weight > 0.01);
-    }
-
-    /// Finds continuation of a pattern in history
-    fn find_pattern_continuation(&self, pattern: &[PageId], offset: usize) -> Option<PageId> {
-        let pattern_len = pattern.len();
-        let access_vec: Vec<PageId> = self.access_history
-            .iter()
-            .map(|(page_id, _)| *page_id)
-            .collect();
-
-        for i in 0..=access_vec.len().saturating_sub(pattern_len + offset) {
-            if &access_vec[i..i + pattern_len] == pattern {
-                if let Some(&next_page) = access_vec.get(i + pattern_len + offset - 1) {
-                    return Some(next_page);
-                }
-            }
-        }
-
-        None
-    }
-
-    pub fn get_accuracy(&self) -> f64 {
-        self.prediction_accuracy
-    }
-}
-
-/// Advanced work-stealing I/O scheduler
-#[derive(Debug)]
-pub struct WorkStealingScheduler {
-    worker_queues: Vec<Arc<crossbeam_channel::Sender<IOTask>>>,
-    receivers: Vec<crossbeam_channel::Receiver<IOTask>>,
-    worker_count: usize,
-    round_robin_counter: AtomicUsize,
-}
-
-/// I/O task for work-stealing scheduler
-#[derive(Debug)]
-pub struct IOTask {
-    pub task_type: IOTaskType,
-    pub priority: IOPriority,
-    pub creation_time: Instant,
-    pub completion_callback: Option<oneshot::Sender<IoResult<Vec<u8>>>>,
-}
-
-/// Types of I/O tasks
-#[derive(Debug)]
-pub enum IOTaskType {
-    Read(PageId),
-    Write(PageId, Vec<u8>),
-    BatchRead(Vec<PageId>),
-    BatchWrite(Vec<(PageId, Vec<u8>)>),
-    Prefetch(Vec<PageId>),
-    Flush,
-    Sync,
-}
-
-impl WorkStealingScheduler {
-    pub fn new(worker_count: usize) -> Self {
-        let mut worker_queues = Vec::new();
-        let mut receivers = Vec::new();
-
-        for _ in 0..worker_count {
-            let (sender, receiver) = crossbeam_channel::unbounded();
-            worker_queues.push(Arc::new(sender));
-            receivers.push(receiver);
-        }
-
-        Self {
-            worker_queues,
-            receivers,
-            worker_count,
-            round_robin_counter: AtomicUsize::new(0),
-        }
-    }
-
-    /// Submits a task to the scheduler
-    pub fn submit_task(&self, task: IOTask) -> Result<(), crossbeam_channel::SendError<IOTask>> {
-        // Use round-robin for now, could be improved with load balancing
-        let worker_idx = self.round_robin_counter.fetch_add(1, Ordering::Relaxed) % self.worker_count;
-        self.worker_queues[worker_idx].send(task)
-    }
-
-    /// Tries to steal work from another worker's queue
-    pub fn try_steal_work(&self, worker_id: usize) -> Option<IOTask> {
-        for i in 1..self.worker_count {
-            let steal_from = (worker_id + i) % self.worker_count;
-            if let Ok(task) = self.receivers[steal_from].try_recv() {
-                return Some(task);
-            }
-        }
-        None
-    }
-
-    /// Gets the receiver for a specific worker
-    pub fn get_worker_receiver(&self, worker_id: usize) -> &crossbeam_channel::Receiver<IOTask> {
-        &self.receivers[worker_id]
-    }
-}
-
-/// Zero-copy I/O operations using memory mapping
-#[derive(Debug)]
-pub struct ZeroCopyIO {
-    file_handle: Arc<File>,
-    memory_maps: HashMap<PageId, Vec<u8>>,
-    map_cache: LRUCache<PageId, Vec<u8>>,
-}
-
-impl ZeroCopyIO {
-    pub fn new(file_handle: Arc<File>) -> Self {
-        Self {
-            file_handle,
-            memory_maps: HashMap::new(),
-            map_cache: LRUCache::new(100),
-        }
-    }
-
-    /// Performs zero-copy read using memory mapping
-    pub async fn zero_copy_read(&mut self, page_id: PageId) -> IoResult<&[u8]> {
-        // In a real implementation, this would use mmap
-        // For demo purposes, we'll simulate it
-        if !self.memory_maps.contains_key(&page_id) {
-            let data = vec![0u8; DB_PAGE_SIZE as usize]; // Simulate mmap
-            self.memory_maps.insert(page_id, data);
-        }
-
-        Ok(self.memory_maps.get(&page_id).unwrap())
-    }
-
-    /// Performs zero-copy write using memory mapping
-    pub async fn zero_copy_write(&mut self, page_id: PageId, data: &[u8]) -> IoResult<()> {
-        // In a real implementation, this would write to mmap region
-        self.memory_maps.insert(page_id, data.to_vec());
-        Ok(())
-    }
-}
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
+use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::recovery::log_record::LogRecord;
+use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
+use crate::storage::disk::async_disk::cache::CacheManager;
+use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
+use crate::storage::disk::async_disk::DiskManagerConfig;
+use crate::storage::disk::async_disk::io::io::AsyncIOEngine;
+use crate::storage::disk::async_disk::memory::{NumaAllocator, WriteBufferStats, WriteManager};
+use crate::storage::disk::async_disk::metrics::alerts::AlertSummary;
+use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
+use crate::storage::disk::async_disk::metrics::dashboard::{CacheDashboard, ComponentHealth, DashboardData, HealthReport, PerformanceDashboard, StorageDashboard};
+use crate::storage::disk::async_disk::metrics::prediction::TrendData;
+use crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot;
 
 // ============================================================================
-// CONFIGURATION AND ENUMS
+// RESOURCE MANAGER 
 // ============================================================================
 
-/// Configuration for the disk manager with Phase 5 optimizations
-#[derive(Debug, Clone)]
-pub struct DiskManagerConfig {
-    // I/O Configuration
-    pub io_threads: usize,
-    pub max_concurrent_ops: usize,
-    pub batch_size: usize,
-    pub direct_io: bool,
-
-    // Cache Configuration
-    pub cache_size_mb: usize,
-    pub hot_cache_ratio: f64,
-    pub warm_cache_ratio: f64,
-    pub prefetch_enabled: bool,
-    pub prefetch_distance: usize,
-
-    // Write Configuration
-    pub write_buffer_size_mb: usize,
-    pub flush_threshold_pages: usize,
-    pub flush_interval_ms: u64,
-    pub compression_enabled: bool,
-
-    // Performance Configuration
-    pub metrics_enabled: bool,
-    pub detailed_metrics: bool,
-    pub numa_aware: bool,
-    pub cpu_affinity: Option<Vec<usize>>,
-
-    // Durability Configuration
-    pub fsync_policy: FsyncPolicy,
-    pub durability_level: DurabilityLevel,
-    pub wal_enabled: bool,
-
-    // Phase 5: Advanced Performance Options
-    pub compression_algorithm: CompressionAlgorithm,
-    pub simd_optimizations: bool,
-    pub numa_node_id: Option<usize>,
-    pub work_stealing_enabled: bool,
-    pub ml_prefetching: bool,
-    pub zero_copy_io: bool,
-    pub adaptive_algorithms: bool,
-    pub memory_pool_size_mb: usize,
-    pub parallel_io_degree: usize,
-    pub cpu_cache_optimization: bool,
-    pub lock_free_structures: bool,
-    pub vectorized_operations: bool,
-    pub hot_cold_separation: bool,
-    pub deduplication_enabled: bool,
-    pub compression_level: u32,
-}
-
-/// File synchronization policies
-#[derive(Debug, Clone, PartialEq)]
-pub enum FsyncPolicy {
-    Never,
-    OnFlush,
-    PerWrite,
-    Periodic(Duration),
-}
-
-/// Durability levels for writes
-#[derive(Debug, Clone, PartialEq)]
-pub enum DurabilityLevel {
-    None,        // No durability guarantees
-    Buffer,      // Buffered writes
-    Sync,        // Synchronous writes
-    Durable,     // Guaranteed durability
-}
-
-/// Priority levels for I/O operations
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum IOPriority {
-    Low = 1,
-    Normal = 2,
-    High = 3,
-    Critical = 4,
-}
-
-/// Types of I/O operations
-#[derive(Debug, Clone)]
-pub enum IOOperationType {
-    Read { page_id: PageId },
-    Write { page_id: PageId, data: Vec<u8> },
-    BatchRead { page_ids: Vec<PageId> },
-    BatchWrite { pages: Vec<(PageId, Vec<u8>)> },
-    Flush,
-    Sync,
-}
-
-/// Cache eviction policies
-#[derive(Debug, Clone, PartialEq)]
-pub enum EvictionPolicy {
-    LRU,    // Least Recently Used
-    LFU,    // Least Frequently Used
-    FIFO,   // First In, First Out
-    ARC,    // Adaptive Replacement Cache
-}
-
-// ============================================================================
-// I/O OPERATION STRUCTURES
-// ============================================================================
-
-/// Represents an I/O operation with priority and metadata
-#[derive(Debug)]
-pub struct IOOperation {
-    pub id: u64,
-    pub operation_type: IOOperationType,
-    pub priority: IOPriority,
-    pub timestamp: Instant,
-    pub completion_sender: oneshot::Sender<IoResult<Vec<u8>>>,
-}
-
-impl PartialEq for IOOperation {
-    fn eq(&self, other: &Self) -> bool {
-        self.priority == other.priority && self.timestamp == other.timestamp
-    }
-}
-
-impl Eq for IOOperation {}
-
-impl PartialOrd for IOOperation {
-    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for IOOperation {
-    fn cmp(&self, other: &Self) -> CmpOrdering {
-        // Higher priority first, then by timestamp (older first)
-        other.priority.cmp(&self.priority)
-            .then_with(|| self.timestamp.cmp(&other.timestamp))
-    }
-}
-
-/// Tracks completion of I/O operations
-#[derive(Debug, Default)]
-pub struct CompletionTracker {
-    completed_ops: AtomicU64,
-    failed_ops: AtomicU64,
-    total_latency_ns: AtomicU64,
-}
-
-// ============================================================================
-// CACHE STRUCTURES
-// ============================================================================
-
-/// Page data with metadata
-#[derive(Debug)]
-pub struct PageData {
-    pub data: Vec<u8>,
-    pub access_count: AtomicUsize,
-    pub last_access: Instant,
-    pub dirty: AtomicBool,
-}
-
-impl Clone for PageData {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data.clone(),
-            access_count: AtomicUsize::new(self.access_count.load(Ordering::Relaxed)),
-            last_access: self.last_access,
-            dirty: AtomicBool::new(self.dirty.load(Ordering::Relaxed)),
-        }
-    }
-}
-
-/// LRU Cache implementation with proper eviction
-#[derive(Debug)]
-pub struct LRUCache<K, V> {
-    capacity: usize,
-    data: HashMap<K, V>,
-    access_order: VecDeque<K>,
-    hit_count: AtomicU64,
-    miss_count: AtomicU64,
-}
-
-/// LFU Cache implementation with proper eviction
-#[derive(Debug)]
-pub struct LFUCache<K, V> {
-    capacity: usize,
-    data: HashMap<K, V>,
-    frequencies: HashMap<K, usize>,
-    frequency_lists: HashMap<usize, VecDeque<K>>,
-    min_frequency: usize,
-    hit_count: AtomicU64,
-    miss_count: AtomicU64,
-}
-
-/// FIFO Cache implementation with proper eviction
-#[derive(Debug)]
-pub struct FIFOCache<K, V> {
-    capacity: usize,
-    data: HashMap<K, V>,
-    insertion_order: VecDeque<K>,
-    hit_count: AtomicU64,
-    miss_count: AtomicU64,
-}
-
-/// LRU-K Cache adapter using the existing LRU-K replacer
-pub struct LRUKCache {
-    capacity: usize,
-    data: HashMap<PageId, PageData>,
-    replacer: std::sync::Mutex<LRUKReplacer>,
-    hit_count: AtomicU64,
-    miss_count: AtomicU64,
-}
-
-impl std::fmt::Debug for LRUKCache {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LRUKCache")
-            .field("capacity", &self.capacity)
-            .field("data_len", &self.data.len())
-            .field("hit_count", &self.hit_count.load(Ordering::Relaxed))
-            .field("miss_count", &self.miss_count.load(Ordering::Relaxed))
-            .finish()
-    }
-}
-
-impl LRUKCache {
-    /// Creates a new LRU-K cache
-    pub fn new(capacity: usize, k: usize) -> Self {
-        Self {
-            capacity,
-            data: HashMap::new(),
-            replacer: std::sync::Mutex::new(LRUKReplacer::new(capacity, k)),
-            hit_count: AtomicU64::new(0),
-            miss_count: AtomicU64::new(0),
-        }
-    }
-
-    /// Gets a page from the cache
-    pub fn get(&mut self, page_id: PageId) -> Option<Vec<u8>> {
-        if let Some(page_data) = self.data.get(&page_id) {
-            // Record access in replacer
-            {
-                let replacer = self.replacer.lock().unwrap();
-                replacer.record_access(page_id, AccessType::Lookup);
-            }
-            self.hit_count.fetch_add(1, Ordering::Relaxed);
-            Some(page_data.data.clone())
-        } else {
-            self.miss_count.fetch_add(1, Ordering::Relaxed);
-            None
-        }
-    }
-
-    /// Inserts a page into the cache
-    pub fn insert(&mut self, page_id: PageId, data: Vec<u8>) {
-        // If at capacity and page doesn't exist, evict using LRU-K
-        if self.data.len() >= self.capacity && !self.data.contains_key(&page_id) {
-            if let Some(victim_frame) = {
-                let mut replacer = self.replacer.lock().unwrap();
-                replacer.evict()
-            } {
-                self.data.remove(&victim_frame);
-            }
-        }
-
-        // Insert the new page
-        let page_data = PageData {
-            data,
-            access_count: AtomicUsize::new(1),
-            last_access: Instant::now(),
-            dirty: AtomicBool::new(false),
-        };
-
-        self.data.insert(page_id, page_data);
-
-        // Record in replacer
-        {
-            let mut replacer = self.replacer.lock().unwrap();
-            replacer.record_access(page_id, AccessType::Lookup);
-            replacer.set_evictable(page_id, true);
-        }
-    }
-
-    /// Returns current cache size
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    /// Checks if cache is empty
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    /// Gets hit ratio
-    pub fn hit_ratio(&self) -> f64 {
-        let hits = self.hit_count.load(Ordering::Relaxed);
-        let misses = self.miss_count.load(Ordering::Relaxed);
-        let total = hits + misses;
-        if total > 0 {
-            hits as f64 / total as f64
-        } else {
-            0.0
-        }
-    }
-
-    /// Gets cache statistics
-    pub fn stats(&self) -> (u64, u64) {
-        (
-            self.hit_count.load(Ordering::Relaxed),
-            self.miss_count.load(Ordering::Relaxed)
-        )
-    }
-
-    /// Clears the cache
-    pub fn clear(&mut self) {
-        self.data.clear();
-        self.replacer = std::sync::Mutex::new(LRUKReplacer::new(self.capacity, 2));
-    }
-}
-
-/// Prefetch engine for predictive caching
-#[derive(Debug)]
-pub struct PrefetchEngine {
-    access_patterns: HashMap<PageId, Vec<PageId>>,
-    sequential_threshold: usize,
-    prefetch_distance: usize,
-    accuracy_tracker: AtomicU64,
-}
-
-/// Cache admission controller
-#[derive(Debug)]
-pub struct AdmissionController {
-    admission_rate: AtomicU64,
-    memory_pressure: AtomicU64,
-    max_memory: usize,
-}
-
-/// Hot/cold data metadata for intelligent cache management
-#[derive(Debug, Clone)]
-pub struct HotColdMetadata {
-    access_frequency: f64,
-    last_access: Instant,
-    access_pattern: AccessPattern,
-    temperature: DataTemperature,
-    promotion_score: f64,
-}
-
-/// Access patterns for predictive caching
-#[derive(Debug, Clone, PartialEq)]
-pub enum AccessPattern {
-    Sequential,
-    Random,
-    Temporal,
-    Spatial,
-}
-
-/// Data temperature classification
-#[derive(Debug, Clone, PartialEq)]
-pub enum DataTemperature {
-    Hot,    // Frequently accessed
-    Warm,   // Moderately accessed
-    Cold,   // Rarely accessed
-    Frozen, // Almost never accessed
-}
-
-/// Advanced deduplication engine
-#[derive(Debug)]
-pub struct DeduplicationEngine {
-    content_hashes: HashMap<u64, Vec<PageId>>, // Hash -> list of page IDs with that content
-    page_hashes: HashMap<PageId, u64>,         // Page ID -> content hash
-    dedup_savings_bytes: AtomicUsize,
-    total_pages_processed: AtomicUsize,
-}
-
-impl DeduplicationEngine {
-    pub fn new() -> Self {
-        Self {
-            content_hashes: HashMap::new(),
-            page_hashes: HashMap::new(),
-            dedup_savings_bytes: AtomicUsize::new(0),
-            total_pages_processed: AtomicUsize::new(0),
-        }
-    }
-
-    /// Checks if page content is duplicated and returns canonical page ID if found
-    pub fn check_duplicate(&mut self, page_id: PageId, data: &[u8]) -> Option<PageId> {
-        let hash = SimdProcessor::fast_checksum(data);
-        self.page_hashes.insert(page_id, hash);
-        self.total_pages_processed.fetch_add(1, Ordering::Relaxed);
-
-        if let Some(existing_pages) = self.content_hashes.get(&hash) {
-            if let Some(&canonical_page) = existing_pages.first() {
-                if canonical_page != page_id {
-                    // Found duplicate content
-                    self.dedup_savings_bytes.fetch_add(data.len(), Ordering::Relaxed);
-                    return Some(canonical_page);
-                }
-            }
-        }
-
-        // Add this page as a new unique content
-        self.content_hashes.entry(hash).or_insert_with(Vec::new).push(page_id);
-        None
-    }
-
-    /// Gets deduplication statistics
-    pub fn get_stats(&self) -> (usize, usize, f64) {
-        let savings = self.dedup_savings_bytes.load(Ordering::Relaxed);
-        let total = self.total_pages_processed.load(Ordering::Relaxed);
-        let ratio = if total > 0 { savings as f64 / (total * DB_PAGE_SIZE as usize) as f64 } else { 0.0 };
-        (savings, total, ratio)
-    }
-}
-
-/// Advanced multi-level cache manager with ML-based prefetching (Phase 5)
-#[derive(Debug)]
-pub struct CacheManager {
-    // L1: Hot page cache (fastest access) - LRU-K based
-    hot_cache: Arc<RwLock<LRUKCache>>,
-
-    // L2: Warm page cache (medium access) - LFU based
-    warm_cache: Arc<RwLock<LFUCache<PageId, PageData>>>,
-
-    // L3: Cold page cache (background prefetch) - FIFO based
-    cold_cache: Arc<RwLock<FIFOCache<PageId, PageData>>>,
-
-    // Cache sizes
-    hot_cache_size: usize,
-    warm_cache_size: usize,
-    cold_cache_size: usize,
-
-    // Predictive prefetching
-    prefetch_engine: Arc<RwLock<PrefetchEngine>>,
-
-    // Phase 5: ML-based prefetching
-    ml_prefetcher: Arc<RwLock<MLPrefetcher>>,
-
-    // Cache admission control
-    admission_controller: Arc<AdmissionController>,
-
-    // Phase 5: Hot/cold data separation
-    hot_data_tracker: Arc<RwLock<HashMap<PageId, HotColdMetadata>>>,
-
-    // Phase 5: Deduplication engine
-    dedup_engine: Arc<RwLock<DeduplicationEngine>>,
-
-    // Cache statistics
-    promotion_count: AtomicU64,
-    demotion_count: AtomicU64,
-
-    // Phase 5: Advanced statistics
-    prefetch_accuracy: AtomicU64,
-    dedup_savings: AtomicU64,
-}
-
-impl CacheManager {
-    /// Creates a new cache manager
-    pub fn new(config: &DiskManagerConfig) -> Self {
-        let total_cache_mb = config.cache_size_mb;
-        let hot_cache_size = (total_cache_mb as f64 * config.hot_cache_ratio) as usize;
-        let warm_cache_size = (total_cache_mb as f64 * config.warm_cache_ratio) as usize;
-        let cold_cache_size = total_cache_mb - hot_cache_size - warm_cache_size;
-
-        // Phase 2: Use LRU-K cache for hot cache (L1)
-        let hot_cache = Arc::new(RwLock::new(LRUKCache::new(hot_cache_size, 2)));
-        let warm_cache = Arc::new(RwLock::new(LFUCache::new(warm_cache_size)));
-        let cold_cache = Arc::new(RwLock::new(FIFOCache::new(cold_cache_size)));
-
-        let prefetch_engine = Arc::new(RwLock::new(PrefetchEngine {
-            access_patterns: HashMap::new(),
-            sequential_threshold: 3,
-            prefetch_distance: config.prefetch_distance,
-            accuracy_tracker: AtomicU64::new(0),
-        }));
-
-        let admission_controller = Arc::new(AdmissionController {
-            admission_rate: AtomicU64::new(100),
-            memory_pressure: AtomicU64::new(0),
-            max_memory: total_cache_mb * 1024 * 1024, // Convert to bytes
-        });
-
-        // Phase 5: Initialize ML prefetcher
-        let ml_prefetcher = Arc::new(RwLock::new(MLPrefetcher::new()));
-
-        // Phase 5: Initialize hot/cold data tracker
-        let hot_data_tracker = Arc::new(RwLock::new(HashMap::new()));
-
-        // Phase 5: Initialize deduplication engine
-        let dedup_engine = Arc::new(RwLock::new(DeduplicationEngine::new()));
-
-        Self {
-            hot_cache,
-            warm_cache,
-            cold_cache,
-            hot_cache_size,
-            warm_cache_size,
-            cold_cache_size,
-            prefetch_engine,
-            ml_prefetcher,
-            admission_controller,
-            hot_data_tracker,
-            dedup_engine,
-            promotion_count: AtomicU64::new(0),
-            demotion_count: AtomicU64::new(0),
-            prefetch_accuracy: AtomicU64::new(0),
-            dedup_savings: AtomicU64::new(0),
-        }
-    }
-
-    /// Attempts to get a page from any cache level with enhanced monitoring
-    pub async fn get_page(&self, page_id: PageId) -> Option<Vec<u8>> {
-        // Check L1 hot cache first (LRU-K)
-        if let Some(data) = self.hot_cache.write().await.get(page_id) {
-            return Some(data);
-        }
-
-        // Check L2 warm cache (LFU)
-        if let Some(page_data) = self.warm_cache.write().await.get(&page_id) {
-            // Promote to hot cache on hit
-            self.promotion_count.fetch_add(1, Ordering::Relaxed);
-            let data_copy = page_data.data.clone();
-            self.hot_cache.write().await.insert(page_id, data_copy.clone());
-            return Some(data_copy);
-        }
-
-        // Check L3 cold cache (FIFO)
-        if let Some(page_data) = self.cold_cache.read().await.get(&page_id) {
-            // Promote to warm cache on hit
-            self.promotion_count.fetch_add(1, Ordering::Relaxed);
-            let data_copy = page_data.data.clone();
-            self.warm_cache.write().await.insert(page_id, page_data.clone());
-            return Some(data_copy);
-        }
-
-        None
-    }
-
-    /// Gets a page with metrics collection integration
-    pub async fn get_page_with_metrics(&self, page_id: PageId, metrics_collector: &MetricsCollector) -> Option<Vec<u8>> {
-        // Check L1 hot cache first (LRU-K)
-        if let Some(data) = self.hot_cache.write().await.get(page_id) {
-            metrics_collector.record_cache_operation("hot", true);
-            return Some(data);
-        }
-
-        // Check L2 warm cache (LFU)
-        if let Some(page_data) = self.warm_cache.write().await.get(&page_id) {
-            metrics_collector.record_cache_operation("warm", true);
-
-            // Promote to hot cache on hit
-            self.promotion_count.fetch_add(1, Ordering::Relaxed);
-            metrics_collector.record_cache_migration(true);
-
-            let data_copy = page_data.data.clone();
-            self.hot_cache.write().await.insert(page_id, data_copy.clone());
-            return Some(data_copy);
-        }
-
-        // Check L3 cold cache (FIFO)
-        if let Some(page_data) = self.cold_cache.read().await.get(&page_id) {
-            metrics_collector.record_cache_operation("cold", true);
-
-            // Promote to warm cache on hit
-            self.promotion_count.fetch_add(1, Ordering::Relaxed);
-            metrics_collector.record_cache_migration(true);
-
-            let data_copy = page_data.data.clone();
-            self.warm_cache.write().await.insert(page_id, page_data.clone());
-            return Some(data_copy);
-        }
-
-        // Cache miss on all levels
-        metrics_collector.record_cache_operation("all", false);
-        None
-    }
-
-    /// Stores a page in the appropriate cache level
-    pub async fn store_page(&self, page_id: PageId, data: Vec<u8>) {
-        // Phase 2: Advanced cache admission and placement policy
-
-        // Start with hot cache (L1) for new pages
-        self.hot_cache.write().await.insert(page_id, data.clone());
-
-        // Also store in cold cache for future access pattern analysis
-        let page_data = PageData {
-            data,
-            access_count: AtomicUsize::new(1),
-            last_access: Instant::now(),
-            dirty: AtomicBool::new(false),
-        };
-
-        // Use FIFO for predictive prefetching in cold cache
-        self.cold_cache.write().await.insert(page_id, page_data);
-    }
-
-    /// Gets comprehensive cache statistics
-    pub async fn get_cache_statistics(&self) -> CacheStatistics {
-        let hot_stats = self.hot_cache.read().await.stats();
-        let warm_stats = self.warm_cache.read().await.stats();
-        let cold_stats = self.cold_cache.read().await.stats();
-
-        CacheStatistics {
-            hot_cache_hits: hot_stats.0,
-            hot_cache_misses: hot_stats.1,
-            warm_cache_hits: warm_stats.0,
-            warm_cache_misses: warm_stats.1,
-            cold_cache_hits: cold_stats.0,
-            cold_cache_misses: cold_stats.1,
-            total_promotions: self.promotion_count.load(Ordering::Relaxed),
-            total_demotions: self.demotion_count.load(Ordering::Relaxed),
-            hot_cache_size: self.hot_cache.read().await.len(),
-            warm_cache_size: self.warm_cache.read().await.len(),
-            cold_cache_size: self.cold_cache.read().await.len(),
-        }
-    }
-}
-
-/// Comprehensive cache statistics
-#[derive(Debug, Clone)]
-pub struct CacheStatistics {
-    pub hot_cache_hits: u64,
-    pub hot_cache_misses: u64,
-    pub warm_cache_hits: u64,
-    pub warm_cache_misses: u64,
-    pub cold_cache_hits: u64,
-    pub cold_cache_misses: u64,
-    pub total_promotions: u64,
-    pub total_demotions: u64,
-    pub hot_cache_size: usize,
-    pub warm_cache_size: usize,
-    pub cold_cache_size: usize,
-}
-
-// ============================================================================
-// WRITE MANAGEMENT STRUCTURES
-// ============================================================================
-
-/// Compressed write buffer with advanced features
-#[derive(Debug)]
-pub struct CompressedWriteBuffer {
-    buffer: HashMap<PageId, Vec<u8>>,
-    dirty_pages: AtomicUsize,
-    last_flush: Instant,
-    compression_enabled: bool,
-    buffer_size_bytes: AtomicUsize,
-    max_buffer_size: usize,
-    compression_ratio: AtomicU64, // Stored as percentage * 100
-}
-
-/// Coordinates flush operations
-#[derive(Debug)]
-pub struct FlushCoordinator {
-    flush_in_progress: AtomicBool,
-    flush_threshold: usize,
-    flush_interval: Duration,
-    last_flush: Mutex<Instant>,
-}
-
-/// Coalesces adjacent writes
-#[derive(Debug)]
-pub struct CoalescingEngine {
-    pending_writes: HashMap<PageId, Vec<u8>>,
-    coalesce_window: Duration,
-    max_coalesce_size: usize,
-}
-
-/// Manages durability guarantees
-#[derive(Debug)]
-pub struct DurabilityManager {
-    fsync_policy: FsyncPolicy,
-    durability_level: DurabilityLevel,
-    wal_enabled: bool,
-    pending_syncs: AtomicUsize,
-}
-
-/// Write buffer statistics
-#[derive(Debug, Clone)]
-pub struct WriteBufferStats {
-    pub dirty_pages: usize,
-    pub buffer_size_bytes: usize,
-    pub max_buffer_size: usize,
-    pub utilization_percent: f64,
-    pub compression_ratio: f64,
-    pub compression_enabled: bool,
-    pub time_since_last_flush: Duration,
-}
-
-/// Advanced write management system
-#[derive(Debug)]
-pub struct WriteManager {
-    // Write-ahead buffer with compression
-    write_buffer: Arc<RwLock<CompressedWriteBuffer>>,
-
-    // Async flush coordinator
-    flush_coordinator: Arc<FlushCoordinator>,
-
-    // Write coalescing engine
-    coalescing_engine: Arc<RwLock<CoalescingEngine>>,
-
-    // Durability guarantees
-    durability_manager: Arc<DurabilityManager>,
-}
-
-impl WriteManager {
-    /// Creates a new write manager
-    pub fn new(config: &DiskManagerConfig) -> Self {
-        let max_buffer_size = config.write_buffer_size_mb * 1024 * 1024; // Convert to bytes
-
-        let write_buffer = Arc::new(RwLock::new(CompressedWriteBuffer {
-            buffer: HashMap::new(),
-            dirty_pages: AtomicUsize::new(0),
-            last_flush: Instant::now(),
-            compression_enabled: config.compression_enabled,
-            buffer_size_bytes: AtomicUsize::new(0),
-            max_buffer_size,
-            compression_ratio: AtomicU64::new(10000), // 100% (no compression initially)
-        }));
-
-        let flush_coordinator = Arc::new(FlushCoordinator {
-            flush_in_progress: AtomicBool::new(false),
-            flush_threshold: config.flush_threshold_pages,
-            flush_interval: Duration::from_millis(config.flush_interval_ms),
-            last_flush: Mutex::new(Instant::now()),
-        });
-
-        let coalescing_engine = Arc::new(RwLock::new(CoalescingEngine {
-            pending_writes: HashMap::new(),
-            coalesce_window: Duration::from_millis(10),
-            max_coalesce_size: 64,
-        }));
-
-        let durability_manager = Arc::new(DurabilityManager {
-            fsync_policy: config.fsync_policy.clone(),
-            durability_level: config.durability_level.clone(),
-            wal_enabled: config.wal_enabled,
-            pending_syncs: AtomicUsize::new(0),
-        });
-
-        Self {
-            write_buffer,
-            flush_coordinator,
-            coalescing_engine,
-            durability_manager,
-        }
-    }
-
-    /// Adds a page to the write buffer with compression and coalescing
-    pub async fn buffer_write(&self, page_id: PageId, data: Vec<u8>) -> IoResult<()> {
-        // First, try to coalesce the write
-        let coalesced_data = self.try_coalesce_write(page_id, data.clone()).await?;
-
-        let mut buffer = self.write_buffer.write().await;
-
-        // Check if we need to apply compression
-        let final_data = if buffer.compression_enabled {
-            // Use default compression algorithm and level for now
-            self.compress_data(&coalesced_data, CompressionAlgorithm::Custom, 6)
-        } else {
-            coalesced_data
-        };
-
-        // Calculate size change for buffer size tracking
-        let old_size = buffer.buffer.get(&page_id).map(|d| d.len()).unwrap_or(0);
-        let new_size = final_data.len();
-        let size_delta = if new_size > old_size { 
-            new_size - old_size 
-        } else { 
-            0 
-        };
-
-        // Check if adding this write would exceed buffer capacity
-        let current_size = buffer.buffer_size_bytes.load(Ordering::Relaxed);
-        if current_size + size_delta > buffer.max_buffer_size {
-            // Buffer is full, need to flush first
-            drop(buffer); // Release lock before flush
-            self.force_flush().await?;
-            // Reacquire lock
-            buffer = self.write_buffer.write().await;
-        }
-
-        // Add the write to buffer
-        let was_new = !buffer.buffer.contains_key(&page_id);
-        buffer.buffer.insert(page_id, final_data);
-        buffer.buffer_size_bytes.fetch_add(size_delta, Ordering::Relaxed);
-
-        if was_new {
-            buffer.dirty_pages.fetch_add(1, Ordering::Relaxed);
-        }
-
-        Ok(())
-    }
-
-    /// Attempts to coalesce a write with pending writes
-    async fn try_coalesce_write(&self, page_id: PageId, data: Vec<u8>) -> IoResult<Vec<u8>> {
-        let mut coalescing = self.coalescing_engine.write().await;
-
-        // Check for adjacent page writes that can be coalesced
-        let mut coalesced_data = data;
-
-        // Look for adjacent pages that can be merged
-        for adj_offset in 1..=4 { // Check up to 4 adjacent pages
-            if let Some(adjacent_data) = coalescing.pending_writes.remove(&(page_id + adj_offset)) {
-                // Simple coalescing: append data if pages are sequential
-                coalesced_data.extend_from_slice(&adjacent_data);
-            }
-            if let Some(adjacent_data) = coalescing.pending_writes.remove(&(page_id.saturating_sub(adj_offset))) {
-                // Prepend data for previous pages
-                let mut new_data = adjacent_data;
-                new_data.extend_from_slice(&coalesced_data);
-                coalesced_data = new_data;
-            }
-        }
-
-        // Add current write to pending writes for future coalescing
-        coalescing.pending_writes.insert(page_id, coalesced_data.clone());
-
-        // Clean up old pending writes (simple time-based cleanup)
-        if coalescing.pending_writes.len() > coalescing.max_coalesce_size {
-            // Remove oldest entries (simplified approach)
-            let keys_to_remove: Vec<_> = coalescing.pending_writes.keys()
-                .take(coalescing.pending_writes.len() - coalescing.max_coalesce_size)
-                .cloned()
-                .collect();
-            for key in keys_to_remove {
-                coalescing.pending_writes.remove(&key);
-            }
-        }
-
-        Ok(coalesced_data)
-    }
-
-    /// Advanced compression implementation with multiple algorithms (Phase 5)
-    fn compress_data(&self, data: &[u8], algorithm: CompressionAlgorithm, level: u32) -> Vec<u8> {
-        match algorithm {
-            CompressionAlgorithm::None => data.to_vec(),
-            CompressionAlgorithm::LZ4 => self.compress_lz4(data),
-            CompressionAlgorithm::Zstd => self.compress_zstd(data, level),
-            CompressionAlgorithm::Custom => self.compress_custom_simd(data),
-        }
-    }
-
-    /// LZ4 compression for high-speed compression
-    fn compress_lz4(&self, data: &[u8]) -> Vec<u8> {
-        // Phase 5: Use LZ4 for fast compression
-        match lz4::block::compress(data, None, true) {
-            Ok(compressed) => {
-                if compressed.len() < data.len() {
-                    let ratio = (compressed.len() * 10000) / data.len();
-                    self.durability_manager.pending_syncs.store(ratio, Ordering::Relaxed);
-                    compressed
-                } else {
-                    data.to_vec() // Use uncompressed if no benefit
-                }
-            }
-            Err(_) => data.to_vec(), // Fallback to uncompressed
-        }
-    }
-
-    /// Zstd compression for high compression ratios
-    fn compress_zstd(&self, data: &[u8], level: u32) -> Vec<u8> {
-        // Phase 5: Use Zstd for high compression ratios
-        match zstd::bulk::compress(data, level as i32) {
-            Ok(compressed) => {
-                if compressed.len() < data.len() {
-                    let ratio = (compressed.len() * 10000) / data.len();
-                    self.durability_manager.pending_syncs.store(ratio, Ordering::Relaxed);
-                    compressed
-                } else {
-                    data.to_vec() // Use uncompressed if no benefit
-                }
-            }
-            Err(_) => data.to_vec(), // Fallback to uncompressed
-        }
-    }
-
-    /// Custom SIMD-optimized compression
-    fn compress_custom_simd(&self, data: &[u8]) -> Vec<u8> {
-        // Phase 5: Custom SIMD-optimized compression algorithm
-
-        // First check if it's a zero page (common case)
-        if SimdProcessor::is_zero_page(data) {
-            // Encode zero page as special marker + original length
-            let mut compressed = vec![0xFF, 0xFE]; // Special zero page marker
-            compressed.extend_from_slice(&(data.len() as u32).to_le_bytes());
-            return compressed;
-        }
-
-        // Use enhanced RLE with SIMD detection
-        let mut compressed = Vec::new();
-        let mut i = 0;
-
-        while i < data.len() {
-            let byte = data[i];
-            let mut count = 1;
-
-            // Use SIMD to find run length more efficiently
-            let max_run = (data.len() - i).min(255);
-            while count < max_run && data[i + count] == byte {
-                count += 1;
-            }
-
-            if count >= 4 {
-                // Encode as RLE
-                compressed.push(0xFF); // RLE marker
-                compressed.push(count as u8);
-                compressed.push(byte);
-            } else {
-                // Store literal bytes
-                for j in 0..count {
-                    let b = data[i + j];
-                    if b == 0xFF {
-                        // Escape 0xFF
-                        compressed.push(0xFF);
-                        compressed.push(0x00);
-                    } else {
-                        compressed.push(b);
-                    }
-                }
-            }
-
-            i += count;
-        }
-
-        // Update compression ratio
-        if compressed.len() < data.len() {
-            let ratio = (compressed.len() * 10000) / data.len();
-            self.durability_manager.pending_syncs.store(ratio, Ordering::Relaxed);
-        }
-
-        compressed
-    }
-
-    /// Decompresses data based on detected format
-    fn decompress_data_advanced(&self, compressed: &[u8]) -> Vec<u8> {
-        if compressed.len() < 2 {
-            return compressed.to_vec();
-        }
-
-        // Check for zero page marker
-        if compressed[0] == 0xFF && compressed[1] == 0xFE && compressed.len() == 6 {
-            let length = u32::from_le_bytes([
-                compressed[2], compressed[3], compressed[4], compressed[5]
-            ]) as usize;
-            return vec![0; length];
-        }
-
-        // Try to detect compression format and decompress accordingly
-        if let Ok(decompressed) = lz4::block::decompress(compressed, None) {
-            return decompressed;
-        }
-
-        if let Ok(decompressed) = zstd::bulk::decompress(compressed, 1024 * 1024) {
-            return decompressed;
-        }
-
-        // Fallback to custom decompression
-        self.decompress_custom_simd(compressed)
-    }
-
-    /// Custom SIMD decompression
-    fn decompress_custom_simd(&self, compressed: &[u8]) -> Vec<u8> {
-        let mut decompressed = Vec::new();
-        let mut i = 0;
-
-        while i < compressed.len() {
-            if compressed[i] == 0xFF && i + 2 < compressed.len() {
-                if compressed[i + 1] == 0x00 {
-                    // Escaped 0xFF
-                    decompressed.push(0xFF);
-                    i += 2;
-                } else {
-                    // RLE sequence
-                    let count = compressed[i + 1] as usize;
-                    let byte = compressed[i + 2];
-                    decompressed.extend(std::iter::repeat(byte).take(count));
-                    i += 3;
-                }
-            } else {
-                decompressed.push(compressed[i]);
-                i += 1;
-            }
-        }
-
-        decompressed
-    }
-
-    /// Checks if a flush is needed
-    pub async fn should_flush(&self) -> bool {
-        let buffer = self.write_buffer.read().await;
-        let dirty_count = buffer.dirty_pages.load(Ordering::Relaxed);
-        let time_since_flush = buffer.last_flush.elapsed();
-        let buffer_size = buffer.buffer_size_bytes.load(Ordering::Relaxed);
-        let buffer_utilization = (buffer_size as f64 / buffer.max_buffer_size as f64) * 100.0;
-
-        // Flush if any threshold is exceeded
-        dirty_count >= self.flush_coordinator.flush_threshold ||
-        time_since_flush >= self.flush_coordinator.flush_interval ||
-        buffer_utilization > 80.0 // Flush when buffer is 80% full
-    }
-
-    /// Forces an immediate flush regardless of thresholds
-    pub async fn force_flush(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
-        // Set flush in progress to prevent concurrent flushes
-        if self.flush_coordinator.flush_in_progress.compare_exchange(
-            false, true, Ordering::Acquire, Ordering::Relaxed
-        ).is_err() {
-            // Another flush is already in progress, wait for it
-            while self.flush_coordinator.flush_in_progress.load(Ordering::Acquire) {
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-            return Ok(vec![]); // Return empty as the other flush handled it
-        }
-
-        // Perform the actual flush
-        let result = self.flush_internal().await;
-
-        // Clear flush in progress flag
-        self.flush_coordinator.flush_in_progress.store(false, Ordering::Release);
-
-        result
-    }
-
-    /// Internal flush implementation
-    async fn flush_internal(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
-        let mut buffer = self.write_buffer.write().await;
-
-        if buffer.buffer.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Sort pages by page ID for better disk access patterns
-        let mut pages: Vec<_> = buffer.buffer.drain().collect();
-        pages.sort_by_key(|(page_id, _)| *page_id);
-
-        // Update buffer state
-        buffer.dirty_pages.store(0, Ordering::Relaxed);
-        buffer.buffer_size_bytes.store(0, Ordering::Relaxed);
-        buffer.last_flush = Instant::now();
-
-        // Update flush coordinator
-        {
-            let mut last_flush = self.flush_coordinator.last_flush.lock().await;
-            *last_flush = Instant::now();
-        }
-
-        Ok(pages)
-    }
-
-    /// Regular flush operation (respects thresholds)
-    pub async fn flush(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
-        if !self.should_flush().await {
-            return Ok(vec![]);
-        }
-
-        self.force_flush().await
-    }
-
-    /// Gets write buffer statistics
-    pub async fn get_buffer_stats(&self) -> WriteBufferStats {
-        let buffer = self.write_buffer.read().await;
-        let dirty_count = buffer.dirty_pages.load(Ordering::Relaxed);
-        let buffer_size = buffer.buffer_size_bytes.load(Ordering::Relaxed);
-        let compression_ratio = buffer.compression_ratio.load(Ordering::Relaxed) as f64 / 100.0;
-        let utilization = (buffer_size as f64 / buffer.max_buffer_size as f64) * 100.0;
-
-        WriteBufferStats {
-            dirty_pages: dirty_count,
-            buffer_size_bytes: buffer_size,
-            max_buffer_size: buffer.max_buffer_size,
-            utilization_percent: utilization,
-            compression_ratio,
-            compression_enabled: buffer.compression_enabled,
-            time_since_last_flush: buffer.last_flush.elapsed(),
-        }
-    }
-
-    /// Applies durability policies to a write operation
-    pub async fn apply_durability(&self, _pages: &[(PageId, Vec<u8>)]) -> IoResult<bool> {
-        match self.durability_manager.durability_level {
-            DurabilityLevel::None => Ok(false),
-            DurabilityLevel::Buffer => Ok(false), // Just buffered, no immediate sync
-            DurabilityLevel::Sync => Ok(true),    // Requires sync after write
-            DurabilityLevel::Durable => {
-                // For durable writes, we need to ensure WAL is written first
-                if self.durability_manager.wal_enabled {
-                    // TODO: Write to WAL first
-                }
-                Ok(true) // Requires sync
-            }
-        }
-    }
-
-    /// Decompresses data (companion to compress_data)
-    pub fn decompress_data(&self, compressed: &[u8]) -> Vec<u8> {
-        if compressed.is_empty() {
-            return Vec::new();
-        }
-
-        let mut decompressed = Vec::new();
-        let mut i = 0;
-
-        while i < compressed.len() {
-            if compressed[i] == 0xFF && i + 2 < compressed.len() {
-                if compressed[i + 1] == 0 && compressed[i + 2] == 0xFF {
-                    // Escaped 0xFF byte
-                    decompressed.push(0xFF);
-                    i += 3;
-                } else {
-                    // RLE sequence
-                    let count = compressed[i + 1] as usize;
-                    let byte = compressed[i + 2];
-                    for _ in 0..count {
-                        decompressed.push(byte);
-                    }
-                    i += 3;
-                }
-            } else {
-                // Regular byte
-                decompressed.push(compressed[i]);
-                i += 1;
-            }
-        }
-
-        decompressed
-    }
-}
-
-// ============================================================================
-// METRICS STRUCTURES
-// ============================================================================
-
-/// Live performance metrics with enhanced monitoring
-#[derive(Debug, Default)]
-pub struct LiveMetrics {
-    // I/O Performance (Enhanced)
-    pub io_latency_sum: AtomicU64,
-    pub io_count: AtomicU64,
-    pub io_throughput_bytes: AtomicU64,
-    pub io_queue_depth: AtomicUsize,
-    pub io_utilization: AtomicU64,
-    pub read_ops_count: AtomicU64,
-    pub write_ops_count: AtomicU64,
-    pub batch_ops_count: AtomicU64,
-    pub concurrent_ops_count: AtomicUsize,
-
-    // Latency Distribution
-    pub latency_p50: AtomicU64,
-    pub latency_p95: AtomicU64,
-    pub latency_p99: AtomicU64,
-    pub latency_max: AtomicU64,
-
-    // Cache Performance (Enhanced)
-    pub cache_hits: AtomicU64,
-    pub cache_misses: AtomicU64,
-    pub cache_evictions: AtomicU64,
-    pub prefetch_hits: AtomicU64,
-    pub cache_memory_usage: AtomicUsize,
-    pub hot_cache_hits: AtomicU64,
-    pub warm_cache_hits: AtomicU64,
-    pub cold_cache_hits: AtomicU64,
-    pub cache_promotions: AtomicU64,
-    pub cache_demotions: AtomicU64,
-
-    // Write Performance (Enhanced)
-    pub write_buffer_utilization: AtomicU64,
-    pub flush_count: AtomicU64,
-    pub write_amplification: AtomicU64,
-    pub compression_ratio: AtomicU64,
-    pub coalesced_writes: AtomicU64,
-    pub total_bytes_written: AtomicU64,
-    pub total_bytes_compressed: AtomicU64,
-
-    // System Resources (Enhanced)
-    pub memory_usage: AtomicUsize,
-    pub cpu_usage: AtomicU64,
-    pub disk_utilization: AtomicU64,
-    pub network_usage: AtomicU64,
-    pub file_descriptors_used: AtomicUsize,
-
-    // Error Tracking (Enhanced)
-    pub error_count: AtomicU64,
-    pub retry_count: AtomicU64,
-    pub timeout_count: AtomicU64,
-    pub corruption_count: AtomicU64,
-    pub recovery_count: AtomicU64,
-
-    // Performance Counters
-    pub transactions_per_second: AtomicU64,
-    pub pages_per_second: AtomicU64,
-    pub bytes_per_second: AtomicU64,
-
-    // Health Indicators
-    pub health_score: AtomicU64, // 0-100 health score
-    pub uptime_seconds: AtomicU64,
-    pub last_checkpoint: AtomicU64,
-}
-
-/// Enhanced historical metrics storage with aggregation
-#[derive(Debug)]
-pub struct MetricsStore {
-    snapshots: VecDeque<MetricsSnapshot>,
-    max_snapshots: usize,
-    snapshot_interval: Duration,
-    aggregated_hourly: VecDeque<AggregatedMetrics>,
-    aggregated_daily: VecDeque<AggregatedMetrics>,
-    last_snapshot_time: Instant,
-    start_time: Instant,
-}
-
-/// Aggregated metrics for trend analysis
-#[derive(Debug, Clone)]
-pub struct AggregatedMetrics {
-    pub timestamp: Instant,
-    pub duration: Duration,
-
-    // Aggregated I/O metrics
-    pub avg_latency_ns: u64,
-    pub max_latency_ns: u64,
-    pub total_operations: u64,
-    pub total_throughput_mb: f64,
-
-    // Aggregated cache metrics
-    pub avg_hit_ratio: f64,
-    pub total_cache_operations: u64,
-    pub cache_efficiency_score: f64,
-
-    // Aggregated write metrics
-    pub avg_compression_ratio: f64,
-    pub total_flushes: u64,
-    pub avg_write_amplification: f64,
-
-    // Health metrics
-    pub avg_health_score: f64,
-    pub error_rate: f64,
-    pub availability_percentage: f64,
-}
-
-/// Enhanced performance analyzer with AI-driven insights
-#[derive(Debug)]
-pub struct PerformanceAnalyzer {
-    thresholds: HashMap<String, PerformanceThreshold>,
-    anomaly_detector: AnomalyDetector,
-    trend_analyzer: TrendAnalyzer,
-    bottleneck_detector: BottleneckDetector,
-    prediction_engine: PredictionEngine,
-}
-
-/// Performance threshold with configurable alerting
-#[derive(Debug, Clone)]
-pub struct PerformanceThreshold {
-    pub metric_name: String,
-    pub warning_threshold: f64,
-    pub critical_threshold: f64,
-    pub comparison: ThresholdComparison,
-    pub evaluation_window: Duration,
-    pub consecutive_violations: usize,
-}
-
-/// Threshold comparison types
-#[derive(Debug, Clone, PartialEq)]
-pub enum ThresholdComparison {
-    GreaterThan,
-    LessThan,
-    GreaterThanOrEqual,
-    LessThanOrEqual,
-}
-
-/// Advanced anomaly detection with machine learning
-#[derive(Debug)]
-pub struct AnomalyDetector {
-    baseline_metrics: HashMap<String, MetricBaseline>,
-    sensitivity: f64,
-    detection_window: Duration,
-    learning_rate: f64,
-    anomaly_history: VecDeque<AnomalyEvent>,
-}
-
-/// Baseline metrics for anomaly detection
-#[derive(Debug, Clone)]
-pub struct MetricBaseline {
-    pub mean: f64,
-    pub std_dev: f64,
-    pub min_value: f64,
-    pub max_value: f64,
-    pub sample_count: usize,
-    pub last_updated: Instant,
-}
-
-/// Anomaly event tracking
-#[derive(Debug, Clone)]
-pub struct AnomalyEvent {
-    pub timestamp: Instant,
-    pub metric_name: String,
-    pub actual_value: f64,
-    pub expected_range: (f64, f64),
-    pub severity: AnomalySeverity,
-    pub resolved: bool,
-}
-
-/// Anomaly severity levels
-#[derive(Debug, Clone, PartialEq)]
-pub enum AnomalySeverity {
-    Low,
-    Medium,
-    High,
-    Critical,
-}
-
-/// Trend analysis for predictive monitoring
-#[derive(Debug)]
-pub struct TrendAnalyzer {
-    trend_data: HashMap<String, VecDeque<(Instant, f64)>>,
-    trend_window: Duration,
-    prediction_horizon: Duration,
-}
-
-/// Bottleneck detection and analysis
-#[derive(Debug)]
-pub struct BottleneckDetector {
-    active_bottlenecks: HashMap<String, BottleneckInfo>,
-    detection_rules: Vec<BottleneckRule>,
-    correlation_matrix: HashMap<(String, String), f64>,
-}
-
-/// Bottleneck information
-#[derive(Debug, Clone)]
-pub struct BottleneckInfo {
-    pub component: String,
-    pub metric: String,
-    pub severity: f64,
-    pub first_detected: Instant,
-    pub contributing_factors: Vec<String>,
-    pub suggested_actions: Vec<String>,
-}
-
-/// Bottleneck detection rules
-#[derive(Debug, Clone)]
-pub struct BottleneckRule {
-    pub name: String,
-    pub conditions: Vec<MetricCondition>,
-    pub action: BottleneckAction,
-}
-
-/// Metric condition for bottleneck detection
-#[derive(Debug, Clone)]
-pub struct MetricCondition {
-    pub metric: String,
-    pub operator: ThresholdComparison,
-    pub value: f64,
-    pub duration: Duration,
-}
-
-/// Actions to take when bottleneck is detected
-#[derive(Debug, Clone)]
-pub enum BottleneckAction {
-    Alert(String),
-    AutoScale(String),
-    CacheEvict,
-    ForceFlush,
-    ReduceConcurrency,
-}
-
-/// Predictive performance engine
-#[derive(Debug)]
-pub struct PredictionEngine {
-    models: HashMap<String, PredictionModel>,
-    forecast_horizon: Duration,
-    confidence_threshold: f64,
-}
-
-/// Prediction model for performance forecasting
-#[derive(Debug)]
-pub struct PredictionModel {
-    pub metric_name: String,
-    pub model_type: ModelType,
-    pub accuracy: f64,
-    pub last_trained: Instant,
-    pub predictions: VecDeque<Prediction>,
-}
-
-/// Types of prediction models
-#[derive(Debug)]
-pub enum ModelType {
-    LinearRegression,
-    MovingAverage,
-    ExponentialSmoothing,
-    Seasonal,
-}
-
-/// Performance prediction
-#[derive(Debug, Clone)]
-pub struct Prediction {
-    pub timestamp: Instant,
-    pub predicted_value: f64,
-    pub confidence_interval: (f64, f64),
-    pub confidence_score: f64,
-}
-
-/// Enhanced alerting system with multiple channels
-pub struct AlertingSystem {
-    alert_handlers: Vec<Box<dyn Fn(&Alert) + Send + Sync>>,
-    alert_cooldown: HashMap<String, Instant>,
-    active_alerts: HashMap<String, Alert>,
-    alert_history: VecDeque<Alert>,
-    escalation_rules: Vec<EscalationRule>,
-    notification_channels: Vec<NotificationChannel>,
-}
-
-/// Alert structure with detailed information
-#[derive(Debug, Clone)]
-pub struct Alert {
-    pub id: String,
-    pub alert_type: AlertType,
-    pub severity: AlertSeverity,
-    pub title: String,
-    pub description: String,
-    pub metric_name: String,
-    pub current_value: f64,
-    pub threshold_value: f64,
-    pub timestamp: Instant,
-    pub resolved: bool,
-    pub acknowledged: bool,
-    pub escalated: bool,
-    pub tags: HashMap<String, String>,
-}
-
-/// Types of alerts
-#[derive(Debug, Clone, PartialEq)]
-pub enum AlertType {
-    Performance,
-    Resource,
-    Error,
-    Security,
-    Health,
-    Prediction,
-}
-
-/// Alert severity levels
-#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq)]
-pub enum AlertSeverity {
-    Info = 1,
-    Warning = 2,
-    Critical = 3,
-    Emergency = 4,
-}
-
-/// Escalation rules for alert management
-#[derive(Debug, Clone)]
-pub struct EscalationRule {
-    pub alert_type: AlertType,
-    pub severity: AlertSeverity,
-    pub escalation_delay: Duration,
-    pub max_escalations: usize,
-    pub escalation_actions: Vec<EscalationAction>,
-}
-
-/// Actions to take during escalation
-#[derive(Debug, Clone)]
-pub enum EscalationAction {
-    NotifyAdmins,
-    SendEmail(String),
-    SendSMS(String),
-    CreateTicket(String),
-    AutoRemediate(String),
-}
-
-/// Notification channels
-#[derive(Debug, Clone)]
-pub enum NotificationChannel {
-    Email {
-        smtp_server: String,
-        recipients: Vec<String>,
-    },
-    Slack {
-        webhook_url: String,
-        channel: String,
-    },
-    PagerDuty {
-        service_key: String,
-    },
-    Webhook {
-        url: String,
-        headers: HashMap<String, String>,
-    },
-    Console,
-}
-
-impl std::fmt::Debug for AlertingSystem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AlertingSystem")
-            .field("handler_count", &self.alert_handlers.len())
-            .field("alert_cooldown", &self.alert_cooldown)
-            .finish()
-    }
-}
-
-/// Comprehensive metrics collection system
-#[derive(Debug)]
-pub struct MetricsCollector {
-    // Real-time metrics
-    live_metrics: Arc<LiveMetrics>,
-
-    // Historical data
-    metrics_store: Arc<RwLock<MetricsStore>>,
-
-    // Performance analysis
-    analyzer: Arc<PerformanceAnalyzer>,
-
-    // Alerting system
-    alerting: Arc<RwLock<AlertingSystem>>,
-}
-
-impl MetricsCollector {
-    /// Creates a new enhanced metrics collector
-    pub fn new(_config: &DiskManagerConfig) -> Self {
-        let live_metrics = Arc::new(LiveMetrics::default());
-
-        let now = Instant::now();
-        let metrics_store = Arc::new(RwLock::new(MetricsStore {
-            snapshots: VecDeque::new(),
-            max_snapshots: 1000,
-            snapshot_interval: Duration::from_secs(60),
-            aggregated_hourly: VecDeque::new(),
-            aggregated_daily: VecDeque::new(),
-            last_snapshot_time: now,
-            start_time: now,
-        }));
-
-        let analyzer = Arc::new(PerformanceAnalyzer {
-            thresholds: Self::create_default_thresholds(),
-            anomaly_detector: AnomalyDetector {
-                baseline_metrics: HashMap::new(),
-                sensitivity: 2.0,
-                detection_window: Duration::from_secs(300),
-                learning_rate: 0.1,
-                anomaly_history: VecDeque::new(),
-            },
-            trend_analyzer: TrendAnalyzer {
-                trend_data: HashMap::new(),
-                trend_window: Duration::from_secs(3600),
-                prediction_horizon: Duration::from_secs(1800),
-            },
-            bottleneck_detector: BottleneckDetector {
-                active_bottlenecks: HashMap::new(),
-                detection_rules: Self::create_bottleneck_rules(),
-                correlation_matrix: HashMap::new(),
-            },
-            prediction_engine: PredictionEngine {
-                models: HashMap::new(),
-                forecast_horizon: Duration::from_secs(1800),
-                confidence_threshold: 0.8,
-            },
-        });
-
-        let alerting = Arc::new(RwLock::new(AlertingSystem {
-            alert_handlers: Vec::new(),
-            alert_cooldown: HashMap::new(),
-            active_alerts: HashMap::new(),
-            alert_history: VecDeque::new(),
-            escalation_rules: Self::create_escalation_rules(),
-            notification_channels: vec![NotificationChannel::Console],
-        }));
-
-        Self {
-            live_metrics,
-            metrics_store,
-            analyzer,
-            alerting,
-        }
-    }
-
-    /// Creates default performance thresholds
-    fn create_default_thresholds() -> HashMap<String, PerformanceThreshold> {
-        let mut thresholds = HashMap::new();
-
-        // I/O latency thresholds
-        thresholds.insert("io_latency_avg".to_string(), PerformanceThreshold {
-            metric_name: "io_latency_avg".to_string(),
-            warning_threshold: 10_000_000.0, // 10ms
-            critical_threshold: 50_000_000.0, // 50ms
-            comparison: ThresholdComparison::GreaterThan,
-            evaluation_window: Duration::from_secs(60),
-            consecutive_violations: 3,
-        });
-
-        // Cache hit ratio thresholds
-        thresholds.insert("cache_hit_ratio".to_string(), PerformanceThreshold {
-            metric_name: "cache_hit_ratio".to_string(),
-            warning_threshold: 80.0,
-            critical_threshold: 70.0,
-            comparison: ThresholdComparison::LessThan,
-            evaluation_window: Duration::from_secs(300),
-            consecutive_violations: 5,
-        });
-
-        // Error rate thresholds
-        thresholds.insert("error_rate".to_string(), PerformanceThreshold {
-            metric_name: "error_rate".to_string(),
-            warning_threshold: 0.01, // 1%
-            critical_threshold: 0.05, // 5%
-            comparison: ThresholdComparison::GreaterThan,
-            evaluation_window: Duration::from_secs(60),
-            consecutive_violations: 2,
-        });
-
-        thresholds
-    }
-
-    /// Creates default bottleneck detection rules
-    fn create_bottleneck_rules() -> Vec<BottleneckRule> {
-        vec![
-            BottleneckRule {
-                name: "High I/O Queue Depth".to_string(),
-                conditions: vec![
-                    MetricCondition {
-                        metric: "io_queue_depth".to_string(),
-                        operator: ThresholdComparison::GreaterThan,
-                        value: 100.0,
-                        duration: Duration::from_secs(30),
-                    }
-                ],
-                action: BottleneckAction::Alert("I/O subsystem overloaded".to_string()),
-            },
-            BottleneckRule {
-                name: "Low Cache Hit Ratio".to_string(),
-                conditions: vec![
-                    MetricCondition {
-                        metric: "cache_hit_ratio".to_string(),
-                        operator: ThresholdComparison::LessThan,
-                        value: 60.0,
-                        duration: Duration::from_secs(120),
-                    }
-                ],
-                action: BottleneckAction::CacheEvict,
-            },
-            BottleneckRule {
-                name: "High Write Buffer Utilization".to_string(),
-                conditions: vec![
-                    MetricCondition {
-                        metric: "write_buffer_utilization".to_string(),
-                        operator: ThresholdComparison::GreaterThan,
-                        value: 90.0,
-                        duration: Duration::from_secs(60),
-                    }
-                ],
-                action: BottleneckAction::ForceFlush,
-            },
-        ]
-    }
-
-    /// Creates default escalation rules
-    fn create_escalation_rules() -> Vec<EscalationRule> {
-        vec![
-            EscalationRule {
-                alert_type: AlertType::Performance,
-                severity: AlertSeverity::Critical,
-                escalation_delay: Duration::from_secs(300),
-                max_escalations: 3,
-                escalation_actions: vec![
-                    EscalationAction::NotifyAdmins,
-                    EscalationAction::CreateTicket("Performance degradation detected".to_string()),
-                ],
-            },
-            EscalationRule {
-                alert_type: AlertType::Error,
-                severity: AlertSeverity::Emergency,
-                escalation_delay: Duration::from_secs(60),
-                max_escalations: 2,
-                escalation_actions: vec![
-                    EscalationAction::NotifyAdmins,
-                    EscalationAction::AutoRemediate("restart_service".to_string()),
-                ],
-            },
-        ]
-    }
-
-    /// Records a read operation with enhanced metrics
-    pub fn record_read(&self, latency_ns: u64, bytes: u64, success: bool) {
-        // Basic I/O metrics
-        self.live_metrics.io_latency_sum.fetch_add(latency_ns, Ordering::Relaxed);
-        self.live_metrics.io_count.fetch_add(1, Ordering::Relaxed);
-        self.live_metrics.read_ops_count.fetch_add(1, Ordering::Relaxed);
-        self.live_metrics.io_throughput_bytes.fetch_add(bytes, Ordering::Relaxed);
-
-        // Update latency distribution
-        self.update_latency_distribution(latency_ns);
-
-        // Cache metrics
-        if success {
-            self.live_metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-        } else {
-            self.live_metrics.cache_misses.fetch_add(1, Ordering::Relaxed);
-        }
-
-        // Performance counters
-        self.update_performance_counters();
-
-        // Trigger anomaly detection
-        self.check_for_anomalies("read_latency", latency_ns as f64);
-    }
-
-    /// Records a write operation with enhanced metrics
-    pub fn record_write(&self, latency_ns: u64, bytes: u64) {
-        // Basic I/O metrics
-        self.live_metrics.io_latency_sum.fetch_add(latency_ns, Ordering::Relaxed);
-        self.live_metrics.io_count.fetch_add(1, Ordering::Relaxed);
-        self.live_metrics.write_ops_count.fetch_add(1, Ordering::Relaxed);
-        self.live_metrics.io_throughput_bytes.fetch_add(bytes, Ordering::Relaxed);
-        self.live_metrics.total_bytes_written.fetch_add(bytes, Ordering::Relaxed);
-
-        // Update latency distribution
-        self.update_latency_distribution(latency_ns);
-
-        // Performance counters
-        self.update_performance_counters();
-
-        // Trigger anomaly detection
-        self.check_for_anomalies("write_latency", latency_ns as f64);
-    }
-
-    /// Records a batch operation
-    pub fn record_batch_operation(&self, operation_count: usize, total_latency_ns: u64, total_bytes: u64) {
-        self.live_metrics.batch_ops_count.fetch_add(1, Ordering::Relaxed);
-        self.live_metrics.io_count.fetch_add(operation_count as u64, Ordering::Relaxed);
-        self.live_metrics.io_latency_sum.fetch_add(total_latency_ns, Ordering::Relaxed);
-        self.live_metrics.io_throughput_bytes.fetch_add(total_bytes, Ordering::Relaxed);
-
-        // Update batch-specific metrics
-        let avg_latency = total_latency_ns / operation_count as u64;
-        self.update_latency_distribution(avg_latency);
-
-        // Check for batch operation anomalies
-        self.check_for_anomalies("batch_latency", avg_latency as f64);
-    }
-
-    /// Records cache operation metrics
-    pub fn record_cache_operation(&self, cache_level: &str, hit: bool) {
-        if hit {
-            match cache_level {
-                "hot" => {
-                    self.live_metrics.hot_cache_hits.fetch_add(1, Ordering::Relaxed);
-                    self.live_metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                }
-                "warm" => {
-                    self.live_metrics.warm_cache_hits.fetch_add(1, Ordering::Relaxed);
-                    self.live_metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                }
-                "cold" => {
-                    self.live_metrics.cold_cache_hits.fetch_add(1, Ordering::Relaxed);
-                    self.live_metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                }
-                _ => {}
-            }
-        } else {
-            // Record cache miss
-            self.live_metrics.cache_misses.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    /// Records cache promotion/demotion
-    pub fn record_cache_migration(&self, promotion: bool) {
-        if promotion {
-            self.live_metrics.cache_promotions.fetch_add(1, Ordering::Relaxed);
-        } else {
-            self.live_metrics.cache_demotions.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    /// Updates latency distribution metrics
-    fn update_latency_distribution(&self, latency_ns: u64) {
-        // Simple percentile approximation - in production, use proper quantile estimation
-        let current_max = self.live_metrics.latency_max.load(Ordering::Relaxed);
-        if latency_ns > current_max {
-            self.live_metrics.latency_max.store(latency_ns, Ordering::Relaxed);
-        }
-
-        // Simplified percentile updates (would use proper statistical methods in production)
-        self.live_metrics.latency_p50.store(latency_ns, Ordering::Relaxed);
-        self.live_metrics.latency_p95.store(latency_ns, Ordering::Relaxed);
-        self.live_metrics.latency_p99.store(latency_ns, Ordering::Relaxed);
-    }
-
-    /// Updates performance counters
-    fn update_performance_counters(&self) {
-        // Calculate operations per second (simplified)
-        let ops_count = self.live_metrics.io_count.load(Ordering::Relaxed);
-        let uptime = self.live_metrics.uptime_seconds.load(Ordering::Relaxed);
-
-        if uptime > 0 {
-            let ops_per_sec = ops_count / uptime;
-            self.live_metrics.pages_per_second.store(ops_per_sec, Ordering::Relaxed);
-        }
-
-        // Update health score (simplified calculation)
-        let health_score = self.calculate_health_score();
-        self.live_metrics.health_score.store(health_score, Ordering::Relaxed);
-    }
-
-    /// Calculates overall system health score
-    fn calculate_health_score(&self) -> u64 {
-        let mut score = 100u64;
-
-        // Penalize high error rates
-        let error_count = self.live_metrics.error_count.load(Ordering::Relaxed);
-        let total_ops = self.live_metrics.io_count.load(Ordering::Relaxed);
-        if total_ops > 0 {
-            let error_rate = (error_count as f64 / total_ops as f64) * 100.0;
-            score = score.saturating_sub((error_rate * 10.0) as u64);
-        }
-
-        // Penalize high latency
-        let avg_latency = if total_ops > 0 {
-            self.live_metrics.io_latency_sum.load(Ordering::Relaxed) / total_ops
-        } else {
-            0
-        };
-
-        if avg_latency > 10_000_000 { // 10ms
-            score = score.saturating_sub(20);
-        }
-
-        // Penalize low cache hit rates
-        let cache_hits = self.live_metrics.cache_hits.load(Ordering::Relaxed);
-        let cache_misses = self.live_metrics.cache_misses.load(Ordering::Relaxed);
-        let total_cache_ops = cache_hits + cache_misses;
-
-        if total_cache_ops > 0 {
-            let hit_ratio = (cache_hits as f64 / total_cache_ops as f64) * 100.0;
-            if hit_ratio < 80.0 {
-                score = score.saturating_sub((80.0 - hit_ratio) as u64);
-            }
-        }
-
-        score
-    }
-
-    /// Checks for performance anomalies
-    fn check_for_anomalies(&self, metric_name: &str, value: f64) {
-        // Simple threshold-based anomaly detection
-        // In production, this would use the enhanced anomaly detection system
-
-        match metric_name {
-            "read_latency" | "write_latency" => {
-                if value > 50_000_000.0 { // 50ms
-                    // Would trigger alert in real implementation
-                }
-            }
-            "batch_latency" => {
-                if value > 100_000_000.0 { // 100ms
-                    // Would trigger alert in real implementation
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Gets current live metrics
-    pub fn get_live_metrics(&self) -> &LiveMetrics {
-        &self.live_metrics
-    }
-
-    /// Creates a comprehensive metrics snapshot
-    pub async fn create_metrics_snapshot(&self) -> MetricsSnapshot {
-        let live_metrics = &self.live_metrics;
-
-        let io_count = live_metrics.io_count.load(Ordering::Relaxed);
-        let latency_sum = live_metrics.io_latency_sum.load(Ordering::Relaxed);
-        let cache_hits = live_metrics.cache_hits.load(Ordering::Relaxed);
-        let cache_misses = live_metrics.cache_misses.load(Ordering::Relaxed);
-        let throughput_bytes = live_metrics.io_throughput_bytes.load(Ordering::Relaxed);
-        let flush_count = live_metrics.flush_count.load(Ordering::Relaxed);
-        let _health_score = live_metrics.health_score.load(Ordering::Relaxed);
-
-        let avg_latency = if io_count > 0 { latency_sum / io_count } else { 0 };
-        let total_cache_ops = cache_hits + cache_misses;
-        let hit_ratio = if total_cache_ops > 0 {
-            (cache_hits as f64 / total_cache_ops as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        MetricsSnapshot {
-            read_latency_avg_ns: avg_latency,
-            write_latency_avg_ns: avg_latency,
-            io_throughput_mb_per_sec: (throughput_bytes as f64) / (1024.0 * 1024.0),
-            io_queue_depth: live_metrics.io_queue_depth.load(Ordering::Relaxed),
-            cache_hit_ratio: hit_ratio,
-            prefetch_accuracy: 0.0, // Would calculate from prefetch metrics
-            cache_memory_usage_mb: live_metrics.cache_memory_usage.load(Ordering::Relaxed) / (1024 * 1024),
-            write_buffer_utilization: live_metrics.write_buffer_utilization.load(Ordering::Relaxed) as f64 / 10000.0,
-            compression_ratio: live_metrics.compression_ratio.load(Ordering::Relaxed) as f64 / 10000.0,
-            flush_frequency_per_sec: flush_count as f64 / 60.0, // Simplified calculation
-            error_rate_per_sec: live_metrics.error_count.load(Ordering::Relaxed) as f64,
-            retry_count: live_metrics.retry_count.load(Ordering::Relaxed),
-        }
-    }
-
-    /// Starts background monitoring tasks
-    pub async fn start_monitoring(&self) -> JoinHandle<()> {
-        let metrics_store = Arc::clone(&self.metrics_store);
-        let live_metrics = Arc::clone(&self.live_metrics);
-        let analyzer = Arc::clone(&self.analyzer);
-        let alerting = Arc::clone(&self.alerting);
-
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
-
-            loop {
-                interval.tick().await;
-
-                // Create and store snapshot
-                let snapshot = Self::create_snapshot_from_live(&live_metrics).await;
-                {
-                    let mut store = metrics_store.write().await;
-                    store.snapshots.push_back(snapshot.clone());
-
-                    // Maintain maximum snapshots
-                    while store.snapshots.len() > store.max_snapshots {
-                        store.snapshots.pop_front();
-                    }
-
-                    // Update aggregated metrics
-                    Self::update_aggregated_metrics(&mut store, &snapshot).await;
-                }
-
-                // Perform anomaly detection
-                Self::perform_anomaly_detection(&analyzer, &snapshot).await;
-
-                // Check for alerts
-                Self::check_alert_conditions(&alerting, &snapshot).await;
-            }
-        })
-    }
-
-    /// Creates a snapshot from live metrics
-    async fn create_snapshot_from_live(live_metrics: &LiveMetrics) -> MetricsSnapshot {
-        let io_count = live_metrics.io_count.load(Ordering::Relaxed);
-        let latency_sum = live_metrics.io_latency_sum.load(Ordering::Relaxed);
-        let cache_hits = live_metrics.cache_hits.load(Ordering::Relaxed);
-        let cache_misses = live_metrics.cache_misses.load(Ordering::Relaxed);
-        let throughput_bytes = live_metrics.io_throughput_bytes.load(Ordering::Relaxed);
-
-        let avg_latency = if io_count > 0 { latency_sum / io_count } else { 0 };
-        let total_cache_ops = cache_hits + cache_misses;
-        let hit_ratio = if total_cache_ops > 0 {
-            (cache_hits as f64 / total_cache_ops as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        MetricsSnapshot {
-            read_latency_avg_ns: avg_latency,
-            write_latency_avg_ns: avg_latency,
-            io_throughput_mb_per_sec: (throughput_bytes as f64) / (1024.0 * 1024.0),
-            io_queue_depth: live_metrics.io_queue_depth.load(Ordering::Relaxed),
-            cache_hit_ratio: hit_ratio,
-            prefetch_accuracy: 0.0,
-            cache_memory_usage_mb: live_metrics.cache_memory_usage.load(Ordering::Relaxed) / (1024 * 1024),
-            write_buffer_utilization: live_metrics.write_buffer_utilization.load(Ordering::Relaxed) as f64 / 10000.0,
-            compression_ratio: live_metrics.compression_ratio.load(Ordering::Relaxed) as f64 / 10000.0,
-            flush_frequency_per_sec: live_metrics.flush_count.load(Ordering::Relaxed) as f64 / 60.0,
-            error_rate_per_sec: live_metrics.error_count.load(Ordering::Relaxed) as f64,
-            retry_count: live_metrics.retry_count.load(Ordering::Relaxed),
-        }
-    }
-
-    /// Updates aggregated metrics for trend analysis
-    async fn update_aggregated_metrics(store: &mut MetricsStore, snapshot: &MetricsSnapshot) {
-        // Create hourly aggregation if needed
-        let now = Instant::now();
-        let should_aggregate_hourly = store.last_snapshot_time.elapsed() >= Duration::from_secs(3600);
-
-        if should_aggregate_hourly {
-            let aggregated = AggregatedMetrics {
-                timestamp: now,
-                duration: Duration::from_secs(3600),
-                avg_latency_ns: snapshot.read_latency_avg_ns,
-                max_latency_ns: snapshot.read_latency_avg_ns, // Simplified
-                total_operations: 0, // Would calculate from stored snapshots
-                total_throughput_mb: snapshot.io_throughput_mb_per_sec,
-                avg_hit_ratio: snapshot.cache_hit_ratio,
-                total_cache_operations: 0, // Would calculate from stored snapshots
-                cache_efficiency_score: snapshot.cache_hit_ratio,
-                avg_compression_ratio: snapshot.compression_ratio,
-                total_flushes: 0, // Would calculate from stored snapshots
-                avg_write_amplification: 1.0, // Simplified
-                avg_health_score: 95.0, // Would calculate from health metrics
-                error_rate: snapshot.error_rate_per_sec,
-                availability_percentage: 99.9, // Would calculate from uptime metrics
-            };
-
-            store.aggregated_hourly.push_back(aggregated);
-
-            // Maintain maximum hourly aggregations (keep 30 days = 720 hours)
-            while store.aggregated_hourly.len() > 720 {
-                store.aggregated_hourly.pop_front();
-            }
-        }
-
-        store.last_snapshot_time = now;
-    }
-
-    /// Performs anomaly detection on metrics
-    async fn perform_anomaly_detection(_analyzer: &PerformanceAnalyzer, _snapshot: &MetricsSnapshot) {
-        // Would implement sophisticated anomaly detection here
-        // This is a placeholder for the enhanced anomaly detection system
-    }
-
-    /// Checks for alert conditions
-    async fn check_alert_conditions(_alerting: &RwLock<AlertingSystem>, _snapshot: &MetricsSnapshot) {
-        // Would implement alert condition checking here
-        // This is a placeholder for the enhanced alerting system
-    }
-}
-
-// ============================================================================
-// RESOURCE MANAGEMENT
-// ============================================================================
-
-/// Manages system resources
+/// Advanced resource manager for handling system resources, memory allocation,
+/// thread management, and performance optimization
 #[derive(Debug)]
 pub struct ResourceManager {
-    memory_pool: Arc<MemoryPool>,
+    config: DiskManagerConfig,
+    
+    // Memory management
+    memory_pool: Arc<crate::storage::disk::async_disk::memory::MemoryPool>,
+    numa_allocator: Option<Arc<NumaAllocator>>,
+    
+    // Resource tracking
+    allocated_memory: AtomicU64,
+    peak_memory_usage: AtomicU64,
+    
+    // Thread management
     cpu_affinity: Option<Vec<usize>>,
-    max_concurrent_ops: usize,
-    numa_topology: Option<NumaTopology>,
+    io_thread_pool: Arc<tokio::runtime::Handle>,
+    
+    // Performance monitoring
+    resource_pressure: AtomicU64, // 0-100 scale
+    memory_pressure_threshold: u64,
+    
+    // Resource limits
+    max_memory_mb: usize,
+    max_concurrent_operations: usize,
+    
+    // Background cleanup
+    cleanup_interval: Duration,
+    last_cleanup: Arc<Mutex<Instant>>,
 }
 
 impl ResourceManager {
-    /// Creates a new resource manager
-    pub fn new(_config: &DiskManagerConfig) -> Self {
-        let memory_pool = Arc::new(MemoryPool {
-            free_buffers: Mutex::new(Vec::new()),
-            buffer_size: DB_PAGE_SIZE as usize,
-            max_buffers: 1000,
-            allocated_count: AtomicUsize::new(0),
-        });
-
+    /// Creates a new resource manager with advanced system resource management
+    pub fn new(config: &DiskManagerConfig) -> Self {
+        let memory_pool = Arc::new(crate::storage::disk::async_disk::memory::MemoryPool::new(
+            config.memory_pool_size_mb,
+            config.numa_aware,
+            config.numa_node_id,
+        ));
+        
+        let numa_allocator = if config.numa_aware {
+            Some(Arc::new(NumaAllocator::new(config.numa_node_id.unwrap_or(0))))
+        } else {
+            None
+        };
+        
+        let io_thread_pool = Arc::new(tokio::runtime::Handle::current());
+        
         Self {
+            config: config.clone(),
             memory_pool,
-            cpu_affinity: None, // Would use config.cpu_affinity.clone()
-            max_concurrent_ops: 1000, // Would use config.max_concurrent_ops
-            numa_topology: None, // Phase 1: No NUMA support yet
+            numa_allocator,
+            allocated_memory: AtomicU64::new(0),
+            peak_memory_usage: AtomicU64::new(0),
+            cpu_affinity: config.cpu_affinity.clone(),
+            io_thread_pool,
+            resource_pressure: AtomicU64::new(0),
+            memory_pressure_threshold: (config.memory_pool_size_mb * 1024 * 1024 * 80 / 100) as u64, // 80% threshold
+            max_memory_mb: config.memory_pool_size_mb,
+            max_concurrent_operations: config.max_concurrent_ops,
+            cleanup_interval: Duration::from_secs(30), // Cleanup every 30 seconds
+            last_cleanup: Arc::new(Mutex::new(Instant::now())),
         }
     }
-}
-
-/// Memory pool for efficient allocation
-#[derive(Debug)]
-pub struct MemoryPool {
-    free_buffers: Mutex<Vec<Vec<u8>>>,
-    buffer_size: usize,
-    max_buffers: usize,
-    allocated_count: AtomicUsize,
-}
-
-/// NUMA topology information
-#[derive(Debug)]
-pub struct NumaTopology {
-    nodes: Vec<NumaNode>,
-    current_node: usize,
-}
-
-/// NUMA node information
-#[derive(Debug)]
-pub struct NumaNode {
-    id: usize,
-    cpus: Vec<usize>,
-    memory_gb: usize,
-}
-
-// ============================================================================
-// ASYNC I/O ENGINE
-// ============================================================================
-
-/// Priority queue for I/O operations
-pub type PriorityQueue<T> = Arc<Mutex<BinaryHeap<T>>>;
-
-/// Async I/O engine with tokio
-#[derive(Debug)]
-pub struct AsyncIOEngine {
-    // File handles with async I/O
-    db_file: Arc<File>,
-    log_file: Arc<File>,
-
-    // I/O operation queue with prioritization
-    operation_queue: PriorityQueue<IOOperation>,
-
-    // Async I/O workers
-    worker_pool: Vec<JoinHandle<()>>,
-
-    // I/O completion tracking
-    completion_tracker: Arc<CompletionTracker>,
-
-    // Operation ID counter
-    next_operation_id: AtomicU64,
-}
-
-impl AsyncIOEngine {
-    /// Creates a new async I/O engine
-    pub async fn new(db_file: Arc<File>, log_file: Arc<File>) -> IoResult<Self> {
-        let operation_queue = Arc::new(Mutex::new(BinaryHeap::new()));
-        let completion_tracker = Arc::new(CompletionTracker::default());
-
-        Ok(Self {
-            db_file,
-            log_file,
-            operation_queue,
-            worker_pool: Vec::new(),
-            completion_tracker,
-            next_operation_id: AtomicU64::new(0),
-        })
-    }
-
-    /// Reads a page from the database file
-    pub async fn read_page(&self, page_id: PageId) -> IoResult<Vec<u8>> {
-        // Use simplified approach for Phase 1 implementation
-        let _offset = (page_id as u64) * DB_PAGE_SIZE;
-
-        // For now, use simple approach - in production we'd use proper file handle management
-        // This is a Phase 1 implementation
-        let buffer = vec![0u8; DB_PAGE_SIZE as usize];
-
-        // Try to read from the file using pread-like functionality
-        // For Phase 1, we'll use a simplified approach
-        match File::open("temp_placeholder").await {
-            Ok(_) => {
-                // For Phase 1, just return empty data - this will be properly implemented
-                // when we have proper file handle management
-                Ok(buffer)
-            }
-            Err(_) => {
-                // Return zeros for now - Phase 1 implementation
-                Ok(vec![0u8; DB_PAGE_SIZE as usize])
-            }
+    
+    /// Allocates memory from the managed pool with tracking
+    pub fn allocate_memory(&self, size_bytes: usize) -> Option<()> {
+        let current_allocated = self.allocated_memory.load(Ordering::Relaxed);
+        let new_total = current_allocated + size_bytes as u64;
+        
+        // Check memory limits
+        if new_total > (self.max_memory_mb * 1024 * 1024) as u64 {
+            return None; // Memory limit exceeded
         }
+        
+        // Update allocated memory
+        self.allocated_memory.store(new_total, Ordering::Relaxed);
+        
+        // Update peak usage
+        let current_peak = self.peak_memory_usage.load(Ordering::Relaxed);
+        if new_total > current_peak {
+            self.peak_memory_usage.store(new_total, Ordering::Relaxed);
+        }
+        
+        // Update resource pressure
+        self.update_resource_pressure();
+        
+        Some(())
     }
-
-    /// Writes a page to the database file
-    pub async fn write_page(&self, page_id: PageId, data: &[u8]) -> IoResult<()> {
-        // Use simplified approach for Phase 1 implementation
-        let _offset = (page_id as u64) * DB_PAGE_SIZE;
-        let _data_len = data.len();
-
-        // For Phase 1, just return success
-        // This will be properly implemented with file handle management
+    
+    /// Deallocates memory and updates tracking
+    pub fn deallocate_memory(&self, size_bytes: usize) {
+        let current_allocated = self.allocated_memory.load(Ordering::Relaxed);
+        let new_total = current_allocated.saturating_sub(size_bytes as u64);
+        self.allocated_memory.store(new_total, Ordering::Relaxed);
+        
+        // Update resource pressure
+        self.update_resource_pressure();
+    }
+    
+    /// Gets current memory usage statistics
+    pub fn get_memory_stats(&self) -> (u64, u64, f64) {
+        let allocated = self.allocated_memory.load(Ordering::Relaxed);
+        let peak = self.peak_memory_usage.load(Ordering::Relaxed);
+        let utilization = (allocated as f64 / (self.max_memory_mb * 1024 * 1024) as f64) * 100.0;
+        (allocated, peak, utilization)
+    }
+    
+    /// Checks if system is under memory pressure
+    pub fn is_under_memory_pressure(&self) -> bool {
+        let allocated = self.allocated_memory.load(Ordering::Relaxed);
+        allocated > self.memory_pressure_threshold
+    }
+    
+    /// Gets current resource pressure (0-100 scale)
+    pub fn get_resource_pressure(&self) -> u64 {
+        self.resource_pressure.load(Ordering::Relaxed)
+    }
+    
+    /// Updates resource pressure based on current usage
+    fn update_resource_pressure(&self) {
+        let allocated = self.allocated_memory.load(Ordering::Relaxed);
+        let max_memory = (self.max_memory_mb * 1024 * 1024) as u64;
+        
+        let memory_pressure = if max_memory > 0 {
+            ((allocated as f64 / max_memory as f64) * 100.0) as u64
+        } else {
+            0
+        };
+        
+        // Consider other factors (could add CPU usage, I/O pressure, etc.)
+        let overall_pressure = memory_pressure.min(100);
+        
+        self.resource_pressure.store(overall_pressure, Ordering::Relaxed);
+    }
+    
+    /// Applies CPU affinity if configured
+    pub fn apply_cpu_affinity(&self) -> Result<(), std::io::Error> {
+        if let Some(ref affinity) = self.cpu_affinity {
+            // In a real implementation, we would use platform-specific APIs
+            // to set CPU affinity. For now, just return Ok
+            log::info!("CPU affinity would be set to: {:?}", affinity);
+        }
         Ok(())
     }
+    
+    /// Gets the NUMA allocator if available
+    pub fn get_numa_allocator(&self) -> Option<Arc<NumaAllocator>> {
+        self.numa_allocator.clone()
+    }
+    
+    /// Gets the memory pool for advanced allocation
+    pub fn get_memory_pool(&self) -> Arc<crate::storage::disk::async_disk::memory::MemoryPool> {
+        self.memory_pool.clone()
+    }
+    
+    /// Checks if resources should be cleaned up
+    pub async fn should_cleanup(&self) -> bool {
+        let last_cleanup = self.last_cleanup.lock().await;
+        last_cleanup.elapsed() >= self.cleanup_interval
+    }
+    
+    /// Performs resource cleanup and maintenance
+    pub async fn perform_cleanup(&self) -> std::io::Result<()> {
+        // Update last cleanup time
+        {
+            let mut last_cleanup = self.last_cleanup.lock().await;
+            *last_cleanup = Instant::now();
+        }
+        
+        // Reset peak memory if it's been a while
+        let allocated = self.allocated_memory.load(Ordering::Relaxed);
+        self.peak_memory_usage.store(allocated, Ordering::Relaxed);
+        
+        // Could add more cleanup tasks:
+        // - Garbage collect unused memory pools
+        // - Compact fragmented allocations
+        // - Update resource pressure calculations
+        // - Clean up expired cache entries
+        
+        log::debug!("Resource cleanup completed. Current memory usage: {} bytes", allocated);
+        
+        Ok(())
+    }
+    
+    /// Provides resource usage recommendations
+    pub fn get_resource_recommendations(&self) -> Vec<String> {
+        let mut recommendations = Vec::new();
+        
+        let (allocated, peak, utilization) = self.get_memory_stats();
+        
+        if utilization > 90.0 {
+            recommendations.push("Memory usage is very high (>90%). Consider increasing memory pool size.".to_string());
+        } else if utilization > 80.0 {
+            recommendations.push("Memory usage is high (>80%). Monitor for potential memory pressure.".to_string());
+        }
+        
+        if peak > allocated * 2 {
+            recommendations.push("Peak memory usage is much higher than current. Consider memory usage patterns.".to_string());
+        }
+        
+        if self.is_under_memory_pressure() {
+            recommendations.push("System is under memory pressure. Consider reducing concurrent operations.".to_string());
+        }
+        
+        if self.config.numa_aware && self.numa_allocator.is_none() {
+            recommendations.push("NUMA awareness is enabled but allocator is not available.".to_string());
+        }
+        
+        recommendations
+    }
+    
+        /// Gets comprehensive resource health status
+    pub fn get_resource_health(&self) -> (f64, Vec<String>) {
+        let mut health_score: f64 = 100.0;
+        let mut issues = Vec::new();
 
-    /// Syncs the database file to disk
-    pub async fn sync(&self) -> IoResult<()> {
-        self.db_file.sync_all().await
+        let (allocated, _peak, utilization) = self.get_memory_stats();
+
+        // Memory utilization impact
+        if utilization > 95.0 {
+            health_score -= 30.0;
+            issues.push("Critical memory usage".to_string());
+        } else if utilization > 85.0 {
+            health_score -= 15.0;
+            issues.push("High memory usage".to_string());
+        } else if utilization > 70.0 {
+            health_score -= 5.0;
+            issues.push("Moderate memory usage".to_string());
+        }
+
+        // Resource pressure impact
+        let pressure = self.get_resource_pressure();
+        if pressure > 90 {
+            health_score -= 20.0;
+            issues.push("High resource pressure".to_string());
+        } else if pressure > 70 {
+            health_score -= 10.0;
+            issues.push("Moderate resource pressure".to_string());
+        }
+
+        // Memory allocation failures (would track in real implementation)
+        // if allocation_failures > 0 {
+        //     health_score -= 25.0;
+        //     issues.push("Memory allocation failures detected".to_string());
+        // }
+
+        (health_score.max(0.0), issues)
     }
 }
 
@@ -2587,358 +316,8 @@ pub struct AsyncDiskManager {
 // IMPLEMENTATIONS
 // ============================================================================
 
-impl Default for DiskManagerConfig {
-    fn default() -> Self {
-        Self {
-            io_threads: 4,
-            max_concurrent_ops: 1000,
-            batch_size: 64,
-            direct_io: false,
+// Default implementation is already provided in config.rs, removing duplicate
 
-            cache_size_mb: 512,
-            hot_cache_ratio: 0.1,
-            warm_cache_ratio: 0.3,
-            prefetch_enabled: true,
-            prefetch_distance: 8,
-
-            write_buffer_size_mb: 64,
-            flush_threshold_pages: 128,
-            flush_interval_ms: 100,
-            compression_enabled: false,
-
-            metrics_enabled: true,
-            detailed_metrics: false,
-            numa_aware: false,
-            cpu_affinity: None,
-
-            fsync_policy: FsyncPolicy::OnFlush,
-            durability_level: DurabilityLevel::Buffer,
-            wal_enabled: true,
-
-            // Phase 5: Advanced Performance Options
-            compression_algorithm: CompressionAlgorithm::None,
-            simd_optimizations: true,
-            numa_node_id: None,
-            work_stealing_enabled: true,
-            ml_prefetching: true,
-            zero_copy_io: false, // Disabled by default for compatibility
-            adaptive_algorithms: true,
-            memory_pool_size_mb: 128,
-            parallel_io_degree: num_cpus::get(),
-            cpu_cache_optimization: true,
-            lock_free_structures: true,
-            vectorized_operations: true,
-            hot_cold_separation: true,
-            deduplication_enabled: false, // Expensive operation, disabled by default
-            compression_level: 6, // Balanced compression level
-        }
-    }
-}
-
-impl<K, V> LRUCache<K, V> 
-where 
-    K: Clone + std::hash::Hash + Eq,
-    V: Clone,
-{
-    /// Creates a new LRU cache with specified capacity
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            data: HashMap::new(),
-            access_order: VecDeque::new(),
-            hit_count: AtomicU64::new(0),
-            miss_count: AtomicU64::new(0),
-        }
-    }
-
-    /// Inserts or updates a key-value pair
-    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        // Remove from access order if already exists
-        if let Some(pos) = self.access_order.iter().position(|k| k == &key) {
-            self.access_order.remove(pos);
-        }
-
-        // Add to end (most recently used)
-        self.access_order.push_back(key.clone());
-
-        // Evict if over capacity
-        while self.access_order.len() > self.capacity {
-            if let Some(lru_key) = self.access_order.pop_front() {
-                self.data.remove(&lru_key);
-            }
-        }
-
-        // Insert new value
-        self.data.insert(key, value)
-    }
-
-    /// Gets a value by key and updates access order
-    pub fn get(&mut self, key: &K) -> Option<&V> {
-        if self.data.contains_key(key) {
-            // Move to end (most recently used)
-            if let Some(pos) = self.access_order.iter().position(|k| k == key) {
-                let key_clone = self.access_order.remove(pos).unwrap();
-                self.access_order.push_back(key_clone);
-            }
-            self.hit_count.fetch_add(1, Ordering::Relaxed);
-            self.data.get(key)
-        } else {
-            self.miss_count.fetch_add(1, Ordering::Relaxed);
-            None
-        }
-    }
-
-    /// Returns current cache size
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    /// Checks if cache is empty
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    /// Gets hit ratio
-    pub fn hit_ratio(&self) -> f64 {
-        let hits = self.hit_count.load(Ordering::Relaxed);
-        let misses = self.miss_count.load(Ordering::Relaxed);
-        let total = hits + misses;
-        if total > 0 {
-            hits as f64 / total as f64
-        } else {
-            0.0
-        }
-    }
-
-    /// Gets cache statistics
-    pub fn stats(&self) -> (u64, u64) {
-        (
-            self.hit_count.load(Ordering::Relaxed),
-            self.miss_count.load(Ordering::Relaxed)
-        )
-    }
-
-    /// Clears the cache
-    pub fn clear(&mut self) {
-        self.data.clear();
-        self.access_order.clear();
-    }
-}
-
-impl<K, V> LFUCache<K, V> 
-where 
-    K: Clone + std::hash::Hash + Eq,
-    V: Clone,
-{
-    /// Creates a new LFU cache with specified capacity
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            data: HashMap::new(),
-            frequencies: HashMap::new(),
-            frequency_lists: HashMap::new(),
-            min_frequency: 1,
-            hit_count: AtomicU64::new(0),
-            miss_count: AtomicU64::new(0),
-        }
-    }
-
-    /// Inserts or updates a key-value pair
-    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        if self.capacity == 0 {
-            return None;
-        }
-
-        // If key already exists, update value and frequency
-        if self.data.contains_key(&key) {
-            self.update_frequency(&key);
-            return self.data.insert(key, value);
-        }
-
-        // If at capacity, evict LFU item
-        if self.data.len() >= self.capacity {
-            self.evict_lfu();
-        }
-
-        // Insert new item with frequency 1
-        self.data.insert(key.clone(), value);
-        self.frequencies.insert(key.clone(), 1);
-        self.frequency_lists.entry(1).or_insert_with(VecDeque::new).push_back(key);
-        self.min_frequency = 1;
-
-        None
-    }
-
-    /// Gets a value by key and updates frequency
-    pub fn get(&mut self, key: &K) -> Option<&V> {
-        if self.data.contains_key(key) {
-            self.update_frequency(key);
-            self.hit_count.fetch_add(1, Ordering::Relaxed);
-            self.data.get(key)
-        } else {
-            self.miss_count.fetch_add(1, Ordering::Relaxed);
-            None
-        }
-    }
-
-    /// Updates the frequency of a key
-    fn update_frequency(&mut self, key: &K) {
-        let old_freq = self.frequencies.get(key).copied().unwrap_or(0);
-        let new_freq = old_freq + 1;
-
-        // Remove from old frequency list
-        if let Some(list) = self.frequency_lists.get_mut(&old_freq) {
-            if let Some(pos) = list.iter().position(|k| k == key) {
-                list.remove(pos);
-
-                // Update min_frequency if necessary
-                if list.is_empty() && old_freq == self.min_frequency {
-                    self.min_frequency = new_freq;
-                }
-            }
-        }
-
-        // Add to new frequency list
-        self.frequencies.insert(key.clone(), new_freq);
-        self.frequency_lists.entry(new_freq).or_insert_with(VecDeque::new).push_back(key.clone());
-    }
-
-    /// Evicts the least frequently used item
-    fn evict_lfu(&mut self) {
-        if let Some(lfu_list) = self.frequency_lists.get_mut(&self.min_frequency) {
-            if let Some(lfu_key) = lfu_list.pop_front() {
-                self.data.remove(&lfu_key);
-                self.frequencies.remove(&lfu_key);
-            }
-        }
-    }
-
-    /// Returns current cache size
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    /// Checks if cache is empty
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    /// Gets hit ratio
-    pub fn hit_ratio(&self) -> f64 {
-        let hits = self.hit_count.load(Ordering::Relaxed);
-        let misses = self.miss_count.load(Ordering::Relaxed);
-        let total = hits + misses;
-        if total > 0 {
-            hits as f64 / total as f64
-        } else {
-            0.0
-        }
-    }
-
-    /// Gets cache statistics
-    pub fn stats(&self) -> (u64, u64) {
-        (
-            self.hit_count.load(Ordering::Relaxed),
-            self.miss_count.load(Ordering::Relaxed)
-        )
-    }
-
-    /// Clears the cache
-    pub fn clear(&mut self) {
-        self.data.clear();
-        self.frequencies.clear();
-        self.frequency_lists.clear();
-        self.min_frequency = 1;
-    }
-}
-
-impl<K, V> FIFOCache<K, V> 
-where 
-    K: Clone + std::hash::Hash + Eq,
-    V: Clone,
-{
-    /// Creates a new FIFO cache with specified capacity
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            data: HashMap::new(),
-            insertion_order: VecDeque::new(),
-            hit_count: AtomicU64::new(0),
-            miss_count: AtomicU64::new(0),
-        }
-    }
-
-    /// Inserts a key-value pair
-    pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        if self.capacity == 0 {
-            return None;
-        }
-
-        // If key already exists, just update the value (don't change order)
-        if let Some(old_value) = self.data.insert(key.clone(), value) {
-            return Some(old_value);
-        }
-
-        // New key: add to insertion order
-        self.insertion_order.push_back(key.clone());
-
-        // Evict oldest if over capacity
-        while self.insertion_order.len() > self.capacity {
-            if let Some(oldest_key) = self.insertion_order.pop_front() {
-                self.data.remove(&oldest_key);
-            }
-        }
-
-        None
-    }
-
-    /// Gets a value by key (no order change in FIFO)
-    pub fn get(&self, key: &K) -> Option<&V> {
-        if let Some(value) = self.data.get(key) {
-            self.hit_count.fetch_add(1, Ordering::Relaxed);
-            Some(value)
-        } else {
-            self.miss_count.fetch_add(1, Ordering::Relaxed);
-            None
-        }
-    }
-
-    /// Returns current cache size
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    /// Checks if cache is empty
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    /// Gets hit ratio
-    pub fn hit_ratio(&self) -> f64 {
-        let hits = self.hit_count.load(Ordering::Relaxed);
-        let misses = self.miss_count.load(Ordering::Relaxed);
-        let total = hits + misses;
-        if total > 0 {
-            hits as f64 / total as f64
-        } else {
-            0.0
-        }
-    }
-
-    /// Gets cache statistics
-    pub fn stats(&self) -> (u64, u64) {
-        (
-            self.hit_count.load(Ordering::Relaxed),
-            self.miss_count.load(Ordering::Relaxed)
-        )
-    }
-
-    /// Clears the cache
-    pub fn clear(&mut self) {
-        self.data.clear();
-        self.insertion_order.clear();
-    }
-}
 
 impl AsyncDiskManager {
     /// Creates a new async disk manager with specified configuration
@@ -2957,34 +336,31 @@ impl AsyncDiskManager {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        // Open async file handles
-        let db_file = Arc::new(
+        // Open async file handles with proper wrapping in Mutex
+        let db_file = Arc::new(Mutex::new(
             tokio::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .open(&db_file_path)
                 .await?
-        );
+        ));
 
-        let log_file = Arc::new(
+        let log_file = Arc::new(Mutex::new(
             tokio::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .open(&log_file_path)
                 .await?
-        );
+        ));
 
-        // Initialize basic components
-        let io_engine = Arc::new(AsyncIOEngine::new(db_file, log_file).await?);
+        // Initialize basic components - remove .await from non-async constructor
+        let io_engine = Arc::new(AsyncIOEngine::new(db_file, log_file)?);
         let cache_manager = Arc::new(CacheManager::new(&config));
         let write_manager = Arc::new(WriteManager::new(&config));
         let metrics_collector = Arc::new(MetricsCollector::new(&config));
         let resource_manager = Arc::new(ResourceManager::new(&config));
-
-        // Create shutdown signal
-        Arc::new(AtomicBool::new(false));
 
         Ok(Self {
             io_engine,
@@ -3005,7 +381,7 @@ impl AsyncDiskManager {
         // Phase 4: Enhanced implementation with comprehensive monitoring
 
         // 1. Check cache first with metrics integration
-        if let Some(cached_data) = self.cache_manager.get_page_with_metrics(page_id, &self.metrics_collector).await {
+        if let Some(cached_data) = self.cache_manager.get_page_with_metrics(page_id, &self.metrics_collector) {
             let latency_ns = start_time.elapsed().as_nanos() as u64;
             self.metrics_collector.record_read(latency_ns, DB_PAGE_SIZE, true);
             return Ok(cached_data);
@@ -3015,7 +391,7 @@ impl AsyncDiskManager {
         let data = self.io_engine.read_page(page_id).await?;
 
         // 3. Store in cache for future access
-        self.cache_manager.store_page(page_id, data.clone()).await;
+        self.cache_manager.store_page(page_id, data.clone());
 
         // 4. Record comprehensive metrics
         let latency_ns = start_time.elapsed().as_nanos() as u64;
@@ -3024,33 +400,57 @@ impl AsyncDiskManager {
         Ok(data)
     }
 
-    /// Writes a page asynchronously with advanced buffering
+    /// Writes a page asynchronously with advanced buffering and resource management
     pub async fn write_page(&self, page_id: PageId, data: Vec<u8>) -> IoResult<()> {
         let start_time = Instant::now();
 
         // Phase 3: Advanced write management with buffering, compression, and coalescing
 
-        // 1. Add to write buffer (includes compression and coalescing)
-        self.write_manager.buffer_write(page_id, data.clone()).await?;
+        // 1. Check memory pressure before allocation
+        if self.resource_manager.is_under_memory_pressure() {
+            // Try to free up memory by flushing writes
+            self.flush_writes_with_durability().await?;
+        }
 
-        // 2. Update cache if needed (write-through policy)
-        self.cache_manager.store_page(page_id, data).await;
+        // 2. Track memory allocation for this operation
+        let data_size = data.len();
+        if self.resource_manager.allocate_memory(data_size).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::OutOfMemory,
+                "Insufficient memory for write operation"
+            ));
+        }
 
-        // 3. Check if flush is needed based on multiple criteria
+        // 3. Add to write buffer (includes compression and coalescing)
+        let write_result = self.write_manager.buffer_write(page_id, data.clone()).await;
+        
+        // Handle write buffer failure and clean up memory tracking
+        if let Err(e) = write_result {
+            self.resource_manager.deallocate_memory(data_size);
+            return Err(e);
+        }
+
+        // 4. Update cache if needed (write-through policy)
+        self.cache_manager.store_page(page_id, data);
+
+        // 5. Check if flush is needed based on multiple criteria
         if self.write_manager.should_flush().await {
             self.flush_writes_with_durability().await?;
         }
 
-        // 4. Record metrics including compression ratio
+        // 6. Record metrics including compression ratio
         let latency_ns = start_time.elapsed().as_nanos() as u64;
         self.metrics_collector.record_write(latency_ns, DB_PAGE_SIZE);
 
-        // 5. Update write buffer utilization metrics
+        // 7. Update write buffer utilization metrics
         let buffer_stats = self.write_manager.get_buffer_stats().await;
         self.metrics_collector.get_live_metrics().write_buffer_utilization
             .store((buffer_stats.utilization_percent * 100.0) as u64, Ordering::Relaxed);
         self.metrics_collector.get_live_metrics().compression_ratio
             .store((buffer_stats.compression_ratio * 100.0) as u64, Ordering::Relaxed);
+
+        // Note: Memory will be deallocated when the write is actually flushed to disk
+        // For now, we keep it allocated to track write buffer usage
 
         Ok(())
     }
@@ -3064,13 +464,13 @@ impl AsyncDiskManager {
         }
 
         // Check durability requirements
-        let needs_sync = self.write_manager.apply_durability(&pages).await?;
+        let durability_result = self.write_manager.apply_durability(&pages)?;
 
         // Write pages to disk (potentially in batches for better performance)
         self.write_pages_to_disk(pages).await?;
 
         // Apply sync if required by durability level
-        if needs_sync {
+        if durability_result.sync_performed {
             self.io_engine.sync().await?;
         }
 
@@ -3173,7 +573,7 @@ impl AsyncDiskManager {
             self.write_manager.buffer_write(*page_id, data.clone()).await?;
 
             // Update cache for write-through policy
-            self.cache_manager.store_page(*page_id, data.clone()).await;
+            self.cache_manager.store_page(*page_id, data.clone());
         }
 
         // 3. Determine if we should flush immediately for batch operations
@@ -3325,13 +725,13 @@ impl AsyncDiskManager {
 
         if !pages.is_empty() {
             // Apply durability requirements
-            let needs_sync = self.write_manager.apply_durability(&pages).await?;
+            let durability_result = self.write_manager.apply_durability(&pages)?;
 
             // Write to disk
             self.write_pages_to_disk(pages).await?;
 
             // Sync if required
-            if needs_sync {
+            if durability_result.sync_performed {
                 self.io_engine.sync().await?;
             }
         }
@@ -3356,6 +756,15 @@ impl AsyncDiskManager {
         (hits, misses, hit_ratio)
     }
 
+    /// Gets comprehensive resource usage statistics
+    pub fn get_resource_stats(&self) -> (u64, u64, f64, u64, Vec<String>) {
+        let (allocated_bytes, peak_bytes, utilization_percent) = self.resource_manager.get_memory_stats();
+        let resource_pressure = self.resource_manager.get_resource_pressure();
+        let recommendations = self.resource_manager.get_resource_recommendations();
+        
+        (allocated_bytes, peak_bytes, utilization_percent, resource_pressure, recommendations)
+    }
+
     /// Checks system health
     pub fn health_check(&self) -> bool {
         // TODO: Comprehensive health assessment
@@ -3368,10 +777,10 @@ impl AsyncDiskManager {
         true
     }
 
-    /// Starts the comprehensive monitoring system
+    /// Starts the comprehensive monitoring system with resource management
     pub async fn start_monitoring(&self) -> IoResult<JoinHandle<()>> {
         // Phase 4: Start enhanced monitoring background tasks
-        let monitoring_handle = self.metrics_collector.start_monitoring().await;
+        let monitoring_handle = self.metrics_collector.start_monitoring();
 
         // Initialize uptime tracking
         self.metrics_collector.get_live_metrics().uptime_seconds.store(
@@ -3382,13 +791,32 @@ impl AsyncDiskManager {
             Ordering::Relaxed
         );
 
+        // Apply CPU affinity for performance optimization
+        if let Err(e) = self.resource_manager.apply_cpu_affinity() {
+            log::warn!("Failed to apply CPU affinity: {}", e);
+        }
+
+        // Start background resource cleanup task
+        let resource_manager = Arc::clone(&self.resource_manager);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                if resource_manager.should_cleanup().await {
+                    if let Err(e) = resource_manager.perform_cleanup().await {
+                        log::error!("Resource cleanup failed: {}", e);
+                    }
+                }
+            }
+        });
+
         Ok(monitoring_handle)
     }
 
     /// Gets comprehensive real-time dashboard data
     pub async fn get_dashboard_data(&self) -> DashboardData {
-        let metrics_snapshot = self.metrics_collector.create_metrics_snapshot().await;
-        let cache_stats = self.cache_manager.get_cache_statistics().await;
+        let metrics_snapshot = self.metrics_collector.create_metrics_snapshot();
+        let cache_stats = self.cache_manager.get_cache_statistics();
         let buffer_stats = self.get_write_buffer_stats().await;
         let health_score = self.metrics_collector.get_live_metrics().health_score.load(Ordering::Relaxed);
 
@@ -3408,7 +836,7 @@ impl AsyncDiskManager {
                 warm_cache_hit_ratio: self.calculate_cache_hit_ratio("warm", &cache_stats),
                 cold_cache_hit_ratio: self.calculate_cache_hit_ratio("cold", &cache_stats),
                 memory_usage_mb: metrics_snapshot.cache_memory_usage_mb,
-                promotions_per_sec: cache_stats.total_promotions as f64 / 60.0, // Last minute
+                promotions_per_sec: cache_stats.promotion_count as f64 / 60.0, // Last minute
                 evictions_per_sec: 0.0, // Would calculate from eviction metrics
             },
             storage: StorageDashboard {
@@ -3435,7 +863,7 @@ impl AsyncDiskManager {
         }
     }
 
-    /// Gets system health report with detailed analysis
+    /// Gets system health report with detailed analysis including resource management
     pub async fn get_health_report(&self) -> HealthReport {
         let live_metrics = self.metrics_collector.get_live_metrics();
         let health_score = live_metrics.health_score.load(Ordering::Relaxed) as f64;
@@ -3473,13 +901,29 @@ impl AsyncDiskManager {
             recommendations.push("Consider increasing flush frequency or buffer size".to_string());
         }
 
+        // Add resource management analysis
+        let (resource_health, resource_issues) = self.resource_manager.get_resource_health();
+        bottlenecks.extend(resource_issues);
+        
+        let resource_recommendations = self.resource_manager.get_resource_recommendations();
+        recommendations.extend(resource_recommendations);
+        
+        // Check for memory pressure
+        if self.resource_manager.is_under_memory_pressure() {
+            bottlenecks.push("System under memory pressure".to_string());
+            recommendations.push("Consider reducing concurrent operations or increasing memory limits".to_string());
+        }
+
+        // Combine health scores (weighted average)
+        let combined_health = (health_score * 0.7 + resource_health * 0.3).min(100.0);
+
         HealthReport {
-            overall_health: health_score,
+            overall_health: combined_health,
             component_health: ComponentHealth {
                 io_engine: if avg_latency < 5_000_000 { 100.0 } else { 80.0 },
                 cache_manager: cache_hit_ratio,
                 write_manager: 100.0 - buffer_stats.utilization_percent.min(100.0),
-                storage_engine: 95.0, // Would calculate from storage metrics
+                storage_engine: resource_health, // Use resource health for storage engine
             },
             bottlenecks,
             recommendations,
@@ -3510,30 +954,9 @@ impl AsyncDiskManager {
     /// Calculate cache hit ratio for specific cache level
     fn calculate_cache_hit_ratio(&self, cache_level: &str, cache_stats: &CacheStatistics) -> f64 {
         match cache_level {
-            "hot" => {
-                let total = cache_stats.hot_cache_hits + cache_stats.hot_cache_misses;
-                if total > 0 {
-                    cache_stats.hot_cache_hits as f64 / total as f64 * 100.0
-                } else {
-                    0.0
-                }
-            }
-            "warm" => {
-                let total = cache_stats.warm_cache_hits + cache_stats.warm_cache_misses;
-                if total > 0 {
-                    cache_stats.warm_cache_hits as f64 / total as f64 * 100.0
-                } else {
-                    0.0
-                }
-            }
-            "cold" => {
-                let total = cache_stats.cold_cache_hits + cache_stats.cold_cache_misses;
-                if total > 0 {
-                    cache_stats.cold_cache_hits as f64 / total as f64 * 100.0
-                } else {
-                    0.0
-                }
-            }
+            "hot" => cache_stats.hot_cache_hit_ratio,
+            "warm" => cache_stats.warm_cache_hit_ratio,
+            "cold" => cache_stats.cold_cache_hit_ratio,
             _ => 0.0,
         }
     }
@@ -3554,7 +977,7 @@ impl AsyncDiskManager {
     /// Exports metrics in Prometheus format
     pub async fn export_prometheus_metrics(&self) -> String {
         let live_metrics = self.metrics_collector.get_live_metrics();
-        let snapshot = self.metrics_collector.create_metrics_snapshot().await;
+        let snapshot = self.metrics_collector.create_metrics_snapshot();
 
         format!(
             "# HELP tkdb_io_latency_seconds Average I/O latency in seconds\n\
@@ -3678,91 +1101,8 @@ impl AsyncDiskManager {
             ));
         }
 
-        // Create a scoped task for the actual file I/O to ensure proper resource management
-        let log_file = Arc::clone(&self.io_engine.log_file);
-        let data_vec = data.to_vec(); // Clone data for move into async block
-
-        // Use a mutex to ensure exclusive access to the file during seek+write operations
-        // This is necessary because seek+write is not atomic in tokio::fs::File
-        let file_mutex = Arc::new(Mutex::new(()));
-        let file_lock = file_mutex.lock().await;
-
-        // Perform the actual write with retry logic
-        let mut retry_count = 0;
-        let max_retries = 3;
-        let mut success = false;
-
-        while !success && retry_count < max_retries {
-            // Create a new file handle for each attempt to avoid issues with file position
-            let mut file = log_file.try_clone().await.map_err(|e| std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to clone file handle: {}", e)
-            ))?;
-
-            // Seek to the specified offset
-            if let Err(e) = file.seek(std::io::SeekFrom::Start(offset)).await {
-                if e.kind() == std::io::ErrorKind::Interrupted && retry_count < max_retries - 1 {
-                    retry_count += 1;
-                    // Exponential backoff
-                    tokio::time::sleep(Duration::from_millis(10 * (1 << retry_count))).await;
-                    continue;
-                }
-                return Err(std::io::Error::new(
-                    e.kind(),
-                    format!("Failed to seek to offset {}: {}", offset, e)
-                ));
-            }
-
-            // Write the data
-            match file.write_all(&data_vec).await {
-                Ok(()) => {
-                    success = true;
-                },
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::Interrupted && retry_count < max_retries - 1 {
-                        retry_count += 1;
-                        // Exponential backoff
-                        tokio::time::sleep(Duration::from_millis(10 * (1 << retry_count))).await;
-                        continue;
-                    }
-
-                    // For other errors, retry a few times with backoff
-                    if retry_count < max_retries - 1 {
-                        retry_count += 1;
-                        // Exponential backoff
-                        tokio::time::sleep(Duration::from_millis(10 * (1 << retry_count))).await;
-                        continue;
-                    }
-
-                    // Max retries exceeded, return the error
-                    return Err(std::io::Error::new(
-                        e.kind(),
-                        format!("Failed to write at offset {}: {}", offset, e)
-                    ));
-                }
-            }
-        }
-
-        // Ensure all data is written to disk if required by durability settings
-        // Note: Full fsync is handled by apply_log_durability_policy
-        if success {
-            // Create a new file handle for flushing
-            let mut file = log_file.try_clone().await.map_err(|e| std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to clone file handle for flush: {}", e)
-            ))?;
-
-            // Flush the file to ensure data is written to the OS buffer
-            file.flush().await?;
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Failed to write data after maximum retries"
-            ));
-        }
-
-        // Release the lock
-        drop(file_lock);
+        // Use the IO engine to write log data at the specified offset
+        self.io_engine.write_log(data, offset).await?;
 
         Ok(())
     }
@@ -3796,18 +1136,18 @@ impl AsyncDiskManager {
         let start_time = Instant::now();
 
         // Delegate to the IO engine for actual sync operation
-        let result = self.io_engine.log_file.sync_all().await;
+        let result = self.io_engine.sync_log().await;
 
         // Record sync metrics
         let latency_ns = start_time.elapsed().as_nanos() as u64;
         let live_metrics = self.metrics_collector.get_live_metrics();
 
         match result {
-                         Ok(()) => {
-                 live_metrics.flush_count.fetch_add(1, Ordering::Relaxed);
-                 // Record successful sync metrics with latency
-                 self.metrics_collector.record_write(latency_ns, 0); // 0 bytes for sync operation
-             }
+            Ok(()) => {
+                live_metrics.flush_count.fetch_add(1, Ordering::Relaxed);
+                // Record successful sync metrics with latency
+                self.metrics_collector.record_write(latency_ns, 0); // 0 bytes for sync operation
+            }
             Err(_) => {
                 live_metrics.error_count.fetch_add(1, Ordering::Relaxed);
                 // Record failed sync metrics
@@ -3946,131 +1286,6 @@ impl AsyncDiskManager {
 }
 
 // ============================================================================
-// SUPPORTING STRUCTURES
-// ============================================================================
-
-/// Snapshot of performance metrics
-#[derive(Debug, Default, Clone)]
-pub struct MetricsSnapshot {
-    // I/O Performance
-    pub read_latency_avg_ns: u64,
-    pub write_latency_avg_ns: u64,
-    pub io_throughput_mb_per_sec: f64,
-    pub io_queue_depth: usize,
-
-    // Cache Performance
-    pub cache_hit_ratio: f64,
-    pub prefetch_accuracy: f64,
-    pub cache_memory_usage_mb: usize,
-
-    // Write Performance
-    pub write_buffer_utilization: f64,
-    pub compression_ratio: f64,
-    pub flush_frequency_per_sec: f64,
-
-    // Error Tracking
-    pub error_rate_per_sec: f64,
-    pub retry_count: u64,
-}
-
-// ============================================================================
-// DASHBOARD AND MONITORING STRUCTURES
-// ============================================================================
-
-/// Comprehensive dashboard data for real-time monitoring
-#[derive(Debug, Clone)]
-pub struct DashboardData {
-    pub timestamp: Instant,
-    pub health_score: f64,
-    pub performance: PerformanceDashboard,
-    pub cache: CacheDashboard,
-    pub storage: StorageDashboard,
-    pub alerts: Vec<AlertSummary>,
-}
-
-/// Performance metrics for dashboard
-#[derive(Debug, Clone)]
-pub struct PerformanceDashboard {
-    pub avg_read_latency_ms: f64,
-    pub avg_write_latency_ms: f64,
-    pub throughput_mb_sec: f64,
-    pub iops: f64,
-    pub queue_depth: usize,
-}
-
-/// Cache metrics for dashboard
-#[derive(Debug, Clone)]
-pub struct CacheDashboard {
-    pub overall_hit_ratio: f64,
-    pub hot_cache_hit_ratio: f64,
-    pub warm_cache_hit_ratio: f64,
-    pub cold_cache_hit_ratio: f64,
-    pub memory_usage_mb: usize,
-    pub promotions_per_sec: f64,
-    pub evictions_per_sec: f64,
-}
-
-/// Storage metrics for dashboard
-#[derive(Debug, Clone)]
-pub struct StorageDashboard {
-    pub buffer_utilization: f64,
-    pub compression_ratio: f64,
-    pub flush_frequency: f64,
-    pub bytes_written_mb: f64,
-    pub write_amplification: f64,
-}
-
-/// Alert summary for dashboard
-#[derive(Debug, Clone)]
-pub struct AlertSummary {
-    pub alert_type: AlertType,
-    pub severity: AlertSeverity,
-    pub title: String,
-    pub timestamp: Instant,
-    pub acknowledged: bool,
-}
-
-/// Historical trend data
-#[derive(Debug, Clone)]
-pub struct TrendData {
-    pub time_range: Duration,
-    pub latency_trend: Vec<(Instant, f64)>,
-    pub throughput_trend: Vec<(Instant, f64)>,
-    pub cache_hit_ratio_trend: Vec<(Instant, f64)>,
-    pub error_rate_trend: Vec<(Instant, f64)>,
-    pub predictions: Vec<TrendPrediction>,
-}
-
-/// Trend prediction data point
-#[derive(Debug, Clone)]
-pub struct TrendPrediction {
-    pub timestamp: Instant,
-    pub metric: String,
-    pub predicted_value: f64,
-    pub confidence: f64,
-}
-
-/// Comprehensive health report
-#[derive(Debug, Clone)]
-pub struct HealthReport {
-    pub overall_health: f64,
-    pub component_health: ComponentHealth,
-    pub bottlenecks: Vec<String>,
-    pub recommendations: Vec<String>,
-    pub uptime_seconds: u64,
-    pub last_error: Option<String>,
-}
-
-/// Component-specific health scores
-#[derive(Debug, Clone)]
-pub struct ComponentHealth {
-    pub io_engine: f64,
-    pub cache_manager: f64,
-    pub write_manager: f64,
-    pub storage_engine: f64,
-}
-
-// ============================================================================
 // UNIT TESTS
 // ============================================================================
 
@@ -4078,7 +1293,11 @@ pub struct ComponentHealth {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use crate::common::config::{Lsn, TxnId};
+    use crate::common::config::{Lsn, PageId, TxnId};
+    use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
+    use crate::storage::disk::async_disk::config::IOPriority;
+    use crate::storage::disk::async_disk::DiskManagerConfig;
+    use crate::storage::disk::async_disk::simd::SimdProcessor;
 
     /// Helper function to create test configuration
     fn create_test_config() -> DiskManagerConfig {
@@ -4600,7 +1819,7 @@ mod tests {
         assert!(live_metrics.health_score.load(Ordering::Relaxed) > 0);
 
         // Create metrics snapshot
-        let snapshot = disk_manager.metrics_collector.create_metrics_snapshot().await;
+        let snapshot = disk_manager.metrics_collector.create_metrics_snapshot();
         assert!(snapshot.write_latency_avg_ns > 0 || snapshot.read_latency_avg_ns >= 0);
         assert!(snapshot.error_rate_per_sec >= 0.0);
     }
@@ -4624,11 +1843,11 @@ mod tests {
         }
 
         // Check cache statistics
-        let cache_stats = disk_manager.cache_manager.get_cache_statistics().await;
+        let cache_stats = disk_manager.cache_manager.get_cache_statistics();
         assert!(cache_stats.hot_cache_size > 0 || cache_stats.warm_cache_size > 0 || cache_stats.cold_cache_size > 0);
 
         // Check that promotions occurred
-        assert!(cache_stats.total_promotions >= 0);
+        assert!(cache_stats.promotion_count >= 0);
     }
 
     #[tokio::test]
@@ -5067,7 +2286,7 @@ mod tests {
         }
 
         // Check that the ML prefetcher has learned patterns
-        let cache_stats = disk_manager.cache_manager.get_cache_statistics().await;
+        let cache_stats = disk_manager.cache_manager.get_cache_statistics();
         assert!(cache_stats.hot_cache_size >= 0); // Basic validation that system is working
     }
 
@@ -5164,7 +2383,7 @@ mod tests {
         }
 
         // Check that a cache system is working with hot/cold separation
-        let cache_stats = disk_manager.cache_manager.get_cache_statistics().await;
+        let cache_stats = disk_manager.cache_manager.get_cache_statistics();
         assert!(cache_stats.hot_cache_size > 0 || cache_stats.warm_cache_size > 0 || cache_stats.cold_cache_size > 0);
     }
 
@@ -5391,5 +2610,64 @@ mod tests {
         // Test error handling - try to read from invalid offset
         let result = disk_manager.read_log(u64::MAX).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_resource_management() {
+        // Test: Enhanced ResourceManager functionality
+        let (disk_manager, _temp_dir) = create_test_disk_manager().await;
+
+        // Test initial resource stats
+        let (allocated, peak, utilization, pressure, recommendations) = disk_manager.get_resource_stats();
+        assert_eq!(allocated, 0); // Should start with no allocated memory
+        assert_eq!(peak, 0); // No peak usage yet
+        assert_eq!(utilization, 0.0); // No utilization yet
+        assert_eq!(pressure, 0); // No pressure initially
+        assert!(recommendations.is_empty()); // No recommendations for healthy system
+
+        // Perform some operations to test resource tracking
+        for i in 0..10 {
+            let data = vec![i as u8; 1024]; // 1KB per page
+            disk_manager.write_page(i, data).await.unwrap();
+        }
+
+        // Check resource stats after operations
+        let (allocated_after, peak_after, utilization_after, pressure_after, _) = disk_manager.get_resource_stats();
+        
+        // Memory should be allocated for the write operations
+        assert!(allocated_after > allocated);
+        assert!(peak_after >= allocated_after);
+        assert!(utilization_after > utilization);
+        
+        // Resource pressure should be minimal for small operations
+        assert!(pressure_after <= 10); // Should be low pressure
+        
+        // Test health report integration
+        let health_report = disk_manager.get_health_report().await;
+        assert!(health_report.overall_health >= 70.0); // Should be healthy
+        assert!(health_report.component_health.storage_engine >= 70.0); // Storage should be healthy
+        
+        // Test memory pressure detection (would need larger operations in practice)
+        let memory_pressure = disk_manager.resource_manager.is_under_memory_pressure();
+        assert!(!memory_pressure); // Should not be under pressure with small test
+
+        // Test resource recommendations
+        let recommendations = disk_manager.resource_manager.get_resource_recommendations();
+        // Should have few or no recommendations for a healthy system
+        assert!(recommendations.len() <= 2);
+        
+        // Test cleanup functionality
+        let should_cleanup = disk_manager.resource_manager.should_cleanup().await;
+        // Should not need cleanup immediately after creation
+        assert!(!should_cleanup);
+        
+        // Test resource health scoring
+        let (health_score, issues) = disk_manager.resource_manager.get_resource_health();
+        assert!(health_score >= 90.0); // Should be high health score
+        assert!(issues.is_empty() || issues.len() <= 1); // Should have minimal issues
+
+        println!("Resource management test completed successfully!");
+        println!("Final stats - Allocated: {} bytes, Peak: {} bytes, Utilization: {:.2}%, Pressure: {}", 
+                allocated_after, peak_after, utilization_after, pressure_after);
     }
 }  
