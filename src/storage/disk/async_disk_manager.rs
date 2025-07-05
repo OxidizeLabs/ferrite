@@ -16,7 +16,7 @@ use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
 use crate::storage::disk::async_disk::cache::CacheManager;
 use crate::storage::disk::async_disk::config::FsyncPolicy;
-use crate::storage::disk::async_disk::DiskManagerConfig;
+pub use crate::storage::disk::async_disk::DiskManagerConfig;
 use crate::storage::disk::async_disk::io::io::AsyncIOEngine;
 use crate::storage::disk::async_disk::memory::{NumaAllocator, WriteBufferStats, WriteManager};
 use crate::storage::disk::async_disk::metrics::alerts::AlertSummary;
