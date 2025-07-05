@@ -438,6 +438,28 @@ impl BufferPoolManager {
         }
     }
 
+    /// Flushes a page to disk asynchronously
+    pub async fn flush_page_async(&self, page_id: PageId) -> Result<(), String> {
+        trace!("Flushing page {} to disk", page_id);
+
+        let page_table = self.page_table.read();
+        let frame_id = page_table
+            .get(&page_id)
+            .ok_or_else(|| format!("Page {} not found in page table", page_id))?;
+        let frame_id = *frame_id;
+        drop(page_table);
+
+        let pages = self.pages.read();
+        let page = pages
+            .get(frame_id as usize)
+            .and_then(|p| p.as_ref())
+            .ok_or_else(|| format!("Page {} not found in pages array", page_id))?
+            .clone();
+        drop(pages);
+
+        self.write_page_to_disk_async(page_id, &page).await
+    }
+
     /// Flushes a page with the given page ID to disk.
     ///
     /// # Parameters
@@ -476,6 +498,23 @@ impl BufferPoolManager {
 
         for page_id in page_ids {
             if let Err(e) = self.flush_page(page_id) {
+                error!("Failed to flush page {}: {}", page_id, e);
+            }
+        }
+
+        trace!("Finished flushing all pages");
+    }
+
+    /// Flushes all pages to disk asynchronously.
+    pub async fn flush_all_pages_async(&self) {
+        trace!("Flushing all pages to disk");
+
+        let page_table = self.page_table.read();
+        let page_ids: Vec<PageId> = page_table.keys().cloned().collect();
+        drop(page_table);
+
+        for page_id in page_ids {
+            if let Err(e) = self.flush_page_async(page_id).await {
                 error!("Failed to flush page {}: {}", page_id, e);
             }
         }
@@ -785,7 +824,8 @@ impl BufferPoolManager {
         );
     }
 
-    fn write_page_to_disk(
+    /// Writes a page to disk asynchronously
+    async fn write_page_to_disk_async(
         &self,
         page_id: PageId,
         page: &Arc<RwLock<dyn PageTrait>>,
@@ -812,10 +852,51 @@ impl BufferPoolManager {
         };
 
         // Use async disk manager to write page (this will update its cache too)
-        self.run_async_operation(async {
+        self.disk_manager.write_page(page_id, data_buffer).await
+            .map_err(|e| format!("Failed to write page to disk: {}", e))?;
+
+        // Mark page as clean after successful write
+        {
+            let mut page_guard = page.write();
+            page_guard.set_dirty(false);
+        }
+
+        trace!("Successfully wrote page {} to disk with cache coordination", page_id);
+        Ok(())
+    }
+
+    fn write_page_to_disk(
+        &self,
+        page_id: PageId,
+        page: &Arc<RwLock<dyn PageTrait>>,
+    ) -> Result<(), String> {
+        // Create a data buffer
+        let data_buffer = {
+            let page_guard = page.read();
+            let page_type = page_guard.get_page_type();
+            let type_byte = page_type.to_u8();
+
+            let mut data = Vec::with_capacity(DB_PAGE_SIZE as usize);
+            data.extend_from_slice(page_guard.get_data());
+            data[PAGE_TYPE_OFFSET] = type_byte;
+
+            trace!(
+                "Writing page {} to disk. Type: {:?}, Type byte: {}, Size: {} bytes",
+                page_id,
+                page_type,
+                data[PAGE_TYPE_OFFSET],
+                data.len()
+            );
+
+            data
+        };
+
+        // Use futures executor to run the async operation
+        let result = futures::executor::block_on(async {
             self.disk_manager.write_page(page_id, data_buffer).await
-        })
-        .map_err(|e| format!("Failed to write page to disk: {}", e))?;
+        });
+
+        result.map_err(|e| format!("Failed to write page to disk: {}", e))?;
 
         // Mark page as clean after successful write
         {
@@ -1123,13 +1204,8 @@ impl BufferPoolManager {
     where
         F: Future<Output = Result<T, std::io::Error>>,
     {
-        // Try to use the current runtime if available
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.block_on(future)
-        } else {
-            // Fallback to futures executor
-            futures::executor::block_on(future)
-        }
+        // Always use futures executor to avoid runtime conflicts
+        futures::executor::block_on(future)
     }
 
     /// Flushes multiple dirty pages efficiently (backward compatibility)
@@ -1341,8 +1417,8 @@ mod tests {
             data.set_dirty(true);
         }
 
-        // Flush to disk
-        bpm.flush_page(page_id).expect("Failed to flush page");
+        // Flush to disk using async version
+        bpm.flush_page_async(page_id).await.expect("Failed to flush page");
         
         // Unpin the page
         drop(page_guard);
@@ -1380,7 +1456,7 @@ mod tests {
             }
             
             drop(page_guard);
-            bpm.flush_page(page_id).expect("Failed to flush page");
+            bpm.flush_page_async(page_id).await.expect("Failed to flush page");
         }
 
         assert!(bpm.health_check());
