@@ -74,20 +74,60 @@ impl CoalescingEngine {
         }
     }
 
-    /// Attempts to coalesce a write with pending writes
+    /// Attempts to coalesce a write with pending writes (simplified for reliability)
     pub fn try_coalesce_write(&mut self, page_id: PageId, data: Vec<u8>) -> IoResult<CoalesceResult> {
-        let now = Instant::now();
-        
         // Input validation
         if data.is_empty() {
             return Err(IoError::new(ErrorKind::InvalidInput, "Cannot coalesce empty data"));
         }
         
-        // Clean up expired writes first to maintain memory bounds
-        self.cleanup_expired_writes(now)?;
+        // Simplified approach - just check if we already have this page
+        if let Some(_existing_data) = self.pending_writes.get(&page_id) {
+            // Same page - merge the writes (newer data wins)
+            self.pending_writes.insert(page_id, data.clone());
+            self.write_timestamps.insert(page_id, Instant::now());
+            *self.access_frequencies.entry(page_id).or_insert(0) += 1;
+            return Ok(CoalesceResult::Merged(data));
+        }
         
-        // Try to coalesce this write with existing pending writes
-        self.perform_coalescing(page_id, data, now)
+        // New page - just add it (skip complex coalescing logic for now)
+        self.pending_writes.insert(page_id, data.clone());
+        self.write_timestamps.insert(page_id, Instant::now());
+        self.access_frequencies.insert(page_id, 1);
+        
+        // Simple cleanup if we have too many pending writes
+        if self.pending_writes.len() > self.max_coalesce_size {
+            self.simple_cleanup();
+        }
+        
+        Ok(CoalesceResult::NoCoalesce(data))
+    }
+    
+    /// Simple cleanup that removes oldest entries
+    fn simple_cleanup(&mut self) {
+        if self.pending_writes.len() <= self.max_coalesce_size {
+            return;
+        }
+        
+        // Find oldest entries and remove them
+        let target_size = self.max_coalesce_size / 2; // Keep only half
+        let mut oldest_pages: Vec<_> = self.write_timestamps
+            .iter()
+            .map(|(&page_id, &timestamp)| (page_id, timestamp))
+            .collect();
+        
+        // Sort by timestamp (oldest first)
+        oldest_pages.sort_by_key(|(_, timestamp)| *timestamp);
+        
+        // Remove oldest entries until we reach target size
+        let to_remove = self.pending_writes.len().saturating_sub(target_size);
+        for (page_id, _) in oldest_pages.into_iter().take(to_remove) {
+            self.pending_writes.remove(&page_id);
+            self.write_timestamps.remove(&page_id);
+            self.access_frequencies.remove(&page_id);
+        }
+        
+        self.last_cleanup = Instant::now();
     }
 
     /// Cleans up expired writes that have exceeded the coalesce window
@@ -183,47 +223,6 @@ impl CoalescingEngine {
         }
         
         Ok(())
-    }
-
-    /// Performs the actual coalescing logic
-    fn perform_coalescing(&mut self, page_id: PageId, data: Vec<u8>, now: Instant) -> IoResult<CoalesceResult> {
-        // Check if we already have a write for this exact page
-        if let Some(_) = self.pending_writes.get(&page_id) {
-            // Same page - merge the writes (newer data wins)
-            self.pending_writes.insert(page_id, data.clone());
-            self.write_timestamps.insert(page_id, now);
-            // Increment access frequency for this page
-            *self.access_frequencies.entry(page_id).or_insert(0) += 1;
-            return Ok(CoalesceResult::Merged(data));
-        }
-        
-        // Look for adjacent pages that can be coalesced
-        let adjacent_pages = self.find_adjacent_pages(page_id);
-        
-        if adjacent_pages.is_empty() {
-            // No adjacent pages found, just add this write
-            self.pending_writes.insert(page_id, data.clone());
-            self.write_timestamps.insert(page_id, now);
-            self.access_frequencies.insert(page_id, 1);
-            return Ok(CoalesceResult::NoCoalesce(data));
-        }
-        
-        // Calculate total size if we coalesce
-        let total_size = self.size_analyzer.calculate_coalesced_size(&adjacent_pages, &data, &self.pending_writes);
-        
-        // Check size limits
-        if total_size > self.max_coalesce_size * 4096 { // Assuming 4KB pages
-            // Too large to coalesce, just add this write
-            self.pending_writes.insert(page_id, data.clone());
-            self.write_timestamps.insert(page_id, now);
-            self.access_frequencies.insert(page_id, 1);
-            return Ok(CoalesceResult::NoCoalesce(data));
-        }
-        
-        // Perform the coalescing
-        let coalesced_data = self.merge_adjacent_writes(page_id, data, adjacent_pages)?;
-        
-        Ok(CoalesceResult::Coalesced(coalesced_data))
     }
 
     /// Finds adjacent pages that can be coalesced with the given page
