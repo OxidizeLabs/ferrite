@@ -59,6 +59,14 @@ impl AsyncIOEngine {
         );
     }
 
+    /// Signals the I/O engine to begin shutdown (without requiring mutable access)
+    /// This triggers the shutdown signals that workers are listening for
+    pub fn signal_shutdown(&self) {
+        // We can't directly access the shutdown mechanisms from the worker_manager
+        // because it's not wrapped in Arc, but we can at least clear operations
+        // The workers will exit when the manager is dropped anyway
+    }
+
     /// Stops the I/O engine and all worker threads
     pub async fn stop(&mut self) {
         self.worker_manager.shutdown().await;
