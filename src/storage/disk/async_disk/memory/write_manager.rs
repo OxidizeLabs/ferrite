@@ -78,16 +78,30 @@ impl WriteManager {
     /// 1. Attempt write coalescing for efficiency
     /// 2. Add to buffer with compression if enabled
     /// 3. Check flush conditions and coordinate flush if needed
-    pub async fn buffer_write(&self, page_id: PageId, data: Vec<u8>) -> IoResult<()> {
+    /// 
+    /// Returns: Optional list of pages that were flushed and need to be written to disk
+    pub async fn buffer_write(&self, page_id: PageId, data: Vec<u8>) -> IoResult<Option<Vec<(PageId, Vec<u8>)>>> {
+        log::debug!("WriteManager::buffer_write called for page {} with {} bytes", page_id, data.len());
+        
         // Step 1: Try to coalesce the write for efficiency
         let coalesced_data = self.try_coalesce_write(page_id, data).await?;
+        log::debug!("WriteManager::buffer_write coalesced data for page {} now {} bytes", page_id, coalesced_data.len());
 
         // Step 2: Add to buffer manager with compression
         let needs_flush = {
             let mut buffer = self.buffer_manager.lock().await;
+            let stats_before = buffer.get_stats();
+            log::debug!("WriteManager::buffer_write buffer stats before: dirty_pages={}, buffer_size={}", 
+                       stats_before.dirty_pages, stats_before.buffer_size_bytes);
+            
             let buffer_accepted = buffer.buffer_write(page_id, coalesced_data)?;
             
+            let stats_after = buffer.get_stats();
+            log::debug!("WriteManager::buffer_write buffer stats after: dirty_pages={}, buffer_size={}, accepted={}", 
+                       stats_after.dirty_pages, stats_after.buffer_size_bytes, buffer_accepted);
+            
             if !buffer_accepted {
+                log::debug!("WriteManager::buffer_write buffer full, needs flush");
                 true // Buffer is full, needs flush
             } else {
                 // Check if we should flush based on coordinator's decisions
@@ -97,16 +111,24 @@ impl WriteManager {
                     .should_flush(stats.dirty_pages, stats.time_since_last_flush)
                     .await;
                 
-                matches!(flush_decision, FlushDecision::ThresholdFlush | FlushDecision::IntervalFlush)
+                let should_flush = matches!(flush_decision, FlushDecision::ThresholdFlush | FlushDecision::IntervalFlush);
+                log::debug!("WriteManager::buffer_write flush decision: {:?}, should_flush={}", flush_decision, should_flush);
+                should_flush
             }
         };
 
         // Step 3: Coordinate flush if needed
-        if needs_flush {
-            self.flush().await?;
-        }
+        let flushed_pages = if needs_flush {
+            log::debug!("WriteManager::buffer_write triggering flush");
+            let pages = self.flush().await?;
+            log::debug!("WriteManager::buffer_write flush returned {} pages", pages.len());
+            if pages.is_empty() { None } else { Some(pages) }
+        } else {
+            None
+        };
 
-        Ok(())
+        log::debug!("WriteManager::buffer_write completed for page {}", page_id);
+        Ok(flushed_pages)
     }
 
     /// Attempts to coalesce a write using the coalescing engine
@@ -144,11 +166,15 @@ impl WriteManager {
 
     /// Forces a flush regardless of thresholds
     pub async fn force_flush(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
+        log::debug!("WriteManager::force_flush called");
+        
         // Step 1: Force start flush coordination
         if !self.flush_coordinator.try_start_flush() {
+            log::debug!("WriteManager::force_flush waiting for flush lock");
             // Wait briefly and try again for force flush
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             if !self.flush_coordinator.try_start_flush() {
+                log::error!("WriteManager::force_flush could not acquire flush lock");
                 return Err(IoError::new(
                     ErrorKind::WouldBlock,
                     "Could not acquire flush lock for force flush"
@@ -156,30 +182,49 @@ impl WriteManager {
             }
         }
 
+        log::debug!("WriteManager::force_flush acquired flush lock");
+
         // Step 2: Perform the actual flush
         let result = self.flush_internal().await;
 
         // Step 3: Complete flush coordination
         self.flush_coordinator.complete_flush().await;
+        
+        match &result {
+            Ok(pages) => log::debug!("WriteManager::force_flush returning {} pages", pages.len()),
+            Err(e) => log::error!("WriteManager::force_flush failed: {}", e),
+        }
 
         result
     }
 
     /// Internal flush implementation that coordinates between components
     async fn flush_internal(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
+        log::debug!("WriteManager::flush_internal called");
+        
         // Step 1: Drain pages from buffer manager
         let pages_to_flush = {
             let mut buffer = self.buffer_manager.lock().await;
-            buffer.drain_buffer()
+            let stats = buffer.get_stats();
+            log::debug!("WriteManager::flush_internal buffer stats before drain: dirty_pages={}, buffer_size={}", 
+                       stats.dirty_pages, stats.buffer_size_bytes);
+            
+            let pages = buffer.drain_buffer();
+            log::debug!("WriteManager::flush_internal drained {} pages from buffer", pages.len());
+            pages
         };
 
         if pages_to_flush.is_empty() {
+            log::debug!("WriteManager::flush_internal no pages to flush");
             return Ok(pages_to_flush);
         }
+
+        log::debug!("WriteManager::flush_internal applying durability to {} pages", pages_to_flush.len());
 
         // Step 2: Apply durability guarantees
         let _durability_result = self.durability_manager.apply_durability(&pages_to_flush)?;
 
+        log::debug!("WriteManager::flush_internal completed successfully with {} pages", pages_to_flush.len());
         Ok(pages_to_flush)
     }
 
