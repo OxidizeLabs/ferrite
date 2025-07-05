@@ -193,6 +193,11 @@ pub struct CacheManager {
     // Advanced statistics
     prefetch_accuracy: AtomicU64,
     dedup_savings: AtomicU64,
+
+    // Prefetch tracking
+    prefetch_predictions: Arc<RwLock<HashMap<PageId, Instant>>>,
+    prefetch_hits: AtomicU64,
+    prefetch_total: AtomicU64,
 }
 
 impl CacheManager {
@@ -230,6 +235,11 @@ impl CacheManager {
         // Initialize deduplication engine
         let dedup_engine = Arc::new(RwLock::new(DeduplicationEngine::new()));
 
+        // Initialize prefetch tracking
+        let prefetch_predictions = Arc::new(RwLock::new(HashMap::new()));
+        let prefetch_hits = AtomicU64::new(0);
+        let prefetch_total = AtomicU64::new(0);
+
         Self {
             hot_cache,
             warm_cache,
@@ -246,6 +256,9 @@ impl CacheManager {
             demotion_count: AtomicU64::new(0),
             prefetch_accuracy: AtomicU64::new(0),
             dedup_savings: AtomicU64::new(0),
+            prefetch_predictions,
+            prefetch_hits,
+            prefetch_total,
         }
     }
 
@@ -258,6 +271,9 @@ impl CacheManager {
     fn get_page_internal(&self, page_id: PageId, metrics_collector: Option<&MetricsCollector>) -> Option<Vec<u8>> {
         // Record access pattern for prefetching
         self.record_access_pattern(page_id);
+
+        // Check if this page access was a prefetch hit
+        self.check_prefetch_hit(page_id);
 
         // Check L1 hot cache first (LRU-K)
         if let Some(data) = self.hot_cache.try_write().ok()?.get(&page_id) {
@@ -453,43 +469,68 @@ impl CacheManager {
     /// Predicts and returns pages that should be prefetched
     pub fn predict_prefetch_pages(&self, current_page: PageId) -> Vec<PageId> {
         let mut predicted_pages = Vec::new();
+        
+        // Get current prefetch accuracy to adapt prefetch aggressiveness
+        let current_accuracy = self.get_prefetch_accuracy();
+        let accuracy_factor = if current_accuracy > 0.7 {
+            1.0 // High accuracy - be more aggressive
+        } else if current_accuracy > 0.4 {
+            0.7 // Medium accuracy - be conservative
+        } else if current_accuracy > 0.0 {
+            0.3 // Low accuracy - be very conservative
+        } else {
+            0.5 // No data yet - moderate prefetching
+        };
 
         // Get predictions from ML prefetcher
         if let Ok(ml_prefetcher) = self.ml_prefetcher.try_read() {
-            if ml_prefetcher.get_accuracy() > 0.5 {
+            let ml_accuracy = ml_prefetcher.get_accuracy();
+            if ml_accuracy > 0.5 && current_accuracy > 0.3 {
                 predicted_pages.extend(ml_prefetcher.predict_prefetch(current_page));
             }
         }
 
         // Get predictions from basic prefetch engine
         if let Ok(prefetch_engine) = self.prefetch_engine.try_read() {
-            // Simple sequential prefetching
-            for i in 1..=prefetch_engine.prefetch_distance {
+            // Adaptive sequential prefetching based on accuracy
+            let prefetch_distance = (prefetch_engine.prefetch_distance as f64 * accuracy_factor) as usize;
+            let effective_distance = prefetch_distance.max(1).min(prefetch_engine.prefetch_distance);
+            
+            for i in 1..=effective_distance {
                 predicted_pages.push(current_page + i as u64);
             }
 
-            // Pattern-based prefetching
-            if let Some(patterns) = prefetch_engine.access_patterns.get(&current_page) {
-                if patterns.len() >= prefetch_engine.sequential_threshold {
-                    // Find the most common next page
-                    let mut next_page_counts = HashMap::new();
-                    for &page in patterns {
-                        *next_page_counts.entry(page + 1).or_insert(0) += 1;
-                    }
-                    
-                    if let Some((most_common_next, count)) = next_page_counts.iter().max_by_key(|(_, count)| *count) {
-                        if *count >= 2 {
-                            predicted_pages.push(*most_common_next);
+            // Pattern-based prefetching (only if accuracy is reasonable)
+            if current_accuracy > 0.2 {
+                if let Some(patterns) = prefetch_engine.access_patterns.get(&current_page) {
+                    if patterns.len() >= prefetch_engine.sequential_threshold {
+                        // Find the most common next page
+                        let mut next_page_counts = HashMap::new();
+                        for &page in patterns {
+                            *next_page_counts.entry(page + 1).or_insert(0) += 1;
+                        }
+                        
+                        if let Some((most_common_next, count)) = next_page_counts.iter().max_by_key(|(_, count)| *count) {
+                            if *count >= 2 {
+                                predicted_pages.push(*most_common_next);
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Remove duplicates and limit the number of prefetch pages
+        // Remove duplicates and limit the number of prefetch pages based on accuracy
         predicted_pages.sort_unstable();
         predicted_pages.dedup();
-        predicted_pages.truncate(8);
+        let max_predictions = if current_accuracy > 0.7 {
+            12 // High accuracy - allow more predictions
+        } else if current_accuracy > 0.4 {
+            8  // Medium accuracy - standard predictions
+        } else {
+            4  // Low accuracy - fewer predictions
+        };
+        predicted_pages.truncate(max_predictions);
 
         predicted_pages
     }
@@ -603,12 +644,8 @@ impl CacheManager {
             0
         };
 
-        // Get ML prefetcher accuracy
-        let ml_accuracy = if let Ok(ml_prefetcher) = self.ml_prefetcher.try_read() {
-            ml_prefetcher.get_accuracy()
-        } else {
-            0.0
-        };
+        // Use our integrated prefetch accuracy tracking
+        let prefetch_accuracy = self.get_prefetch_accuracy();
 
         // Simplified statistics - the cache implementations don't have hit_ratio() and stats() methods
         // For now, we'll provide placeholder values
@@ -616,8 +653,6 @@ impl CacheManager {
         let warm_hit_ratio = 0.0;
         let cold_hit_ratio = 0.0;
         let total_hits = 0.0;
-
-        let prefetch_accuracy = ml_accuracy;
 
         CacheStatistics {
             hot_cache_size: self.hot_cache_size,
@@ -638,7 +673,14 @@ impl CacheManager {
 
     /// Trigger prefetching for a given page (public interface)
     pub fn trigger_prefetch(&self, current_page: PageId) -> Vec<PageId> {
-        self.predict_prefetch_pages(current_page)
+        let predicted_pages = self.predict_prefetch_pages(current_page);
+        
+        // Record predictions for accuracy tracking
+        if !predicted_pages.is_empty() {
+            self.record_prefetch_predictions(&predicted_pages);
+        }
+        
+        predicted_pages
     }
 
     /// Perform maintenance tasks like memory pressure updates and eviction
@@ -655,6 +697,68 @@ impl CacheManager {
     /// Get current admission rate (0-100)
     pub fn get_admission_rate(&self) -> u64 {
         self.admission_controller.admission_rate.load(Ordering::Relaxed)
+    }
+
+    /// Check if a page access was a prefetch hit and update accuracy
+    fn check_prefetch_hit(&self, page_id: PageId) {
+        if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
+            if predictions.remove(&page_id).is_some() {
+                // This page was predicted and accessed - it's a hit
+                self.prefetch_hits.fetch_add(1, Ordering::Relaxed);
+                self.update_prefetch_accuracy();
+            }
+        }
+    }
+
+    /// Update prefetch accuracy based on hits vs total predictions
+    fn update_prefetch_accuracy(&self) {
+        let hits = self.prefetch_hits.load(Ordering::Relaxed);
+        let total = self.prefetch_total.load(Ordering::Relaxed);
+        
+        if total > 0 {
+            // Calculate accuracy as percentage (0-100)
+            let accuracy = (hits as f64 / total as f64 * 100.0) as u64;
+            self.prefetch_accuracy.store(accuracy, Ordering::Relaxed);
+        }
+    }
+
+    /// Record prefetch predictions for accuracy tracking
+    fn record_prefetch_predictions(&self, predicted_pages: &[PageId]) {
+        if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
+            let now = Instant::now();
+            for &page_id in predicted_pages {
+                predictions.insert(page_id, now);
+            }
+        }
+        
+        // Update total predictions count
+        self.prefetch_total.fetch_add(predicted_pages.len() as u64, Ordering::Relaxed);
+        
+        // Clean up old predictions (older than 60 seconds)
+        self.cleanup_old_predictions();
+    }
+
+    /// Clean up old prefetch predictions that are unlikely to be accessed
+    fn cleanup_old_predictions(&self) {
+        if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
+            let now = Instant::now();
+            let cutoff_time = now - std::time::Duration::from_secs(60);
+            
+            // Remove predictions older than 60 seconds
+            let old_count = predictions.len();
+            predictions.retain(|_, &mut timestamp| timestamp > cutoff_time);
+            let removed_count = old_count - predictions.len();
+            
+            // Adjust total count for removed predictions (they become misses)
+            if removed_count > 0 {
+                self.update_prefetch_accuracy();
+            }
+        }
+    }
+
+    /// Get current prefetch accuracy as a percentage (0-100)
+    pub fn get_prefetch_accuracy(&self) -> f64 {
+        self.prefetch_accuracy.load(Ordering::Relaxed) as f64 / 100.0
     }
 }
 
@@ -704,13 +808,6 @@ mod tests {
         let predicted_pages = cache_manager.trigger_prefetch(3);
         assert!(!predicted_pages.is_empty());
 
-        // Test admission controller
-        let initial_admission_rate = cache_manager.get_admission_rate();
-        assert!(initial_admission_rate > 0);
-
-        let initial_memory_pressure = cache_manager.get_memory_pressure();
-        assert!(initial_memory_pressure >= 0);
-
         // Test maintenance operations
         cache_manager.perform_maintenance();
 
@@ -738,7 +835,7 @@ mod tests {
         let admission_rate = cache_manager.get_admission_rate();
 
         // Memory pressure should be calculated based on cache usage
-        assert!(memory_pressure >= 0);
+        assert!(memory_pressure > 0);
         assert!(admission_rate > 0);
         assert!(admission_rate <= 100);
     }
@@ -900,9 +997,8 @@ mod tests {
 
         // Get deduplication stats
         let stats = cache_manager.get_cache_statistics();
-        
-        // Deduplication should be working (though exact behavior depends on implementation)
-        assert!(stats.demotion_count >= 0); // Basic stats should be accessible
+
+        assert_eq!(stats.hot_cache_used, 0);
     }
 
     #[test]
@@ -971,8 +1067,6 @@ mod tests {
         assert!(stats.warm_cache_used <= stats.warm_cache_size);
         assert!(stats.cold_cache_used <= stats.cold_cache_size);
         assert!(stats.prefetch_accuracy >= 0.0 && stats.prefetch_accuracy <= 1.0);
-        assert!(stats.promotion_count >= 0);
-        assert!(stats.demotion_count >= 0);
     }
 
     #[test]
@@ -986,9 +1080,6 @@ mod tests {
             cache_manager.store_page(i, data);
         }
 
-        let initial_memory_pressure = cache_manager.get_memory_pressure();
-        let initial_admission_rate = cache_manager.get_admission_rate();
-
         // Perform maintenance
         cache_manager.perform_maintenance();
 
@@ -996,7 +1087,7 @@ mod tests {
         let final_admission_rate = cache_manager.get_admission_rate();
 
         // Memory pressure should be calculated
-        assert!(final_memory_pressure >= 0);
+        assert!(final_memory_pressure > 0);
         assert!(final_memory_pressure <= 100);
         
         // Admission rate should be reasonable
@@ -1084,6 +1175,98 @@ mod tests {
         // The large page may or may not be admitted depending on pressure
         // This tests the admission control logic
         let memory_pressure = cache_manager.get_memory_pressure();
-        assert!(memory_pressure >= 0);
+        assert!(memory_pressure > 0);
+    }
+
+    #[test]
+    fn test_prefetch_accuracy_tracking() {
+        let config = DiskManagerConfig::default();
+        let cache_manager = CacheManager::new(&config);
+
+        // Initially, accuracy should be 0 (no predictions made yet)
+        assert_eq!(cache_manager.get_prefetch_accuracy(), 0.0);
+
+        // Make some prefetch predictions
+        let predicted_pages = cache_manager.trigger_prefetch(10);
+        assert!(!predicted_pages.is_empty());
+
+        // Access some of the predicted pages (hits)
+        for i in 0..predicted_pages.len().min(3) {
+            let page_id = predicted_pages[i];
+            let data = vec![page_id as u8; 64];
+            cache_manager.store_page(page_id, data.clone());
+            
+            // Access the page to register a prefetch hit
+            let retrieved = cache_manager.get_page(page_id);
+            assert!(retrieved.is_some());
+        }
+
+        // Check that accuracy has been calculated
+        let accuracy = cache_manager.get_prefetch_accuracy();
+        assert!(accuracy > 0.0, "Accuracy should be greater than 0 after hits");
+        assert!(accuracy <= 1.0, "Accuracy should not exceed 100%");
+
+        // Test adaptive prefetching based on accuracy
+        let new_predictions = cache_manager.trigger_prefetch(20);
+        assert!(!new_predictions.is_empty());
+
+        // Test that accuracy affects prediction count
+        // With some accuracy, we should get reasonable number of predictions
+        if accuracy > 0.4 {
+            assert!(new_predictions.len() >= 4, "Should make more predictions with decent accuracy");
+        }
+    }
+
+    #[test]
+    fn test_prefetch_accuracy_cleanup() {
+        let config = DiskManagerConfig::default();
+        let cache_manager = CacheManager::new(&config);
+
+        // Make predictions
+        let predicted_pages = cache_manager.trigger_prefetch(30);
+        assert!(!predicted_pages.is_empty());
+
+        // Simulate some time passing and accessing pages
+        for &page_id in &predicted_pages[0..2] {
+            let data = vec![page_id as u8; 64];
+            cache_manager.store_page(page_id, data);
+            let _ = cache_manager.get_page(page_id);
+        }
+
+        // Test cleanup of old predictions
+        cache_manager.cleanup_old_predictions();
+
+        // Accuracy should still be reasonable
+        let accuracy = cache_manager.get_prefetch_accuracy();
+        assert!(accuracy >= 0.0 && accuracy <= 1.0);
+    }
+
+    #[test]
+    fn test_adaptive_prefetch_distance() {
+        let config = DiskManagerConfig::default();
+        let cache_manager = CacheManager::new(&config);
+
+        // Test that prefetch distance adapts to accuracy
+        
+        // With no history, should get moderate prefetching
+        let initial_predictions = cache_manager.trigger_prefetch(40);
+        let initial_count = initial_predictions.len();
+        assert!(initial_count > 0);
+
+        // Create some successful prefetch history
+        for &page_id in &initial_predictions[0..initial_predictions.len().min(4)] {
+            let data = vec![page_id as u8; 64];
+            cache_manager.store_page(page_id, data);
+            let _ = cache_manager.get_page(page_id);
+        }
+
+        // With higher accuracy, might get more predictions
+        let improved_predictions = cache_manager.trigger_prefetch(50);
+        assert!(!improved_predictions.is_empty());
+        
+        // Test that cache statistics include our prefetch accuracy
+        let stats = cache_manager.get_cache_statistics();
+        assert!(stats.prefetch_accuracy >= 0.0);
+        assert!(stats.prefetch_accuracy <= 1.0);
     }
 }
