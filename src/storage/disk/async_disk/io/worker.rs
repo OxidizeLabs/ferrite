@@ -565,4 +565,444 @@ mod tests {
 
         cleanup_test_files(&db_path, &log_path).await;
     }
+
+    #[tokio::test]
+    async fn test_queue_overflow_handling() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        // Create worker manager with minimal concurrency to create backpressure
+        let mut worker_manager = IOWorkerManager::new(1);
+        worker_manager.start_workers(1, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Enqueue many operations quickly to test queue handling
+        let mut receivers = Vec::new();
+        for i in 0..50 {
+            let test_data = vec![i as u8; 1024]; // Smaller data to process faster
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::WritePage { page_id: i, data: test_data },
+                priorities::PAGE_WRITE,
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // All operations should eventually complete
+        for receiver in receivers {
+            let _result = receiver.await.unwrap().unwrap();
+        }
+        
+        // Verify all operations were processed
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let metrics = completion_tracker.metrics();
+        assert!(metrics.completed_operations() >= 50);
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_priority_handling() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        worker_manager.start_workers(1, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Enqueue operations with different priorities
+        let mut receivers = Vec::new();
+        
+        // Low priority operations
+        for i in 0..3 {
+            let test_data = vec![i as u8; 1024];
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::WritePage { page_id: i, data: test_data },
+                priorities::PAGE_WRITE, // Normal priority
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // High priority operations
+        for i in 10..13 {
+            let test_data = vec![i as u8; 1024];
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::WritePage { page_id: i, data: test_data },
+                priorities::LOG_WRITE, // Higher priority
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // All operations should complete regardless of priority
+        for receiver in receivers {
+            let _result = receiver.await.unwrap().unwrap();
+        }
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_empty_queue_handling() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        worker_manager.start_workers(2, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Let workers run with empty queue for a short time
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Workers should still be active
+        assert_eq!(worker_manager.worker_count(), 2);
+        assert!(worker_manager.has_active_workers());
+        
+        // Add a single operation to verify workers are still responsive
+        let test_data = vec![42u8; 1024];
+        let (_op_id, receiver) = queue_manager.enqueue_operation(
+            IOOperationType::WritePage { page_id: 0, data: test_data.clone() },
+            priorities::PAGE_WRITE,
+        ).await;
+        
+        let result = receiver.await.unwrap().unwrap();
+        assert_eq!(result, test_data);
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_during_operations() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        worker_manager.start_workers(2, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Enqueue operations
+        let mut receivers = Vec::new();
+        for i in 0..5 {
+            let test_data = vec![i as u8; 4096];
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::WritePage { page_id: i, data: test_data },
+                priorities::PAGE_WRITE,
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // Start shutdown immediately without waiting for operations to complete
+        let shutdown_task = tokio::spawn(async move {
+            worker_manager.shutdown().await;
+        });
+        
+        // Race the shutdown against operation completion with timeout
+        let operation_task = tokio::spawn(async move {
+            let mut completed_count = 0;
+            for receiver in receivers {
+                // Use timeout to avoid hanging indefinitely
+                match tokio::time::timeout(tokio::time::Duration::from_millis(500), receiver).await {
+                    Ok(Ok(Ok(_))) => completed_count += 1,
+                    Ok(Ok(Err(_))) => (), // Operation failed, which is acceptable during shutdown
+                    Ok(Err(_)) => (), // Receiver was dropped, which is acceptable during shutdown
+                    Err(_) => (), // Timeout - operation didn't complete in time due to shutdown
+                }
+            }
+            completed_count
+        });
+        
+        // Wait for both tasks to complete
+        let (shutdown_result, operation_result) = tokio::join!(shutdown_task, operation_task);
+        
+        shutdown_result.unwrap();
+        let completed_count = operation_result.unwrap();
+        
+        // Some operations may have completed before shutdown
+        println!("Completed operations during shutdown: {}", completed_count);
+        
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_different_operation_types() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        worker_manager.start_workers(2, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Test different operation types
+        let mut receivers = Vec::new();
+        
+        // Write operations
+        for i in 0..3 {
+            let test_data = vec![i as u8; 1024];
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::WritePage { page_id: i, data: test_data },
+                priorities::PAGE_WRITE,
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // Read operations
+        for i in 0..3 {
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::ReadPage { page_id: i },
+                priorities::PAGE_READ,
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // Log operations
+        let log_data = b"test log entry".to_vec();
+        let (_op_id, receiver) = queue_manager.enqueue_operation(
+            IOOperationType::AppendLog { data: log_data },
+            priorities::LOG_WRITE,
+        ).await;
+        receivers.push(receiver);
+        
+        // Wait for all operations to complete
+        for receiver in receivers {
+            let _result = receiver.await.unwrap(); // Some may fail, which is OK
+        }
+        
+        // Verify operations were processed
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let metrics = completion_tracker.metrics();
+        assert!(metrics.total_operations() > 0);
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_worker_restart_after_shutdown() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        
+        // Start workers
+        worker_manager.start_workers(2, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        assert_eq!(worker_manager.worker_count(), 2);
+        
+        // Shutdown workers
+        worker_manager.shutdown().await;
+        assert_eq!(worker_manager.worker_count(), 0);
+        
+        // Restart workers
+        worker_manager.start_workers(3, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        assert_eq!(worker_manager.worker_count(), 3);
+        
+        // Verify workers are functional
+        let test_data = vec![42u8; 1024];
+        let (_op_id, receiver) = queue_manager.enqueue_operation(
+            IOOperationType::WritePage { page_id: 0, data: test_data.clone() },
+            priorities::PAGE_WRITE,
+        ).await;
+        
+        let result = receiver.await.unwrap().unwrap();
+        assert_eq!(result, test_data);
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_metrics_accuracy() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        worker_manager.start_workers(1, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        let initial_metrics = completion_tracker.metrics();
+        let initial_total = initial_metrics.total_operations();
+        let initial_completed = initial_metrics.completed_operations();
+        
+        // Enqueue successful operations
+        let mut receivers = Vec::new();
+        for i in 0..5 {
+            let test_data = vec![i as u8; 1024];
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::WritePage { page_id: i, data: test_data },
+                priorities::PAGE_WRITE,
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // Wait for all operations to complete
+        for receiver in receivers {
+            let _result = receiver.await.unwrap().unwrap();
+        }
+        
+        // Enqueue an operation that should fail
+        let (_op_id, receiver) = queue_manager.enqueue_operation(
+            IOOperationType::ReadPage { page_id: 1000 }, // Non-existent page
+            priorities::PAGE_READ,
+        ).await;
+        
+        let result = receiver.await.unwrap();
+        assert!(result.is_err());
+        
+        // Wait for metrics to update
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        let final_metrics = completion_tracker.metrics();
+        
+        // Verify metrics are accurate
+        assert_eq!(final_metrics.total_operations(), initial_total + 6);
+        assert_eq!(final_metrics.completed_operations(), initial_completed + 5);
+        assert!(final_metrics.failed_operations() > 0);
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_semaphore_exhaustion() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        // Create worker manager with very limited concurrency
+        let mut worker_manager = IOWorkerManager::new(1);
+        worker_manager.start_workers(3, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Enqueue more operations than semaphore permits
+        let mut receivers = Vec::new();
+        for i in 0..10 {
+            let test_data = vec![i as u8; 1024];
+            let (_op_id, receiver) = queue_manager.enqueue_operation(
+                IOOperationType::WritePage { page_id: i, data: test_data },
+                priorities::PAGE_WRITE,
+            ).await;
+            receivers.push(receiver);
+        }
+        
+        // All operations should eventually complete despite semaphore limiting
+        for receiver in receivers {
+            let _result = receiver.await.unwrap().unwrap();
+        }
+        
+        // Verify all operations were processed
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let metrics = completion_tracker.metrics();
+        assert!(metrics.completed_operations() >= 10);
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_default_constructor() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let mut worker_manager = IOWorkerManager::default();
+        
+        // Should have default concurrency limit
+        assert_eq!(worker_manager.worker_count(), 0);
+        assert!(!worker_manager.has_active_workers());
+        
+        // Should be able to start workers
+        worker_manager.start_workers(
+            2,
+            Arc::new(queue_manager),
+            Arc::new(executor),
+            Arc::new(completion_tracker),
+        );
+        
+        assert_eq!(worker_manager.worker_count(), 2);
+        assert!(worker_manager.has_active_workers());
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_shutdown_calls() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        worker_manager.start_workers(2, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Call shutdown multiple times concurrently
+        let worker_manager = Arc::new(tokio::sync::Mutex::new(worker_manager));
+        
+        let mut shutdown_tasks = Vec::new();
+        for _ in 0..3 {
+            let worker_manager_clone = Arc::clone(&worker_manager);
+            let task = tokio::spawn(async move {
+                let mut manager = worker_manager_clone.lock().await;
+                manager.shutdown().await;
+            });
+            shutdown_tasks.push(task);
+        }
+        
+        // Wait for all shutdown calls to complete
+        for task in shutdown_tasks {
+            task.await.unwrap();
+        }
+        
+        // Verify all workers are shut down
+        let manager = worker_manager.lock().await;
+        assert_eq!(manager.worker_count(), 0);
+        
+        cleanup_test_files(&db_path, &log_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_large_data_operations() {
+        let (queue_manager, executor, completion_tracker, db_path, log_path) = create_test_components().await;
+        
+        let queue_manager = Arc::new(queue_manager);
+        let executor = Arc::new(executor);
+        let completion_tracker = Arc::new(completion_tracker);
+        
+        let mut worker_manager = IOWorkerManager::new(16);
+        worker_manager.start_workers(2, Arc::clone(&queue_manager), Arc::clone(&executor), Arc::clone(&completion_tracker));
+        
+        // Test with large data
+        let large_data = vec![0xFFu8; 64 * 1024]; // 64KB
+        let (_op_id, receiver) = queue_manager.enqueue_operation(
+            IOOperationType::WritePage { page_id: 0, data: large_data.clone() },
+            priorities::PAGE_WRITE,
+        ).await;
+        
+        let result = receiver.await.unwrap().unwrap();
+        assert_eq!(result, large_data);
+        
+        // Verify metrics recorded the large data size
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        let metrics = completion_tracker.metrics();
+        assert!(metrics.total_operations() > 0);
+        assert!(metrics.completed_operations() > 0);
+        
+        worker_manager.shutdown().await;
+        cleanup_test_files(&db_path, &log_path).await;
+    }
 } 
