@@ -124,8 +124,21 @@ impl IOOperationExecutor {
         let offset = (page_id as u64) * DB_PAGE_SIZE;
 
         let mut file = self.db_file.lock().await;
+        
+        // Debug: Check file size before write
+        let file_size_before = file.metadata().await?.len();
+        log::debug!("execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}", 
+                   page_id, offset, data.len(), file_size_before);
+        
         file.seek(std::io::SeekFrom::Start(offset)).await?;
         file.write_all(data).await?;
+        file.flush().await?;  // Ensure data is flushed to OS buffers
+        
+        // Debug: Check file size after write and flush
+        let file_size_after = file.metadata().await?.len();
+        log::debug!("execute_write_page: COMPLETED page_id={}, file_size_after={}", 
+                   page_id, file_size_after);
+        
         Ok(())
     }
 
@@ -155,6 +168,7 @@ impl IOOperationExecutor {
         let mut file = self.log_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
         file.write_all(data).await?;
+        file.flush().await?;  // Ensure data is flushed to OS buffers
         Ok(())
     }
 
@@ -169,13 +183,23 @@ impl IOOperationExecutor {
         let mut file = self.log_file.lock().await;
         let offset = file.seek(std::io::SeekFrom::End(0)).await?;
         file.write_all(data).await?;
+        file.flush().await?;  // Ensure data is flushed to OS buffers
         Ok(offset)
     }
 
     /// Syncs the database file to ensure data persistence
     async fn execute_sync(&self) -> IoResult<()> {
+        log::debug!("execute_sync: Starting sync_all() for database file");
         let file = self.db_file.lock().await;
-        file.sync_all().await
+        
+        // Debug: Check file size before sync
+        let file_size = file.metadata().await?.len();
+        log::debug!("execute_sync: file_size_before_sync={}", file_size);
+        
+        let result = file.sync_all().await;
+        
+        log::debug!("execute_sync: sync_all() completed, result={:?}", result);
+        result
     }
 
     /// Syncs the log file to ensure data persistence
