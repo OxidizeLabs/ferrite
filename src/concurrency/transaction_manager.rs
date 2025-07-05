@@ -262,6 +262,13 @@ impl TransactionManager {
             );
         }
 
+        // Force flush all buffered writes to disk to ensure durability
+        if let Err(e) = futures::executor::block_on(bpm.get_disk_manager().force_flush_all()) {
+            log::error!("Failed to force flush all writes after transaction commit: {}", e);
+            return false;
+        }
+        log::debug!("Force flushed all writes to disk for txn {}", txn.get_transaction_id());
+
         true
     }
 
