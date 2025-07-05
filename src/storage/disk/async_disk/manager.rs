@@ -80,7 +80,13 @@ impl AsyncDiskManager {
         
         // Create IO engine
         debug!("Initializing AsyncIOEngine");
-        let io_engine = Arc::new(RwLock::new(AsyncIOEngine::new(db_file.clone(), log_file.clone())?));
+        let mut io_engine_instance = AsyncIOEngine::new(db_file.clone(), log_file.clone())?;
+        
+        // Start the IO engine with configured number of worker threads
+        debug!("Starting AsyncIOEngine with {} worker threads", config.io_threads);
+        io_engine_instance.start(config.io_threads);
+        
+        let io_engine = Arc::new(RwLock::new(io_engine_instance));
         
         // Create metrics collector
         debug!("Initializing MetricsCollector");
@@ -245,12 +251,18 @@ impl AsyncDiskManager {
         
         // Buffer the write using write manager
         debug!("Buffering write for page {}", page_id);
-        self.write_manager.buffer_write(page_id, data.clone()).await?;
+        let flushed_pages = self.write_manager.buffer_write(page_id, data.clone()).await?;
         
         // Update cache if caching is enabled
         if self.config.cache_size_mb > 0 {
             trace!("Updating cache for page {}", page_id);
             self.cache_manager.store_page(page_id, data.clone());
+        }
+        
+        // Write any flushed pages to disk
+        if let Some(pages) = flushed_pages {
+            debug!("Writing {} flushed pages to disk from buffer_write", pages.len());
+            self.write_pages_to_disk(pages).await?;
         }
         
         // Update metrics
@@ -259,7 +271,7 @@ impl AsyncDiskManager {
         let elapsed_ns = elapsed.as_nanos() as u64;
         self.metrics_collector.record_write(elapsed_ns, data.len() as u64);
         
-        // Check if we need to flush based on configuration
+        // Check if we need to flush based on configuration (this should no longer trigger since we handled flushed pages above)
         if self.should_trigger_flush().await {
             debug!("Write buffer threshold reached, triggering flush");
             self.flush_writes_with_durability().await?;
@@ -470,7 +482,13 @@ impl AsyncDiskManager {
             // Buffer all writes in this chunk
             for (page_id, data) in chunk {
                 trace!("Buffering page {} in batch write", page_id);
-                self.write_manager.buffer_write(*page_id, data.clone()).await?;
+                let flushed_pages = self.write_manager.buffer_write(*page_id, data.clone()).await?;
+                
+                // Write any flushed pages to disk immediately
+                if let Some(pages) = flushed_pages {
+                    debug!("Writing {} flushed pages to disk from batch write", pages.len());
+                    self.write_pages_to_disk(pages).await?;
+                }
                 
                 // Update cache if caching is enabled
                 if self.config.cache_size_mb > 0 {
@@ -863,6 +881,26 @@ impl AsyncDiskManager {
         debug!("Flushing all pending writes before shutdown");
         self.force_flush_all().await?;
         
+        // Signal the IO engine to stop gracefully to prevent worker abort warnings
+        debug!("Signaling AsyncIOEngine to stop gracefully");
+        {
+            let io_engine = self.io_engine.read().await;
+            // Cancel all pending operations to allow workers to exit cleanly
+            let cancelled = io_engine.cancel_all_pending_operations("System shutdown").await;
+            if cancelled > 0 {
+                debug!("Cancelled {} pending operations during shutdown", cancelled);
+            }
+            // Clear the queue to prevent new operations from being processed
+            let cleared = io_engine.clear_queue().await;
+            if cleared > 0 {
+                debug!("Cleared {} operations from queue during shutdown", cleared);
+            }
+        }
+        
+        // Give workers a brief moment to detect the empty queue and exit cleanly
+        debug!("Allowing time for workers to exit cleanly");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
         // Cancel background tasks
         debug!("Cancelling background tasks");
         let mut tasks = self.background_tasks.lock().await;
@@ -935,7 +973,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_basic_read_write() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (mut manager, _temp_dir) = create_test_manager().await;
         
         let page_id = 1;
         let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
@@ -950,8 +988,11 @@ mod tests {
         // Read the page back
         let read_data = manager.read_page(page_id).await
             .expect("Failed to read page");
-        
+
         assert_eq!(read_data, test_data);
+        
+        // Properly shutdown the manager to avoid hanging
+        manager.shutdown().await.expect("Failed to shutdown manager");
     }
 
     #[tokio::test]
@@ -977,7 +1018,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batch_operations() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (mut manager, _temp_dir) = create_test_manager().await;
         
         let page_ids = vec![1, 2, 3, 4, 5];
         let test_data = vec![
@@ -1000,12 +1041,15 @@ mod tests {
         
         // Flush to ensure data is written
         manager.flush().await.expect("Failed to flush");
-        
+
         // Read batch
         let read_data = manager.read_pages_batch(page_ids).await
             .expect("Failed to read batch");
-        
+
         assert_eq!(read_data, test_data);
+        
+        // Properly shutdown the manager to avoid hanging
+        manager.shutdown().await.expect("Failed to shutdown manager");
     }
 
     #[tokio::test]
@@ -1031,7 +1075,7 @@ mod tests {
         assert_eq!(read_data2, test_data);
         
         // Check cache statistics
-        let (promotions, demotions, hit_ratio) = manager.get_cache_stats().await;
+        let (_promotions, _demotions, hit_ratio) = manager.get_cache_stats().await;
         assert!(hit_ratio > 0.0, "Cache hit ratio should be greater than 0");
     }
 
@@ -1065,13 +1109,13 @@ mod tests {
         assert_eq!(read_data, test_data);
         
         // Cache stats should show no activity
-        let (promotions, demotions, hit_ratio) = manager.get_cache_stats().await;
+        let (_promotions, _demotions, hit_ratio) = manager.get_cache_stats().await;
         assert_eq!(hit_ratio, 0.0, "Cache hit ratio should be 0 when caching is disabled");
     }
 
     #[tokio::test]
     async fn test_flush_operations() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (mut manager, _temp_dir) = create_test_manager().await;
         
         let page_ids = vec![1, 2, 3];
         let test_data = vec![
@@ -1103,6 +1147,8 @@ mod tests {
                 .expect("Failed to read page");
             assert_eq!(read_data, *expected_data);
         }
+
+        manager.shutdown().await.expect("Failed to shutdown manager");
     }
 
     #[tokio::test]
@@ -1149,8 +1195,6 @@ mod tests {
         
         // Get metrics
         let metrics = manager.get_metrics();
-        // Just verify we can get metrics without errors
-        assert!(metrics.read_latency_avg_ns >= 0);
         
         // Get dashboard data
         let dashboard = manager.get_dashboard_data();
@@ -1300,13 +1344,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_error_handling() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (mut manager, _temp_dir) = create_test_manager().await;
         
         // Test reading non-existent page
         let result = manager.read_page(999).await;
         // This might succeed with empty data depending on implementation
         // The important thing is that it doesn't panic
         assert!(result.is_ok() || result.is_err());
+        
+        // Properly shutdown the manager to avoid hanging
+        manager.shutdown().await.expect("Failed to shutdown manager");
     }
 
     #[tokio::test]
@@ -1396,7 +1443,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_large_data_handling() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (mut manager, _temp_dir) = create_test_manager().await;
         
         // Test with large data (1MB)
         let large_data = vec![42u8; 1024 * 1024];
@@ -1411,11 +1458,14 @@ mod tests {
             .expect("Failed to read large page");
         
         assert_eq!(read_data, large_data);
+        
+        // Properly shutdown the manager to avoid hanging
+        manager.shutdown().await.expect("Failed to shutdown manager");
     }
 
     #[tokio::test]
     async fn test_log_operations() {
-        let (manager, _temp_dir) = create_test_manager().await;
+        let (mut manager, _temp_dir) = create_test_manager().await;
         
         // Test log write using proper LogRecord constructor
         use crate::recovery::log_record::{LogRecord, LogRecordType};
@@ -1432,6 +1482,9 @@ mod tests {
         // Test log read
         let _log_data = manager.read_log(0).await;
         // Should not panic regardless of success/failure
+        
+        // Properly shutdown the manager to avoid hanging
+        manager.shutdown().await.expect("Failed to shutdown manager");
     }
 
     #[tokio::test]
@@ -1442,7 +1495,7 @@ mod tests {
             ..Default::default()
         };
         
-        let (manager, _temp_dir) = create_test_manager_with_config(config_with_compression).await;
+        let (mut manager, _temp_dir) = create_test_manager_with_config(config_with_compression).await;
         
         // Write some compressible data
         let compressible_data = vec![1u8; 1024]; // Highly compressible
@@ -1460,5 +1513,8 @@ mod tests {
         // Check dashboard shows compression ratio
         let dashboard = manager.get_dashboard_data();
         assert!(dashboard.storage.compression_ratio > 0.0);
+        
+        // Properly shutdown the manager to avoid hanging
+        manager.shutdown().await.expect("Failed to shutdown manager");
     }
 }
