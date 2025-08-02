@@ -1,0 +1,149 @@
+# TKDB Cursor Rules
+
+You are an expert Rust developer working on TKDB, a Database Management System (DBMS) inspired by CMU 15-445/645 course. Follow these project-specific guidelines:
+
+## Project Overview
+- **TKDB** is a full-featured DBMS written in Rust 
+- Implements core database components: buffer management, storage, SQL processing, concurrency control, recovery, and network protocols
+- Follows academic database architecture patterns with production-grade Rust implementation
+- Supports both embedded and client-server modes
+
+## Architecture & Module Organization
+
+### Core Modules
+- `buffer/` - Buffer pool management and LRU-K replacement policy
+- `storage/` - Disk management, page types, indexes (B+ trees, hash tables), table heaps
+- `sql/` - Complete SQL pipeline: binder → planner → optimizer → execution
+- `concurrency/` - Transaction management, lock manager, isolation levels
+- `recovery/` - WAL, checkpointing, crash recovery
+- `types_db/` - Database type system (integers, decimals, varchar, etc.)
+- `catalog/` - Schema management, table/column metadata
+- `network/` & `server/` & `client/` - Network protocol and client-server communication
+
+### Key Design Patterns
+- **Layered architecture**: Clear separation between storage, execution, and network layers
+- **Trait-based polymorphism**: Extensive use of trait objects for page types, expressions, executors
+- **Shared ownership**: `Arc<RwLock<T>>` for shared mutable state, `Arc<T>` for immutable shared data
+- **Error handling**: Custom error hierarchies using `thiserror`, comprehensive error conversion chains
+
+## Coding Standards
+
+### Concurrency & Safety
+- Use `parking_lot::RwLock` for performance-critical locks (not `std::sync::RwLock`)
+- Prefer `Arc<RwLock<T>>` for shared mutable state
+- Use `AtomicU64` for counters and IDs
+- Always handle potential deadlocks in multi-lock scenarios
+- Use `tokio` for async networking, synchronous code for storage/buffer management
+
+### Error Handling
+- Define specific error types using `#[derive(Error, Debug)]` and `thiserror`
+- Implement comprehensive `From` conversions between error types
+- Use `Result<T, DBError>` as the primary return type
+- Log errors appropriately: `error!()` for serious issues, `warn!()` for recoverable problems
+
+### Memory Management
+- Use `PageId`, `FrameId` type aliases for clarity
+- Implement proper `Drop` traits for cleanup when needed
+- Be mindful of page pinning/unpinning in buffer pool operations
+- Use `Vec<Option<T>>` patterns for sparse collections
+
+### Logging & Debugging
+- Use structured logging: `log::{trace, debug, info, warn, error}`
+- Include relevant context in log messages (page IDs, transaction IDs, etc.)
+- Implement comprehensive `Debug` traits, especially for complex structs
+- Use `#[cfg(test)]` for test-only code
+
+## Database-Specific Guidelines
+
+### Buffer Pool Management
+- Always pin pages before use, unpin when done
+- Handle page eviction carefully - check if page is dirty before eviction
+- Use proper locking hierarchy: page table → free list → individual pages
+- Implement LRU-K algorithm correctly for page replacement
+
+### SQL Processing
+- Follow the pipeline: Parse → Bind → Plan → Optimize → Execute
+- Use visitor pattern for expression evaluation
+- Implement proper type checking and casting in the binder
+- Handle NULL values correctly throughout the execution engine
+
+### Storage & Indexing
+- Page layout must be carefully designed for performance
+- B+ tree operations must maintain invariants
+- Hash table resizing should be handled gracefully
+- Implement proper serialization/deserialization for persistence
+
+### Transactions & Concurrency
+- Implement proper 2PL (Two-Phase Locking)
+- Handle deadlock detection and resolution
+- Support multiple isolation levels (READ_UNCOMMITTED, READ_COMMITTED, etc.)
+- WAL entries must be written before data modifications
+
+## Code Style Preferences
+
+### Naming Conventions
+- Use `snake_case` for functions, variables, modules
+- Use `PascalCase` for types, traits, enums
+- Use `SCREAMING_SNAKE_CASE` for constants
+- Prefix private fields with underscore when appropriate
+- Use descriptive names: `page_id` not `pid`, `frame_id` not `fid`
+
+### File Organization
+- Keep related functionality in the same module
+- Use `mod.rs` to expose public interfaces
+- Group similar operations (e.g., all index operations in `index/`)
+- Separate plan nodes from executor implementations
+
+### Documentation
+- Document public APIs with `///` comments
+- Explain complex algorithms and invariants
+- Include examples for non-trivial public functions
+- Document unsafe code extensively
+
+## Testing Guidelines
+- Write unit tests for individual components
+- Create integration tests for end-to-end workflows
+- Use `mockall` for mocking complex dependencies
+- Test edge cases: empty tables, full buffer pools, concurrent access
+- Include performance benchmarks for critical paths
+
+## Performance Considerations
+- Buffer pool is the performance bottleneck - optimize carefully
+- Minimize memory allocations in hot paths
+- Use efficient data structures (`HashMap` vs `BTreeMap` based on use case)
+- Profile lock contention in concurrent workloads
+- Consider NUMA effects for large buffer pools
+
+## Common Patterns
+
+### Resource Management
+```rust
+// Pin page before use
+let page_guard = buffer_pool.fetch_page(page_id)?;
+// Use page
+let result = page_guard.read().process();
+// Page automatically unpinned when guard drops
+```
+
+### Error Propagation
+```rust
+// Convert errors appropriately
+impl From<PageError> for DBError {
+    fn from(error: PageError) -> Self {
+        DBError::Internal(error.to_string())
+    }
+}
+```
+
+### Async/Sync Boundaries
+- Keep storage layer synchronous for simplicity
+- Use async only for network I/O and client handling
+- Convert between sync/async using `tokio::task::spawn_blocking` when needed
+
+## Debugging Tips
+- Use `cargo test -- --nocapture` to see log output during tests
+- Set `RUST_LOG=debug` for detailed logging
+- Use `addr2line` for stack trace debugging
+- Profile with `perf` or `cargo flamegraph` for performance issues
+
+Remember: TKDB aims to be both educational and performant. Write code that clearly demonstrates database concepts while maintaining production-level quality and performance.
