@@ -1,3 +1,4 @@
+use crate::sql::execution::check_option::CheckOption;
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::catalog::Catalog;
 use crate::common::exception::DBError;
@@ -46,7 +47,7 @@ impl ExecutionEngine {
     }
 
     /// Execute a SQL statement with the given context and writer
-    pub fn execute_sql(
+    pub async fn execute_sql(
         &mut self,
         sql: &str,
         context: Arc<RwLock<ExecutionContext>>,
@@ -56,7 +57,7 @@ impl ExecutionEngine {
         let plan = self.prepare_sql(sql, context.clone())?;
 
         // Execute the plan
-        self.execute_plan(&plan, context, writer)
+        self.execute_plan(&plan, context, writer).await
     }
 
     /// Prepare a SQL statement for execution
@@ -90,7 +91,7 @@ impl ExecutionEngine {
     }
 
     /// Execute a physical plan
-    fn execute_plan(
+    async fn execute_plan(
         &self,
         plan: &PlanNode,
         context: Arc<RwLock<ExecutionContext>>,
@@ -228,7 +229,7 @@ impl ExecutionEngine {
                         let txn_id = txn_context.get_transaction_id();
 
                         // Commit the transaction through transaction manager
-                        match self.commit_transaction(txn_context.clone()) {
+                        match self.commit_transaction(txn_context.clone()).await {
                             Ok(success) => {
                                 info!("Transaction {} committed successfully", txn_id);
 
@@ -415,12 +416,13 @@ impl ExecutionEngine {
     fn optimize_plan(&self, plan: LogicalPlan) -> Result<PlanNode, DBError> {
         // Box the logical plan and get check options
         let boxed_plan = Box::new(plan);
-        let check_options = Arc::new(CheckOptions::new());
+        let mut check_options = CheckOptions::new();
+        check_options.add_check(CheckOption::EnableNljCheck);
 
         // Optimize the plan
         let optimized_plan = self
             .optimizer
-            .optimize(boxed_plan, check_options)
+            .optimize(boxed_plan, Arc::from(check_options))
             .map_err(|e| DBError::OptimizeError(e.to_string()))?;
 
         // Convert to physical plan and map any String errors to DBError
@@ -457,7 +459,7 @@ impl ExecutionEngine {
     }
 
     /// Execute a prepared statement (currently same as regular execute)
-    pub fn execute_prepared_statement(
+    pub async fn execute_prepared_statement(
         &mut self,
         sql: &str,
         _params: Vec<Value>,
@@ -465,10 +467,10 @@ impl ExecutionEngine {
         writer: &mut impl ResultWriter,
     ) -> Result<bool, DBError> {
         // For now, just execute as regular SQL since we don't support parameters
-        self.execute_sql(sql, context, writer)
+        self.execute_sql(sql, context, writer).await
     }
 
-    fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
+    async fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Committing transaction {}", txn_ctx.get_transaction_id());
 
         // Get transaction manager
@@ -491,7 +493,7 @@ impl ExecutionEngine {
         transaction.set_prev_lsn(lsn);
 
         // Attempt to commit
-        match txn_manager.commit(transaction, self.buffer_pool_manager.clone()) {
+        match txn_manager.commit(transaction, self.buffer_pool_manager.clone()).await {
             true => {
                 debug!("Transaction committed successfully");
                 Ok(true)
@@ -610,6 +612,7 @@ mod tests {
         engine: ExecutionEngine,
         catalog: Arc<RwLock<Catalog>>,
         exec_ctx: Arc<RwLock<ExecutionContext>>,
+        disk_manager: Arc<AsyncDiskManager>,
         _temp_dir: TempDir,
     }
 
@@ -689,6 +692,7 @@ mod tests {
                 engine,
                 catalog,
                 exec_ctx,
+                disk_manager: disk_manager_arc,
                 _temp_dir: temp_dir,
             }
         }
@@ -698,6 +702,10 @@ mod tests {
             Ok(catalog
                 .create_table(table_name.to_string(), schema.clone())
                 .unwrap())
+        }
+
+        async fn get_db_file_size(&self) -> std::io::Result<u64> {
+            self.disk_manager.get_db_file_size().await
         }
 
         fn insert_tuples(
@@ -724,10 +732,10 @@ mod tests {
             Ok(())
         }
 
-        fn commit_current_transaction(&mut self) -> Result<(), String> {
+        async fn commit_current_transaction(&mut self) -> Result<(), String> {
             let mut writer = TestResultWriter::new();
             self.engine
-                .execute_sql("COMMIT", self.exec_ctx.clone(), &mut writer)
+                .execute_sql("COMMIT", self.exec_ctx.clone(), &mut writer).await
                 .map(|_| ())
                 .map_err(|e| e.to_string())
         }
@@ -791,7 +799,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table operation failed");
 
@@ -800,7 +808,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert operation failed");
 
@@ -808,7 +816,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await 
                 .unwrap();
             assert!(success, "Select operation failed");
             assert_eq!(
@@ -839,7 +847,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with all data types failed");
 
@@ -860,7 +868,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with all data types failed");
 
@@ -869,7 +877,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from all types table failed");
             assert_eq!(writer.get_rows().len(), 1, "Expected 1 row");
@@ -884,7 +892,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create single column table failed");
 
@@ -893,7 +901,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert into single column table failed");
 
@@ -901,7 +909,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from single column table failed");
             assert_eq!(writer.get_rows()[0][0].to_string(), "42");
@@ -921,7 +929,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create wide table failed");
 
@@ -935,7 +943,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert into wide table failed");
 
@@ -944,7 +952,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from wide table failed");
             let row = &writer.get_rows()[0];
@@ -968,7 +976,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create varchar test table failed");
 
@@ -982,7 +990,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert varchar data failed");
 
@@ -991,7 +999,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select varchar data failed");
             assert_eq!(writer.get_rows()[0][1].to_string(), "short");
@@ -1012,7 +1020,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create numeric precision table failed");
 
@@ -1027,7 +1035,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert numeric precision data failed");
 
@@ -1036,7 +1044,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select numeric precision data failed");
             let row = &writer.get_rows()[0];
@@ -1054,7 +1062,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create employees table failed");
 
@@ -1064,7 +1072,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create departments table failed");
 
@@ -1072,14 +1080,14 @@ mod tests {
             let insert_emp_sql = "INSERT INTO employees VALUES (1, 'Alice', 1), (2, 'Bob', 2)";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(insert_emp_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_emp_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let insert_dept_sql =
                 "INSERT INTO departments VALUES (1, 'Engineering', 1000000), (2, 'Sales', 500000)";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify both tables work independently
@@ -1087,7 +1095,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_emp_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_emp_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from employees failed");
             assert_eq!(writer.get_rows().len(), 2);
@@ -1096,7 +1104,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from departments failed");
             assert_eq!(writer.get_rows().len(), 2);
@@ -1106,7 +1114,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Join between tables failed");
             assert_eq!(writer.get_rows().len(), 2);
@@ -1121,7 +1129,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with underscores and numbers failed");
 
@@ -1130,7 +1138,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create uppercase table failed");
 
@@ -1138,13 +1146,13 @@ mod tests {
             let insert_sql1 = "INSERT INTO test_table_123 VALUES (1, 'test')";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let insert_sql2 = "INSERT INTO UPPER_CASE_TABLE VALUES (2, 'TEST')";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify data retrieval
@@ -1152,7 +1160,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from underscore table failed");
             assert_eq!(writer.get_rows().len(), 1);
@@ -1161,7 +1169,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from uppercase table failed");
             assert_eq!(writer.get_rows().len(), 1);
@@ -1176,7 +1184,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "First create table should succeed");
 
@@ -1186,7 +1194,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // Should return an error for duplicate table name
             assert!(result.is_err(), "Creating duplicate table should fail");
@@ -1207,7 +1215,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create boolean table failed");
 
@@ -1220,7 +1228,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert boolean data failed");
 
@@ -1230,7 +1238,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_enabled_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_enabled_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select enabled features failed");
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 enabled features");
@@ -1239,7 +1247,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_experimental_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_experimental_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select experimental features failed");
             assert_eq!(
@@ -1266,7 +1274,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create sales_data table failed");
 
@@ -1280,7 +1288,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert sales data failed");
 
@@ -1289,7 +1297,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Aggregation query failed");
             assert_eq!(writer.get_rows().len(), 3, "Expected 3 categories");
@@ -1299,7 +1307,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Complex filter query failed");
             assert_eq!(
@@ -1313,7 +1321,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Calculated column query failed");
             assert_eq!(writer.get_rows().len(), 5, "Expected all 5 records");
@@ -1327,7 +1335,7 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Create table within transaction
@@ -1335,7 +1343,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table in transaction failed");
 
@@ -1344,7 +1352,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert in transaction failed");
 
@@ -1353,7 +1361,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Commit transaction failed");
 
@@ -1362,7 +1370,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select after commit failed");
             assert_eq!(
@@ -1385,7 +1393,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with PRIMARY KEY failed");
 
@@ -1394,7 +1402,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert valid data failed");
 
@@ -1402,7 +1410,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert second valid record failed");
 
@@ -1412,7 +1420,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: Depending on implementation, this might succeed if PK constraints aren't enforced yet
             // The test documents expected behavior
 
@@ -1421,7 +1429,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from PK table failed");
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 unique records");
@@ -1441,7 +1449,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with NOT NULL failed");
 
@@ -1450,7 +1458,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with all fields failed");
 
@@ -1460,7 +1468,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with NULL optional field failed");
 
@@ -1470,7 +1478,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_null_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_null_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: Depending on implementation, this behavior may vary
 
             // Verify successful inserts
@@ -1478,7 +1486,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from NOT NULL table failed");
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
@@ -1498,7 +1506,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with UNIQUE constraint failed");
 
@@ -1508,7 +1516,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert first unique email failed");
 
@@ -1517,7 +1525,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert second unique email failed");
 
@@ -1527,7 +1535,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: Behavior depends on UNIQUE constraint enforcement
 
             // Verify data integrity
@@ -1535,7 +1543,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from UNIQUE table failed");
             assert_eq!(
@@ -1559,7 +1567,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with CHECK constraint failed");
 
@@ -1568,7 +1576,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert valid data failed");
 
@@ -1576,7 +1584,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert second valid record failed");
 
@@ -1586,7 +1594,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: CHECK constraint enforcement depends on implementation
 
             // Try to insert data that violates salary constraint
@@ -1597,7 +1605,7 @@ mod tests {
                 insert_invalid_salary_sql,
                 ctx.exec_ctx.clone(),
                 &mut writer,
-            );
+            ).await;
             // Note: CHECK constraint enforcement depends on implementation
 
             // Verify valid data exists
@@ -1605,7 +1613,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from CHECK table failed");
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
@@ -1626,7 +1634,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with DEFAULT values failed");
 
@@ -1635,7 +1643,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with explicit values failed");
 
@@ -1644,7 +1652,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with defaults failed");
 
@@ -1654,7 +1662,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with explicit NULL failed");
 
@@ -1664,7 +1672,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from DEFAULT table failed");
             assert_eq!(writer.get_rows().len(), 3, "Expected 3 records");
@@ -1692,7 +1700,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with multiple constraints failed");
 
@@ -1701,7 +1709,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert valid constrained data failed");
 
@@ -1709,7 +1717,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert second valid record failed");
 
@@ -1720,7 +1728,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_dup_pk_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_dup_pk_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: Constraint enforcement depends on implementation
 
             // Duplicate username
@@ -1728,14 +1736,14 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_dup_username_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_dup_username_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // Age constraint violation
             let insert_invalid_age_sql = "INSERT INTO comprehensive_users (id, username, email, age) VALUES (4, 'young_user', 'young@example.com', 10)";
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_invalid_age_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // Verify only valid data exists
             let select_sql =
@@ -1743,7 +1751,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from multi-constraint table failed");
             assert_eq!(writer.get_rows().len(), 2, "Expected 2 valid records");
@@ -1762,7 +1770,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_parent_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_parent_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create parent table failed");
 
@@ -1776,7 +1784,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_child_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_child_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with FOREIGN KEY failed");
 
@@ -1786,7 +1794,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert departments failed");
 
@@ -1795,7 +1803,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_emp_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_emp_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert employee with valid FK failed");
 
@@ -1803,7 +1811,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_emp_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_emp_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert second employee failed");
 
@@ -1812,7 +1820,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_emp_null_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_emp_null_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert employee with NULL FK failed");
 
@@ -1821,7 +1829,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: FK constraint enforcement depends on implementation
 
             // Verify join works correctly
@@ -1829,7 +1837,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Join with FK table failed");
             assert_eq!(writer.get_rows().len(), 3, "Expected 3 employee records");
@@ -1848,7 +1856,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // AUTO_INCREMENT might not be supported, so handle gracefully
             match result {
@@ -1860,7 +1868,7 @@ mod tests {
                     let mut writer = TestResultWriter::new();
                     let success = ctx
                         .engine
-                        .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                        .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                         .unwrap();
                     assert!(success, "Insert with auto ID failed");
 
@@ -1868,7 +1876,7 @@ mod tests {
                     let mut writer = TestResultWriter::new();
                     let success = ctx
                         .engine
-                        .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                        .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                         .unwrap();
                     assert!(success, "Insert second auto ID failed");
 
@@ -1877,7 +1885,7 @@ mod tests {
                     let mut writer = TestResultWriter::new();
                     let success = ctx
                         .engine
-                        .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                        .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                         .unwrap();
                     assert!(success, "Select auto ID table failed");
                     assert_eq!(
@@ -1909,7 +1917,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with composite constraints failed");
 
@@ -1918,7 +1926,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert valid composite data failed");
 
@@ -1926,7 +1934,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert second valid record failed");
 
@@ -1934,7 +1942,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql3, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert third valid record failed");
 
@@ -1943,7 +1951,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: Composite key constraint enforcement depends on implementation
 
             // Verify data integrity
@@ -1951,7 +1959,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select from composite constraint table failed");
             assert_eq!(
@@ -2014,7 +2022,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create index on name column failed");
 
@@ -2023,7 +2031,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create index on age column failed");
 
@@ -2032,7 +2040,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create index on id column failed");
 
@@ -2041,7 +2049,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query after index creation failed");
 
@@ -2108,7 +2116,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create composite index on names failed");
 
@@ -2118,7 +2126,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(
                 success,
@@ -2131,7 +2139,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create three-column composite index failed");
 
@@ -2140,7 +2148,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query using composite index failed");
 
@@ -2187,7 +2195,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create unique index on email failed");
 
@@ -2196,7 +2204,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create unique index on username failed");
 
@@ -2206,7 +2214,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create unique composite index failed");
 
@@ -2216,7 +2224,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // Note: Behavior depends on whether unique constraint enforcement is implemented
             match result {
@@ -2229,7 +2237,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query after unique index creation failed");
         }
@@ -2321,7 +2329,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(success, "Create index on {} failed", data_type);
             }
@@ -2331,7 +2339,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query using multiple indexed columns failed");
         }
@@ -2381,7 +2389,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(success, "Create index with {} name failed", description);
             }
@@ -2391,7 +2399,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query using multiple indexes failed");
         }
@@ -2415,7 +2423,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await;
             assert!(
                 result.is_err(),
                 "Creating index on non-existent table should fail"
@@ -2426,7 +2434,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await;
             assert!(
                 result.is_err(),
                 "Creating index on non-existent column should fail"
@@ -2437,7 +2445,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Creating valid index failed");
 
@@ -2446,7 +2454,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(create_duplicate_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // This may or may not fail depending on implementation
             match result {
                 Ok(_) => println!("Note: Duplicate index names are allowed"),
@@ -2458,7 +2466,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(auto_name_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(auto_name_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "CREATE INDEX with auto-generated name should succeed");
 
@@ -2473,7 +2481,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(invalid_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(invalid_sql, ctx.exec_ctx.clone(), &mut writer).await;
                 assert!(result.is_err(), "Invalid SQL should fail: {}", invalid_sql);
             }
 
@@ -2488,7 +2496,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await;
                 assert!(result.is_ok(), "Auto-generated index name should succeed: {}", create_sql);
                 assert!(result.unwrap(), "Index creation should return true: {}", create_sql);
             }
@@ -2545,7 +2553,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(
                     success,
@@ -2575,7 +2583,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(query_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(query_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(
                     success,
@@ -2612,20 +2620,20 @@ mod tests {
                 .unwrap();
 
             // Commit initial data
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test 1: CREATE INDEX with transaction commit
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let create_index_sql = "CREATE INDEX idx_test_data ON test_table (data)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create index in transaction failed");
 
@@ -2633,7 +2641,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Commit after index creation failed");
 
@@ -2642,7 +2650,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query after committed index creation failed");
 
@@ -2650,14 +2658,14 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let create_index_sql = "CREATE INDEX idx_test_id ON test_table (id)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(
                 success,
@@ -2668,7 +2676,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Rollback after index creation failed");
 
@@ -2680,7 +2688,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query after rolled back index creation failed");
         }
@@ -2719,7 +2727,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(search_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(search_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let query_time_before = start_time.elapsed();
 
@@ -2733,7 +2741,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let index_creation_time = start_time.elapsed();
 
@@ -2744,7 +2752,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(search_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(search_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let query_time_after = start_time.elapsed();
 
@@ -2772,7 +2780,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(&test_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(&test_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 total_time_after += start_time.elapsed();
                 assert!(success, "Performance test query {} failed", i);
@@ -2788,7 +2796,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(range_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(range_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Range query with index failed");
 
@@ -2823,7 +2831,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             match result {
                 Ok(success) => {
@@ -2833,7 +2841,7 @@ mod tests {
                     let mut writer = TestResultWriter::new();
                     let success = ctx
                         .engine
-                        .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                        .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                         .unwrap();
                     assert!(success, "Second CREATE INDEX IF NOT EXISTS should succeed");
                 }
@@ -2845,7 +2853,7 @@ mod tests {
                     let mut writer = TestResultWriter::new();
                     let success = ctx
                         .engine
-                        .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer)
+                        .execute_sql(create_index_sql, ctx.exec_ctx.clone(), &mut writer).await
                         .unwrap();
                     assert!(success, "Regular CREATE INDEX failed");
                 }
@@ -2856,7 +2864,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query using index failed");
         }
@@ -2951,7 +2959,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(success, "Create index failed for {}", description);
             }
@@ -2961,7 +2969,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Join query using multiple indexes failed");
 
@@ -2970,7 +2978,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Multi-column filter query failed");
 
@@ -3007,7 +3015,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert operation failed");
 
@@ -3016,7 +3024,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select operation failed");
             assert_eq!(writer.get_rows().len(), 1, "Expected 1 row after insert");
@@ -3026,7 +3034,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(multi_insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(multi_insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Multi-row insert operation failed");
 
@@ -3035,7 +3043,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select operation failed");
             assert_eq!(
@@ -3067,7 +3075,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with all columns failed");
 
@@ -3076,7 +3084,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with partial columns failed");
 
@@ -3085,7 +3093,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with reordered columns failed");
 
@@ -3094,7 +3102,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select after column-specific inserts failed");
 
@@ -3145,7 +3153,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with explicit NULL failed");
 
@@ -3154,7 +3162,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with multiple NULLs failed");
 
@@ -3164,7 +3172,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(
                 success,
@@ -3176,7 +3184,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select with NULL values failed");
 
@@ -3232,7 +3240,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(
                 success,
@@ -3244,7 +3252,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select with NULL values failed");
 
@@ -3299,7 +3307,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with all data types failed");
 
@@ -3319,7 +3327,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with different value types failed");
 
@@ -3339,7 +3347,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert with edge case values failed");
 
@@ -3348,7 +3356,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select all data types failed");
 
@@ -3404,7 +3412,7 @@ mod tests {
                 (5, 'Eve', 'Sales', 68000)";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(insert_source_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_source_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Test 1: INSERT with simple SELECT (all rows)
@@ -3412,7 +3420,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with SELECT (all rows) failed");
 
@@ -3420,7 +3428,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM employees_target";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -3432,7 +3440,7 @@ mod tests {
             let delete_sql = "DELETE FROM employees_target";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Test 2: INSERT with filtered SELECT
@@ -3440,7 +3448,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_filtered_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_filtered_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with filtered SELECT failed");
 
@@ -3448,7 +3456,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM employees_target";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -3461,7 +3469,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_columns_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_columns_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(
                 success,
@@ -3473,7 +3481,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             // This test depends on NULL handling in the implementation
             if success {
@@ -3512,7 +3520,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with expressions failed");
 
@@ -3527,7 +3535,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // This may fail if functions aren't implemented - that's OK
             match result {
                 Ok(success) => assert!(success, "INSERT with functions failed"),
@@ -3545,7 +3553,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             match result {
                 Ok(success) => assert!(success, "INSERT with CASE expressions failed"),
                 Err(_) => println!("CASE expressions not supported in INSERT"),
@@ -3556,7 +3564,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select after expression INSERT failed");
 
@@ -3589,14 +3597,14 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let insert_sql = "INSERT INTO transactions_test VALUES (1, 'Alice', 1000)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT in transaction failed");
 
@@ -3604,21 +3612,21 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Second INSERT in transaction failed");
 
             let commit_sql = "COMMIT";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify data was committed
             let select_sql = "SELECT COUNT(*) FROM transactions_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -3630,28 +3638,28 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let insert_sql = "INSERT INTO transactions_test VALUES (3, 'Charlie', 3000)";
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT before rollback failed");
 
             let rollback_sql = "ROLLBACK";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify rollback worked - should still have only 2 rows
             let select_sql = "SELECT COUNT(*) FROM transactions_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -3663,7 +3671,7 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Insert multiple rows in transaction
@@ -3677,7 +3685,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(success, "Batch INSERT {} failed", i);
             }
@@ -3685,14 +3693,14 @@ mod tests {
             let commit_sql = "COMMIT";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify all batch inserts were committed
             let select_sql = "SELECT COUNT(*) FROM transactions_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -3721,7 +3729,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             assert!(
                 result.is_err(),
                 "INSERT into non-existent table should fail"
@@ -3732,7 +3740,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // This may or may not fail depending on implementation - document the behavior
             match result {
                 Ok(_) => println!("Note: INSERT with extra values was accepted"),
@@ -3744,7 +3752,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             match result {
                 Ok(_) => println!("Note: INSERT with missing values was accepted (NULLs assumed)"),
                 Err(_) => println!("INSERT with missing values was correctly rejected"),
@@ -3755,7 +3763,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             assert!(
                 result.is_err(),
                 "INSERT with non-existent column should fail"
@@ -3766,7 +3774,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             match result {
                 Ok(_) => println!("Note: Type coercion was applied for string->integer"),
                 Err(_) => println!("Type mismatch was correctly detected and rejected"),
@@ -3777,7 +3785,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Count query should work even after errors");
             println!(
@@ -3800,7 +3808,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with constraints failed");
 
@@ -3810,7 +3818,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with valid constrained data failed");
 
@@ -3819,7 +3827,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Second INSERT with valid constrained data failed");
 
@@ -3829,7 +3837,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // Note: Constraint enforcement depends on implementation
             match result {
                 Ok(_) => println!("Note: Primary key constraint not enforced"),
@@ -3842,7 +3850,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             match result {
                 Ok(_) => println!("Note: Unique constraint not enforced"),
                 Err(_) => println!("Unique constraint correctly enforced"),
@@ -3853,7 +3861,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             match result {
                 Ok(_) => println!("Note: CHECK constraint not enforced"),
                 Err(_) => println!("CHECK constraint correctly enforced"),
@@ -3865,7 +3873,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             match result {
                 Ok(_) => println!("Note: NOT NULL constraint not enforced"),
                 Err(_) => println!("NOT NULL constraint correctly enforced"),
@@ -3875,7 +3883,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM constrained_table";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             println!(
                 "Final row count in constrained table: {}",
@@ -3908,7 +3916,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Large batch INSERT failed");
 
@@ -3916,7 +3924,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM large_batch";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -3928,7 +3936,7 @@ mod tests {
             let select_sql = "SELECT id, data, value FROM large_batch WHERE id <= 5 ORDER BY id";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let rows = writer.get_rows();
@@ -3970,7 +3978,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create table with defaults failed");
 
@@ -3980,7 +3988,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with explicit values failed");
 
@@ -3989,7 +3997,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with partial columns failed");
 
@@ -3999,7 +4007,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
             match result {
                 Ok(success) => assert!(success, "INSERT with DEFAULT keyword failed"),
                 Err(_) => println!("DEFAULT keyword not supported in INSERT VALUES"),
@@ -4011,7 +4019,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Select after default inserts failed");
 
@@ -4038,7 +4046,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create departments table failed");
 
@@ -4053,7 +4061,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_emp_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_emp_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create employees table with FK failed");
 
@@ -4065,7 +4073,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert departments failed");
 
@@ -4077,7 +4085,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_emp_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_emp_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT employees with valid FK failed");
 
@@ -4087,7 +4095,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_null_fk_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_null_fk_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with NULL FK failed");
 
@@ -4097,7 +4105,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_invalid_fk_sql, ctx.exec_ctx.clone(), &mut writer).await;
             // FK constraint enforcement depends on implementation
             match result {
                 Ok(_) => println!("Note: Foreign key constraint not enforced on INSERT"),
@@ -4112,7 +4120,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(join_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "JOIN query failed");
 
@@ -4149,9 +4157,16 @@ mod tests {
             ctx.create_test_table(table_name, table_schema.clone())
                 .unwrap();
 
-            // Test 1: Single large INSERT statement with 100 rows
+            // Test Flow:
+            // 1. Bulk INSERT 1000 rows (tests bulk insert performance)
+            // 2. DELETE all rows (clears table for individual inserts)
+            // 3. Individual INSERT 50 rows (tests single insert performance)
+            // 4. INSERT with SELECT 25 rows (tests query-based inserts)
+            // Final state: 75 rows (50 + 25)
+            
+            // Test 1: Single large INSERT statement with 1000 rows
             let mut values = Vec::new();
-            for i in 1..=100 {
+            for i in 1..=1000 {
                 values.push(format!(
                     "({}, {}, {}, 'text_data_{}', {})",
                     i,
@@ -4163,37 +4178,37 @@ mod tests {
             }
             let bulk_insert_sql = format!("INSERT INTO bulk_test VALUES {}", values.join(", "));
 
-            let start_time = std::time::Instant::now();
+            // Get initial disk manager metrics for comparison
+            let disk_manager = ctx.disk_manager.clone();
+
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(&bulk_insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(&bulk_insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
-            let bulk_duration = start_time.elapsed();
 
             assert!(success, "Bulk INSERT failed");
-            println!("Bulk INSERT of 100 rows took: {:?}", bulk_duration);
+            println!("Bulk INSERT of 1000 rows completed successfully");
 
             // Verify bulk insert
             let count_sql = "SELECT COUNT(*) FROM bulk_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
-                "100",
-                "Expected 100 rows from bulk insert"
+                "1000",
+                "Expected 1000 rows from bulk insert"
             );
 
             // Test 2: Multiple individual INSERT statements for comparison
             let clear_sql = "DELETE FROM bulk_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(clear_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(clear_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
-            let start_time = std::time::Instant::now();
             for i in 1..=50 {
                 // Fewer iterations to keep test reasonable
                 let individual_insert_sql = format!(
@@ -4207,35 +4222,30 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(&individual_insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(&individual_insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(success, "Individual INSERT {} failed", i);
             }
-            let individual_duration = start_time.elapsed();
 
-            println!("50 individual INSERTs took: {:?}", individual_duration);
+            println!("50 individual INSERTs completed successfully");
 
             // Test 3: INSERT with SELECT from existing data (data duplication)
             let insert_select_sql = "INSERT INTO bulk_test SELECT id + 1000, batch_id + 100, value * 2, 'copied_' || text_data, computed * 2 FROM bulk_test WHERE id <= 25";
-            let start_time = std::time::Instant::now();
+            
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
-            let select_insert_duration = start_time.elapsed();
 
             assert!(success, "INSERT with SELECT failed");
-            println!(
-                "INSERT with SELECT (25 rows) took: {:?}",
-                select_insert_duration
-            );
+            println!("INSERT with SELECT (25 rows) completed successfully");
 
             // Verify final state
             let final_count_sql = "SELECT COUNT(*) FROM bulk_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4248,7 +4258,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Aggregation on bulk data failed");
 
@@ -4259,6 +4269,58 @@ mod tests {
                     row[0], row[1], row[2], row[3]
                 );
             }
+
+            // Commit the transaction to ensure data is written to disk
+            ctx.commit_current_transaction().await.unwrap();
+
+            // Allow time for async I/O metrics to be fully updated
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            // Assert that bytes have been physically written to the database file
+            let db_file_size = ctx.get_db_file_size().await.unwrap();
+            assert!(db_file_size > 0, "Database file should have data written to it after bulk operations, but size is {} bytes", db_file_size);
+            println!("Database file size after bulk operations: {} bytes", db_file_size);
+
+            // Display comprehensive I/O performance metrics
+            let final_metrics = disk_manager.get_metrics();
+            
+            // Also check raw live metrics to understand what's being recorded
+            let live_metrics = disk_manager.get_metrics_collector().get_live_metrics();
+            let read_ops = live_metrics.read_ops_count.load(std::sync::atomic::Ordering::Relaxed);
+            let write_ops = live_metrics.write_ops_count.load(std::sync::atomic::Ordering::Relaxed);
+            let io_latency_sum = live_metrics.io_latency_sum.load(std::sync::atomic::Ordering::Relaxed);
+            let cache_hits = live_metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+            let cache_misses = live_metrics.cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+            let flush_count = live_metrics.flush_count.load(std::sync::atomic::Ordering::Relaxed);
+            
+            println!("\n=== Raw Live Metrics Debug ===");
+            println!("  - Read operations: {}", read_ops);
+            println!("  - Write operations: {}", write_ops);
+            println!("  - Total I/O latency sum: {} ns", io_latency_sum);
+            println!("  - Cache hits: {}", cache_hits);
+            println!("  - Cache misses: {}", cache_misses);
+            println!("  - Flush count: {}", flush_count);
+            
+            println!("\n=== Comprehensive I/O Performance Metrics ===");
+            println!("Performance Metrics from Disk Manager:");
+            println!("  - Read latency avg: {} ns", final_metrics.read_latency_avg_ns);
+            println!("  - Write latency avg: {} ns", final_metrics.write_latency_avg_ns);
+            println!("  - I/O throughput: {:.2} MB/s", final_metrics.io_throughput_mb_per_sec);
+            println!("  - I/O queue depth: {}", final_metrics.io_queue_depth);
+            println!("  - Cache hit ratio: {:.2}%", final_metrics.cache_hit_ratio * 100.0);
+            println!("  - Prefetch accuracy: {:.2}%", final_metrics.prefetch_accuracy * 100.0);
+            println!("  - Cache memory usage: {} MB", final_metrics.cache_memory_usage_mb);
+            println!("  - Write buffer utilization: {:.2}%", final_metrics.write_buffer_utilization * 100.0);
+            println!("  - Compression ratio: {:.2}", final_metrics.compression_ratio);
+            println!("  - Flush frequency: {:.2} flushes/sec", final_metrics.flush_frequency_per_sec);
+            println!("  - Error rate: {:.2} errors/sec", final_metrics.error_rate_per_sec);
+            println!("  - Retry count: {}", final_metrics.retry_count);
+            println!("===============================================");
+            
+            // Note: Individual operation metrics may show 0 because the disk manager
+            // updates metrics asynchronously and in batches. The final comprehensive
+            // metrics above provide the most accurate view of overall I/O performance.
+
         }
 
         #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
@@ -4278,13 +4340,13 @@ mod tests {
                 .unwrap();
 
             // Commit initial setup
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test 1: INSERT in one transaction, verify isolation
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Insert data in first transaction
@@ -4294,7 +4356,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_t1_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_t1_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT in first transaction failed");
 
@@ -4302,7 +4364,7 @@ mod tests {
             let select_t1_sql = "SELECT COUNT(*) FROM concurrent_test WHERE transaction_id = 1";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_t1_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_t1_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4314,14 +4376,14 @@ mod tests {
             let commit_sql = "COMMIT";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Test 2: Second transaction with more data
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Insert data in second transaction
@@ -4332,7 +4394,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_t2_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_t2_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT in second transaction failed");
 
@@ -4340,14 +4402,14 @@ mod tests {
             let rollback_sql = "ROLLBACK";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify only first transaction data remains
             let final_count_sql = "SELECT COUNT(*) FROM concurrent_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4359,7 +4421,7 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Insert and immediately commit
@@ -4368,21 +4430,21 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_t3_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_t3_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT in third transaction failed");
 
             let commit_sql = "COMMIT";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify final state
             let verify_sql = "SELECT transaction_id, COUNT(*) FROM concurrent_test GROUP BY transaction_id ORDER BY transaction_id";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             println!("Final transaction data summary:");
@@ -4416,7 +4478,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with computed column data failed");
 
@@ -4437,7 +4499,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result =
                 ctx.engine
-                    .execute_sql(computed_select_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(computed_select_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             match result {
                 Ok(success) => {
@@ -4462,7 +4524,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(math_insert_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(math_insert_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             match result {
                 Ok(success) => {
@@ -4472,7 +4534,7 @@ mod tests {
                     let verify_sql = "SELECT first_name, last_name, salary FROM employee_computed WHERE id IN (4, 5) ORDER BY id";
                     let mut writer = TestResultWriter::new();
                     ctx.engine
-                        .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
+                        .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer).await
                         .unwrap();
 
                     let rows = writer.get_rows();
@@ -4499,7 +4561,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(computed_insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(computed_insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT with SELECT computation failed");
 
@@ -4507,7 +4569,7 @@ mod tests {
             let final_count_sql = "SELECT COUNT(*) FROM employee_computed";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let total_rows = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
@@ -4577,7 +4639,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Basic delete operation failed");
 
@@ -4585,7 +4647,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM users";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4597,7 +4659,7 @@ mod tests {
             let select_sql = "SELECT name FROM users WHERE id = 2";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(writer.get_rows().len(), 0, "Bob should be deleted");
 
@@ -4606,7 +4668,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Boolean condition delete failed");
 
@@ -4614,7 +4676,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM users";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4686,7 +4748,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Range condition delete failed");
 
@@ -4694,7 +4756,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM employees";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4707,7 +4769,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "String condition delete failed");
 
@@ -4715,7 +4777,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM employees";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4729,7 +4791,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Multiple condition delete failed");
 
@@ -4737,7 +4799,7 @@ mod tests {
             let select_sql = "SELECT name FROM employees ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let remaining_names: Vec<String> = writer
                 .get_rows()
@@ -4779,7 +4841,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Should return false since no rows were affected
@@ -4789,7 +4851,7 @@ mod tests {
             let select_sql = "SELECT COUNT(*) FROM employees";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4827,18 +4889,18 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "DELETE all rows should succeed");
 
             // Commit the transaction to make changes visible
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Verify all rows were deleted
             let select_sql = "SELECT COUNT(*) FROM temp_data";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4872,13 +4934,13 @@ mod tests {
                 .unwrap();
 
             // Commit initial data
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test 1: DELETE in transaction with commit
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Delete account with zero balance
@@ -4886,7 +4948,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Delete in transaction failed");
 
@@ -4894,14 +4956,14 @@ mod tests {
             let commit_sql = "COMMIT";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify deletion was committed
             let select_sql = "SELECT COUNT(*) FROM accounts";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -4913,7 +4975,7 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Delete another account
@@ -4921,7 +4983,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Delete in transaction failed");
 
@@ -4929,14 +4991,14 @@ mod tests {
             let rollback_sql = "ROLLBACK";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify deletion was rolled back - with our enhanced implementation, deleted rows should be restored
             let select_sql = "SELECT COUNT(*) FROM accounts";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             
             // With our enhanced implementation, deleted rows should be fully restored on rollback
@@ -5017,7 +5079,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Complex condition delete failed");
 
@@ -5027,7 +5089,7 @@ mod tests {
             let select_sql = "SELECT name FROM employees ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let remaining_names: Vec<String> = writer
@@ -5063,7 +5125,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await;
             assert!(
                 result.is_err(),
                 "DELETE from non-existent table should fail"
@@ -5074,7 +5136,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await;
             assert!(
                 result.is_err(),
                 "DELETE with non-existent column should fail"
@@ -5091,7 +5153,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(invalid_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(invalid_sql, ctx.exec_ctx.clone(), &mut writer).await;
                 assert!(result.is_err(), "Invalid SQL should fail: {}", invalid_sql);
             }
         }
@@ -5108,7 +5170,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create departments table failed");
 
@@ -5122,7 +5184,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_emp_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_emp_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Create employees table with FK failed");
 
@@ -5134,7 +5196,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert departments failed");
 
@@ -5146,7 +5208,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_emp_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_emp_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert employees failed");
 
@@ -5155,7 +5217,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(delete_dept_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(delete_dept_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // Behavior depends on foreign key constraint enforcement
             match result {
@@ -5168,7 +5230,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_emp_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_emp_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Delete employees in Sales department failed");
 
@@ -5177,7 +5239,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_dept_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_dept_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Delete Sales department should succeed");
 
@@ -5185,14 +5247,14 @@ mod tests {
             let count_sql = "SELECT COUNT(*) FROM departments_fk";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let dept_count = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
 
             let count_sql = "SELECT COUNT(*) FROM employees_fk";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let emp_count = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
 
@@ -5283,7 +5345,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             assert!(result.is_ok(), "Simple DELETE operation failed");
             
@@ -5291,7 +5353,7 @@ mod tests {
             let count_sql = "SELECT COUNT(*) FROM employees_sub WHERE department_id = 3";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             
             let remaining_in_dept3 = writer.get_rows()[0][0]
@@ -5306,7 +5368,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let result = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer);
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await;
                 
             assert!(result.is_ok(), "Salary-based DELETE operation failed");
             
@@ -5314,7 +5376,7 @@ mod tests {
             let count_sql = "SELECT COUNT(*) FROM employees_sub";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
                 
             let remaining_count = writer.get_rows()[0][0]
@@ -5374,7 +5436,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let delete_duration = start_time.elapsed();
 
@@ -5385,7 +5447,7 @@ mod tests {
             let count_sql = "SELECT COUNT(*) FROM bulk_delete_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let remaining_count = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
             println!("Rows remaining after category delete: {}", remaining_count);
@@ -5396,7 +5458,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let inactive_delete_duration = start_time.elapsed();
 
@@ -5410,7 +5472,7 @@ mod tests {
             let count_sql = "SELECT COUNT(*) FROM bulk_delete_test";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let final_count = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
             println!("Final row count: {}", final_count);
@@ -5421,7 +5483,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let complex_delete_duration = start_time.elapsed();
 
@@ -5519,7 +5581,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Simple customer-based delete failed");
             
@@ -5527,7 +5589,7 @@ mod tests {
             let count_sql = "SELECT COUNT(*) FROM orders_del";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             let remaining_orders =
@@ -5549,7 +5611,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(delete_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Delete pending orders failed");
 
@@ -5557,7 +5619,7 @@ mod tests {
             let final_count_sql = "SELECT COUNT(*) FROM orders_del";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(final_count_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let final_count = writer.get_rows()[0][0].to_string().parse::<i32>().unwrap();
             println!("Final order count: {}", final_count);
@@ -5623,7 +5685,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Basic update operation failed");
 
@@ -5631,7 +5693,7 @@ mod tests {
             let select_sql = "SELECT age FROM employees WHERE id = 1";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -5645,7 +5707,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Multi-column update operation failed");
 
@@ -5653,7 +5715,7 @@ mod tests {
             let select_sql = "SELECT name, salary FROM employees WHERE id = 1";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let row = &writer.get_rows()[0];
             assert_eq!(row[0].to_string(), "Alice Smith", "Name should be updated");
@@ -5664,7 +5726,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Boolean update operation failed");
 
@@ -5672,7 +5734,7 @@ mod tests {
             let select_sql = "SELECT active FROM employees WHERE id = 2";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -5744,7 +5806,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Range condition update failed");
 
@@ -5752,7 +5814,7 @@ mod tests {
             let select_sql = "SELECT name, salary FROM employees WHERE age > 30 ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let rows = writer.get_rows();
 
@@ -5784,7 +5846,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "String condition update failed");
 
@@ -5793,7 +5855,7 @@ mod tests {
                 "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let rows = writer.get_rows();
 
@@ -5827,7 +5889,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Multiple condition update failed");
 
@@ -5836,7 +5898,7 @@ mod tests {
                 "SELECT name, age FROM employees WHERE department = 'Sales' ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let rows = writer.get_rows();
 
@@ -5902,7 +5964,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Arithmetic expression update failed");
 
@@ -5910,7 +5972,7 @@ mod tests {
             let select_sql = "SELECT id, name, base_salary FROM employees ORDER BY id";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let rows = writer.get_rows();
 
@@ -5939,7 +6001,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Column reference expression update failed");
 
@@ -5948,7 +6010,7 @@ mod tests {
                 "SELECT name, bonus FROM employees WHERE years_experience >= 5 ORDER BY name";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let rows = writer.get_rows();
 
@@ -5999,7 +6061,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Should return false since no rows were affected
@@ -6009,7 +6071,7 @@ mod tests {
             let select_sql = "SELECT id, age FROM employees ORDER BY id";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let rows = writer.get_rows();
 
@@ -6046,18 +6108,18 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "UPDATE all rows should succeed");
 
             // Commit the transaction to make changes visible
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Verify all rows were updated
             let select_sql = "SELECT status FROM employees";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             let rows = writer.get_rows();
 
@@ -6095,13 +6157,13 @@ mod tests {
                 .unwrap();
 
             // Commit initial data
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test 1: UPDATE in transaction with commit
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Transfer money from Alice to Bob
@@ -6109,7 +6171,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql1, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql1, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "First update in transaction failed");
 
@@ -6117,7 +6179,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql2, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql2, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Second update in transaction failed");
 
@@ -6125,14 +6187,14 @@ mod tests {
             let commit_sql = "COMMIT";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify changes were committed
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -6143,7 +6205,7 @@ mod tests {
             let select_sql = "SELECT balance FROM accounts WHERE id = 2";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -6155,7 +6217,7 @@ mod tests {
             let begin_sql = "BEGIN";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Try to transfer more money
@@ -6163,7 +6225,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Update in transaction failed");
 
@@ -6171,14 +6233,14 @@ mod tests {
             let rollback_sql = "ROLLBACK";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             // Verify changes were rolled back
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -6224,7 +6286,7 @@ mod tests {
             println!("Executing simple query: {}", sql);
             match ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 Ok(success) => {
                     assert!(success, "Query execution failed for: {}", sql);
@@ -6285,7 +6347,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql("SELECT * FROM employees", ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql("SELECT * FROM employees", ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "SELECT * query failed");
@@ -6304,7 +6366,7 @@ mod tests {
                     "SELECT name, age FROM employees",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "SELECT specific columns failed");
@@ -6347,7 +6409,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -6416,7 +6478,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -6466,7 +6528,7 @@ mod tests {
                     "SELECT DISTINCT department FROM employees",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "DISTINCT query failed");
@@ -6484,7 +6546,7 @@ mod tests {
                     "SELECT DISTINCT department, city FROM employees",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "DISTINCT multiple columns failed");
@@ -6528,7 +6590,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -6574,7 +6636,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -6627,7 +6689,7 @@ mod tests {
                     ctx.exec_ctx.clone(),
                     &mut writer,
                 )
-                .unwrap();
+                .await.unwrap();
 
             assert!(success, "Column alias query failed");
             assert_eq!(writer.get_rows().len(), 2, "Should return 2 rows");
@@ -6657,7 +6719,7 @@ mod tests {
                     "SELECT e.employee_id, e.first_name FROM employees e",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Table alias query failed");
@@ -6717,7 +6779,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -6782,7 +6844,7 @@ mod tests {
                     ctx.exec_ctx.clone(),
                     &mut writer,
                 )
-                .unwrap();
+                .await.unwrap();
 
             assert!(success, "Query with NULL values failed");
             assert_eq!(
@@ -6799,7 +6861,7 @@ mod tests {
                     "SELECT name, optional_field FROM nullable_data",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Query selecting columns with NULLs failed");
@@ -6830,7 +6892,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -6881,7 +6943,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -6961,7 +7023,7 @@ mod tests {
                     "SELECT COUNT(*) FROM employees",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "COUNT(*) query failed");
@@ -6980,7 +7042,7 @@ mod tests {
                     "SELECT COUNT(name) FROM employees",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "COUNT(column) query failed");
@@ -6999,7 +7061,7 @@ mod tests {
                     "SELECT COUNT(DISTINCT department) FROM employees",
                     ctx.exec_ctx.clone(),
                     &mut writer3,
-                )
+                ).await
                 .unwrap();
 
             assert!(success3, "COUNT(DISTINCT) query failed");
@@ -7042,7 +7104,7 @@ mod tests {
                     "SELECT SUM(amount) FROM transactions",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "SUM query failed");
@@ -7061,7 +7123,7 @@ mod tests {
                     "SELECT SUM(amount) FROM transactions WHERE category = 'A'",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "SUM with WHERE query failed");
@@ -7104,7 +7166,7 @@ mod tests {
                     "SELECT AVG(score) FROM grades",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "AVG query failed");
@@ -7125,7 +7187,7 @@ mod tests {
                     "SELECT AVG(score) FROM grades WHERE subject = 'Math'",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "AVG with WHERE query failed");
@@ -7170,7 +7232,7 @@ mod tests {
                     "SELECT MIN(temperature) FROM weather",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "MIN query failed");
@@ -7189,7 +7251,7 @@ mod tests {
                     "SELECT MAX(temperature) FROM weather",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "MAX query failed");
@@ -7208,7 +7270,7 @@ mod tests {
                     "SELECT MIN(temperature), MAX(temperature) FROM weather",
                     ctx.exec_ctx.clone(),
                     &mut writer3,
-                )
+                ).await
                 .unwrap();
 
             assert!(success3, "MIN and MAX query failed");
@@ -7282,7 +7344,7 @@ mod tests {
                     "SELECT department, COUNT(*) FROM employees GROUP BY department",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "COUNT with GROUP BY failed");
@@ -7300,7 +7362,7 @@ mod tests {
                     "SELECT department, SUM(salary) FROM employees GROUP BY department",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "SUM with GROUP BY failed");
@@ -7319,7 +7381,7 @@ mod tests {
                     ctx.exec_ctx.clone(),
                     &mut writer3,
                 )
-                .unwrap();
+                .await.unwrap();
 
             assert!(success3, "AVG with GROUP BY failed");
             assert_eq!(
@@ -7336,7 +7398,7 @@ mod tests {
                     "SELECT department, COUNT(*), SUM(salary), AVG(salary), MIN(salary), MAX(salary) FROM employees GROUP BY department",
                     ctx.exec_ctx.clone(),
                     &mut writer4
-                )
+                ).await
                 .unwrap();
 
             assert!(success4, "Multiple aggregations with GROUP BY failed");
@@ -7384,7 +7446,7 @@ mod tests {
                     "SELECT department, COUNT(*) FROM employees GROUP BY department HAVING COUNT(*) > 1",
                     ctx.exec_ctx.clone(),
                     &mut writer
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "HAVING with COUNT failed");
@@ -7402,7 +7464,7 @@ mod tests {
                     "SELECT department, AVG(salary) FROM employees GROUP BY department HAVING AVG(salary) > 60000",
                     ctx.exec_ctx.clone(),
                     &mut writer2
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "HAVING with AVG failed");
@@ -7444,7 +7506,7 @@ mod tests {
                     "SELECT COUNT(*) FROM test_nulls",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "COUNT(*) with NULLs failed");
@@ -7462,7 +7524,7 @@ mod tests {
                     "SELECT COUNT(value) FROM test_nulls",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "COUNT(column) with NULLs failed");
@@ -7480,7 +7542,7 @@ mod tests {
                     "SELECT SUM(value) FROM test_nulls",
                     ctx.exec_ctx.clone(),
                     &mut writer3,
-                )
+                ).await
                 .unwrap();
 
             assert!(success3, "SUM with NULLs failed");
@@ -7498,7 +7560,7 @@ mod tests {
                     "SELECT AVG(value) FROM test_nulls",
                     ctx.exec_ctx.clone(),
                     &mut writer4,
-                )
+                ).await
                 .unwrap();
 
             assert!(success4, "AVG with NULLs failed");
@@ -7529,7 +7591,7 @@ mod tests {
                     "SELECT COUNT(*) FROM empty_table",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "COUNT(*) on empty table failed");
@@ -7548,7 +7610,7 @@ mod tests {
                     "SELECT SUM(value) FROM empty_table",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "SUM on empty table failed");
@@ -7563,7 +7625,7 @@ mod tests {
                     "SELECT AVG(value) FROM empty_table",
                     ctx.exec_ctx.clone(),
                     &mut writer3,
-                )
+                ).await
                 .unwrap();
 
             assert!(success3, "AVG on empty table failed");
@@ -7632,7 +7694,7 @@ mod tests {
                     "SELECT category, SUM(price * quantity) as total_revenue FROM sales GROUP BY category",
                     ctx.exec_ctx.clone(),
                     &mut writer
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Aggregation with calculated fields failed");
@@ -7646,7 +7708,7 @@ mod tests {
                     "SELECT category, COUNT(*) as product_count, AVG(price) as avg_price, SUM(quantity) as total_quantity FROM sales GROUP BY category ORDER BY category",
                     ctx.exec_ctx.clone(),
                     &mut writer2
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Multiple aggregations failed");
@@ -7665,7 +7727,7 @@ mod tests {
                     "SELECT category, COUNT(*) FROM sales WHERE price > 100 GROUP BY category HAVING COUNT(*) > 1",
                     ctx.exec_ctx.clone(),
                     &mut writer3
-                )
+                ).await
                 .unwrap();
 
             assert!(success3, "Complex aggregation with WHERE and HAVING failed");
@@ -7711,7 +7773,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Performance test failed for: {}", sql);
@@ -7778,7 +7840,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
                 assert!(success, "Query execution failed");
 
@@ -7898,7 +7960,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -7966,7 +8028,7 @@ mod tests {
                     "SELECT category, COUNT(*) as item_count FROM products GROUP BY category",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY single column query failed");
@@ -8039,7 +8101,7 @@ mod tests {
                     "SELECT department, location, SUM(employee_count) as total_employees, AVG(budget) as avg_budget FROM departments GROUP BY department, location",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY multiple columns query failed");
@@ -8124,7 +8186,7 @@ mod tests {
                     "SELECT category, COUNT(*) as available_items, AVG(price) as avg_price FROM inventory WHERE in_stock = true GROUP BY category",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY with WHERE clause query failed");
@@ -8208,7 +8270,7 @@ mod tests {
                     "SELECT team, COUNT(*) as player_count, AVG(score) as avg_score FROM players GROUP BY team HAVING COUNT(*) > 2",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY with HAVING clause query failed");
@@ -8261,7 +8323,7 @@ mod tests {
                     "SELECT region, SUM(sales_amount) as total_sales FROM sales GROUP BY region ORDER BY total_sales DESC",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY with ORDER BY query failed");
@@ -8320,7 +8382,7 @@ mod tests {
                     "SELECT category, COUNT(*) as row_count, COUNT(value) as non_null_values FROM test_nulls GROUP BY category",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY with NULL values query failed");
@@ -8373,7 +8435,7 @@ mod tests {
                     "SELECT group_id, COUNT(*) as count, SUM(value) as sum_val, AVG(value) as avg_val, MIN(value) as min_val, MAX(value) as max_val FROM measurements GROUP BY group_id",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(
@@ -8417,7 +8479,7 @@ mod tests {
                     "SELECT category, COUNT(*) as count FROM empty_table GROUP BY category",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY on empty table query failed");
@@ -8479,7 +8541,7 @@ mod tests {
                     "SELECT category, subcategory, COUNT(*) as record_count, AVG(value) as avg_value, SUM(value) as total_value FROM large_dataset GROUP BY category, subcategory",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY performance test query failed");
@@ -8571,7 +8633,7 @@ mod tests {
                     "SELECT department, COUNT(DISTINCT skill) as unique_skills, COUNT(*) as total_records FROM employee_skills GROUP BY department",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "GROUP BY with COUNT(DISTINCT) query failed");
@@ -8661,7 +8723,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -8722,7 +8784,7 @@ mod tests {
                     "SELECT e.name, d.name FROM employees e RIGHT JOIN departments d ON e.dept_id = d.id",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Right join query execution failed");
@@ -8736,7 +8798,7 @@ mod tests {
                     "SELECT e.name, d.name FROM employees e RIGHT JOIN departments d ON e.dept_id = d.id ORDER BY d.id",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Right join with ORDER BY failed");
@@ -8802,7 +8864,7 @@ mod tests {
                     "SELECT c.name, ci.name FROM customers c FULL OUTER JOIN cities ci ON c.city_id = ci.id",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Full outer join query execution failed");
@@ -8856,7 +8918,7 @@ mod tests {
                     "SELECT c.color, s.size FROM colors c CROSS JOIN sizes s",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Cross join query execution failed");
@@ -8874,7 +8936,7 @@ mod tests {
                     "SELECT c.color, s.size FROM colors c, sizes s",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Implicit cross join query execution failed");
@@ -8917,7 +8979,7 @@ mod tests {
                     "SELECT e.name AS employee, m.name AS manager FROM employees e LEFT JOIN employees m ON e.manager_id = m.id",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Self join query execution failed");
@@ -8931,7 +8993,7 @@ mod tests {
                     "SELECT e1.name, e2.name FROM employees e1 JOIN employees e2 ON e1.manager_id = e2.manager_id AND e1.id != e2.id",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Colleagues self join query execution failed");
@@ -8999,7 +9061,7 @@ mod tests {
                     "SELECT c.name, p.name, o.quantity FROM customers c JOIN orders o ON c.id = o.customer_id JOIN products p ON o.product_id = p.id",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Three-table join query execution failed");
@@ -9013,7 +9075,7 @@ mod tests {
                     "SELECT c.name, COUNT(*) as order_count FROM customers c JOIN orders o ON c.id = o.customer_id JOIN products p ON o.product_id = p.id GROUP BY c.name",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Three-table join with aggregation failed");
@@ -9101,7 +9163,7 @@ mod tests {
                     "SELECT sp.name, s.amount FROM salespeople sp JOIN sales s ON sp.id = s.salesperson_id AND sp.region = s.region",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Complex join condition query execution failed");
@@ -9120,7 +9182,7 @@ mod tests {
                     "SELECT sp.name, s.amount FROM salespeople sp JOIN sales s ON sp.id = s.salesperson_id AND s.amount > 1000",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Join with amount comparison failed");
@@ -9181,7 +9243,7 @@ mod tests {
                     "SELECT a.value, b.value FROM table_a a JOIN table_b b ON a.id = b.a_id WHERE a.id <= 10",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Large dataset join query execution failed");
@@ -9238,7 +9300,7 @@ mod tests {
                     "SELECT t.name, c.name FROM teachers t JOIN courses c ON t.id = c.teacher_id",
                     ctx.exec_ctx.clone(),
                     &mut writer,
-                )
+                ).await
                 .unwrap();
 
             assert!(success, "Join with NULL values failed");
@@ -9256,7 +9318,7 @@ mod tests {
                     "SELECT t.name, c.name FROM teachers t LEFT JOIN courses c ON t.id = c.teacher_id",
                     ctx.exec_ctx.clone(),
                     &mut writer2,
-                )
+                ).await
                 .unwrap();
 
             assert!(success2, "Left join with NULL values failed");
@@ -9351,7 +9413,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -9485,7 +9547,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -9604,7 +9666,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -9719,7 +9781,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -9855,7 +9917,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -9996,7 +10058,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await;
 
                 match result {
                     Ok(_) => {
@@ -10148,7 +10210,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await;
 
                 match result {
                     Ok(_) => {
@@ -10310,7 +10372,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await;
 
                 match result {
                     Ok(success) => {
@@ -10462,7 +10524,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await;
 
                 match result {
                     Ok(success) => {
@@ -10586,7 +10648,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let success = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                     .unwrap();
 
                 assert!(success, "Query execution failed for: {}", sql);
@@ -10626,7 +10688,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await;
 
                 assert!(result.is_err(), "Expected error for invalid query: {}", sql);
             }
@@ -10738,7 +10800,7 @@ mod tests {
                 let mut writer = TestResultWriter::new();
                 let result = ctx
                     .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await;
 
                 match result {
                     Ok(success) => {
@@ -10822,7 +10884,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with COUNT query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -10886,7 +10948,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with SUM query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -10931,7 +10993,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with SUM >= query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -10977,7 +11039,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with AVG query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11034,7 +11096,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with MIN/MAX query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11080,7 +11142,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with multiple conditions query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11134,7 +11196,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with NULL values query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11176,7 +11238,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING without GROUP BY query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11223,7 +11285,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING with subquery failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11282,7 +11344,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING performance test query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11333,7 +11395,7 @@ mod tests {
 
             if let Err(e) = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 println!("HAVING edge cases query failed: {:?}", e);
                 return; // Expected to fail in current implementation
@@ -11385,7 +11447,7 @@ mod tests {
             println!("Executing query: {}", sql);
             let success = match ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
             {
                 Ok(s) => {
                     println!("Query execution succeeded");
@@ -11464,7 +11526,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11511,7 +11573,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11568,7 +11630,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11606,7 +11668,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11651,7 +11713,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11696,7 +11758,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11756,7 +11818,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11802,7 +11864,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11836,7 +11898,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11853,7 +11915,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -11906,7 +11968,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Performance test query execution failed");
@@ -11973,7 +12035,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query execution failed");
 
@@ -12242,7 +12304,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Query execution failed");
 
@@ -12314,7 +12376,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12381,7 +12443,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12439,7 +12501,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12480,7 +12542,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12525,7 +12587,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12572,7 +12634,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12633,7 +12695,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12678,7 +12740,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12713,7 +12775,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12730,7 +12792,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Query execution failed");
@@ -12777,7 +12839,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             assert!(success, "Performance test query execution failed");
@@ -12851,7 +12913,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -12905,7 +12967,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -12997,7 +13059,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13051,7 +13113,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13131,7 +13193,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13187,7 +13249,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13241,7 +13303,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13298,7 +13360,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13351,7 +13413,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13451,7 +13513,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13496,7 +13558,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13513,7 +13575,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
 
             if success {
@@ -13561,7 +13623,7 @@ mod tests {
                 .unwrap();
 
             // Commit the initial transaction to make the data visible to subsequent transactions
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Start transaction
             let begin_sql = "BEGIN";
@@ -13569,7 +13631,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
 
             assert!(success, "Begin transaction failed");
 
@@ -13579,7 +13641,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Update operation failed");
 
             // Update Bob's balance
@@ -13588,7 +13650,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Update operation failed");
 
             // Commit transaction
@@ -13597,14 +13659,14 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Commit transaction failed");
 
             // Verify changes were committed
             let select_sql = "SELECT balance FROM accounts WHERE id = 1";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -13615,7 +13677,7 @@ mod tests {
             let select_sql = "SELECT balance FROM accounts WHERE id = 2";
             let mut writer = TestResultWriter::new();
             ctx.engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert_eq!(
                 writer.get_rows()[0][0].to_string(),
@@ -13647,7 +13709,7 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Start transaction
             let begin_sql = "BEGIN";
@@ -13655,7 +13717,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Begin transaction failed");
 
             // Successful operation
@@ -13663,7 +13725,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Insert operation should succeed");
 
@@ -13673,7 +13735,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Rollback should succeed");
 
             // Verify Charlie was not added
@@ -13681,7 +13743,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success);
 
@@ -13723,7 +13785,7 @@ mod tests {
             ctx.insert_tuples("accounts", account_data, account_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Start complex transaction - money transfer with logging
             let begin_sql = "BEGIN";
@@ -13731,7 +13793,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Begin transaction failed");
 
             // Transfer $200 from Alice to Bob
@@ -13740,7 +13802,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(debit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Debit operation failed");
 
             let credit_sql = "UPDATE accounts SET balance = balance + 200 WHERE id = 2";
@@ -13748,7 +13810,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(credit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Credit operation failed");
 
             // Log the transaction
@@ -13757,7 +13819,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(log_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Transaction logging failed");
 
             // Commit the transaction
@@ -13766,7 +13828,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Commit failed");
 
             // Verify all changes were applied
@@ -13775,7 +13837,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -13792,7 +13854,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(log_verify_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -13823,7 +13885,7 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test transaction isolation - uncommitted changes should not be visible
             let begin_sql = "BEGIN";
@@ -13831,7 +13893,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Make changes but don't commit
@@ -13840,7 +13902,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // In the same transaction, we should see the change
@@ -13848,7 +13910,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success);
 
@@ -13862,7 +13924,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // After rollback, should see original value
@@ -13871,7 +13933,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -13906,7 +13968,7 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test transaction with constraint violation
             let begin_sql = "BEGIN";
@@ -13914,7 +13976,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Insert valid data first
@@ -13923,7 +13985,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(insert_valid_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Valid insert should succeed");
 
             // Attempt to insert duplicate ID (constraint violation in real system)
@@ -13933,7 +13995,7 @@ mod tests {
             // This might succeed in the test system but would fail in production with proper constraints
             let _result =
                 ctx.engine
-                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(insert_duplicate_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // For demonstration, rollback the transaction
             let rollback_sql = "ROLLBACK";
@@ -13941,7 +14003,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(rollback_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Verify no new data was committed
@@ -13950,7 +14012,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -13981,7 +14043,7 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test savepoints (if supported)
             let begin_sql = "BEGIN";
@@ -13989,7 +14051,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // First operation
@@ -13999,7 +14061,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(insert1_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Create savepoint (might not be supported)
@@ -14007,7 +14069,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let _savepoint_result =
                 ctx.engine
-                    .execute_sql(savepoint_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(savepoint_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // Second operation
             let insert2_sql =
@@ -14016,7 +14078,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(insert2_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Rollback to savepoint (might not be supported)
@@ -14024,7 +14086,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let _rollback_result =
                 ctx.engine
-                    .execute_sql(rollback_savepoint_sql, ctx.exec_ctx.clone(), &mut writer);
+                    .execute_sql(rollback_savepoint_sql, ctx.exec_ctx.clone(), &mut writer).await;
 
             // Commit transaction
             let commit_sql = "COMMIT";
@@ -14032,7 +14094,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Verify final state
@@ -14040,7 +14102,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success);
 
@@ -14062,7 +14124,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Create table in transaction
@@ -14070,7 +14132,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "CREATE TABLE in transaction should succeed");
 
@@ -14079,7 +14141,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "INSERT into new table should succeed");
 
@@ -14089,7 +14151,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Verify table and data exist after commit
@@ -14097,7 +14159,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success);
 
@@ -14129,7 +14191,7 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Simulate potential deadlock scenario
             let begin_sql = "BEGIN";
@@ -14137,7 +14199,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Lock ResourceA first
@@ -14146,7 +14208,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(lock_a_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Then lock ResourceB
@@ -14155,7 +14217,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(lock_b_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Commit to release locks
@@ -14164,7 +14226,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Verify lock counts
@@ -14173,7 +14235,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -14205,7 +14267,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Perform operations
@@ -14214,7 +14276,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(insert_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success);
 
@@ -14225,7 +14287,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Verify operation completed
@@ -14234,7 +14296,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -14265,7 +14327,7 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().unwrap();
+            ctx.commit_current_transaction().await.unwrap();
 
             // Test Atomicity - all operations succeed or all fail
             let begin_sql = "BEGIN";
@@ -14273,7 +14335,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Transfer money - both operations must succeed together
@@ -14282,7 +14344,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(debit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Debit operation failed");
 
             let credit_sql = "UPDATE acid_test SET balance = balance + 100, last_updated = 'transferred' WHERE account_id = 2";
@@ -14290,7 +14352,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(credit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Credit operation failed");
 
             // Test Consistency - verify total balance remains the same
@@ -14299,7 +14361,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(total_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -14314,7 +14376,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Test Durability - verify changes persist after commit
@@ -14324,7 +14386,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -14344,7 +14406,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(final_total_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -14375,7 +14437,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Insert multiple records in single transaction
@@ -14389,7 +14451,7 @@ mod tests {
                 let success = ctx
                     .engine
                     .execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer)
-                    .unwrap();
+                    .await.unwrap();
                 assert!(success, "Batch insert {} failed", i);
             }
 
@@ -14399,7 +14461,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Commit large transaction
@@ -14408,7 +14470,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             // Verify batch processing results
@@ -14417,7 +14479,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -14432,7 +14494,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success);
 
@@ -14507,7 +14569,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Basic decimal select failed");
 
@@ -14533,7 +14595,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Decimal arithmetic failed");
 
@@ -14551,7 +14613,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Decimal aggregation failed");
 
@@ -14569,7 +14631,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(filter_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Decimal filtering failed");
 
@@ -14585,7 +14647,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(case_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Decimal CASE expression failed");
 
             let case_rows = writer.get_rows();
@@ -14641,7 +14703,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Basic float select failed");
 
@@ -14663,7 +14725,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Float arithmetic failed");
 
@@ -14681,7 +14743,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Float aggregation failed");
 
@@ -14741,7 +14803,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Mixed numeric select failed");
 
@@ -14764,7 +14826,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Mixed arithmetic failed");
 
@@ -14783,7 +14845,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(comp_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Mixed comparison failed");
 
             let comp_rows = writer.get_rows();
@@ -14797,7 +14859,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Mixed aggregation failed");
 
@@ -14867,7 +14929,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Edge cases select failed");
 
@@ -14889,7 +14951,7 @@ mod tests {
             let success = ctx
                 .engine
                 .execute_sql(ops_sql, ctx.exec_ctx.clone(), &mut writer)
-                .unwrap();
+                .await.unwrap();
             assert!(success, "Edge case operations failed");
 
             let ops_rows = writer.get_rows();
@@ -14960,7 +15022,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Column-aware decimal select failed");
 
@@ -14982,7 +15044,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(calc_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Decimal calculation formatting failed");
 
@@ -15000,7 +15062,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let success = ctx
                 .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
+                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer).await
                 .unwrap();
             assert!(success, "Decimal aggregation formatting failed");
 
@@ -15012,6 +15074,50 @@ mod tests {
                     row[0], row[1], row[2]
                 );
             }
+        }
+        
+        #[tokio::test]
+        async fn test_metrics_collection_verification() {
+            // This test specifically verifies that our metrics collection fixes are working
+            let mut ctx = TestContext::new("test_metrics_collection_verification").await;
+            let disk_manager = ctx.disk_manager.clone();
+            
+            // Create a simple table for testing
+            let create_sql = "CREATE TABLE metrics_test (id INTEGER PRIMARY KEY, data VARCHAR(100))";
+            let mut writer = TestResultWriter::new();
+            ctx.engine.execute_sql(create_sql, ctx.exec_ctx.clone(), &mut writer).await.unwrap();
+            
+            // Perform operations that should trigger metrics collection
+            for i in 1..=5 {
+                let insert_sql = format!("INSERT INTO metrics_test VALUES ({}, 'test_data_{}')", i, i);
+                let mut writer = TestResultWriter::new();
+                ctx.engine.execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer).await.unwrap();
+            }
+            
+            // Commit transaction (should trigger flush)
+            ctx.commit_current_transaction().await.unwrap();
+            
+            // Allow time for async operations to complete
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            // Verify metrics were properly collected
+            let live_metrics = disk_manager.get_metrics_collector().get_live_metrics();
+            let snapshot = disk_manager.get_metrics();
+            
+            let write_ops = live_metrics.write_ops_count.load(std::sync::atomic::Ordering::Relaxed);
+            let io_count = live_metrics.io_count.load(std::sync::atomic::Ordering::Relaxed);
+            
+            println!("Metrics Verification: write_ops={}, io_count={}", write_ops, io_count);
+            println!("Write latency avg: {} ns", snapshot.write_latency_avg_ns);
+            
+            // Verify metrics are working (should have non-zero values now)
+            assert!(write_ops > 0, "Write operations should be recorded");
+            assert!(io_count > 0, "Total I/O operations should be recorded");
+            
+            let db_file_size = ctx.get_db_file_size().await.unwrap();
+            assert!(db_file_size > 0, "Database file should contain data");
+            
+            println!("✅ Metrics collection verification passed!");
         }
     }
 }

@@ -239,6 +239,11 @@ impl AsyncIOEngine {
         }
     }
 
+    /// Gets the current size of the database file in bytes
+    pub async fn get_db_file_size(&self) -> IoResult<u64> {
+        self.executor.get_db_file_size().await
+    }
+
     // Queue management methods
 
     /// Gets the current queue size

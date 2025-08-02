@@ -823,7 +823,7 @@ mod index_scan_executor_tests {
         txn_manager.commit(
             txn_ctx.get_transaction(),
             context.read().get_buffer_pool_manager(),
-        );
+        ).await;
 
         // Create new transaction for scanning with new execution context
         let scan_txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));

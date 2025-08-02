@@ -1,5 +1,6 @@
 use futures::future;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, Mutex};
+use  tokio::sync::Mutex as AsyncMutex;
 use std::sync::Arc;
 use std::time::Duration;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
@@ -19,7 +20,7 @@ pub struct ConcurrentTestContext {
     catalog: Arc<RwLock<Catalog>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
     transaction_factory: Arc<TransactionManagerFactory>,
-    execution_engine: Arc<RwLock<ExecutionEngine>>,
+    execution_engine: Arc<AsyncMutex<ExecutionEngine>>,
 }
 
 impl ConcurrentTestContext {
@@ -53,7 +54,7 @@ impl ConcurrentTestContext {
 
         let wal_manager = Arc::new(WALManager::new(log_manager));
 
-        let execution_engine = Arc::new(RwLock::new(ExecutionEngine::new(
+        let execution_engine = Arc::new(AsyncMutex::new(ExecutionEngine::new(
             catalog.clone(),
             buffer_pool_manager.clone(),
             transaction_factory.clone(),
@@ -68,7 +69,7 @@ impl ConcurrentTestContext {
         }
     }
 
-    pub fn setup_test_table(&self) -> Result<(), String> {
+    pub async fn setup_test_table(&self) -> Result<(), String> {
         let mut writer = CliResultWriter::new();
         let create_sql = "CREATE TABLE test_table (id INTEGER PRIMARY KEY, value INTEGER);";
 
@@ -80,12 +81,12 @@ impl ConcurrentTestContext {
         )));
 
         let result = self.execution_engine
-            .write()
-            .execute_sql(create_sql, exec_ctx, &mut writer)
+            .lock()
+            .await.execute_sql(create_sql, exec_ctx, &mut writer).await
             .map_err(|e| format!("Failed to create table: {}", e))?;
 
         if result {
-            self.transaction_factory.commit_transaction(txn_ctx);
+            self.transaction_factory.commit_transaction(txn_ctx).await;
         } else {
             self.transaction_factory.abort_transaction(txn_ctx);
         }
@@ -97,7 +98,7 @@ impl ConcurrentTestContext {
 #[tokio::test]
 async fn test_concurrent_inserts() {
     let ctx = Arc::new(ConcurrentTestContext::new("concurrent_inserts").await);
-    ctx.setup_test_table().unwrap();
+    ctx.setup_test_table().await.unwrap();
 
     let thread_count = 10;
     let mut handles = vec![];
@@ -116,13 +117,13 @@ async fn test_concurrent_inserts() {
                 txn_ctx.clone(),
             )));
 
-            let result = ctx_clone
-                .execution_engine
-                .write()
-                .execute_sql(&insert_sql, exec_ctx, &mut writer);
+            let result = {
+                let mut engine = ctx_clone.execution_engine.lock().await;
+                engine.execute_sql(&insert_sql, exec_ctx, &mut writer).await
+            };
 
             match result {
-                Ok(_) => ctx_clone.transaction_factory.commit_transaction(txn_ctx),
+                Ok(_) => ctx_clone.transaction_factory.commit_transaction(txn_ctx).await,
                 Err(_) => {
                     ctx_clone.transaction_factory.abort_transaction(txn_ctx);
                     false
@@ -143,7 +144,7 @@ async fn test_concurrent_inserts() {
 
     // Verify the results
     let mut writer = CliResultWriter::new();
-    let select_sql = "SELECT COUNT(*) FROM test_table;";
+    let select_sql = "SELECT COUNT(*) FROM test_table";
     let txn_ctx = ctx.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
     let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
         ctx.buffer_pool_manager.clone(),
@@ -152,17 +153,16 @@ async fn test_concurrent_inserts() {
     )));
     let result = ctx
         .execution_engine
-        .write()
-        .execute_sql(select_sql, exec_ctx, &mut writer);
+        .lock().await.execute_sql(select_sql, exec_ctx, &mut writer).await;
 
     assert!(result.is_ok());
-    ctx.transaction_factory.commit_transaction(txn_ctx);
+    ctx.transaction_factory.commit_transaction(txn_ctx).await;
 }
 
 #[tokio::test]
 async fn test_concurrent_updates() {
     let ctx = Arc::new(ConcurrentTestContext::new("concurrent_updates").await);
-    ctx.setup_test_table().unwrap();
+    ctx.setup_test_table().await.unwrap();
 
     // Insert initial data
     let mut writer = CliResultWriter::new();
@@ -175,10 +175,10 @@ async fn test_concurrent_updates() {
     let insert_sql = "INSERT INTO test_table VALUES (1, 100);";
     let result = ctx
         .execution_engine
-        .write()
-        .execute_sql(insert_sql, exec_ctx, &mut writer);
+        .lock()
+        .await.execute_sql(insert_sql, exec_ctx, &mut writer).await;
     assert!(result.is_ok());
-    assert!(ctx.transaction_factory.commit_transaction(txn_ctx));
+    assert!(ctx.transaction_factory.commit_transaction(txn_ctx).await);
 
     let thread_count = 5;
     let mut handles = vec![];
@@ -197,11 +197,11 @@ async fn test_concurrent_updates() {
             )));
             let result = ctx_clone
                 .execution_engine
-                .write()
-                .execute_sql(&update_sql, exec_ctx, &mut writer);
+                .lock()
+                .await.execute_sql(&update_sql, exec_ctx, &mut writer).await;
 
             match result {
-                Ok(_) => ctx_clone.transaction_factory.commit_transaction(txn_ctx),
+                Ok(_) => ctx_clone.transaction_factory.commit_transaction(txn_ctx).await,
                 Err(_) => {
                     ctx_clone.transaction_factory.abort_transaction(txn_ctx);
                     false
@@ -223,7 +223,7 @@ async fn test_concurrent_updates() {
 #[tokio::test]
 async fn test_deadlock_detection() {
     let ctx = Arc::new(ConcurrentTestContext::new("deadlock_detection").await);
-    ctx.setup_test_table().unwrap();
+    ctx.setup_test_table().await.unwrap();
 
     // Insert initial data
     let mut writer = CliResultWriter::new();
@@ -236,10 +236,10 @@ async fn test_deadlock_detection() {
     let insert_sql = "INSERT INTO test_table VALUES (1, 100), (2, 200);";
     let result = ctx
         .execution_engine
-        .write()
-        .execute_sql(insert_sql, exec_ctx, &mut writer);
+        .lock()
+        .await.execute_sql(insert_sql, exec_ctx, &mut writer).await;
     assert!(result.is_ok());
-    assert!(ctx.transaction_factory.commit_transaction(txn_ctx));
+    assert!(ctx.transaction_factory.commit_transaction(txn_ctx).await);
 
     let ctx_clone1 = Arc::clone(&ctx);
     let ctx_clone2 = Arc::clone(&ctx);
@@ -257,8 +257,8 @@ async fn test_deadlock_detection() {
         let sql1 = "UPDATE test_table SET value = 150 WHERE id = 1;";
         let result1 = ctx_clone1
             .execution_engine
-            .write()
-            .execute_sql(sql1, exec_ctx.clone(), &mut writer);
+            .lock()
+            .await.execute_sql(sql1, exec_ctx.clone(), &mut writer).await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -266,11 +266,11 @@ async fn test_deadlock_detection() {
         let sql2 = "UPDATE test_table SET value = 250 WHERE id = 2;";
         let result2 = ctx_clone1
             .execution_engine
-            .write()
-            .execute_sql(sql2, exec_ctx, &mut writer);
+            .lock()
+            .await.execute_sql(sql2, exec_ctx, &mut writer).await;
 
         match (result1, result2) {
-            (Ok(_), Ok(_)) => ctx_clone1.transaction_factory.commit_transaction(txn_ctx),
+            (Ok(_), Ok(_)) => ctx_clone1.transaction_factory.commit_transaction(txn_ctx).await,
             _ => {
                 ctx_clone1.transaction_factory.abort_transaction(txn_ctx);
                 false
@@ -291,8 +291,8 @@ async fn test_deadlock_detection() {
         let sql1 = "UPDATE test_table SET value = 250 WHERE id = 2;";
         let result1 = ctx_clone2
             .execution_engine
-            .write()
-            .execute_sql(sql1, exec_ctx.clone(), &mut writer);
+            .lock()
+            .await.execute_sql(sql1, exec_ctx.clone(), &mut writer).await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -300,11 +300,11 @@ async fn test_deadlock_detection() {
         let sql2 = "UPDATE test_table SET value = 150 WHERE id = 1;";
         let result2 = ctx_clone2
             .execution_engine
-            .write()
-            .execute_sql(sql2, exec_ctx, &mut writer);
+            .lock()
+            .await.execute_sql(sql2, exec_ctx, &mut writer).await;
 
         match (result1, result2) {
-            (Ok(_), Ok(_)) => ctx_clone2.transaction_factory.commit_transaction(txn_ctx),
+            (Ok(_), Ok(_)) => ctx_clone2.transaction_factory.commit_transaction(txn_ctx).await,
             _ => {
                 ctx_clone2.transaction_factory.abort_transaction(txn_ctx);
                 false

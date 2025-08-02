@@ -57,9 +57,9 @@ impl TransactionManagerFactory {
         ))
     }
 
-    pub fn commit_transaction(&self, ctx: Arc<TransactionContext>) -> bool {
+    pub async fn commit_transaction(&self, ctx: Arc<TransactionContext>) -> bool {
         self.transaction_manager
-            .commit(ctx.get_transaction(), self.buffer_pool_manager.clone())
+            .commit(ctx.get_transaction(), self.buffer_pool_manager.clone()).await
     }
 
     pub fn abort_transaction(&self, ctx: Arc<TransactionContext>) {

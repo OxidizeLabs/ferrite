@@ -129,7 +129,7 @@ impl Default for DiskManagerConfig {
             cpu_affinity: None,
 
             fsync_policy: FsyncPolicy::OnFlush,
-            durability_level: DurabilityLevel::Buffer,
+            durability_level: DurabilityLevel::Sync,
             wal_enabled: true,
 
             // Advanced Performance Options

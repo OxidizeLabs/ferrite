@@ -26,7 +26,7 @@ impl CLI {
         })
     }
 
-    pub fn run(&mut self) -> Result<(), DBError> {
+    pub async fn run(&mut self) -> Result<(), DBError> {
         println!("Welcome to TKDB. Commands end with ;");
         println!("Type 'help;' for help.");
 
@@ -84,7 +84,7 @@ impl CLI {
                     self.begin_transaction(IsolationLevel::RepeatableRead)?;
                 }
                 "commit" => {
-                    self.commit_transaction()?;
+                    self.commit_transaction().await?;
                 }
                 "rollback" => {
                     self.rollback_transaction()?;
@@ -94,7 +94,7 @@ impl CLI {
                     self.db.display_tables(&mut writer)?;
                 }
                 _ => {
-                    self.execute_command(command)?;
+                    self.execute_command(command).await?;
                 }
             }
         }
@@ -117,9 +117,9 @@ impl CLI {
         Ok(())
     }
 
-    fn commit_transaction(&mut self) -> Result<(), DBError> {
+    async fn commit_transaction(&mut self) -> Result<(), DBError> {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            match self.db.commit_transaction(txn_ctx.get_transaction_id()) {
+            match self.db.commit_transaction(txn_ctx.get_transaction_id()).await {
                 Ok(_) => {
                     println!("Transaction committed successfully.");
                 }
@@ -162,7 +162,7 @@ impl CLI {
         }
     }
 
-    fn execute_command(&mut self, sql: &str) -> Result<(), DBError> {
+    async fn execute_command(&mut self, sql: &str) -> Result<(), DBError> {
         let mut writer = CliResultWriter::new();
 
         match &self.current_transaction {
@@ -170,7 +170,7 @@ impl CLI {
                 // Execute within existing transaction
                 match self
                     .db
-                    .execute_transaction(sql, txn_ctx.clone(), &mut writer)
+                    .execute_transaction(sql, txn_ctx.clone(), &mut writer).await
                 {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -183,7 +183,7 @@ impl CLI {
                 // Auto-commit mode
                 match self
                     .db
-                    .execute_sql(sql, IsolationLevel::ReadCommitted, &mut writer)
+                    .execute_sql(sql, IsolationLevel::ReadCommitted, &mut writer).await
                 {
                     Ok(_) => Ok(()),
                     Err(e) => {

@@ -10,7 +10,7 @@ pub fn initialize_logger() {
 
         builder
             .filter_level(LevelFilter::Info)
-            .filter_module("tkdb", LevelFilter::Debug)
+            .filter_module("tkdb", LevelFilter::Info)
             .filter_module("tkdb::buffer", LevelFilter::Info)
             .filter_module("tkdb::storage", LevelFilter::Info)
             .filter_module("tkdb::concurrency", LevelFilter::Info)
