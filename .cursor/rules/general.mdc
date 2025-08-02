@@ -1,0 +1,57 @@
+---
+description: Core TKDB project guidelines and Rust best practices
+globs: []
+alwaysApply: true
+---
+
+# TKDB Core Guidelines
+
+You are an expert Rust developer working on **TKDB**, a Database Management System (DBMS) inspired by CMU 15-445/645 course.
+
+## Project Overview
+
+TKDB is a full-featured DBMS written in Rust that implements core database components: buffer management, storage, SQL processing, concurrency control, recovery, and network protocols. It follows academic database architecture patterns with production-grade Rust implementation and supports both embedded and client-server modes.
+
+## Key Design Patterns
+
+- **Layered architecture**: Clear separation between storage, execution, and network layers
+- **Trait-based polymorphism**: Extensive use of trait objects for page types, expressions, executors
+- **Shared ownership**: `Arc<RwLock<T>>` for shared mutable state, `Arc<T>` for immutable shared data
+- **Error handling**: Custom error hierarchies using `thiserror`, comprehensive error conversion chains
+
+## Core Coding Standards
+
+### Concurrency & Safety
+- Use `parking_lot::RwLock` for performance-critical locks (not `std::sync::RwLock`)
+- Prefer `Arc<RwLock<T>>` for shared mutable state
+- Use `AtomicU64` for counters and IDs
+- Always handle potential deadlocks in multi-lock scenarios
+
+### Error Handling
+- Define specific error types using `#[derive(Error, Debug)]` and `thiserror`
+- Implement comprehensive `From` conversions between error types
+- Use `Result<T, DBError>` as the primary return type
+- Log errors appropriately: `error!()` for serious issues, `warn!()` for recoverable problems
+
+### Memory Management
+- Use `PageId`, `FrameId` type aliases for clarity
+- Implement proper `Drop` traits for cleanup when needed
+- Be mindful of page pinning/unpinning in buffer pool operations
+- Use `Vec<Option<T>>` patterns for sparse collections
+
+### Naming Conventions
+- Use `snake_case` for functions, variables, modules
+- Use `PascalCase` for types, traits, enums
+- Use `SCREAMING_SNAKE_CASE` for constants
+- Use descriptive names: `page_id` not `pid`, `frame_id` not `fid`
+
+### Logging & Documentation
+- Use structured logging: `log::{trace, debug, info, warn, error}`
+- Include relevant context in log messages (page IDs, transaction IDs, etc.)
+- Document public APIs with `///` comments
+- Explain complex algorithms and invariants
+
+### Async/Sync Boundaries
+- Keep storage layer synchronous for simplicity
+- Use async only for network I/O and client handling
+- Convert between sync/async using `tokio::task::spawn_blocking` when needed

@@ -1,0 +1,170 @@
+---
+description: Testing strategies and guidelines for TKDB components
+globs: []
+alwaysApply: false
+---
+
+# Testing Guidelines
+
+Comprehensive testing strategy for database components requiring both correctness and performance validation.
+
+## Unit Testing
+
+### Component Testing
+- Write unit tests for individual components
+- Test each public function and method
+- Use dependency injection for testability
+- Mock complex dependencies with `mockall`
+- Test error conditions and edge cases
+
+### Test Organization
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockall::predicate::*;
+    
+    #[test]
+    fn test_buffer_pool_fetch_page() {
+        let mut buffer_pool = BufferPool::new(10);
+        let page_id = PageId::new(1);
+        
+        // Test successful page fetch
+        let page = buffer_pool.fetch_page(page_id).unwrap();
+        assert!(page.is_pinned());
+        
+        // Test page pinning behavior
+        assert_eq!(buffer_pool.get_pin_count(page_id), 1);
+    }
+}
+```
+
+### Edge Case Testing
+- Test with empty tables and zero-length data
+- Test with full buffer pools and resource exhaustion
+- Test boundary conditions (max values, edge sizes)
+- Test malformed input and invalid states
+- Test concurrent access scenarios
+
+## Integration Testing
+
+### End-to-End Workflows
+- Test complete SQL execution pipelines
+- Test transaction commit/abort workflows
+- Test recovery scenarios after crashes
+- Test client-server communication flows
+- Test index operations with real data
+
+### Multi-Component Testing
+```rust
+#[tokio::test]
+async fn test_sql_execution_pipeline() {
+    let db = TestDatabase::new().await;
+    
+    // Create table
+    db.execute("CREATE TABLE users (id INT, name VARCHAR(50))").await?;
+    
+    // Insert data
+    db.execute("INSERT INTO users VALUES (1, 'Alice')").await?;
+    
+    // Query data
+    let result = db.query("SELECT * FROM users WHERE id = 1").await?;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].get_string("name"), "Alice");
+}
+```
+
+## Concurrency Testing
+
+### Race Condition Detection
+- Test concurrent buffer pool access
+- Test concurrent transaction execution
+- Test lock manager under contention
+- Use tools like `loom` for deterministic testing
+- Test deadlock detection and resolution
+
+### Stress Testing
+```rust
+#[tokio::test]
+async fn test_concurrent_transactions() {
+    let db = TestDatabase::new().await;
+    let handles = (0..100).map(|i| {
+        let db = db.clone();
+        tokio::spawn(async move {
+            let txn = db.begin_transaction().await?;
+            db.execute_with_txn(&txn, "INSERT INTO test VALUES (?)", &[i]).await?;
+            txn.commit().await
+        })
+    }).collect::<Vec<_>>();
+    
+    // All transactions should complete successfully
+    for handle in handles {
+        handle.await??;
+    }
+}
+```
+
+## Performance Testing
+
+### Benchmarking Critical Paths
+- Benchmark buffer pool operations
+- Benchmark index operations (B+ tree, hash tables)
+- Benchmark SQL query execution
+- Use `criterion` for statistical benchmarking
+- Profile memory allocations and lock contention
+
+### Benchmark Organization
+```rust
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn benchmark_buffer_pool(c: &mut Criterion) {
+    c.bench_function("buffer_pool_fetch", |b| {
+        let buffer_pool = BufferPool::new(1000);
+        b.iter(|| {
+            let page_id = PageId::new(black_box(42));
+            buffer_pool.fetch_page(page_id)
+        });
+    });
+}
+
+criterion_group!(benches, benchmark_buffer_pool);
+criterion_main!(benches);
+```
+
+## Test Data Management
+
+### Test Database Setup
+- Use isolated test databases for each test
+- Implement proper test cleanup
+- Use deterministic test data
+- Support test data fixtures
+- Handle test database migration
+
+### Mock Objects
+- Mock disk manager for unit tests
+- Mock network connections for protocol tests
+- Mock system time for deterministic tests
+- Use dependency injection for mockability
+
+## Testing Best Practices
+
+### Test Reliability
+- Use `cargo test -- --nocapture` to see log output
+- Set `RUST_LOG=debug` for detailed test logging
+- Make tests deterministic and repeatable
+- Avoid timing-dependent tests where possible
+- Use proper cleanup in test teardown
+
+### Test Coverage
+- Aim for high code coverage on critical paths
+- Test both happy path and error conditions
+- Include regression tests for bug fixes
+- Test with different configuration options
+- Test cross-platform compatibility
+
+### Debugging Test Failures
+- Use `addr2line` for stack trace debugging
+- Enable detailed logging in failing tests
+- Use `cargo test --test test_name` for isolated test runs
+- Consider using `--nocapture` flag for printf debugging
+- Profile test performance with `cargo flamegraph`

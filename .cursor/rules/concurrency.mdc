@@ -1,0 +1,132 @@
+---
+description: Transaction management and concurrency control guidelines
+globs: ["src/concurrency/**/*.rs"]
+alwaysApply: false
+---
+
+# Concurrency Control Guidelines
+
+When working with concurrency components, ensure ACID properties while maximizing performance.
+
+## Transaction Management
+
+### Transaction Lifecycle
+- Implement proper transaction state management
+- Handle transaction begin, commit, and abort correctly
+- Maintain transaction isolation levels
+- Integrate with recovery manager for durability
+
+### Transaction Context
+```rust
+// Proper transaction context usage
+let txn = transaction_manager.begin_transaction(isolation_level)?;
+let result = execute_with_transaction(&txn, || {
+    // Perform operations
+    Ok(result)
+});
+match result {
+    Ok(value) => txn.commit()?,
+    Err(e) => txn.abort()?,
+}
+```
+
+## Lock Manager Implementation
+
+### Two-Phase Locking (2PL)
+- Implement proper 2PL protocol
+- Growing phase: acquire locks as needed
+- Shrinking phase: release all locks at once
+- No lock acquisition after first release
+
+### Lock Types and Compatibility
+- Implement shared (S) and exclusive (X) locks
+- Consider intention locks (IS, IX) for hierarchical locking
+- Maintain lock compatibility matrix
+- Handle lock upgrades and downgrades safely
+
+### Deadlock Handling
+- Implement deadlock detection algorithms
+- Use timeout-based deadlock resolution
+- Consider wound-wait or wait-die policies
+- Log deadlock occurrences for analysis
+
+```rust
+// Deadlock detection pattern
+impl LockManager {
+    fn detect_deadlock(&self, txn_id: TransactionId) -> Option<Vec<TransactionId>> {
+        // Build wait-for graph
+        // Detect cycles using DFS
+        // Return cycle if found
+    }
+}
+```
+
+## Isolation Levels
+
+### READ_UNCOMMITTED
+- Allow dirty reads
+- Minimal locking overhead
+- Suitable for read-heavy analytical workloads
+
+### READ_COMMITTED
+- Prevent dirty reads
+- Use short-duration read locks
+- Allow non-repeatable reads
+
+### REPEATABLE_READ
+- Prevent dirty and non-repeatable reads
+- Hold read locks until transaction end
+- May allow phantom reads
+
+### SERIALIZABLE
+- Prevent all anomalies
+- Use predicate locking or validation
+- Highest isolation, lowest concurrency
+
+## Watermark Management
+
+### Transaction Ordering
+- Implement transaction timestamp ordering
+- Handle timestamp allocation efficiently
+- Use watermarks for garbage collection
+- Maintain transaction commit ordering
+
+### Snapshot Isolation
+- Implement proper snapshot creation
+- Handle snapshot visibility rules
+- Manage snapshot cleanup
+- Optimize snapshot storage
+
+## Performance Optimization
+
+### Lock Granularity
+- Balance lock granularity with concurrency
+- Consider table-level vs. row-level locking
+- Implement hierarchical locking when beneficial
+- Use lock escalation to reduce overhead
+
+### Contention Reduction
+- Minimize critical section duration
+- Use lock-free data structures where possible
+- Implement proper backoff strategies
+- Consider partitioning hot resources
+
+### Throughput Optimization
+- Batch lock acquisitions when possible
+- Use efficient data structures for lock tables
+- Minimize lock manager overhead
+- Profile and optimize lock contention points
+
+## Recovery Integration
+
+### Write-Ahead Logging
+- WAL entries must be written before data modifications
+- Ensure proper log record ordering
+- Handle log force operations correctly
+- Integrate with checkpoint operations
+
+### Transaction Abort
+- Implement proper rollback semantics
+- Undo all transaction modifications
+- Release all acquired locks
+- Clean up transaction state properly

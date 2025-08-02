@@ -1,0 +1,202 @@
+---
+description: Performance optimization guidelines and profiling strategies
+globs: []
+alwaysApply: false
+---
+
+# Performance Optimization Guidelines
+
+When optimizing TKDB performance, focus on identifying bottlenecks and applying targeted optimizations.
+
+## Performance Analysis Methodology
+
+### Profiling Tools
+- Use `cargo flamegraph` for CPU profiling
+- Use `perf` for detailed system-level profiling
+- Use `valgrind` for memory analysis
+- Use custom metrics collection for database-specific insights
+- Profile with realistic workloads and data sizes
+
+### Performance Metrics
+```rust
+// Performance monitoring pattern
+#[derive(Debug)]
+pub struct PerformanceMetrics {
+    buffer_pool_hit_rate: AtomicU64,
+    query_execution_time: AtomicU64,
+    lock_contention_time: AtomicU64,
+    disk_io_operations: AtomicU64,
+}
+
+impl PerformanceMetrics {
+    pub fn record_buffer_hit(&self) {
+        self.buffer_pool_hit_rate.fetch_add(1, Ordering::Relaxed);
+    }
+}
+```
+
+## Buffer Pool Optimization
+
+### Critical Performance Areas
+- Buffer pool is often the primary performance bottleneck
+- Optimize lock contention in page table operations
+- Use efficient data structures for free list management
+- Minimize memory allocations in hot paths
+- Consider NUMA effects for large buffer pools
+
+### Buffer Pool Best Practices
+- Size buffer pool appropriately for workload
+- Monitor buffer pool hit rates continuously
+- Implement efficient page replacement algorithms
+- Use read/write locks appropriately
+- Consider lock-free data structures for statistics
+
+```rust
+// Optimized buffer pool access pattern
+impl BufferPool {
+    pub fn fetch_page_optimized(&self, page_id: PageId) -> Result<PageGuard> {
+        // Fast path: check if page already in memory
+        if let Some(frame_id) = self.page_table.get_fast(page_id) {
+            return Ok(self.pin_page(frame_id));
+        }
+        
+        // Slow path: load from disk
+        self.fetch_page_from_disk(page_id)
+    }
+}
+```
+
+## Query Execution Optimization
+
+### Execution Engine Performance
+- Minimize iterator overhead in query execution
+- Use vectorized execution where beneficial
+- Implement efficient join algorithms
+- Optimize expression evaluation
+- Cache frequently computed results
+
+### Index Utilization
+- Ensure query planner chooses appropriate indexes
+- Monitor index effectiveness and usage
+- Consider covering indexes for read-heavy workloads
+- Implement proper index maintenance strategies
+- Profile index operation performance
+
+## Storage Layer Optimization
+
+### Disk I/O Optimization
+- Batch disk operations when possible
+- Use appropriate I/O scheduling policies
+- Consider direct I/O for large sequential operations
+- Implement proper read-ahead strategies
+- Monitor disk utilization and queue depths
+
+### Page Layout Optimization
+- Design page layouts for cache efficiency
+- Minimize page overhead and fragmentation
+- Use compression when beneficial
+- Implement efficient serialization formats
+- Consider column-oriented storage for analytics
+
+## Concurrency Optimization
+
+### Lock Contention Reduction
+- Use appropriate lock granularity
+- Implement lock-free algorithms where possible
+- Use efficient locking primitives (`parking_lot`)
+- Monitor lock contention and wait times
+- Consider partitioning hot resources
+
+### Transaction Performance
+```rust
+// Optimized transaction pattern
+impl TransactionManager {
+    pub fn execute_batch<F>(&self, operations: Vec<F>) -> Result<Vec<R>>
+    where
+        F: FnOnce(&Transaction) -> Result<R>,
+    {
+        let txn = self.begin_transaction()?;
+        let results = operations.into_iter()
+            .map(|op| op(&txn))
+            .collect::<Result<Vec<_>>>()?;
+        txn.commit()?;
+        Ok(results)
+    }
+}
+```
+
+## Memory Management Optimization
+
+### Allocation Patterns
+- Minimize memory allocations in hot paths
+- Use object pooling for frequently allocated objects
+- Implement proper memory locality patterns
+- Use appropriate data structures for access patterns
+- Profile memory usage and fragmentation
+
+### Cache Optimization
+- Design data structures for CPU cache efficiency
+- Use cache-aware algorithms
+- Minimize pointer chasing in hot paths
+- Consider data structure padding for cache alignment
+- Profile cache miss rates
+
+## Network Performance
+
+### Protocol Optimization
+- Use efficient serialization formats (consider binary protocols)
+- Implement connection pooling and keep-alive
+- Batch network operations when possible
+- Use appropriate TCP buffer sizes
+- Consider using UNIX domain sockets for local connections
+
+### Async Performance
+- Use appropriate async runtime configuration
+- Minimize async overhead for CPU-bound operations
+- Use efficient async data structures
+- Profile async task scheduling overhead
+- Consider work-stealing vs. thread-per-core models
+
+## Benchmarking and Monitoring
+
+### Continuous Performance Monitoring
+- Implement comprehensive metrics collection
+- Set up performance regression detection
+- Monitor key performance indicators (KPIs)
+- Use statistical analysis for benchmark results
+- Implement performance budgets for new features
+
+### Performance Testing Strategy
+```rust
+// Performance regression testing
+#[cfg(test)]
+mod performance_tests {
+    use criterion::{Criterion, black_box};
+    
+    fn benchmark_critical_path(c: &mut Criterion) {
+        c.bench_function("buffer_pool_contention", |b| {
+            let buffer_pool = setup_test_buffer_pool();
+            b.iter(|| {
+                // Simulate realistic workload
+                simulate_concurrent_access(black_box(&buffer_pool))
+            });
+        });
+    }
+}
+```
+
+## Optimization Guidelines
+
+### Systematic Approach
+1. **Measure first**: Always profile before optimizing
+2. **Focus on bottlenecks**: Optimize the slowest components first
+3. **Validate improvements**: Measure performance impact of changes
+4. **Consider trade-offs**: Balance performance vs. code complexity
+5. **Test under load**: Use realistic workloads for performance testing
+
+### Common Performance Pitfalls
+- Premature optimization without profiling
+- Optimizing non-critical paths
+- Ignoring cache effects and memory locality
+- Over-engineering for theoretical performance
+- Sacrificing maintainability for marginal gains
