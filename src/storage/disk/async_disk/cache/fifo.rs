@@ -109,7 +109,7 @@ where
         let key_arc = Arc::new(key);
         let value_arc = Arc::new(value);
 
-        // If key already exists, just update the value
+        // If key already exists, update the value
         if self.cache.contains_key(&key_arc) {
             return self.cache.insert(key_arc, value_arc)
                 .and_then(|old_value_arc| {
@@ -1978,59 +1978,461 @@ mod tests {
         // Performance Benchmark Tests
         mod performance {
             use super::*;
+            use std::time::Instant;
+
+            /// Performance metrics collected during benchmarks
+            #[derive(Debug)]
+            struct PerformanceMetrics {
+                total_operations: usize,
+                total_time_ns: u64,
+                ops_per_second: f64,
+                avg_time_per_op_ns: f64,
+                cache_hit_rate: f64,
+            }
+
+            impl PerformanceMetrics {
+                fn new(total_operations: usize, total_time_ns: u64, cache_hits: usize) -> Self {
+                    let ops_per_second = if total_time_ns > 0 {
+                        (total_operations as f64) / (total_time_ns as f64 / 1_000_000_000.0)
+                    } else {
+                        0.0
+                    };
+                    
+                    let avg_time_per_op_ns = if total_operations > 0 {
+                        total_time_ns as f64 / total_operations as f64
+                    } else {
+                        0.0
+                    };
+
+                    let cache_hit_rate = if total_operations > 0 {
+                        cache_hits as f64 / total_operations as f64
+                    } else {
+                        0.0
+                    };
+
+                    PerformanceMetrics {
+                        total_operations,
+                        total_time_ns,
+                        ops_per_second,
+                        avg_time_per_op_ns,
+                        cache_hit_rate,
+                    }
+                }
+            }
+
+            /// Helper function to run a performance benchmark
+            fn run_benchmark<F>(name: &str, operation: F) -> PerformanceMetrics
+            where
+                F: FnOnce() -> (usize, usize), // Returns (total_ops, cache_hits)
+            {
+                println!("Running benchmark: {}", name);
+                let start = Instant::now();
+                let (total_ops, cache_hits) = operation();
+                let duration = start.elapsed();
+                
+                let metrics = PerformanceMetrics::new(total_ops, duration.as_nanos() as u64, cache_hits);
+                
+                println!("  Operations: {}", metrics.total_operations);
+                println!("  Time: {:.2} ms", duration.as_secs_f64() * 1000.0);
+                println!("  Ops/sec: {:.0}", metrics.ops_per_second);
+                println!("  Avg time/op: {:.2} ns", metrics.avg_time_per_op_ns);
+                println!("  Cache hit rate: {:.1}%", metrics.cache_hit_rate * 100.0);
+                println!();
+                
+                metrics
+            }
 
             #[test]
             fn test_small_cache_performance() {
-                // TODO: Benchmark with cache size 100
-                todo!("Implement small cache performance test")
+                let cache_size = 100;
+                let total_operations = 10_000;
+                
+                let metrics = run_benchmark("Small Cache (100 entries)", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Mix of insertions and lookups
+                    for i in 0..total_operations {
+                        if i % 3 == 0 {
+                            // Insert operation
+                            cache.insert(format!("key_{}", i % (cache_size * 2)), format!("value_{}", i));
+                        } else {
+                            // Lookup operation
+                            let key = format!("key_{}", i % (cache_size * 2));
+                            if cache.get(&key).is_some() {
+                                cache_hits += 1;
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Performance assertions for small cache
+                assert!(metrics.ops_per_second > 10_000.0, 
+                       "Small cache should handle >10K ops/sec, got {:.0}", metrics.ops_per_second);
+                assert!(metrics.avg_time_per_op_ns < 100_000.0, 
+                       "Small cache operations should be <100μs, got {:.2}ns", metrics.avg_time_per_op_ns);
             }
 
             #[test]
             fn test_medium_cache_performance() {
-                // TODO: Benchmark with cache size 1K
-                todo!("Implement medium cache performance test")
+                let cache_size = 1_000;
+                let total_operations = 50_000;
+                
+                let metrics = run_benchmark("Medium Cache (1K entries)", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // More complex workload with different operation ratios
+                    for i in 0..total_operations {
+                        match i % 5 {
+                            0 | 1 => {
+                                // Insert operations (40%)
+                                cache.insert(format!("key_{}", i % (cache_size * 3)), format!("value_{}", i));
+                            }
+                            _ => {
+                                // Lookup operations (60%)
+                                let key = format!("key_{}", i % (cache_size * 3));
+                                if cache.get(&key).is_some() {
+                                    cache_hits += 1;
+                                }
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Performance assertions for medium cache
+                assert!(metrics.ops_per_second > 5_000.0, 
+                       "Medium cache should handle >5K ops/sec, got {:.0}", metrics.ops_per_second);
+                assert!(metrics.avg_time_per_op_ns < 200_000.0, 
+                       "Medium cache operations should be <200μs, got {:.2}ns", metrics.avg_time_per_op_ns);
             }
 
             #[test]
             fn test_large_cache_performance() {
-                // TODO: Benchmark with cache size 10K
-                todo!("Implement large cache performance test")
+                let cache_size = 10_000;
+                let total_operations = 100_000;
+                
+                let metrics = run_benchmark("Large Cache (10K entries)", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Realistic workload with batch operations
+                    for batch in 0..100 {
+                        // Batch insert
+                        for i in 0..500 {
+                            let key = format!("batch_{}_{}", batch, i);
+                            cache.insert(key, format!("data_{}", batch * 500 + i));
+                        }
+                        
+                        // Batch lookup
+                        for i in 0..500 {
+                            let key = format!("batch_{}_{}", batch, i % 200); // Some lookups will miss
+                            if cache.get(&key).is_some() {
+                                cache_hits += 1;
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Performance assertions for large cache
+                assert!(metrics.ops_per_second > 1_000.0, 
+                       "Large cache should handle >1K ops/sec, got {:.0}", metrics.ops_per_second);
+                assert!(metrics.avg_time_per_op_ns < 1_000_000.0, 
+                       "Large cache operations should be <1ms, got {:.2}ns", metrics.avg_time_per_op_ns);
             }
 
             #[test]
             fn test_very_large_cache_performance() {
-                // TODO: Benchmark with cache size 100K
-                todo!("Implement very large cache performance test")
+                let cache_size = 100_000;
+                let total_operations = 200_000;
+                
+                let metrics = run_benchmark("Very Large Cache (100K entries)", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Stress test with large data
+                    for i in 0..total_operations {
+                        if i % 4 == 0 {
+                            // Insert larger values to stress memory
+                            let large_value = format!("large_data_{}_{}_{}", i, "x".repeat(100), i);
+                            cache.insert(format!("large_key_{}", i), large_value);
+                        } else {
+                            // Lookup with locality
+                            let key = format!("large_key_{}", i - (i % 1000)); // Some temporal locality
+                            if cache.get(&key).is_some() {
+                                cache_hits += 1;
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Performance assertions for very large cache (more lenient due to size)
+                assert!(metrics.ops_per_second > 100.0, 
+                       "Very large cache should handle >100 ops/sec, got {:.0}", metrics.ops_per_second);
+                assert!(metrics.avg_time_per_op_ns < 10_000_000.0, 
+                       "Very large cache operations should be <10ms, got {:.2}ns", metrics.avg_time_per_op_ns);
             }
 
             #[test]
             fn test_sequential_access_pattern() {
-                // TODO: Benchmark sequential access patterns
-                todo!("Implement sequential access pattern test")
+                let cache_size = 1_000;
+                let total_operations = 20_000;
+                
+                let metrics = run_benchmark("Sequential Access Pattern", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Phase 1: Sequential insertion
+                    for i in 0..cache_size {
+                        cache.insert(format!("seq_{}", i), format!("data_{}", i));
+                    }
+                    
+                    // Phase 2: Sequential access with some overwrites
+                    for i in 0..(total_operations - cache_size) {
+                        let idx = i % (cache_size * 2); // Some keys will be new, some existing
+                        
+                        if i % 3 == 0 {
+                            // Insert/update
+                            cache.insert(format!("seq_{}", idx), format!("updated_data_{}", i));
+                        } else {
+                            // Sequential read
+                            let key = format!("seq_{}", idx);
+                            if cache.get(&key).is_some() {
+                                cache_hits += 1;
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Sequential access should be efficient
+                assert!(metrics.ops_per_second > 10_000.0, 
+                       "Sequential access should be fast, got {:.0} ops/sec", metrics.ops_per_second);
+                assert!(metrics.cache_hit_rate > 0.3, 
+                       "Sequential access should have reasonable hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
             }
 
             #[test]
             fn test_random_access_pattern() {
-                // TODO: Benchmark random access patterns
-                todo!("Implement random access pattern test")
+                let cache_size = 1_000;
+                let total_operations = 20_000;
+                let key_space = cache_size * 5; // Larger key space for more misses
+                
+                let metrics = run_benchmark("Random Access Pattern", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Simulate random access using deterministic sequence
+                    let mut rng_state = 12345u64; // Simple LCG for deterministic "randomness"
+                    
+                    for _ in 0..total_operations {
+                        // Simple LCG: a = 1664525, c = 1013904223, m = 2^32
+                        rng_state = rng_state.wrapping_mul(1664525).wrapping_add(1013904223);
+                        let key_idx = (rng_state % key_space as u64) as usize;
+                        let operation = rng_state % 4;
+                        
+                        match operation {
+                            0 => {
+                                // Insert (25%)
+                                cache.insert(format!("rand_{}", key_idx), format!("random_data_{}", rng_state));
+                            }
+                            _ => {
+                                // Lookup (75%)
+                                let key = format!("rand_{}", key_idx);
+                                if cache.get(&key).is_some() {
+                                    cache_hits += 1;
+                                }
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Random access typically has lower hit rates but should still be performant
+                assert!(metrics.ops_per_second > 5_000.0, 
+                       "Random access should be reasonably fast, got {:.0} ops/sec", metrics.ops_per_second);
+                assert!(metrics.cache_hit_rate < 0.5, 
+                       "Random access should have lower hit rate due to larger key space, got {:.1}%", 
+                       metrics.cache_hit_rate * 100.0);
             }
 
             #[test]
             fn test_mixed_workload_performance() {
-                // TODO: Benchmark mixed read/write workloads
-                todo!("Implement mixed workload performance test")
+                let cache_size = 2_000;
+                let total_operations = 30_000;
+                
+                let metrics = run_benchmark("Mixed Workload (Read/Write/Update)", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Complex mixed workload simulating real-world usage
+                    for i in 0..total_operations {
+                        match i % 10 {
+                            0 | 1 => {
+                                // Heavy read phase (20%)
+                                for j in 0..5 {
+                                    let key = format!("mixed_{}", (i + j) % (cache_size / 2));
+                                    if cache.get(&key).is_some() {
+                                        cache_hits += 1;
+                                    }
+                                }
+                            }
+                            2 | 3 => {
+                                // Write phase (20%)
+                                cache.insert(format!("mixed_{}", i % cache_size), format!("data_{}", i));
+                            }
+                            4 => {
+                                // Update existing (10%)
+                                let key = format!("mixed_{}", i % (cache_size / 4));
+                                cache.insert(key, format!("updated_{}", i));
+                            }
+                            5 | 6 | 7 => {
+                                // Batch operations (30%)
+                                let batch_size = 3;
+                                for j in 0..batch_size {
+                                    let key = format!("batch_{}_{}", i / 10, j);
+                                    if j % 2 == 0 {
+                                        cache.insert(key, format!("batch_data_{}_{}", i, j));
+                                    } else if cache.get(&key).is_some() {
+                                        cache_hits += 1;
+                                    }
+                                }
+                            }
+                            _ => {
+                                // FIFO-specific operations (20%)
+                                if let Some((old_key, _)) = cache.pop_oldest() {
+                                    // Re-insert with new value to test FIFO behavior under load
+                                    cache.insert(old_key, format!("recycled_{}", i));
+                                }
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Mixed workload should maintain good performance across operation types
+                assert!(metrics.ops_per_second > 3_000.0, 
+                       "Mixed workload should maintain good performance, got {:.0} ops/sec", metrics.ops_per_second);
+                assert!(metrics.cache_hit_rate > 0.1 && metrics.cache_hit_rate < 0.8, 
+                       "Mixed workload should have moderate hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
             }
 
             #[test]
             fn test_heavy_eviction_performance() {
-                // TODO: Benchmark performance under heavy eviction scenarios
-                todo!("Implement heavy eviction performance test")
+                let cache_size = 500;
+                let total_operations = 15_000;
+                
+                let metrics = run_benchmark("Heavy Eviction Scenario", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Create scenario that causes frequent evictions
+                    let key_space = cache_size * 10; // 10x larger key space forces evictions
+                    
+                    for i in 0..total_operations {
+                        if i % 5 == 0 {
+                            // Lookup (20% - mostly misses due to evictions)
+                            let key = format!("evict_{}", i % key_space);
+                            if cache.get(&key).is_some() {
+                                cache_hits += 1;
+                            }
+                        } else {
+                            // Insert (80% - causes constant evictions)
+                            cache.insert(format!("evict_{}", i % key_space), format!("data_{}", i));
+                        }
+                    }
+                    
+                    // Verify we're actually at capacity (heavy eviction occurred)
+                    assert_eq!(cache.len(), cache_size, "Cache should be at capacity after heavy eviction");
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Heavy eviction should still maintain reasonable performance
+                assert!(metrics.ops_per_second > 1_000.0, 
+                       "Heavy eviction should still maintain >1K ops/sec, got {:.0}", metrics.ops_per_second);
+                assert!(metrics.cache_hit_rate < 0.3, 
+                       "Heavy eviction should result in low hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
+                
+                // Test that eviction mechanism is working efficiently
+                assert!(metrics.avg_time_per_op_ns < 1_000_000.0, 
+                       "Eviction operations should be efficient, got {:.2}ns avg", metrics.avg_time_per_op_ns);
             }
 
             #[test]
             fn test_light_eviction_performance() {
-                // TODO: Benchmark performance with minimal evictions
-                todo!("Implement light eviction performance test")
+                let cache_size = 2_000;
+                let total_operations = 25_000;
+                
+                let metrics = run_benchmark("Light Eviction Scenario", || {
+                    let mut cache = FIFOCache::new(cache_size);
+                    let mut cache_hits = 0;
+                    
+                    // Create scenario with minimal evictions (working set fits mostly in cache)
+                    let working_set_size = cache_size * 3 / 4; // 75% of cache size for good locality
+                    
+                    // Pre-populate cache
+                    for i in 0..working_set_size {
+                        cache.insert(format!("stable_{}", i), format!("data_{}", i));
+                    }
+                    
+                    // Workload with high temporal locality (minimal evictions)
+                    for i in 0..total_operations {
+                        match i % 16 {
+                            0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 => {
+                                // High read ratio (62.5%)
+                                let key = format!("stable_{}", i % working_set_size);
+                                if cache.get(&key).is_some() {
+                                    cache_hits += 1;
+                                }
+                            }
+                            10 | 11 | 12 | 13 => {
+                                // Update existing (25%)
+                                let key = format!("stable_{}", i % working_set_size);
+                                cache.insert(key, format!("updated_data_{}", i));
+                            }
+                            14 => {
+                                // Very occasional new insert within working set (6.25% - minimal eviction)
+                                let key = format!("stable_{}", (i + working_set_size / 2) % working_set_size);
+                                cache.insert(key, format!("refreshed_data_{}", i));
+                            }
+                            _ => {
+                                // Rare new insert outside working set (6.25% - may cause some eviction)
+                                // Only if working set is much smaller than capacity
+                                if working_set_size < cache_size * 9 / 10 {
+                                    cache.insert(format!("new_{}", i), format!("new_data_{}", i));
+                                } else {
+                                    // Otherwise, just do another read to maintain high hit rate
+                                    let key = format!("stable_{}", i % working_set_size);
+                                    if cache.get(&key).is_some() {
+                                        cache_hits += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    (total_operations, cache_hits)
+                });
+
+                // Light eviction should have excellent performance and high hit rates
+                assert!(metrics.ops_per_second > 8_000.0, 
+                       "Light eviction should have excellent performance, got {:.0} ops/sec", metrics.ops_per_second);
+                assert!(metrics.cache_hit_rate > 0.5, 
+                       "Light eviction should have high hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
+                assert!(metrics.avg_time_per_op_ns < 125_000.0, 
+                       "Light eviction operations should be very fast, got {:.2}ns avg", metrics.avg_time_per_op_ns);
             }
         }
     }
