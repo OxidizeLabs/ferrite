@@ -195,7 +195,7 @@ impl DBInstance {
         )))
     }
 
-    pub fn execute_sql(
+    pub async fn execute_sql(
         &self,
         sql: &str,
         isolation_level: IsolationLevel,
@@ -219,14 +219,14 @@ impl DBInstance {
         // Execute query
         let result = {
             let mut engine = self.execution_engine.lock();
-            engine.execute_sql(sql, exec_ctx, writer)
+            engine.execute_sql(sql, exec_ctx, writer).await
         };
 
         // Handle transaction completion
         match result {
             Ok(success) => {
                 if success {
-                    if self.transaction_factory.commit_transaction(txn_ctx.clone()) {
+                    if self.transaction_factory.commit_transaction(txn_ctx.clone()).await {
                         Ok(true)
                     } else {
                         self.transaction_factory.abort_transaction(txn_ctx);
@@ -244,7 +244,7 @@ impl DBInstance {
         }
     }
 
-    pub fn execute_transaction(
+    pub async fn execute_transaction(
         &self,
         sql: &str,
         txn_ctx: Arc<TransactionContext>,
@@ -257,7 +257,7 @@ impl DBInstance {
         )));
 
         let mut engine = self.execution_engine.lock();
-        engine.execute_sql(sql, exec_ctx, writer)
+        engine.execute_sql(sql, exec_ctx, writer).await
     }
 
     pub fn display_tables(&self, writer: &mut dyn ResultWriter) -> Result<(), DBError> {
@@ -344,14 +344,14 @@ impl DBInstance {
         self.transaction_factory.begin_transaction(isolation_level)
     }
 
-    pub fn commit_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
+    pub async fn commit_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
         let txn_manager = self.transaction_factory.get_transaction_manager();
 
         let txn = txn_manager
             .get_transaction(&txn_id)
             .ok_or_else(|| DBError::Transaction(format!("Transaction {} not found", txn_id)))?;
 
-        if !txn_manager.commit(txn, self.buffer_pool_manager.clone()) {
+        if !txn_manager.commit(txn, self.buffer_pool_manager.clone()).await {
             warn!("Transaction commit failed");
             return Err(DBError::Transaction(
                 "Failed to commit transaction".to_string(),
@@ -406,12 +406,12 @@ impl DBInstance {
                 match self
                     .execution_engine
                     .lock()
-                    .execute_sql(&sql, exec_ctx, &mut writer)
+                    .execute_sql(&sql, exec_ctx, &mut writer).await
                 {
                     Ok(_) => {
                         if session.current_transaction.is_none() {
                             // Auto-commit if not in transaction
-                            if !self.transaction_factory.commit_transaction(txn_ctx.clone()) {
+                            if !self.transaction_factory.commit_transaction(txn_ctx.clone()).await {
                                 self.transaction_factory.abort_transaction(txn_ctx);
                                 return Err(DBError::Execution(
                                     "Failed to commit transaction".to_string(),
@@ -432,7 +432,7 @@ impl DBInstance {
             DatabaseRequest::BeginTransaction { isolation_level } => {
                 self.handle_begin_transaction(session, isolation_level)
             }
-            DatabaseRequest::Commit => self.handle_commit(session),
+            DatabaseRequest::Commit => self.handle_commit(session).await,
             DatabaseRequest::Rollback => self.handle_rollback(session),
             DatabaseRequest::Prepare(sql) => self.handle_sql_query(sql, session).await,
             DatabaseRequest::Execute { stmt_id, params } => {
@@ -452,10 +452,10 @@ impl DBInstance {
 
         let result = if let Some(txn_ctx) = &session.current_transaction {
             // Execute within existing transaction
-            self.execute_transaction(&sql, txn_ctx.clone(), &mut writer)
+            self.execute_transaction(&sql, txn_ctx.clone(), &mut writer).await
         } else {
             // Auto-commit transaction
-            self.execute_sql(&sql, session.isolation_level, &mut writer)
+            self.execute_sql(&sql, session.isolation_level, &mut writer).await
         };
 
         match result {
@@ -504,9 +504,9 @@ impl DBInstance {
         Ok(DatabaseResponse::Results(QueryResults::empty()))
     }
 
-    fn handle_commit(&self, session: &mut ClientSession) -> Result<DatabaseResponse, DBError> {
+    async fn handle_commit(&self, session: &mut ClientSession) -> Result<DatabaseResponse, DBError> {
         if let Some(txn_ctx) = session.current_transaction.take() {
-            if self.transaction_factory.commit_transaction(txn_ctx) {
+            if self.transaction_factory.commit_transaction(txn_ctx).await {
                 if self.debug_mode {
                     info!("Client {} committed transaction", session.id);
                 }
@@ -685,14 +685,14 @@ impl DBInstance {
         // Execute the statement with parameters
         let mut writer = NetworkResultWriter::new();
         let result = if let Some(txn_ctx) = &session.current_transaction {
-            self.execute_prepared_statement(&stmt.sql, params, txn_ctx.clone(), &mut writer)
+            self.execute_prepared_statement(&stmt.sql, params, txn_ctx.clone(), &mut writer).await
         } else {
             self.execute_prepared_statement_autocommit(
                 &stmt.sql,
                 params,
                 session.isolation_level,
                 &mut writer,
-            )
+            ).await
         };
 
         match result {
@@ -738,7 +738,7 @@ impl DBInstance {
         Ok(DatabaseResponse::Results(QueryResults::empty()))
     }
 
-    fn execute_prepared_statement(
+    async fn execute_prepared_statement(
         &self,
         sql: &str,
         params: Vec<Value>,
@@ -752,10 +752,10 @@ impl DBInstance {
         )));
 
         let mut engine = self.execution_engine.lock();
-        engine.execute_prepared_statement(sql, params, exec_ctx, writer)
+        engine.execute_prepared_statement(sql, params, exec_ctx, writer).await
     }
 
-    fn execute_prepared_statement_autocommit(
+    async fn execute_prepared_statement_autocommit(
         &self,
         sql: &str,
         params: Vec<Value>,
@@ -764,12 +764,12 @@ impl DBInstance {
     ) -> Result<bool, DBError> {
         let txn_ctx = self.transaction_factory.begin_transaction(isolation_level);
 
-        let result = self.execute_prepared_statement(sql, params, txn_ctx.clone(), writer);
+        let result = self.execute_prepared_statement(sql, params, txn_ctx.clone(), writer).await;
 
         match result {
             Ok(success) => {
                 if success {
-                    if self.transaction_factory.commit_transaction(txn_ctx) {
+                    if self.transaction_factory.commit_transaction(txn_ctx).await {
                         Ok(true)
                     } else {
                         Ok(false)
@@ -854,7 +854,7 @@ mod tests {
                     IsolationLevel::ReadCommitted,
                     &mut writer,
                 )
-                .unwrap();
+                .await.unwrap();
 
             db_instance
                 .execute_sql(
@@ -862,7 +862,7 @@ mod tests {
                     IsolationLevel::ReadCommitted,
                     &mut writer,
                 )
-                .unwrap();
+                .await.unwrap();
         }
 
         // Second session - open existing DB (should trigger recovery)
@@ -879,7 +879,7 @@ mod tests {
                 "SELECT * FROM test;",
                 IsolationLevel::ReadCommitted,
                 &mut writer,
-            );
+            ).await;
             assert!(result.is_ok(), "Should be able to query recovered table");
         }
 

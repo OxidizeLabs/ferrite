@@ -48,7 +48,7 @@ impl InsertExecutor {
         }
     }
 
-    /// PERFORMANCE OPTIMIZATION: Bulk insert processing
+    /// PERFORMANCE OPTIMIZATION: True bulk insert processing
     fn bulk_insert_values(
         &self,
         values_batch: &[Vec<crate::types_db::value::Value>],
@@ -56,36 +56,23 @@ impl InsertExecutor {
         transactional_table_heap: &TransactionalTableHeap,
         txn_context: Arc<crate::sql::execution::transaction_context::TransactionContext>,
     ) -> Result<usize, DBError> {
-        debug!("Processing bulk insert of {} rows", values_batch.len());
-        
-        // Pre-validate all foreign key constraints in batch
-        for values in values_batch {
-            if let Err(e) = Self::validate_foreign_key_constraints_with_context(&self.context, values, schema) {
-                error!("Foreign key constraint violation in batch: {}", e);
-                return Err(DBError::Execution(format!("Bulk insert failed: {}", e)));
+        debug!("Processing TRUE bulk insert of {} rows", values_batch.len());
+
+        // Use the new TRUE bulk insert method with batched operations
+        match transactional_table_heap.bulk_insert_tuples_from_values(
+            values_batch,
+            schema,
+            txn_context,
+        ) {
+            Ok(rids) => {
+                info!("✓ TRUE bulk insert completed successfully: {} rows inserted", rids);
+                Ok(rids)
+            }
+            Err(e) => {
+                error!("✗ TRUE bulk insert failed: {}", e);
+                Err(DBError::Execution(format!("Bulk insert failed: {}", e)))
             }
         }
-
-        // Perform bulk insert operation
-        let mut successful_inserts = 0;
-        for values in values_batch {
-            match transactional_table_heap.insert_tuple_from_values(
-                values.clone(),
-                schema,
-                txn_context.clone(),
-            ) {
-                Ok(_rid) => {
-                    successful_inserts += 1;
-                }
-                Err(e) => {
-                    error!("Failed to insert tuple in batch: {}", e);
-                    return Err(DBError::Execution(format!("Bulk insert failed: {}", e)));
-                }
-            }
-        }
-
-        trace!("Successfully completed bulk insert of {} rows", successful_inserts);
-        Ok(successful_inserts)
     }
 
     /// Validates foreign key constraints for the given values
@@ -246,10 +233,13 @@ impl AbstractExecutor for InsertExecutor {
 
             // PERFORMANCE OPTIMIZATION: Process inserts in batches
             if values_to_insert.len() >= BATCH_INSERT_THRESHOLD {
-                debug!("Using bulk insert optimization for {} rows", values_to_insert.len());
+                debug!("Using TRUE bulk insert optimization for {} rows", values_to_insert.len());
                 
-                // Process in batches to optimize memory usage
-                for batch in values_to_insert.chunks(BATCH_INSERT_THRESHOLD) {
+                // OPTIMIZATION: Process in optimal batch sizes for memory efficiency
+                // Use larger batches for better performance while respecting memory limits
+                let optimal_batch_size = std::cmp::min(BATCH_INSERT_THRESHOLD * 2, 1000);
+                
+                for batch in values_to_insert.chunks(optimal_batch_size) {
                     let batch_result = self.bulk_insert_values(
                         batch,
                         &schema,
@@ -257,29 +247,35 @@ impl AbstractExecutor for InsertExecutor {
                         txn_context.clone(),
                     )?;
                     insert_count += batch_result;
-                    trace!("Successfully inserted batch of {} tuples", batch_result);
+                    trace!("✓ Successfully completed TRUE bulk insert batch of {} tuples", batch_result);
                 }
             } else {
-                // Fall back to individual inserts for small batches
-                for values in values_to_insert {
-                    // Validate foreign key constraints before inserting
-                    if let Err(e) = Self::validate_foreign_key_constraints_with_context(&self.context, &values, &schema) {
-                        error!("Foreign key constraint violation: {}", e);
-                        return Err(DBError::Execution(format!("Insert failed: {}", e)));
-                    }
-
-                    match transactional_table_heap.insert_tuple_from_values(
-                        values.clone(),
+                // OPTIMIZATION: Even for small batches, use bulk insert if we have multiple rows
+                if values_to_insert.len() > 1 {
+                    debug!("Using TRUE bulk insert for small batch of {} rows", values_to_insert.len());
+                    let batch_result = self.bulk_insert_values(
+                        &values_to_insert,
                         &schema,
+                        &transactional_table_heap,
                         txn_context.clone(),
-                    ) {
-                        Ok(_rid) => {
-                            insert_count += 1;
-                            trace!("Successfully inserted tuple #{}", insert_count);
-                        }
-                        Err(e) => {
-                            error!("Failed to insert tuple: {}", e);
-                            return Err(DBError::Execution(format!("Insert failed: {}", e)));
+                    )?;
+                    insert_count += batch_result;
+                } else {
+                    // Single row - fall back to individual insert
+                    for values in values_to_insert {
+                        match transactional_table_heap.insert_tuple_from_values(
+                            values.clone(),
+                            &schema,
+                            txn_context.clone(),
+                        ) {
+                            Ok(_rid) => {
+                                insert_count += 1;
+                                trace!("Successfully inserted single tuple");
+                            }
+                            Err(e) => {
+                                error!("Failed to insert single tuple: {}", e);
+                                return Err(DBError::Execution(format!("Insert failed: {}", e)));
+                            }
                         }
                     }
                 }

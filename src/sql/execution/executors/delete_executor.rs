@@ -409,7 +409,7 @@ mod tests {
         // Commit the transaction after deletes
         let txn_ctx = execution_context.read().get_transaction_context();
         ctx.transaction_manager
-            .commit(txn_ctx.get_transaction(), ctx.bpm.clone());
+            .commit(txn_ctx.get_transaction(), ctx.bpm.clone()).await;
 
         // Create new transaction for verification
         let verify_txn_ctx = ctx.create_transaction(IsolationLevel::ReadCommitted);
@@ -435,6 +435,6 @@ mod tests {
 
         // Clean up - commit verification transaction
         ctx.transaction_manager
-            .commit(verify_txn_ctx.get_transaction(), ctx.bpm.clone());
+            .commit(verify_txn_ctx.get_transaction(), ctx.bpm.clone()).await;
     }
 }

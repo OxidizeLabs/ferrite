@@ -331,7 +331,7 @@ mod tests {
             test_ctx.transaction_manager().commit(
                 test_ctx.transaction_context().get_transaction().clone(),
                 test_ctx.buffer_pool_manager().clone(),
-            );
+            ).await;
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();
@@ -391,7 +391,7 @@ mod tests {
             test_ctx.transaction_manager().commit(
                 test_ctx.transaction_context().get_transaction().clone(),
                 test_ctx.buffer_pool_manager().clone(),
-            );
+            ).await;
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();

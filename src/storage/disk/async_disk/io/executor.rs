@@ -208,6 +208,13 @@ impl IOOperationExecutor {
         file.sync_all().await
     }
 
+    /// Gets the current size of the database file in bytes
+    pub async fn get_db_file_size(&self) -> IoResult<u64> {
+        let file = self.db_file.lock().await;
+        let metadata = file.metadata().await?;
+        Ok(metadata.len())
+    }
+
     /// Gets a reference to the database file (for advanced use cases)
     pub fn db_file(&self) -> Arc<Mutex<File>> {
         Arc::clone(&self.db_file)

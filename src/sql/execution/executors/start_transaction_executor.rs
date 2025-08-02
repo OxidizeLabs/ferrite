@@ -492,7 +492,7 @@ mod tests {
         // Collect results and clean up
         for handle in handles {
             if let Ok(Some(txn)) = handle.join() {
-                transaction_manager.commit(txn, buffer_pool.clone());
+                transaction_manager.commit(txn, buffer_pool.clone()).await;
             }
         }
 
