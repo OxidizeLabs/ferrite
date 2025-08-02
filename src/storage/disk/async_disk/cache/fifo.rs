@@ -1,24 +1,23 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::Hash;
+use std::sync::Arc;
 use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 
 /// FIFO (First In, First Out) Cache implementation.
 #[derive(Debug)]
 pub struct FIFOCache<K, V>
 where 
-    K: Eq + Hash + Clone,
-    V: Clone,
+    K: Eq + Hash,
 {
     capacity: usize,
-    pub(crate) cache: HashMap<K, V>,  // Made public for testing
-    pub(crate) insertion_order: VecDeque<K>, // Made public for testing - tracks the order of insertion
+    cache: HashMap<Arc<K>, Arc<V>>,
+    insertion_order: VecDeque<Arc<K>>, // Tracks the order of insertion
 }
 
 impl<K, V> FIFOCache<K, V>
 where 
-    K: Eq + Hash + Clone,
-    V: Clone,
+    K: Eq + Hash,
 {
     /// Creates a new FIFO cache with the given capacity
     pub fn new(capacity: usize) -> Self {
@@ -27,6 +26,59 @@ where
             cache: HashMap::with_capacity(capacity),
             insertion_order: VecDeque::with_capacity(capacity),
         }
+    }
+
+    /// Returns the number of items currently in the cache.
+    /// This is a duplicate of the CoreCache::len() method but provides direct access.
+    pub fn current_size(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Returns the insertion order length (may include stale entries).
+    /// This is primarily for testing and debugging purposes.
+    pub fn insertion_order_len(&self) -> usize {
+        self.insertion_order.len()
+    }
+
+    /// Checks if the internal cache HashMap contains a specific Arc<K>.
+    /// This is primarily for testing stale entry behavior.
+    pub fn cache_contains_key(&self, key: &Arc<K>) -> bool {
+        self.cache.contains_key(key)
+    }
+
+    /// Returns an iterator over the insertion order keys.
+    /// This is primarily for testing and debugging purposes.
+    pub fn insertion_order_iter(&self) -> impl Iterator<Item = &Arc<K>> {
+        self.insertion_order.iter()
+    }
+
+    /// Manually removes a key from the cache HashMap only (for testing stale entries).
+    /// This is only for testing purposes to simulate stale entry conditions.
+    /// Accepts a raw key and finds the corresponding Arc<K> to remove.
+    #[cfg(test)]
+    pub fn remove_from_cache_only(&mut self, key: &K) -> Option<Arc<V>> {
+        // Find the Arc<K> that matches this key
+        let arc_key = self.cache.keys()
+            .find(|k| k.as_ref() == key)
+            .cloned();
+        
+        if let Some(arc_key) = arc_key {
+            self.cache.remove(&arc_key)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the current cache HashMap capacity (for testing memory usage).
+    #[cfg(test)]
+    pub fn cache_capacity(&self) -> usize {
+        self.cache.capacity()
+    }
+
+    /// Returns the current insertion order VecDeque capacity (for testing memory usage).
+    #[cfg(test)]
+    pub fn insertion_order_capacity(&self) -> usize {
+        self.insertion_order.capacity()
     }
 
     /// Evicts the oldest valid entry from the cache.
@@ -46,8 +98,7 @@ where
 
 impl<K, V> CoreCache<K, V> for FIFOCache<K, V>
 where 
-    K: Eq + Hash + Clone,
-    V: Clone,
+    K: Eq + Hash,
 {
     fn insert(&mut self, key: K, value: V) -> Option<V> {
         // If capacity is 0, cannot store anything
@@ -55,9 +106,23 @@ where
             return None;
         }
 
+        let key_arc = Arc::new(key);
+        let value_arc = Arc::new(value);
+
         // If key already exists, just update the value
-        if self.cache.contains_key(&key) {
-            return self.cache.insert(key, value);
+        if self.cache.contains_key(&key_arc) {
+            return self.cache.insert(key_arc, value_arc)
+                .and_then(|old_value_arc| {
+                    // Try to unwrap the Arc to get the original value
+                    match Arc::try_unwrap(old_value_arc) {
+                        Ok(old_value) => Some(old_value),
+                        Err(_) => {
+                            // If unwrap fails, there are external references to this Arc<V>
+                            // This violates our cache's ownership model
+                            panic!("Failed to unwrap Arc<V> in insert - there are external references to the value");
+                        }
+                    }
+                });
         }
 
         // If cache is at capacity, remove the oldest valid item (FIFO)
@@ -66,17 +131,31 @@ where
         }
 
         // Add the new key to the insertion order and cache
-        self.insertion_order.push_back(key.clone());
-        self.cache.insert(key, value)
+        // Only the Arc pointers are cloned (8 bytes each), not the actual data
+        self.insertion_order.push_back(key_arc.clone());
+        self.cache.insert(key_arc, value_arc);
+        None
     }
 
     fn get(&mut self, key: &K) -> Option<&V> {
         // In FIFO, getting an item doesn't change its position
-        self.cache.get(key)
+        // Find the Arc<K> that contains this key by iterating (less efficient but correct)
+        for (k, v) in &self.cache {
+            if k.as_ref() == key {
+                return Some(v.as_ref());
+            }
+        }
+        None
     }
 
     fn contains(&self, key: &K) -> bool {
-        self.cache.contains_key(key)
+        // Find the Arc<K> that contains this key by iterating (less efficient but correct)
+        for k in self.cache.keys() {
+            if k.as_ref() == key {
+                return true;
+            }
+        }
+        false
     }
 
     fn len(&self) -> usize {
@@ -95,14 +174,33 @@ where
 
 impl<K, V> FIFOCacheTrait<K, V> for FIFOCache<K, V>
 where 
-    K: Eq + Hash + Clone,
-    V: Clone,
+    K: Eq + Hash,
 {
     fn pop_oldest(&mut self) -> Option<(K, V)> {
         // Use the existing evict_oldest logic but return the key-value pair
-        while let Some(oldest_key) = self.insertion_order.pop_front() {
-            if let Some(value) = self.cache.remove(&oldest_key) {
-                return Some((oldest_key, value));
+        while let Some(oldest_key_arc) = self.insertion_order.pop_front() {
+            if let Some(value_arc) = self.cache.remove(&oldest_key_arc) {
+                // Try to unwrap both Arcs to get the original key and value
+                // This should succeed since we just removed them from the cache
+                let key = match Arc::try_unwrap(oldest_key_arc) {
+                    Ok(key) => key,
+                    Err(_) => {
+                        // If unwrap fails, it means there are external references to this Arc<K>
+                        // This violates our cache's ownership model and shouldn't happen in normal usage
+                        panic!("Failed to unwrap Arc<K> in pop_oldest - there are external references to the key");
+                    }
+                };
+                
+                let value = match Arc::try_unwrap(value_arc) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        // If unwrap fails, it means there are external references to this Arc<V>
+                        // This violates our cache's ownership model and shouldn't happen in normal usage
+                        panic!("Failed to unwrap Arc<V> in pop_oldest - there are external references to the value");
+                    }
+                };
+                
+                return Some((key, value));
             }
             // Skip stale entries (keys that were already removed from cache)
         }
@@ -111,9 +209,9 @@ where
 
     fn peek_oldest(&self) -> Option<(&K, &V)> {
         // Find the first valid entry in insertion order
-        for key in &self.insertion_order {
-            if let Some(value) = self.cache.get(key) {
-                return Some((key, value));
+        for key_arc in &self.insertion_order {
+            if let Some(value_arc) = self.cache.get(key_arc) {
+                return Some((key_arc.as_ref(), value_arc.as_ref()));
             }
         }
         None
@@ -122,9 +220,9 @@ where
     fn age_rank(&self, key: &K) -> Option<usize> {
         // Find position in insertion order, accounting for stale entries
         let mut rank = 0;
-        for insertion_key in &self.insertion_order {
-            if self.cache.contains_key(insertion_key) {
-                if insertion_key == key {
+        for insertion_key_arc in &self.insertion_order {
+            if self.cache.contains_key(insertion_key_arc) {
+                if insertion_key_arc.as_ref() == key {
                     return Some(rank);
                 }
                 rank += 1;
@@ -956,11 +1054,11 @@ mod tests {
                 
                 // Manually remove key1 from HashMap but leave it in insertion_order
                 // This simulates how stale entries would occur in a more complex scenario
-                cache.cache.remove(&"key1");
+                cache.remove_from_cache_only(&"key1");
                 assert_eq!(cache.len(), 2); // HashMap now has 2 items
                 
                 // The insertion_order VecDeque still has 3 entries, but "key1" is now stale
-                assert_eq!(cache.insertion_order.len(), 3);
+                assert_eq!(cache.insertion_order_len(), 3);
                 assert!(!cache.contains(&"key1")); // key1 is not in cache anymore
                 assert!(cache.contains(&"key2"));  // key2 is still valid
                 assert!(cache.contains(&"key3"));  // key3 is still valid
@@ -1007,12 +1105,12 @@ mod tests {
                 assert_eq!(cache.age_rank(&"d"), Some(3));
                 
                 // Manually create stale entries by removing from HashMap
-                cache.cache.remove(&"a");
-                cache.cache.remove(&"c");
+                cache.remove_from_cache_only(&"a");
+                cache.remove_from_cache_only(&"c");
                 
                 // Now "a" and "c" are stale entries in insertion_order
                 assert_eq!(cache.len(), 2); // Only "b" and "d" remain in HashMap
-                assert_eq!(cache.insertion_order.len(), 4); // All 4 still in insertion_order
+                assert_eq!(cache.insertion_order_len(), 4); // All 4 still in insertion_order
                 
                 // age_rank should skip stale entries and give correct ranks for valid entries
                 assert_eq!(cache.age_rank(&"a"), None); // Stale, should return None
@@ -1051,12 +1149,12 @@ mod tests {
                 cache.insert("keep", "value_keep");
                 
                 // Manually remove items to create stale entries
-                cache.cache.remove(&"temp1");
-                cache.cache.remove(&"temp2");
+                cache.remove_from_cache_only(&"temp1");
+                cache.remove_from_cache_only(&"temp2");
                 
                 // Stale entries remain in insertion_order
                 assert_eq!(cache.len(), 1); // Only "keep" in HashMap
-                assert_eq!(cache.insertion_order.len(), 3); // All 3 in insertion_order
+                assert_eq!(cache.insertion_order_len(), 3); // All 3 in insertion_order
                 
                 // Verify operations work correctly despite stale entries
                 assert_eq!(cache.peek_oldest(), Some((&"keep", &"value_keep")));
@@ -1071,7 +1169,7 @@ mod tests {
                 
                 // Now we have: stale("temp1"), stale("temp2"), "keep", "new1", "new2"
                 assert_eq!(cache.len(), 3);
-                assert_eq!(cache.insertion_order.len(), 5);
+                assert_eq!(cache.insertion_order_len(), 5);
                 
                 // pop_oldest should skip stale entries and pop "keep"
                 assert_eq!(cache.pop_oldest(), Some(("keep", "value_keep")));
@@ -1097,9 +1195,9 @@ mod tests {
                 cache.insert("valid", "valid_value");
                 
                 // Remove first three to create consecutive stale entries
-                cache.cache.remove(&"stale1");
-                cache.cache.remove(&"stale2");
-                cache.cache.remove(&"stale3");
+                cache.remove_from_cache_only(&"stale1");
+                cache.remove_from_cache_only(&"stale2");
+                cache.remove_from_cache_only(&"stale3");
                 
                 assert_eq!(cache.len(), 1); // Only "valid" in HashMap
                 // insertion_order might have any length >= 1 depending on cleanup behavior
@@ -1127,14 +1225,14 @@ mod tests {
                 cache.insert("valid2", "value2");
                 
                 // Create stale entries
-                cache.cache.remove(&"will_be_stale1");
-                cache.cache.remove(&"will_be_stale2");
+                cache.remove_from_cache_only(&"will_be_stale1");
+                cache.remove_from_cache_only(&"will_be_stale2");
                 
                 assert_eq!(cache.len(), 2); // Only valid entries in HashMap
-                assert_eq!(cache.insertion_order.len(), 4); // All entries in insertion_order
+                assert_eq!(cache.insertion_order_len(), 4); // All entries in insertion_order
                 
                 // Test 1: pop_oldest cleans up stale entries as it encounters them
-                let initial_order_len = cache.insertion_order.len();
+                let initial_order_len = cache.insertion_order_len();
                 assert_eq!(cache.pop_oldest(), Some(("valid1", "value1")));
                 
                 // Should have cleaned up stale entries encountered during traversal
@@ -1148,8 +1246,8 @@ mod tests {
                 cache.insert("new3", "new_value3");
                 
                 // Create more stale entries
-                cache.cache.remove(&"new1");
-                cache.cache.remove(&"new3");
+                cache.remove_from_cache_only(&"new1");
+                cache.remove_from_cache_only(&"new3");
                 
                 let batch = cache.pop_oldest_batch(2);
                 // Should get valid2 and new2 (skipping stale new1 and new3)
@@ -1162,7 +1260,7 @@ mod tests {
                 cache.insert("test2", "test_value2");
                 cache.insert("test3", "test_value3");
                 
-                cache.cache.remove(&"test2"); // Make test2 stale
+                cache.remove_from_cache_only(&"test2"); // Make test2 stale
                 
                 // age_rank should return correct ranks despite stale entry
                 assert_eq!(cache.age_rank(&"test1"), Some(0)); // First valid
@@ -1170,7 +1268,7 @@ mod tests {
                 assert_eq!(cache.age_rank(&"test3"), Some(1)); // Second valid
                 
                 // Test 4: peek_oldest doesn't modify structure but finds valid entry
-                cache.cache.remove(&"test1"); // Make test1 also stale
+                cache.remove_from_cache_only(&"test1"); // Make test1 also stale
                 
                 // peek_oldest should find test3 despite two stale entries before it
                 assert_eq!(cache.peek_oldest(), Some((&"test3", &"test_value3")));
@@ -1185,8 +1283,8 @@ mod tests {
                 // Now at capacity (4): test3, fill1, fill2, fill3
                 
                 // Create stale entries
-                cache.cache.remove(&"fill1");
-                cache.cache.remove(&"fill2");
+                cache.remove_from_cache_only(&"fill1");
+                cache.remove_from_cache_only(&"fill2");
                 
                 // Now we have test3, fill3 in HashMap (2 valid items)
                 assert_eq!(cache.len(), 2);
@@ -1345,7 +1443,7 @@ mod tests {
                     // This simulates the worst-case scenario for eviction
                     let stale_count = size / 2;
                     for i in 0..stale_count {
-                        cache.cache.remove(&format!("key{}", i));
+                        cache.remove_from_cache_only(&format!("key{}", i));
                     }
                     
                     // Measure time for eviction operations (insertions that trigger eviction)
@@ -1545,10 +1643,10 @@ mod tests {
                 let base_size = mem::size_of::<FIFOCache<K, V>>();
                 
                 // HashMap overhead (estimated)
-                let hashmap_overhead = cache.cache.capacity() * (mem::size_of::<K>() + mem::size_of::<V>() + 8);
+                let hashmap_overhead = cache.cache_capacity() * (mem::size_of::<K>() + mem::size_of::<V>() + 8);
                 
                 // VecDeque overhead (estimated) 
-                let vecdeque_overhead = cache.insertion_order.capacity() * mem::size_of::<K>();
+                let vecdeque_overhead = cache.insertion_order_capacity() * mem::size_of::<K>();
                 
                 base_size + hashmap_overhead + vecdeque_overhead
             }
