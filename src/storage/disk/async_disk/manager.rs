@@ -409,10 +409,12 @@ impl AsyncDiskManager {
     /// Reads multiple pages in a batch operation
     pub async fn read_pages_batch(&self, page_ids: Vec<PageId>) -> IoResult<Vec<Vec<u8>>> {
         debug!("Reading batch of {} pages", page_ids.len());
+        let start_time = Instant::now();
         
         // Use configured batch size to process in chunks
         let batch_size = self.config.batch_size;
         let mut results = Vec::with_capacity(page_ids.len());
+        let mut total_bytes = 0;
         
         for chunk in page_ids.chunks(batch_size) {
             let chunk_results = if self.config.work_stealing_enabled && chunk.len() > 1 {
@@ -420,21 +422,34 @@ impl AsyncDiskManager {
             } else {
                 self.direct_batch_read_operation(chunk.to_vec()).await?
             };
+            
+            // Calculate total bytes for metrics
+            for data in &chunk_results {
+                total_bytes += data.len() as u64;
+            }
+            
             results.extend(chunk_results);
         }
         
-        debug!("Batch read completed for {} pages", results.len());
+        // Update batch read metrics
+        let elapsed = start_time.elapsed();
+        let elapsed_ns = elapsed.as_nanos() as u64;
+        self.update_batch_read_metrics(results.len(), total_bytes, elapsed_ns);
+        
+        debug!("Batch read completed for {} pages (total: {} bytes, elapsed: {:?})", 
+               results.len(), total_bytes, elapsed);
         Ok(results)
     }
     
     /// Schedules a batch read operation through the scheduler
     async fn schedule_batch_read_operation(&self, page_ids: Vec<PageId>) -> IoResult<Vec<Vec<u8>>> {
+        let start_time = Instant::now();
         let (sender, receiver) = oneshot::channel();
         
         let task = IOTask {
             task_type: IOTaskType::BatchRead(page_ids.clone()),
             priority: IOPriority::Normal,
-            creation_time: Instant::now(),
+            creation_time: start_time,
             completion_callback: Some(sender),
         };
         
@@ -462,6 +477,11 @@ impl AsyncDiskManager {
                     results.push(data[start..end].to_vec());
                 }
                 
+                // Record individual metrics for this chunk
+                let elapsed = start_time.elapsed();
+                let elapsed_ns = elapsed.as_nanos() as u64;
+                self.update_batch_read_metrics(results.len(), data.len() as u64, elapsed_ns);
+                
                 Ok(results)
             },
             Ok(Err(e)) => {
@@ -480,11 +500,20 @@ impl AsyncDiskManager {
     
     /// Performs direct batch read operation without scheduling
     async fn direct_batch_read_operation(&self, page_ids: Vec<PageId>) -> IoResult<Vec<Vec<u8>>> {
+        let start_time = Instant::now();
         let mut results = Vec::with_capacity(page_ids.len());
+        let mut total_bytes = 0;
         
-        for page_id in page_ids {
-            results.push(self.read_page(page_id).await?);
+        for page_id in page_ids.iter() {
+            let data = self.read_page(*page_id).await?;
+            total_bytes += data.len() as u64;
+            results.push(data);
         }
+        
+        // Record metrics for this direct batch read
+        let elapsed = start_time.elapsed();
+        let elapsed_ns = elapsed.as_nanos() as u64;
+        self.update_batch_read_metrics(results.len(), total_bytes, elapsed_ns);
         
         Ok(results)
     }
@@ -674,6 +703,20 @@ impl AsyncDiskManager {
             0.0
         };
         
+        // Get cache statistics if caching is enabled
+        let (overall_hit_ratio, hot_cache_hit_ratio, warm_cache_hit_ratio, cold_cache_hit_ratio) = 
+            if self.config.cache_size_mb > 0 {
+                let cache_stats = self.cache_manager.get_cache_statistics();
+                (
+                    self.calculate_cache_hit_ratio("overall", &cache_stats),
+                    self.calculate_cache_hit_ratio("hot", &cache_stats),
+                    self.calculate_cache_hit_ratio("warm", &cache_stats),
+                    self.calculate_cache_hit_ratio("cold", &cache_stats),
+                )
+            } else {
+                (0.0, 0.0, 0.0, 0.0)
+            };
+        
         DashboardData {
             timestamp: Instant::now().into(),
             health_score,
@@ -685,10 +728,10 @@ impl AsyncDiskManager {
                 queue_depth: 0,
             },
             cache: CacheDashboard {
-                overall_hit_ratio: 0.0,
-                hot_cache_hit_ratio: 0.0,
-                warm_cache_hit_ratio: 0.0,
-                cold_cache_hit_ratio: 0.0,
+                overall_hit_ratio,
+                hot_cache_hit_ratio,
+                warm_cache_hit_ratio,
+                cold_cache_hit_ratio,
                 memory_usage_mb: 0,
                 promotions_per_sec: 0.0,
                 evictions_per_sec: 0.0,
@@ -1057,7 +1100,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batch_operations() {
-        let (mut manager, _temp_dir) = create_test_manager().await;
+        let (manager, _temp_dir) = create_test_manager().await;
         
         let page_ids = vec![1, 2, 3, 4, 5];
         let test_data = vec![
@@ -1221,10 +1264,7 @@ mod tests {
             .expect("Failed to write page");
         manager.flush().await.expect("Failed to flush");
         manager.read_page(page_id).await.expect("Failed to read page");
-        
-        // Get metrics
-        let metrics = manager.get_metrics();
-        
+
         // Get dashboard data
         let dashboard = manager.get_dashboard_data();
         assert!(dashboard.health_score > 0.0);
@@ -1542,66 +1582,55 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_recording_integration() {
         let (manager, _temp_dir) = create_test_manager().await;
-        
-        // Get initial metrics
-        let initial_metrics = manager.get_metrics();
-        let initial_read_ops = initial_metrics.retry_count; // Using available field as proxy
-        
+
         // Perform read operation
         let test_data = vec![0x42; 1024];
         let write_result = manager.write_page(200, test_data.clone()).await;
         assert!(write_result.is_ok(), "Write should succeed");
-        
+
         let read_result = manager.read_page(200).await;
         assert!(read_result.is_ok(), "Read should succeed");
-        
+
         // Verify that metrics were recorded
         let live_metrics = manager.get_metrics_collector().get_live_metrics();
-        let read_ops = live_metrics.read_ops_count.load(std::sync::atomic::Ordering::Relaxed);
-        let write_ops = live_metrics.write_ops_count.load(std::sync::atomic::Ordering::Relaxed);
-        
+        let write_ops = live_metrics.write_ops_count.load(Ordering::Relaxed);
+
         // Note: Depending on caching, the read might come from cache or disk
-        // So we check that at least write operations were recorded
         assert!(write_ops > 0, "Write operations should be recorded in metrics");
-        
+
         // Verify latency sums are populated
-        let read_latency_sum = live_metrics.read_latency_sum.load(std::sync::atomic::Ordering::Relaxed);
-        let write_latency_sum = live_metrics.write_latency_sum.load(std::sync::atomic::Ordering::Relaxed);
-        
+        let write_latency_sum = live_metrics.write_latency_sum.load(Ordering::Relaxed);
+
         assert!(write_latency_sum > 0, "Write latency should be recorded");
         // Read latency might be 0 if served from cache, which is acceptable
-        
+
         // Test batch operations metrics
         let pages = vec![
             (300, vec![0x01; 1024]),
             (301, vec![0x02; 1024]),
             (302, vec![0x03; 1024]),
         ];
-        
+
         let batch_write_result = manager.write_pages_batch(pages).await;
         assert!(batch_write_result.is_ok(), "Batch write should succeed");
-        
+
         // Verify batch operations were recorded
-        let batch_ops = live_metrics.batch_ops_count.load(std::sync::atomic::Ordering::Relaxed);
+        let batch_ops = live_metrics.batch_ops_count.load(Ordering::Relaxed);
         assert!(batch_ops > 0, "Batch operations should be recorded");
-        
+
         // Test flush metrics
         let flush_result = manager.flush().await;
         assert!(flush_result.is_ok(), "Flush should succeed");
-        
+
         // Force flush to ensure metrics are recorded
         let force_flush_result = manager.force_flush_all().await;
         assert!(force_flush_result.is_ok(), "Force flush should succeed");
-        
-        let flush_count = live_metrics.flush_count.load(std::sync::atomic::Ordering::Relaxed);
-        // Note: flush_count might be 0 if no pages needed flushing, which is acceptable
-        
+
         // Create metrics snapshot and verify it's populated correctly
         let snapshot = manager.get_metrics();
         assert!(snapshot.io_throughput_mb_per_sec >= 0.0, "Throughput should be non-negative");
-        assert!(snapshot.retry_count >= 0, "Retry count should be non-negative");
     }
-    
+
     #[tokio::test]
     async fn test_cache_metrics_integration() {
         let mut config = DiskManagerConfig::default();
@@ -1624,8 +1653,8 @@ mod tests {
         
         // Verify cache metrics were recorded
         let live_metrics = manager.get_metrics_collector().get_live_metrics();
-        let cache_hits = live_metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
-        let cache_misses = live_metrics.cache_misses.load(std::sync::atomic::Ordering::Relaxed);
+        let cache_hits = live_metrics.cache_hits.load(Ordering::Relaxed);
+        let cache_misses = live_metrics.cache_misses.load(Ordering::Relaxed);
         
         // We should have at least some cache activity
         let total_cache_ops = cache_hits + cache_misses;
@@ -1648,7 +1677,7 @@ mod tests {
             assert!(write_result.is_ok(), "Write {} should succeed", i);
             
             // Small delay to ensure time passes
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
         
         // Force an update of performance counters
@@ -1657,13 +1686,10 @@ mod tests {
         
         // Verify time-based metrics are calculated
         let live_metrics = collector.get_live_metrics();
-        let bytes_per_sec = live_metrics.bytes_per_second.load(Ordering::Relaxed);
-        let ops_per_sec = live_metrics.pages_per_second.load(Ordering::Relaxed);
         let uptime = live_metrics.uptime_seconds.load(Ordering::Relaxed);
         
         assert!(uptime > 0, "Uptime should be tracked");
-        // bytes_per_sec and ops_per_sec might be 0 due to very short test duration, which is acceptable
-        
+
         // Create snapshot and verify time-based calculations
         let snapshot = manager.get_metrics();
         assert!(snapshot.io_throughput_mb_per_sec >= 0.0, "Throughput should be non-negative");
@@ -1693,6 +1719,5 @@ mod tests {
         // Get health report
         let health_report = manager.get_health_report();
         assert!(health_report.overall_health >= 0.0, "Health report should be valid");
-        assert!(health_report.uptime_seconds >= 0, "Uptime should be tracked");
     }
 }
