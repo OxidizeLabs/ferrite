@@ -1,13 +1,13 @@
+use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::Hash;
 use std::sync::Arc;
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 
 /// # FIFO (First In, First Out) Cache Implementation
 ///
-/// This module provides a high-performance FIFO cache that evicts the oldest (first inserted) 
-/// items when the cache reaches capacity. The implementation is optimized for use in database 
+/// This module provides a high-performance FIFO cache that evicts the oldest (first inserted)
+/// items when the cache reaches capacity. The implementation is optimized for use in database
 /// buffer pool management and other scenarios requiring predictable eviction patterns.
 ///
 /// ## How It Works
@@ -17,7 +17,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// - **VecDeque<Arc<K>>**: Tracks insertion order for O(1) FIFO eviction from the front
 ///
 /// When the cache reaches capacity, the oldest item (at the front of the VecDeque) is evicted
-/// to make room for new insertions. This ensures predictable cache behavior where the 
+/// to make room for new insertions. This ensures predictable cache behavior where the
 /// "stalest" data is always removed first.
 ///
 /// ## Time Complexity
@@ -31,12 +31,12 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// | `clear()` | O(n)         | O(n)       | Clear both data structures |
 /// | `age_rank()`| O(n)       | O(n)       | Linear scan of insertion order |
 ///
-/// **Note**: `get()` and `insert()` require Arc<K> comparison which may scan the HashMap 
+/// **Note**: `get()` and `insert()` require Arc<K> comparison which may scan the HashMap
 /// in the worst case, but typically perform at O(1) due to hash distribution.
 ///
 /// ## Space Complexity
 ///
-/// - **Memory Usage**: O(capacity) 
+/// - **Memory Usage**: O(capacity)
 /// - **Storage**: Each key and value is wrapped in Arc<> for zero-copy sharing
 /// - **Overhead**: HashMap overhead + VecDeque overhead + Arc reference counting
 /// - **Stale Entries**: VecDeque may temporarily contain more entries than HashMap
@@ -62,7 +62,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// #     insertion_order: VecDeque<Arc<K>>,
 /// # }
 /// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self { 
+/// #     pub fn new(capacity: usize) -> Self {
 /// #         FIFOCache {
 /// #             capacity,
 /// #             cache: HashMap::with_capacity(capacity),
@@ -71,10 +71,10 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// #     }
 /// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> { None }
 /// # }
-/// 
+///
 /// // Correct usage in multithreaded environment
 /// let thread_safe_cache = Arc::new(RwLock::new(FIFOCache::new(1000)));
-/// 
+///
 /// // Multiple threads can safely access through the RwLock
 /// let cache_clone = thread_safe_cache.clone();
 /// std::thread::spawn(move || {
@@ -119,14 +119,14 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// #     insertion_order: VecDeque<Arc<K>>,
 /// # }
 /// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self { 
+/// #     pub fn new(capacity: usize) -> Self {
 /// #         FIFOCache {
 /// #             capacity,
 /// #             cache: HashMap::with_capacity(capacity),
 /// #             insertion_order: VecDeque::with_capacity(capacity),
 /// #         }
 /// #     }
-/// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> { 
+/// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> {
 /// #         if self.cache.len() >= self.capacity {
 /// #             self.insertion_order.pop_front();
 /// #         }
@@ -177,7 +177,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// #     insertion_order: VecDeque<Arc<K>>,
 /// # }
 /// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self { 
+/// #     pub fn new(capacity: usize) -> Self {
 /// #         FIFOCache {
 /// #             capacity,
 /// #             cache: HashMap::with_capacity(capacity),
@@ -236,7 +236,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// #     insertion_order: VecDeque<Arc<K>>,
 /// # }
 /// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self { 
+/// #     pub fn new(capacity: usize) -> Self {
 /// #         FIFOCache {
 /// #             capacity,
 /// #             cache: HashMap::with_capacity(capacity),
@@ -299,7 +299,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// #     insertion_order: VecDeque<Arc<K>>,
 /// # }
 /// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self { 
+/// #     pub fn new(capacity: usize) -> Self {
 /// #         FIFOCache {
 /// #             capacity,
 /// #             cache: HashMap::with_capacity(capacity),
@@ -313,7 +313,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// # }
 /// # type PageId = u32;
 /// # type PageData = Vec<u8>;
-/// 
+///
 /// // In buffer pool manager
 /// struct BufferPool {
 ///     page_cache: Arc<RwLock<FIFOCache<PageId, PageData>>>,
@@ -335,7 +335,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// FIFO (First In, First Out) Cache implementation.
 #[derive(Debug)]
 pub struct FIFOCache<K, V>
-where 
+where
     K: Eq + Hash,
 {
     capacity: usize,
@@ -344,7 +344,7 @@ where
 }
 
 impl<K, V> FIFOCache<K, V>
-where 
+where
     K: Eq + Hash,
 {
     /// Creates a new FIFO cache with the given capacity
@@ -386,10 +386,8 @@ where
     #[cfg(test)]
     pub fn remove_from_cache_only(&mut self, key: &K) -> Option<Arc<V>> {
         // Find the Arc<K> that matches this key
-        let arc_key = self.cache.keys()
-            .find(|k| k.as_ref() == key)
-            .cloned();
-        
+        let arc_key = self.cache.keys().find(|k| k.as_ref() == key).cloned();
+
         if let Some(arc_key) = arc_key {
             self.cache.remove(&arc_key)
         } else {
@@ -425,7 +423,7 @@ where
 }
 
 impl<K, V> CoreCache<K, V> for FIFOCache<K, V>
-where 
+where
     K: Eq + Hash,
 {
     fn insert(&mut self, key: K, value: V) -> Option<V> {
@@ -501,7 +499,7 @@ where
 }
 
 impl<K, V> FIFOCacheTrait<K, V> for FIFOCache<K, V>
-where 
+where
     K: Eq + Hash,
 {
     fn pop_oldest(&mut self) -> Option<(K, V)> {
@@ -515,19 +513,23 @@ where
                     Err(_) => {
                         // If unwrap fails, it means there are external references to this Arc<K>
                         // This violates our cache's ownership model and shouldn't happen in normal usage
-                        panic!("Failed to unwrap Arc<K> in pop_oldest - there are external references to the key");
+                        panic!(
+                            "Failed to unwrap Arc<K> in pop_oldest - there are external references to the key"
+                        );
                     }
                 };
-                
+
                 let value = match Arc::try_unwrap(value_arc) {
                     Ok(value) => value,
                     Err(_) => {
                         // If unwrap fails, it means there are external references to this Arc<V>
                         // This violates our cache's ownership model and shouldn't happen in normal usage
-                        panic!("Failed to unwrap Arc<V> in pop_oldest - there are external references to the value");
+                        panic!(
+                            "Failed to unwrap Arc<V> in pop_oldest - there are external references to the value"
+                        );
                     }
                 };
-                
+
                 return Some((key, value));
             }
             // Skip stale entries (keys that were already removed from cache)
@@ -545,6 +547,18 @@ where
         None
     }
 
+    fn pop_oldest_batch(&mut self, count: usize) -> Vec<(K, V)> {
+        let mut result = Vec::with_capacity(count.min(<Self as CoreCache<K, V>>::len(self)));
+        for _ in 0..count {
+            if let Some(entry) = self.pop_oldest() {
+                result.push(entry);
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
     fn age_rank(&self, key: &K) -> Option<usize> {
         // Find position in insertion order, accounting for stale entries
         let mut rank = 0;
@@ -557,18 +571,6 @@ where
             }
         }
         None
-    }
-
-    fn pop_oldest_batch(&mut self, count: usize) -> Vec<(K, V)> {
-        let mut result = Vec::with_capacity(count.min(<Self as CoreCache<K, V>>::len(self)));
-        for _ in 0..count {
-            if let Some(entry) = self.pop_oldest() {
-                result.push(entry);
-            } else {
-                break;
-            }
-        }
-        result
     }
 }
 
@@ -591,12 +593,12 @@ mod tests {
             #[test]
             fn test_basic_fifo_insertion_and_retrieval() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Test basic insertion and retrieval
                 assert_eq!(cache.insert("key1", "value1"), None);
                 assert_eq!(cache.insert("key2", "value2"), None);
                 assert_eq!(cache.insert("key3", "value3"), None);
-                
+
                 assert_eq!(cache.get(&"key1"), Some(&"value1"));
                 assert_eq!(cache.get(&"key2"), Some(&"value2"));
                 assert_eq!(cache.get(&"key3"), Some(&"value3"));
@@ -606,16 +608,16 @@ mod tests {
             #[test]
             fn test_fifo_eviction_order() {
                 let mut cache = FIFOCache::new(2);
-                
+
                 // Fill cache to capacity
                 cache.insert("first", "value1");
                 cache.insert("second", "value2");
                 assert_eq!(cache.len(), 2);
-                
+
                 // Insert third item - should evict "first" (oldest)
                 cache.insert("third", "value3");
                 assert_eq!(cache.len(), 2);
-                assert!(!cache.contains(&"first"));  // First item should be evicted
+                assert!(!cache.contains(&"first")); // First item should be evicted
                 assert!(cache.contains(&"second"));
                 assert!(cache.contains(&"third"));
             }
@@ -623,12 +625,12 @@ mod tests {
             #[test]
             fn test_capacity_enforcement() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Fill beyond capacity
                 for i in 1..=5 {
                     cache.insert(format!("key{}", i), format!("value{}", i));
                 }
-                
+
                 // Should only contain last 3 items due to FIFO eviction
                 assert_eq!(cache.len(), 3);
                 assert!(!cache.contains(&"key1".to_string()));
@@ -641,10 +643,10 @@ mod tests {
             #[test]
             fn test_update_existing_key() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 cache.insert("key1", "original");
                 cache.insert("key2", "value2");
-                
+
                 // Update existing key - should return old value
                 let old_value = cache.insert("key1", "updated");
                 assert_eq!(old_value, Some("original"));
@@ -655,54 +657,54 @@ mod tests {
             #[test]
             fn test_insertion_order_preservation() {
                 let mut cache = FIFOCache::new(4);
-                
+
                 // Insert items in specific order
                 cache.insert("first", 1);
                 cache.insert("second", 2);
                 cache.insert("third", 3);
                 cache.insert("fourth", 4);
-                
+
                 // Verify insertion order is preserved in FIFO operations
                 assert_eq!(cache.peek_oldest(), Some((&"first", &1)));
-                assert_eq!(cache.age_rank(&"first"), Some(0));  // oldest
+                assert_eq!(cache.age_rank(&"first"), Some(0)); // oldest
                 assert_eq!(cache.age_rank(&"second"), Some(1));
                 assert_eq!(cache.age_rank(&"third"), Some(2));
                 assert_eq!(cache.age_rank(&"fourth"), Some(3)); // newest
-                
+
                 // Pop oldest and verify order shifts correctly
                 assert_eq!(cache.pop_oldest(), Some(("first", 1)));
                 assert_eq!(cache.peek_oldest(), Some((&"second", &2)));
                 assert_eq!(cache.age_rank(&"second"), Some(0)); // now oldest
                 assert_eq!(cache.age_rank(&"third"), Some(1));
                 assert_eq!(cache.age_rank(&"fourth"), Some(2)); // still newest
-                
+
                 // Insert new item and verify it becomes newest
                 cache.insert("fifth", 5);
                 assert_eq!(cache.age_rank(&"second"), Some(0));
                 assert_eq!(cache.age_rank(&"third"), Some(1));
                 assert_eq!(cache.age_rank(&"fourth"), Some(2));
                 assert_eq!(cache.age_rank(&"fifth"), Some(3)); // newest
-                
+
                 // Test eviction maintains order - add item beyond capacity
                 cache.insert("sixth", 6);
                 // Should evict "second" (oldest)
                 assert!(!cache.contains(&"second"));
                 assert_eq!(cache.peek_oldest(), Some((&"third", &3)));
-                assert_eq!(cache.age_rank(&"third"), Some(0));  // now oldest
+                assert_eq!(cache.age_rank(&"third"), Some(0)); // now oldest
                 assert_eq!(cache.age_rank(&"fourth"), Some(1));
                 assert_eq!(cache.age_rank(&"fifth"), Some(2));
-                assert_eq!(cache.age_rank(&"sixth"), Some(3));  // newest
+                assert_eq!(cache.age_rank(&"sixth"), Some(3)); // newest
             }
 
             #[test]
             fn test_key_operations_consistency() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Test consistency between contains, get, and len
                 assert_eq!(cache.len(), 0);
                 assert!(!cache.contains(&"key1"));
                 assert_eq!(cache.get(&"key1"), None);
-                
+
                 // Insert first item
                 cache.insert("key1", "value1");
                 assert_eq!(cache.len(), 1);
@@ -710,7 +712,7 @@ mod tests {
                 assert_eq!(cache.get(&"key1"), Some(&"value1"));
                 assert!(!cache.contains(&"key2"));
                 assert_eq!(cache.get(&"key2"), None);
-                
+
                 // Insert second item
                 cache.insert("key2", "value2");
                 assert_eq!(cache.len(), 2);
@@ -718,7 +720,7 @@ mod tests {
                 assert!(cache.contains(&"key2"));
                 assert_eq!(cache.get(&"key1"), Some(&"value1"));
                 assert_eq!(cache.get(&"key2"), Some(&"value2"));
-                
+
                 // Update existing key - len should not change
                 let old_value = cache.insert("key1", "updated_value1");
                 assert_eq!(old_value, Some("value1"));
@@ -726,7 +728,7 @@ mod tests {
                 assert!(cache.contains(&"key1"));
                 assert_eq!(cache.get(&"key1"), Some(&"updated_value1"));
                 assert_eq!(cache.get(&"key2"), Some(&"value2"));
-                
+
                 // Fill to capacity
                 cache.insert("key3", "value3");
                 assert_eq!(cache.len(), 3);
@@ -734,29 +736,29 @@ mod tests {
                 assert!(cache.contains(&"key1"));
                 assert!(cache.contains(&"key2"));
                 assert!(cache.contains(&"key3"));
-                
+
                 // Trigger eviction - should evict key1 (oldest, even though updated)
                 // In true FIFO, updating a key does NOT change its insertion order position
                 cache.insert("key4", "value4");
                 assert_eq!(cache.len(), 3); // Should remain at capacity
                 assert!(!cache.contains(&"key1")); // Should be evicted (oldest insertion time)
-                assert!(cache.contains(&"key2"));  // Should remain
+                assert!(cache.contains(&"key2")); // Should remain
                 assert!(cache.contains(&"key3"));
                 assert!(cache.contains(&"key4"));
                 assert_eq!(cache.get(&"key1"), None);
                 assert_eq!(cache.get(&"key4"), Some(&"value4"));
-                
+
                 // Test pop_oldest consistency - should pop key2 (now oldest)
                 let popped = cache.pop_oldest();
                 assert_eq!(popped, Some(("key2", "value2")));
                 assert_eq!(cache.len(), 2);
                 assert!(!cache.contains(&"key2"));
                 assert_eq!(cache.get(&"key2"), None);
-                
+
                 // Verify remaining items
                 assert!(cache.contains(&"key3"));
                 assert!(cache.contains(&"key4"));
-                
+
                 // Clear and verify all operations report empty state
                 cache.clear();
                 assert_eq!(cache.len(), 0);
@@ -778,12 +780,12 @@ mod tests {
             #[test]
             fn test_empty_cache_operations() {
                 let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
-                
+
                 assert_eq!(cache.get(&"nonexistent".to_string()), None);
                 assert!(!cache.contains(&"nonexistent".to_string()));
                 assert_eq!(cache.len(), 0);
                 assert_eq!(cache.capacity(), 5);
-                
+
                 // Clear empty cache should work
                 cache.clear();
                 assert_eq!(cache.len(), 0);
@@ -792,11 +794,11 @@ mod tests {
             #[test]
             fn test_single_item_cache() {
                 let mut cache = FIFOCache::new(1);
-                
+
                 cache.insert("only", "value1");
                 assert_eq!(cache.len(), 1);
                 assert_eq!(cache.get(&"only"), Some(&"value1"));
-                
+
                 // Insert second item - should evict first
                 cache.insert("second", "value2");
                 assert_eq!(cache.len(), 1);
@@ -807,7 +809,7 @@ mod tests {
             #[test]
             fn test_zero_capacity_cache() {
                 let mut cache = FIFOCache::new(0);
-                
+
                 // Should not be able to store anything
                 cache.insert("key", "value");
                 assert_eq!(cache.len(), 0);
@@ -818,11 +820,11 @@ mod tests {
             #[test]
             fn test_clear_operation() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 cache.insert("key1", "value1");
                 cache.insert("key2", "value2");
                 assert_eq!(cache.len(), 2);
-                
+
                 cache.clear();
                 assert_eq!(cache.len(), 0);
                 assert!(!cache.contains(&"key1"));
@@ -833,34 +835,34 @@ mod tests {
             #[test]
             fn test_duplicate_key_handling() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Insert initial key
                 assert_eq!(cache.insert("key1", "value1"), None);
                 assert_eq!(cache.len(), 1);
                 assert!(cache.contains(&"key1"));
                 assert_eq!(cache.get(&"key1"), Some(&"value1"));
-                
+
                 // Insert same key again - should update, not add new entry
                 assert_eq!(cache.insert("key1", "value1_updated"), Some("value1"));
                 assert_eq!(cache.len(), 1); // Length should remain the same
                 assert_eq!(cache.get(&"key1"), Some(&"value1_updated"));
-                
+
                 // Add more keys
                 cache.insert("key2", "value2");
                 cache.insert("key3", "value3");
                 assert_eq!(cache.len(), 3);
-                
+
                 // Update existing key multiple times
                 assert_eq!(cache.insert("key2", "value2_v2"), Some("value2"));
                 assert_eq!(cache.insert("key2", "value2_v3"), Some("value2_v2"));
                 assert_eq!(cache.len(), 3); // Should still be 3
                 assert_eq!(cache.get(&"key2"), Some(&"value2_v3"));
-                
+
                 // Verify insertion order preserved (key1 should still be oldest)
                 assert_eq!(cache.age_rank(&"key1"), Some(0)); // Still oldest despite updates
                 assert_eq!(cache.age_rank(&"key2"), Some(1));
                 assert_eq!(cache.age_rank(&"key3"), Some(2));
-                
+
                 // Fill to capacity and force eviction
                 cache.insert("key4", "value4");
                 assert_eq!(cache.len(), 3);
@@ -868,12 +870,12 @@ mod tests {
                 assert!(cache.contains(&"key2"));
                 assert!(cache.contains(&"key3"));
                 assert!(cache.contains(&"key4"));
-                
+
                 // Update existing key after eviction
                 assert_eq!(cache.insert("key2", "value2_final"), Some("value2_v3"));
                 assert_eq!(cache.len(), 3);
                 assert_eq!(cache.get(&"key2"), Some(&"value2_final"));
-                
+
                 // Verify no duplicate entries in internal structures
                 let mut found_keys = HashSet::new();
                 let mut count = 0;
@@ -887,52 +889,52 @@ mod tests {
             #[test]
             fn test_boundary_conditions() {
                 let mut cache = FIFOCache::new(2);
-                
+
                 // Test exactly at capacity
                 cache.insert("key1", "value1");
                 assert_eq!(cache.len(), 1);
                 assert!(!cache.contains(&"key2"));
-                
+
                 cache.insert("key2", "value2");
                 assert_eq!(cache.len(), 2); // Exactly at capacity
                 assert_eq!(cache.capacity(), 2);
                 assert!(cache.contains(&"key1"));
                 assert!(cache.contains(&"key2"));
-                
+
                 // Test operations at capacity limit
                 assert_eq!(cache.peek_oldest(), Some((&"key1", &"value1")));
                 assert_eq!(cache.age_rank(&"key1"), Some(0));
                 assert_eq!(cache.age_rank(&"key2"), Some(1));
-                
+
                 // Insert one more to trigger eviction (capacity + 1)
                 cache.insert("key3", "value3");
                 assert_eq!(cache.len(), 2); // Should remain at capacity
                 assert!(!cache.contains(&"key1")); // Oldest evicted
                 assert!(cache.contains(&"key2"));
                 assert!(cache.contains(&"key3"));
-                
+
                 // Test boundary with updates at capacity
                 assert_eq!(cache.insert("key2", "value2_updated"), Some("value2"));
                 assert_eq!(cache.len(), 2); // Still at capacity
                 assert_eq!(cache.get(&"key2"), Some(&"value2_updated"));
-                
+
                 // Test pop operations at boundary
                 assert_eq!(cache.pop_oldest(), Some(("key2", "value2_updated")));
                 assert_eq!(cache.len(), 1); // One below capacity
-                
+
                 assert_eq!(cache.pop_oldest(), Some(("key3", "value3")));
                 assert_eq!(cache.len(), 0); // Empty
-                
+
                 // Test operations on empty cache after reaching boundary
                 assert_eq!(cache.pop_oldest(), None);
                 assert_eq!(cache.peek_oldest(), None);
                 assert_eq!(cache.len(), 0);
-                
+
                 // Test filling back to capacity
                 cache.insert("new1", "newval1");
                 cache.insert("new2", "newval2");
                 assert_eq!(cache.len(), 2); // Back to capacity
-                
+
                 // Test batch operations at boundary
                 let batch = cache.pop_oldest_batch(3); // Request more than available
                 assert_eq!(batch.len(), 2); // Should get exactly what's available
@@ -942,23 +944,23 @@ mod tests {
             #[test]
             fn test_empty_to_full_transition() {
                 let mut cache = FIFOCache::new(4);
-                
+
                 // Start empty
                 assert_eq!(cache.len(), 0);
                 assert_eq!(cache.capacity(), 4);
                 assert_eq!(cache.peek_oldest(), None);
                 assert_eq!(cache.pop_oldest(), None);
-                
+
                 // Fill step by step, verifying state at each step
-                
+
                 // Step 1: Insert first item
                 cache.insert("item1", 1);
                 assert_eq!(cache.len(), 1);
                 assert!(cache.contains(&"item1"));
                 assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
                 assert_eq!(cache.age_rank(&"item1"), Some(0));
-                
-                // Step 2: Insert second item  
+
+                // Step 2: Insert second item
                 cache.insert("item2", 2);
                 assert_eq!(cache.len(), 2);
                 assert!(cache.contains(&"item1"));
@@ -966,7 +968,7 @@ mod tests {
                 assert_eq!(cache.peek_oldest(), Some((&"item1", &1))); // Still oldest
                 assert_eq!(cache.age_rank(&"item1"), Some(0));
                 assert_eq!(cache.age_rank(&"item2"), Some(1));
-                
+
                 // Step 3: Insert third item
                 cache.insert("item3", 3);
                 assert_eq!(cache.len(), 3);
@@ -974,32 +976,32 @@ mod tests {
                 assert_eq!(cache.age_rank(&"item1"), Some(0));
                 assert_eq!(cache.age_rank(&"item2"), Some(1));
                 assert_eq!(cache.age_rank(&"item3"), Some(2));
-                
+
                 // Step 4: Fill to capacity
                 cache.insert("item4", 4);
                 assert_eq!(cache.len(), 4); // Now at full capacity
                 assert_eq!(cache.capacity(), 4);
-                
+
                 // Verify all items present and in correct order
                 assert!(cache.contains(&"item1"));
                 assert_eq!(cache.get(&"item1"), Some(&1));
                 assert_eq!(cache.age_rank(&"item1"), Some(0));
-                
+
                 assert!(cache.contains(&"item2"));
                 assert_eq!(cache.get(&"item2"), Some(&2));
                 assert_eq!(cache.age_rank(&"item2"), Some(1));
-                
+
                 assert!(cache.contains(&"item3"));
                 assert_eq!(cache.get(&"item3"), Some(&3));
                 assert_eq!(cache.age_rank(&"item3"), Some(2));
-                
+
                 assert!(cache.contains(&"item4"));
                 assert_eq!(cache.get(&"item4"), Some(&4));
                 assert_eq!(cache.age_rank(&"item4"), Some(3));
-                
+
                 // Verify oldest is still first
                 assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
-                
+
                 // Test that we're truly at capacity - next insert should evict
                 cache.insert("item5", 5);
                 assert_eq!(cache.len(), 4); // Still at capacity
@@ -1020,10 +1022,10 @@ mod tests {
                     assert_eq!(cache.capacity(), 3);
                     cache
                 };
-                
+
                 // Method 1: Empty using pop_oldest one by one
                 let mut emptying_cache = create_test_cache();
-                
+
                 // First pop
                 assert_eq!(emptying_cache.pop_oldest(), Some(("item1", 1)));
                 assert_eq!(emptying_cache.len(), 2);
@@ -1031,24 +1033,24 @@ mod tests {
                 assert!(emptying_cache.contains(&"item2"));
                 assert!(emptying_cache.contains(&"item3"));
                 assert_eq!(emptying_cache.peek_oldest(), Some((&"item2", &2)));
-                
+
                 // Second pop
                 assert_eq!(emptying_cache.pop_oldest(), Some(("item2", 2)));
                 assert_eq!(emptying_cache.len(), 1);
                 assert!(!emptying_cache.contains(&"item2"));
                 assert!(emptying_cache.contains(&"item3"));
                 assert_eq!(emptying_cache.peek_oldest(), Some((&"item3", &3)));
-                
+
                 // Third pop
                 assert_eq!(emptying_cache.pop_oldest(), Some(("item3", 3)));
                 assert_eq!(emptying_cache.len(), 0);
                 assert!(!emptying_cache.contains(&"item3"));
                 assert_eq!(emptying_cache.peek_oldest(), None);
-                
+
                 // Fourth pop on empty cache
                 assert_eq!(emptying_cache.pop_oldest(), None);
                 assert_eq!(emptying_cache.len(), 0);
-                
+
                 // Method 2: Empty using batch operation
                 let mut batch_cache = create_test_cache();
                 let batch = batch_cache.pop_oldest_batch(3);
@@ -1058,7 +1060,7 @@ mod tests {
                 assert_eq!(batch[2], ("item3", 3));
                 assert_eq!(batch_cache.len(), 0);
                 assert_eq!(batch_cache.peek_oldest(), None);
-                
+
                 // Method 3: Empty using clear operation
                 let mut clear_cache = create_test_cache();
                 clear_cache.clear();
@@ -1066,7 +1068,7 @@ mod tests {
                 assert_eq!(clear_cache.capacity(), 3); // Capacity unchanged
                 assert_eq!(clear_cache.peek_oldest(), None);
                 assert_eq!(clear_cache.pop_oldest(), None);
-                
+
                 // Verify cache can be refilled after each emptying method
                 for mut test_cache in [emptying_cache, batch_cache, clear_cache] {
                     test_cache.insert("new1", 100);
@@ -1074,24 +1076,24 @@ mod tests {
                     assert!(test_cache.contains(&"new1"));
                     assert_eq!(test_cache.peek_oldest(), Some((&"new1", &100)));
                 }
-                
+
                 // Test partial emptying and refilling
                 let mut partial_cache = FIFOCache::new(4);
                 partial_cache.insert("a", 1);
                 partial_cache.insert("b", 2);
                 partial_cache.insert("c", 3);
                 partial_cache.insert("d", 4);
-                
+
                 // Remove 2 items
                 partial_cache.pop_oldest(); // Remove "a"
                 partial_cache.pop_oldest(); // Remove "b"
                 assert_eq!(partial_cache.len(), 2);
-                
+
                 // Add 2 new items
                 partial_cache.insert("e", 5);
                 partial_cache.insert("f", 6);
                 assert_eq!(partial_cache.len(), 4); // Back to full
-                
+
                 // Verify correct order maintained
                 assert_eq!(partial_cache.peek_oldest(), Some((&"c", &3))); // "c" should be oldest
                 assert_eq!(partial_cache.age_rank(&"c"), Some(0));
@@ -1108,16 +1110,16 @@ mod tests {
             #[test]
             fn test_pop_oldest() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 cache.insert("first", "value1");
                 cache.insert("second", "value2");
                 cache.insert("third", "value3");
-                
+
                 // Pop oldest should return first inserted
                 assert_eq!(cache.pop_oldest(), Some(("first", "value1")));
                 assert_eq!(cache.len(), 2);
                 assert!(!cache.contains(&"first"));
-                
+
                 // Next pop should return second oldest
                 assert_eq!(cache.pop_oldest(), Some(("second", "value2")));
                 assert_eq!(cache.len(), 1);
@@ -1126,15 +1128,15 @@ mod tests {
             #[test]
             fn test_peek_oldest() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 cache.insert("first", "value1");
                 cache.insert("second", "value2");
-                
+
                 // Peek should return oldest without removing
                 assert_eq!(cache.peek_oldest(), Some((&"first", &"value1")));
                 assert_eq!(cache.len(), 2); // Should not change length
                 assert!(cache.contains(&"first")); // Should still be present
-                
+
                 // Multiple peeks should return same result
                 assert_eq!(cache.peek_oldest(), Some((&"first", &"value1")));
             }
@@ -1142,12 +1144,12 @@ mod tests {
             #[test]
             fn test_age_rank() {
                 let mut cache = FIFOCache::new(4);
-                
-                cache.insert("first", "value1");   // rank 0 (oldest)
-                cache.insert("second", "value2");  // rank 1
-                cache.insert("third", "value3");   // rank 2
-                cache.insert("fourth", "value4");  // rank 3 (newest)
-                
+
+                cache.insert("first", "value1"); // rank 0 (oldest)
+                cache.insert("second", "value2"); // rank 1
+                cache.insert("third", "value3"); // rank 2
+                cache.insert("fourth", "value4"); // rank 3 (newest)
+
                 assert_eq!(cache.age_rank(&"first"), Some(0));
                 assert_eq!(cache.age_rank(&"second"), Some(1));
                 assert_eq!(cache.age_rank(&"third"), Some(2));
@@ -1158,18 +1160,18 @@ mod tests {
             #[test]
             fn test_pop_oldest_batch() {
                 let mut cache = FIFOCache::new(5);
-                
+
                 for i in 1..=5 {
                     cache.insert(format!("key{}", i), format!("value{}", i));
                 }
-                
+
                 // Pop batch of 3 items
                 let batch = cache.pop_oldest_batch(3);
                 assert_eq!(batch.len(), 3);
                 assert_eq!(batch[0], ("key1".to_string(), "value1".to_string()));
                 assert_eq!(batch[1], ("key2".to_string(), "value2".to_string()));
                 assert_eq!(batch[2], ("key3".to_string(), "value3".to_string()));
-                
+
                 // Cache should have 2 items left
                 assert_eq!(cache.len(), 2);
                 assert!(cache.contains(&"key4".to_string()));
@@ -1179,10 +1181,10 @@ mod tests {
             #[test]
             fn test_pop_oldest_batch_more_than_available() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 cache.insert("key1", "value1");
                 cache.insert("key2", "value2");
-                
+
                 // Request more than available
                 let batch = cache.pop_oldest_batch(5);
                 assert_eq!(batch.len(), 2); // Should only return what's available
@@ -1192,24 +1194,24 @@ mod tests {
             #[test]
             fn test_pop_oldest_empty_cache() {
                 let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
-                
+
                 // Pop from empty cache should return None
                 assert_eq!(cache.pop_oldest(), None);
                 assert_eq!(cache.len(), 0);
-                
+
                 // Multiple pops should still return None
                 assert_eq!(cache.pop_oldest(), None);
                 assert_eq!(cache.pop_oldest(), None);
                 assert_eq!(cache.len(), 0);
-                
+
                 // Add one item, pop it, then pop from empty again
                 cache.insert("key1".to_string(), "value1".to_string());
                 assert_eq!(cache.len(), 1);
-                
+
                 let popped = cache.pop_oldest();
                 assert_eq!(popped, Some(("key1".to_string(), "value1".to_string())));
                 assert_eq!(cache.len(), 0);
-                
+
                 // Now it's empty again
                 assert_eq!(cache.pop_oldest(), None);
                 assert_eq!(cache.len(), 0);
@@ -1218,25 +1220,25 @@ mod tests {
             #[test]
             fn test_peek_oldest_empty_cache() {
                 let cache: FIFOCache<String, String> = FIFOCache::new(5);
-                
+
                 // Peek at empty cache should return None
                 assert_eq!(cache.peek_oldest(), None);
                 assert_eq!(cache.len(), 0);
-                
+
                 // Multiple peeks should still return None
                 assert_eq!(cache.peek_oldest(), None);
                 assert_eq!(cache.peek_oldest(), None);
                 assert_eq!(cache.len(), 0);
-                
+
                 // Test peek after clear
                 let mut test_cache = FIFOCache::new(3);
                 test_cache.insert("key1".to_string(), "value1".to_string());
                 test_cache.insert("key2".to_string(), "value2".to_string());
-                
+
                 // Should have content
                 assert!(test_cache.peek_oldest().is_some());
                 assert_eq!(test_cache.len(), 2);
-                
+
                 // Clear and peek again
                 test_cache.clear();
                 assert_eq!(test_cache.peek_oldest(), None);
@@ -1246,54 +1248,54 @@ mod tests {
             #[test]
             fn test_age_rank_after_eviction() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Fill cache
                 cache.insert("first", 1);
                 cache.insert("second", 2);
                 cache.insert("third", 3);
-                
+
                 // Verify initial ranks
                 assert_eq!(cache.age_rank(&"first"), Some(0));
                 assert_eq!(cache.age_rank(&"second"), Some(1));
                 assert_eq!(cache.age_rank(&"third"), Some(2));
-                
+
                 // Trigger eviction by adding fourth item
                 cache.insert("fourth", 4);
-                
+
                 // "first" should be evicted, ranks should shift
                 assert_eq!(cache.age_rank(&"first"), None); // Evicted
                 assert_eq!(cache.age_rank(&"second"), Some(0)); // Now oldest
                 assert_eq!(cache.age_rank(&"third"), Some(1));
                 assert_eq!(cache.age_rank(&"fourth"), Some(2)); // Newest
-                
+
                 // Add another item to trigger another eviction
                 cache.insert("fifth", 5);
-                
+
                 // "second" should be evicted, ranks shift again
-                assert_eq!(cache.age_rank(&"first"), None);   // Still evicted
-                assert_eq!(cache.age_rank(&"second"), None);  // Now evicted
+                assert_eq!(cache.age_rank(&"first"), None); // Still evicted
+                assert_eq!(cache.age_rank(&"second"), None); // Now evicted
                 assert_eq!(cache.age_rank(&"third"), Some(0)); // Now oldest
                 assert_eq!(cache.age_rank(&"fourth"), Some(1));
                 assert_eq!(cache.age_rank(&"fifth"), Some(2)); // Newest
-                
+
                 // Test manual eviction with pop_oldest
                 let popped = cache.pop_oldest();
                 assert_eq!(popped, Some(("third", 3)));
-                
+
                 // Ranks should shift after manual pop
-                assert_eq!(cache.age_rank(&"third"), None);   // Just popped
+                assert_eq!(cache.age_rank(&"third"), None); // Just popped
                 assert_eq!(cache.age_rank(&"fourth"), Some(0)); // Now oldest
-                assert_eq!(cache.age_rank(&"fifth"), Some(1));  // Now newest
-                
+                assert_eq!(cache.age_rank(&"fifth"), Some(1)); // Now newest
+
                 // Test batch eviction
                 cache.insert("sixth", 6);
                 cache.insert("seventh", 7);
                 assert_eq!(cache.len(), 3);
-                
+
                 let batch = cache.pop_oldest_batch(2);
                 assert_eq!(batch.len(), 2);
                 assert_eq!(cache.len(), 1);
-                
+
                 // Only "seventh" should remain
                 assert_eq!(cache.age_rank(&"fourth"), None);
                 assert_eq!(cache.age_rank(&"fifth"), None);
@@ -1304,23 +1306,23 @@ mod tests {
             #[test]
             fn test_batch_operations_edge_cases() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Test batch with count = 0
                 cache.insert("key1", "value1");
                 cache.insert("key2", "value2");
-                
+
                 let batch = cache.pop_oldest_batch(0);
                 assert_eq!(batch.len(), 0);
                 assert_eq!(cache.len(), 2); // Nothing should be removed
                 assert!(cache.contains(&"key1"));
                 assert!(cache.contains(&"key2"));
-                
+
                 // Test batch on empty cache
                 let mut empty_cache: FIFOCache<String, String> = FIFOCache::new(5);
                 let empty_batch = empty_cache.pop_oldest_batch(3);
                 assert_eq!(empty_batch.len(), 0);
                 assert_eq!(empty_cache.len(), 0);
-                
+
                 // Test batch with count = 1 (single item)
                 let batch_one = cache.pop_oldest_batch(1);
                 assert_eq!(batch_one.len(), 1);
@@ -1328,37 +1330,37 @@ mod tests {
                 assert_eq!(cache.len(), 1);
                 assert!(!cache.contains(&"key1"));
                 assert!(cache.contains(&"key2"));
-                
+
                 // Test batch equal to cache size
                 cache.insert("key3", "value3");
                 cache.insert("key4", "value4");
                 assert_eq!(cache.len(), 3);
-                
+
                 let all_batch = cache.pop_oldest_batch(3);
                 assert_eq!(all_batch.len(), 3);
                 assert_eq!(all_batch[0], ("key2", "value2"));
                 assert_eq!(all_batch[1], ("key3", "value3"));
                 assert_eq!(all_batch[2], ("key4", "value4"));
                 assert_eq!(cache.len(), 0);
-                
+
                 // Verify cache is completely empty
                 assert_eq!(cache.peek_oldest(), None);
                 assert_eq!(cache.pop_oldest(), None);
-                
+
                 // Test large batch request on small cache
                 cache.insert("only", "item");
                 let large_batch = cache.pop_oldest_batch(100);
                 assert_eq!(large_batch.len(), 1);
                 assert_eq!(large_batch[0], ("only", "item"));
                 assert_eq!(cache.len(), 0);
-                
+
                 // Test batch on cache that became empty during operation
                 cache.insert("a", "1");
                 cache.insert("b", "2");
-                
+
                 // First, empty the cache manually
                 cache.clear();
-                
+
                 // Then try batch operation on now-empty cache
                 let post_clear_batch = cache.pop_oldest_batch(5);
                 assert_eq!(post_clear_batch.len(), 0);
@@ -1373,40 +1375,40 @@ mod tests {
             #[test]
             fn test_stale_entry_skipping_during_eviction() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Fill cache to capacity
                 cache.insert("key1", "value1");
                 cache.insert("key2", "value2");
                 cache.insert("key3", "value3");
                 assert_eq!(cache.len(), 3);
-                
+
                 // Manually remove key1 from HashMap but leave it in insertion_order
                 // This simulates how stale entries would occur in a more complex scenario
                 cache.remove_from_cache_only(&"key1");
                 assert_eq!(cache.len(), 2); // HashMap now has 2 items
-                
+
                 // The insertion_order VecDeque still has 3 entries, but "key1" is now stale
                 assert_eq!(cache.insertion_order_len(), 3);
                 assert!(!cache.contains(&"key1")); // key1 is not in cache anymore
-                assert!(cache.contains(&"key2"));  // key2 is still valid
-                assert!(cache.contains(&"key3"));  // key3 is still valid
-                
+                assert!(cache.contains(&"key2")); // key2 is still valid
+                assert!(cache.contains(&"key3")); // key3 is still valid
+
                 // Add another item to get back to capacity (so next insert will trigger eviction)
                 cache.insert("temp", "temp_value");
                 assert_eq!(cache.len(), 3);
-                
+
                 // Now trigger eviction by inserting a new item
                 // This should skip over the stale "key1" entry and evict "key2" instead
                 cache.insert("key4", "value4");
-                
+
                 // Verify the eviction skipped stale entry and evicted the next valid entry
                 assert_eq!(cache.len(), 3); // Should remain at capacity
                 assert!(!cache.contains(&"key1")); // Still not present (was stale)
                 assert!(!cache.contains(&"key2")); // Should be evicted (oldest valid)
-                assert!(cache.contains(&"key3"));  // Should remain
-                assert!(cache.contains(&"temp"));  // Should remain
-                assert!(cache.contains(&"key4"));  // Should be newly added
-                
+                assert!(cache.contains(&"key3")); // Should remain
+                assert!(cache.contains(&"temp")); // Should remain
+                assert!(cache.contains(&"key4")); // Should be newly added
+
                 // Test that further operations continue to work correctly
                 cache.insert("key5", "value5");
                 assert_eq!(cache.len(), 3);
@@ -1419,49 +1421,49 @@ mod tests {
             #[test]
             fn test_insertion_order_consistency_with_stale_entries() {
                 let mut cache = FIFOCache::new(4);
-                
+
                 // Fill cache
                 cache.insert("a", 1);
                 cache.insert("b", 2);
                 cache.insert("c", 3);
                 cache.insert("d", 4);
-                
+
                 // Verify initial age ranks
                 assert_eq!(cache.age_rank(&"a"), Some(0));
                 assert_eq!(cache.age_rank(&"b"), Some(1));
                 assert_eq!(cache.age_rank(&"c"), Some(2));
                 assert_eq!(cache.age_rank(&"d"), Some(3));
-                
+
                 // Manually create stale entries by removing from HashMap
                 cache.remove_from_cache_only(&"a");
                 cache.remove_from_cache_only(&"c");
-                
+
                 // Now "a" and "c" are stale entries in insertion_order
                 assert_eq!(cache.len(), 2); // Only "b" and "d" remain in HashMap
                 assert_eq!(cache.insertion_order_len(), 4); // All 4 still in insertion_order
-                
+
                 // age_rank should skip stale entries and give correct ranks for valid entries
                 assert_eq!(cache.age_rank(&"a"), None); // Stale, should return None
                 assert_eq!(cache.age_rank(&"b"), Some(0)); // First valid entry
                 assert_eq!(cache.age_rank(&"c"), None); // Stale, should return None
                 assert_eq!(cache.age_rank(&"d"), Some(1)); // Second valid entry
-                
+
                 // peek_oldest should skip stale entries and return the oldest valid entry
                 assert_eq!(cache.peek_oldest(), Some((&"b", &2)));
-                
+
                 // pop_oldest should skip stale entries and pop the oldest valid entry
                 assert_eq!(cache.pop_oldest(), Some(("b", 2)));
-                
+
                 // After popping "b", stale entries should be cleaned up
                 // and "d" should now be the oldest (and only) valid entry
                 assert_eq!(cache.len(), 1);
                 assert_eq!(cache.age_rank(&"d"), Some(0));
                 assert_eq!(cache.peek_oldest(), Some((&"d", &4)));
-                
+
                 // Add new items and verify order is maintained
                 cache.insert("e", 5);
                 cache.insert("f", 6);
-                
+
                 assert_eq!(cache.age_rank(&"d"), Some(0)); // Still oldest
                 assert_eq!(cache.age_rank(&"e"), Some(1));
                 assert_eq!(cache.age_rank(&"f"), Some(2));
@@ -1470,72 +1472,72 @@ mod tests {
             #[test]
             fn test_lazy_deletion_behavior() {
                 let mut cache = FIFOCache::new(3);
-                
+
                 // Test 1: Stale entries accumulate until cleanup operations
                 cache.insert("temp1", "value1");
                 cache.insert("temp2", "value2");
                 cache.insert("keep", "value_keep");
-                
+
                 // Manually remove items to create stale entries
                 cache.remove_from_cache_only(&"temp1");
                 cache.remove_from_cache_only(&"temp2");
-                
+
                 // Stale entries remain in insertion_order
                 assert_eq!(cache.len(), 1); // Only "keep" in HashMap
                 assert_eq!(cache.insertion_order_len(), 3); // All 3 in insertion_order
-                
+
                 // Verify operations work correctly despite stale entries
                 assert_eq!(cache.peek_oldest(), Some((&"keep", &"value_keep")));
                 assert_eq!(cache.age_rank(&"keep"), Some(0));
                 assert!(!cache.contains(&"temp1"));
                 assert!(!cache.contains(&"temp2"));
                 assert!(cache.contains(&"keep"));
-                
+
                 // Test 2: Lazy cleanup during pop_oldest
                 cache.insert("new1", "value_new1");
                 cache.insert("new2", "value_new2");
-                
+
                 // Now we have: stale("temp1"), stale("temp2"), "keep", "new1", "new2"
                 assert_eq!(cache.len(), 3);
                 assert_eq!(cache.insertion_order_len(), 5);
-                
+
                 // pop_oldest should skip stale entries and pop "keep"
                 assert_eq!(cache.pop_oldest(), Some(("keep", "value_keep")));
-                
+
                 // After pop_oldest, some stale entries should be cleaned up
                 assert_eq!(cache.len(), 2);
                 // insertion_order length depends on how many stale entries were cleaned
-                
+
                 // Test 3: Lazy cleanup during eviction
                 cache.insert("trigger_eviction", "value_trigger");
-                
+
                 // This should trigger eviction, which should skip any remaining stale entries
                 assert_eq!(cache.len(), 3);
                 assert!(cache.contains(&"new1"));
                 assert!(cache.contains(&"new2"));
                 assert!(cache.contains(&"trigger_eviction"));
-                
+
                 // Test 4: Multiple consecutive stale entries
                 cache.clear();
                 cache.insert("stale1", "v1");
                 cache.insert("stale2", "v2");
                 cache.insert("stale3", "v3");
                 cache.insert("valid", "valid_value");
-                
+
                 // Remove first three to create consecutive stale entries
                 cache.remove_from_cache_only(&"stale1");
                 cache.remove_from_cache_only(&"stale2");
                 cache.remove_from_cache_only(&"stale3");
-                
+
                 assert_eq!(cache.len(), 1); // Only "valid" in HashMap
                 // insertion_order might have any length >= 1 depending on cleanup behavior
-                
+
                 // Operations should skip all stale entries and work with "valid"
                 assert_eq!(cache.peek_oldest(), Some((&"valid", &"valid_value")));
                 assert_eq!(cache.pop_oldest(), Some(("valid", "valid_value")));
                 assert_eq!(cache.len(), 0);
                 assert_eq!(cache.peek_oldest(), None);
-                
+
                 // Cache should be functional after stale entry handling
                 cache.insert("new_after_stale", "new_value");
                 assert_eq!(cache.len(), 1);
@@ -1545,101 +1547,101 @@ mod tests {
             #[test]
             fn test_stale_entry_cleanup_during_operations() {
                 let mut cache = FIFOCache::new(4);
-                
+
                 // Setup: Create cache with mix of valid and future stale entries
                 cache.insert("will_be_stale1", "stale1");
                 cache.insert("will_be_stale2", "stale2");
                 cache.insert("valid1", "value1");
                 cache.insert("valid2", "value2");
-                
+
                 // Create stale entries
                 cache.remove_from_cache_only(&"will_be_stale1");
                 cache.remove_from_cache_only(&"will_be_stale2");
-                
+
                 assert_eq!(cache.len(), 2); // Only valid entries in HashMap
                 assert_eq!(cache.insertion_order_len(), 4); // All entries in insertion_order
-                
+
                 // Test 1: pop_oldest cleans up stale entries as it encounters them
                 assert_eq!(cache.pop_oldest(), Some(("valid1", "value1")));
-                
+
                 // Should have cleaned up stale entries encountered during traversal
                 assert_eq!(cache.len(), 1);
                 // insertion_order may be smaller after cleanup, depending on which stale entries were encountered
                 // The exact behavior depends on the order of traversal and which stale entries are cleaned up
-                
+
                 // Test 2: pop_oldest_batch cleans up stale entries
                 cache.insert("new1", "new_value1");
                 cache.insert("new2", "new_value2");
                 cache.insert("new3", "new_value3");
-                
+
                 // Create more stale entries
                 cache.remove_from_cache_only(&"new1");
                 cache.remove_from_cache_only(&"new3");
-                
+
                 let batch = cache.pop_oldest_batch(2);
                 // Should get valid2 and new2 (skipping stale new1 and new3)
                 assert_eq!(batch.len(), 2);
                 assert!(batch.contains(&("valid2", "value2")));
                 assert!(batch.contains(&("new2", "new_value2")));
-                
+
                 // Test 3: age_rank doesn't modify structure but handles stale entries
                 cache.insert("test1", "test_value1");
                 cache.insert("test2", "test_value2");
                 cache.insert("test3", "test_value3");
-                
+
                 cache.remove_from_cache_only(&"test2"); // Make test2 stale
-                
+
                 // age_rank should return correct ranks despite stale entry
                 assert_eq!(cache.age_rank(&"test1"), Some(0)); // First valid
-                assert_eq!(cache.age_rank(&"test2"), None);    // Stale
+                assert_eq!(cache.age_rank(&"test2"), None); // Stale
                 assert_eq!(cache.age_rank(&"test3"), Some(1)); // Second valid
-                
+
                 // Test 4: peek_oldest doesn't modify structure but finds valid entry
                 cache.remove_from_cache_only(&"test1"); // Make test1 also stale
-                
+
                 // peek_oldest should find test3 despite two stale entries before it
                 assert_eq!(cache.peek_oldest(), Some((&"test3", &"test_value3")));
-                
+
                 // The structure should remain unchanged after peek
                 assert_eq!(cache.len(), 1); // Only test3 is valid
-                
+
                 // Test 5: Eviction during insertion handles stale entries
                 cache.insert("fill1", "f1");
                 cache.insert("fill2", "f2");
                 cache.insert("fill3", "f3");
                 // Now at capacity (4): test3, fill1, fill2, fill3
-                
+
                 // Create stale entries
                 cache.remove_from_cache_only(&"fill1");
                 cache.remove_from_cache_only(&"fill2");
-                
+
                 // Now we have test3, fill3 in HashMap (2 valid items)
                 assert_eq!(cache.len(), 2);
-                
+
                 // Add items to get back to capacity so next insert will trigger eviction
                 cache.insert("temp1", "t1");
                 cache.insert("temp2", "t2");
                 assert_eq!(cache.len(), 4); // At capacity
-                
+
                 // This insertion should trigger eviction
                 cache.insert("trigger", "trigger_value");
-                
+
                 // Should have proper capacity and valid operations
                 assert_eq!(cache.len(), 4); // Still at capacity
                 assert!(cache.contains(&"trigger"));
-                
+
                 // The cache should still function correctly regardless of internal stale entry cleanup
                 cache.insert("final", "final_value");
                 assert_eq!(cache.len(), 4); // Should remain at capacity
                 assert!(cache.contains(&"final"));
-                
+
                 // Verify the cache maintains proper FIFO behavior
                 assert_eq!(cache.capacity(), 4);
-                
+
                 // Test that operations still work normally after stale entry handling
                 let oldest = cache.peek_oldest();
                 assert!(oldest.is_some()); // Should have valid oldest entry
-                
+
                 let popped = cache.pop_oldest();
                 assert!(popped.is_some()); // Should be able to pop
                 assert_eq!(cache.len(), 3);
@@ -1673,18 +1675,18 @@ mod tests {
             fn test_insert_time_complexity() {
                 // Test O(1) insert time complexity by measuring insert operations
                 // on caches of different sizes. O(1) means time should remain roughly constant.
-                
+
                 let sizes = vec![100, 1000, 10000];
                 let mut times = Vec::new();
-                
+
                 for &size in &sizes {
                     let mut cache = FIFOCache::new(size);
-                    
+
                     // Pre-fill the cache to capacity - 1 to avoid eviction effects
                     for i in 0..(size - 1) {
                         cache.insert(format!("key{}", i), format!("value{}", i));
                     }
-                    
+
                     // Measure time for multiple insert operations
                     let iterations = 1000;
                     let (_, duration) = measure_time(|| {
@@ -1694,38 +1696,51 @@ mod tests {
                             cache.insert(key, value);
                         }
                     });
-                    
+
                     let avg_time_per_insert = duration.as_nanos() as f64 / iterations as f64;
                     times.push(avg_time_per_insert);
-                    
-                    println!("Cache size: {}, Avg insert time: {:.2} ns", size, avg_time_per_insert);
+
+                    println!(
+                        "Cache size: {}, Avg insert time: {:.2} ns",
+                        size, avg_time_per_insert
+                    );
                 }
-                
+
                 // Verify that times don't grow significantly with cache size
                 // For O(1), the ratio between largest and smallest time should be reasonable
-                let min_time = times.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                let max_time = times.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                let min_time = times
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
+                let max_time = times
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
                 let ratio = max_time / min_time;
-                
+
                 // Allow for some variance due to system noise, but should be roughly constant
-                assert!(ratio < 10.0, "Insert time complexity appears to be worse than O(1). Ratio: {:.2}", ratio);
+                assert!(
+                    ratio < 10.0,
+                    "Insert time complexity appears to be worse than O(1). Ratio: {:.2}",
+                    ratio
+                );
             }
 
             #[test]
             fn test_get_time_complexity() {
                 // Test O(1) get time complexity - HashMap lookups should be constant time
-                
+
                 let sizes = vec![100, 1000, 10000];
                 let mut times = Vec::new();
-                
+
                 for &size in &sizes {
                     let mut cache = FIFOCache::new(size);
-                    
+
                     // Fill cache with test data
                     for i in 0..size {
                         cache.insert(format!("key{}", i), format!("value{}", i));
                     }
-                    
+
                     // Measure time for multiple get operations
                     let iterations = 1000;
                     let (_, duration) = measure_time(|| {
@@ -1734,44 +1749,57 @@ mod tests {
                             let _ = cache.get(&key);
                         }
                     });
-                    
+
                     let avg_time_per_get = duration.as_nanos() as f64 / iterations as f64;
                     times.push(avg_time_per_get);
-                    
-                    println!("Cache size: {}, Avg get time: {:.2} ns", size, avg_time_per_get);
+
+                    println!(
+                        "Cache size: {}, Avg get time: {:.2} ns",
+                        size, avg_time_per_get
+                    );
                 }
-                
+
                 // Verify O(1) complexity
-                let min_time = times.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                let max_time = times.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                let min_time = times
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
+                let max_time = times
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
                 let ratio = max_time / min_time;
-                
-                assert!(ratio < 10.0, "Get time complexity appears to be worse than O(1). Ratio: {:.2}", ratio);
+
+                assert!(
+                    ratio < 10.0,
+                    "Get time complexity appears to be worse than O(1). Ratio: {:.2}",
+                    ratio
+                );
             }
 
             #[test]
             fn test_eviction_time_complexity() {
                 // Test O(n) worst case eviction time due to stale entries
                 // In the worst case, eviction may need to skip through many stale entries
-                
+
                 let sizes = vec![100, 500, 1000];
                 let mut times = Vec::new();
-                
+
                 for &size in &sizes {
                     let mut cache = FIFOCache::new(size);
-                    
+
                     // Fill cache to capacity
                     for i in 0..size {
                         cache.insert(format!("key{}", i), format!("value{}", i));
                     }
-                    
+
                     // Create many stale entries by manually removing from HashMap
                     // This simulates the worst-case scenario for eviction
                     let stale_count = size / 2;
                     for i in 0..stale_count {
                         cache.remove_from_cache_only(&format!("key{}", i));
                     }
-                    
+
                     // Measure time for eviction operations (insertions that trigger eviction)
                     let iterations = 100;
                     let (_, duration) = measure_time(|| {
@@ -1781,41 +1809,46 @@ mod tests {
                             cache.insert(key, value); // This should trigger eviction
                         }
                     });
-                    
+
                     let avg_time_per_eviction = duration.as_nanos() as f64 / iterations as f64;
                     times.push(avg_time_per_eviction);
-                    
-                    println!("Cache size: {}, Avg eviction time: {:.2} ns", size, avg_time_per_eviction);
+
+                    println!(
+                        "Cache size: {}, Avg eviction time: {:.2} ns",
+                        size, avg_time_per_eviction
+                    );
                 }
-                
+
                 // For O(n) complexity, time should grow roughly linearly with cache size
                 // Check that larger caches take more time (allowing for reasonable variance)
                 if times.len() >= 2 {
                     let small_time = times[0];
                     let large_time = times[times.len() - 1];
-                    
+
                     // The larger cache should take more time, but we're lenient with the exact ratio
                     // due to the complexity of measuring micro-benchmarks
-                    assert!(large_time >= small_time * 0.5, 
-                           "Eviction time should increase with cache size for O(n) complexity");
+                    assert!(
+                        large_time >= small_time * 0.5,
+                        "Eviction time should increase with cache size for O(n) complexity"
+                    );
                 }
             }
 
             #[test]
             fn test_age_rank_time_complexity() {
                 // Test O(n) age_rank time complexity - needs to traverse insertion order
-                
+
                 let sizes = vec![100, 500, 1000];
                 let mut times = Vec::new();
-                
+
                 for &size in &sizes {
                     let mut cache = FIFOCache::new(size);
-                    
+
                     // Fill cache with test data
                     for i in 0..size {
                         cache.insert(format!("key{}", i), format!("value{}", i));
                     }
-                    
+
                     // Measure time for age_rank operations on keys at different positions
                     let iterations = 100;
                     let (_, duration) = measure_time(|| {
@@ -1825,62 +1858,69 @@ mod tests {
                             let _ = cache.age_rank(&key);
                         }
                     });
-                    
+
                     let avg_time_per_age_rank = duration.as_nanos() as f64 / iterations as f64;
                     times.push(avg_time_per_age_rank);
-                    
-                    println!("Cache size: {}, Avg age_rank time: {:.2} ns", size, avg_time_per_age_rank);
+
+                    println!(
+                        "Cache size: {}, Avg age_rank time: {:.2} ns",
+                        size, avg_time_per_age_rank
+                    );
                 }
-                
+
                 // For O(n) complexity, time should grow with cache size
                 if times.len() >= 2 {
                     let small_time = times[0];
                     let large_time = times[times.len() - 1];
-                    
+
                     // Larger cache should generally take more time for O(n) operation
-                    assert!(large_time >= small_time * 0.5,
-                           "age_rank time should increase with cache size for O(n) complexity");
+                    assert!(
+                        large_time >= small_time * 0.5,
+                        "age_rank time should increase with cache size for O(n) complexity"
+                    );
                 }
-                
+
                 // Also test worst-case scenario: key at the end of insertion order
                 let mut test_cache = FIFOCache::new(1000);
                 for i in 0..1000 {
                     test_cache.insert(format!("key{}", i), format!("value{}", i));
                 }
-                
+
                 // Key at beginning vs end should show time difference
                 let (_, time_first) = measure_time(|| {
                     for _ in 0..100 {
                         test_cache.age_rank(&"key0".to_string());
                     }
                 });
-                
+
                 let (_, time_last) = measure_time(|| {
                     for _ in 0..100 {
                         test_cache.age_rank(&"key999".to_string());
                     }
                 });
-                
+
                 // Time for last key should be >= time for first key (more traversal needed)
-                assert!(time_last >= time_first || time_last.as_nanos() > 0,
-                       "age_rank should take longer for keys later in insertion order");
+                assert!(
+                    time_last >= time_first || time_last.as_nanos() > 0,
+                    "age_rank should take longer for keys later in insertion order"
+                );
             }
 
             #[test]
             fn test_contains_time_complexity() {
                 // Test O(1) contains time complexity - HashMap contains_key should be constant time
-                
+
                 let sizes = vec![100, 1000, 10000];
                 let mut times = Vec::new();
-                
+
                 for &size in &sizes {
                     let mut cache = FIFOCache::new(size);
-                    
+
                     // Fill cache with test data
                     for i in 0..size {
                         cache.insert(format!("key{}", i), format!("value{}", i));
                     }
-                    
+
                     // Measure time for multiple contains operations
                     let iterations = 1000;
                     let (_, duration) = measure_time(|| {
@@ -1889,28 +1929,41 @@ mod tests {
                             let _ = cache.contains(&key);
                         }
                     });
-                    
+
                     let avg_time_per_contains = duration.as_nanos() as f64 / iterations as f64;
                     times.push(avg_time_per_contains);
-                    
-                    println!("Cache size: {}, Avg contains time: {:.2} ns", size, avg_time_per_contains);
+
+                    println!(
+                        "Cache size: {}, Avg contains time: {:.2} ns",
+                        size, avg_time_per_contains
+                    );
                 }
-                
+
                 // Verify O(1) complexity
-                let min_time = times.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                let max_time = times.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                let min_time = times
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
+                let max_time = times
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
                 let ratio = max_time / min_time;
-                
-                assert!(ratio < 10.0, "Contains time complexity appears to be worse than O(1). Ratio: {:.2}", ratio);
+
+                assert!(
+                    ratio < 10.0,
+                    "Contains time complexity appears to be worse than O(1). Ratio: {:.2}",
+                    ratio
+                );
             }
 
             #[test]
             fn test_clear_time_complexity() {
                 // Test O(1) clear time complexity - clearing HashMap and VecDeque should be constant time
-                
+
                 let sizes = vec![100, 1000, 10000];
                 let mut times = Vec::new();
-                
+
                 for &size in &sizes {
                     // Create multiple caches to test clear operation
                     let mut caches = Vec::new();
@@ -1922,42 +1975,55 @@ mod tests {
                         }
                         caches.push(cache);
                     }
-                    
+
                     // Measure time for clear operations
                     let (_, duration) = measure_time(|| {
                         for cache in &mut caches {
                             cache.clear();
                         }
                     });
-                    
+
                     let avg_time_per_clear = duration.as_nanos() as f64 / caches.len() as f64;
                     times.push(avg_time_per_clear);
-                    
-                    println!("Cache size: {}, Avg clear time: {:.2} ns", size, avg_time_per_clear);
-                    
+
+                    println!(
+                        "Cache size: {}, Avg clear time: {:.2} ns",
+                        size, avg_time_per_clear
+                    );
+
                     // Verify all caches are actually cleared
                     for cache in &caches {
                         assert_eq!(cache.len(), 0);
                     }
                 }
-                
+
                 // Verify O(1) complexity - clear time should not grow significantly with cache size
                 // Note: While clear() is theoretically O(1), in practice clearing larger HashMap and VecDeque
                 // structures can take more time due to memory deallocation, so we use a more lenient ratio
-                let min_time = times.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                let max_time = times.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                let min_time = times
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
+                let max_time = times
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap())
+                    .unwrap();
                 let ratio = max_time / min_time;
-                
+
                 // Allow for larger variance since clearing involves memory deallocation
-                assert!(ratio < 100.0, "Clear time complexity appears to be worse than O(1). Ratio: {:.2}", ratio);
+                assert!(
+                    ratio < 100.0,
+                    "Clear time complexity appears to be worse than O(1). Ratio: {:.2}",
+                    ratio
+                );
             }
         }
 
         // Space Complexity Tests
         mod space_complexity {
             use super::*;
-            use std::mem;
             use std::hash::Hash;
+            use std::mem;
 
             /// Helper function to estimate memory usage of a cache
             fn estimate_cache_memory_usage<K, V>(cache: &FIFOCache<K, V>) -> usize
@@ -1967,41 +2033,45 @@ mod tests {
             {
                 // Base structure size
                 let base_size = mem::size_of::<FIFOCache<K, V>>();
-                
+
                 // HashMap overhead (estimated)
-                let hashmap_overhead = cache.cache_capacity() * (mem::size_of::<K>() + mem::size_of::<V>() + 8);
-                
-                // VecDeque overhead (estimated) 
+                let hashmap_overhead =
+                    cache.cache_capacity() * (mem::size_of::<K>() + mem::size_of::<V>() + 8);
+
+                // VecDeque overhead (estimated)
                 let vecdeque_overhead = cache.insertion_order_capacity() * mem::size_of::<K>();
-                
+
                 base_size + hashmap_overhead + vecdeque_overhead
             }
 
             #[test]
             fn test_memory_usage_patterns() {
                 // Test that memory usage grows linearly with capacity (O(capacity))
-                
+
                 let capacities = vec![100, 500, 1000, 2000];
                 let mut memory_usages = Vec::new();
-                
+
                 for &capacity in &capacities {
                     let mut cache = FIFOCache::<String, String>::new(capacity);
-                    
+
                     // Fill cache to capacity to get realistic memory usage
                     for i in 0..capacity {
                         cache.insert(format!("key_{}", i), format!("value_{}", i));
                     }
-                    
+
                     let estimated_memory = estimate_cache_memory_usage(&cache);
                     memory_usages.push(estimated_memory);
-                    
-                    println!("Capacity: {}, Estimated memory: {} bytes", capacity, estimated_memory);
-                    
+
+                    println!(
+                        "Capacity: {}, Estimated memory: {} bytes",
+                        capacity, estimated_memory
+                    );
+
                     // Verify cache is at expected capacity
                     assert_eq!(cache.len(), capacity);
                     assert_eq!(cache.capacity(), capacity);
                 }
-                
+
                 // Verify roughly linear growth - memory should scale with capacity
                 // Allow for some variance due to HashMap/VecDeque internal allocation strategies
                 if memory_usages.len() >= 2 {
@@ -2009,295 +2079,342 @@ mod tests {
                     let last_usage = memory_usages[memory_usages.len() - 1] as f64;
                     let first_capacity = capacities[0] as f64;
                     let last_capacity = capacities[capacities.len() - 1] as f64;
-                    
+
                     let memory_growth_ratio = last_usage / first_usage;
                     let capacity_growth_ratio = last_capacity / first_capacity;
-                    
+
                     // Memory should grow roughly proportionally to capacity
                     // Allow for reasonable variance due to allocation overhead
-                    let ratio_difference = (memory_growth_ratio / capacity_growth_ratio - 1.0).abs();
-                    assert!(ratio_difference < 1.0, 
-                           "Memory growth ratio ({:.2}) should be roughly proportional to capacity growth ratio ({:.2})",
-                           memory_growth_ratio, capacity_growth_ratio);
+                    let ratio_difference =
+                        (memory_growth_ratio / capacity_growth_ratio - 1.0).abs();
+                    assert!(
+                        ratio_difference < 1.0,
+                        "Memory growth ratio ({:.2}) should be roughly proportional to capacity growth ratio ({:.2})",
+                        memory_growth_ratio,
+                        capacity_growth_ratio
+                    );
                 }
-                
+
                 // Test that empty cache uses less memory than full cache
                 let empty_cache = FIFOCache::<String, String>::new(1000);
                 let empty_memory = estimate_cache_memory_usage(&empty_cache);
                 let full_memory = memory_usages[memory_usages.len() - 1];
-                
+
                 // Empty cache should use less or equal memory than full cache
                 // Note: In Rust, empty collections may pre-allocate based on capacity
-                assert!(empty_memory <= full_memory, 
-                       "Empty cache memory ({}) should not exceed full cache memory ({})", 
-                       empty_memory, full_memory);
+                assert!(
+                    empty_memory <= full_memory,
+                    "Empty cache memory ({}) should not exceed full cache memory ({})",
+                    empty_memory,
+                    full_memory
+                );
             }
 
             #[test]
             fn test_overhead_analysis() {
                 // Analyze the overhead of HashMap + VecDeque vs actual data storage
-                
+
                 let capacity = 1000;
                 let mut cache = FIFOCache::<String, i32>::new(capacity);
-                
+
                 // Fill cache with known data sizes
                 for i in 0..capacity {
                     cache.insert(format!("key_{:06}", i), i as i32); // 10-char keys
                 }
-                
+
                 // Calculate actual data size
                 let key_size = mem::size_of::<String>() + 10; // String overhead + 10 chars
                 let value_size = mem::size_of::<i32>();
                 let actual_data_size = capacity * (key_size + value_size);
-                
+
                 // Estimate total cache memory
                 let total_memory = estimate_cache_memory_usage(&cache);
-                
+
                 // Calculate overhead
                 let overhead = total_memory.saturating_sub(actual_data_size);
                 let overhead_percentage = (overhead as f64 / total_memory as f64) * 100.0;
-                
+
                 println!("Capacity: {}", capacity);
                 println!("Actual data size: {} bytes", actual_data_size);
                 println!("Total cache memory: {} bytes", total_memory);
                 println!("Overhead: {} bytes ({:.1}%)", overhead, overhead_percentage);
-                
+
                 // Verify overhead is reasonable (should be less than 200% of data)
-                assert!(overhead_percentage < 200.0, 
-                       "Overhead percentage ({:.1}%) seems excessive", overhead_percentage);
-                
+                assert!(
+                    overhead_percentage < 200.0,
+                    "Overhead percentage ({:.1}%) seems excessive",
+                    overhead_percentage
+                );
+
                 // Test memory efficiency with different key/value sizes
                 let test_cases = vec![
                     (50, "small"),   // Small cache
                     (500, "medium"), // Medium cache
                     (2000, "large"), // Large cache
                 ];
-                
+
                 for (size, description) in test_cases {
                     let mut test_cache = FIFOCache::<String, String>::new(size);
-                    
+
                     // Fill with variable-length data
                     for i in 0..size {
                         let key = format!("test_key_{}", i);
                         let value = format!("test_value_{}", i);
                         test_cache.insert(key, value);
                     }
-                    
+
                     let memory = estimate_cache_memory_usage(&test_cache);
                     let memory_per_item = memory / size;
-                    
-                    println!("{} cache - Memory per item: {} bytes", description, memory_per_item);
-                    
+
+                    println!(
+                        "{} cache - Memory per item: {} bytes",
+                        description, memory_per_item
+                    );
+
                     // Memory per item should be reasonable (not excessively large)
-                    assert!(memory_per_item < 1000, 
-                           "{} cache memory per item ({}) seems excessive", description, memory_per_item);
+                    assert!(
+                        memory_per_item < 1000,
+                        "{} cache memory per item ({}) seems excessive",
+                        description,
+                        memory_per_item
+                    );
                 }
             }
 
             #[test]
             fn test_memory_leak_detection() {
                 // Test that memory is properly cleaned up after operations
-                
+
                 let initial_capacity = 1000;
-                
+
                 // Test 1: Create and drop cache - should not accumulate memory
                 for iteration in 0..5 {
                     let mut cache = FIFOCache::<String, Vec<u8>>::new(initial_capacity);
-                    
+
                     // Fill with large data to make memory usage more apparent
                     for i in 0..initial_capacity {
                         let large_value = vec![i as u8; 100]; // 100-byte vectors
                         cache.insert(format!("key_{}", i), large_value);
                     }
-                    
+
                     assert_eq!(cache.len(), initial_capacity);
-                    
+
                     // Cache should be dropped at end of loop iteration
                     println!("Iteration {} completed", iteration);
                 }
-                
+
                 // Test 2: Clear operation should free internal memory
                 let mut persistent_cache = FIFOCache::<String, Vec<u8>>::new(initial_capacity);
-                
+
                 // Fill cache
                 for i in 0..initial_capacity {
                     let large_value = vec![i as u8; 100];
                     persistent_cache.insert(format!("key_{}", i), large_value);
                 }
-                
+
                 let memory_before_clear = estimate_cache_memory_usage(&persistent_cache);
-                
+
                 // Clear cache
                 persistent_cache.clear();
-                
+
                 let memory_after_clear = estimate_cache_memory_usage(&persistent_cache);
-                
+
                 println!("Memory before clear: {} bytes", memory_before_clear);
                 println!("Memory after clear: {} bytes", memory_after_clear);
-                
+
                 // Memory after clear should be significantly less (though not necessarily zero due to capacity reservations)
-                assert!(memory_after_clear <= memory_before_clear, 
-                       "Memory after clear should not exceed memory before clear");
-                
+                assert!(
+                    memory_after_clear <= memory_before_clear,
+                    "Memory after clear should not exceed memory before clear"
+                );
+
                 assert_eq!(persistent_cache.len(), 0);
                 assert_eq!(persistent_cache.capacity(), initial_capacity);
-                
+
                 // Test 3: Pop operations should reduce memory usage
                 let mut pop_test_cache = FIFOCache::<String, Vec<u8>>::new(500);
-                
+
                 // Fill cache
                 for i in 0..500 {
                     let value = vec![i as u8; 50];
                     pop_test_cache.insert(format!("key_{}", i), value);
                 }
-                
+
                 let memory_before_pops = estimate_cache_memory_usage(&pop_test_cache);
-                
+
                 // Pop half the items
                 for _ in 0..250 {
                     pop_test_cache.pop_oldest();
                 }
-                
+
                 let memory_after_pops = estimate_cache_memory_usage(&pop_test_cache);
-                
+
                 println!("Memory before pops: {} bytes", memory_before_pops);
                 println!("Memory after pops: {} bytes", memory_after_pops);
-                
+
                 assert_eq!(pop_test_cache.len(), 250);
-                
+
                 // Memory should be reduced (though HashMap may retain some capacity)
                 // At minimum, it shouldn't have increased
-                assert!(memory_after_pops <= memory_before_pops + (memory_before_pops / 10), 
-                       "Memory should not significantly increase after pop operations");
-                
+                assert!(
+                    memory_after_pops <= memory_before_pops + (memory_before_pops / 10),
+                    "Memory should not significantly increase after pop operations"
+                );
+
                 // Test 4: Eviction should not cause memory leaks
                 let mut eviction_cache = FIFOCache::<String, Vec<u8>>::new(100);
-                
+
                 // Fill to capacity
                 for i in 0..100 {
                     let value = vec![i as u8; 50];
                     eviction_cache.insert(format!("key_{}", i), value);
                 }
-                
+
                 let memory_at_capacity = estimate_cache_memory_usage(&eviction_cache);
-                
+
                 // Trigger many evictions
                 for i in 100..500 {
                     let value = vec![i as u8; 50];
                     eviction_cache.insert(format!("key_{}", i), value);
                 }
-                
+
                 let memory_after_evictions = estimate_cache_memory_usage(&eviction_cache);
-                
+
                 println!("Memory at capacity: {} bytes", memory_at_capacity);
                 println!("Memory after evictions: {} bytes", memory_after_evictions);
-                
+
                 assert_eq!(eviction_cache.len(), 100); // Should still be at capacity
-                
+
                 // Memory should remain stable (not continuously grow)
-                let memory_difference_ratio = memory_after_evictions as f64 / memory_at_capacity as f64;
-                assert!(memory_difference_ratio < 2.0, 
-                       "Memory should not double after evictions. Ratio: {:.2}", memory_difference_ratio);
+                let memory_difference_ratio =
+                    memory_after_evictions as f64 / memory_at_capacity as f64;
+                assert!(
+                    memory_difference_ratio < 2.0,
+                    "Memory should not double after evictions. Ratio: {:.2}",
+                    memory_difference_ratio
+                );
             }
 
             #[test]
             fn test_growth_patterns() {
                 // Test how memory grows as cache size increases and verify predictable patterns
-                
+
                 let sizes = vec![10, 50, 100, 250, 500, 1000, 2000];
                 let mut growth_data = Vec::new();
-                
+
                 for &size in &sizes {
                     let mut cache = FIFOCache::<u32, u64>::new(size);
-                    
+
                     // Fill cache completely
                     for i in 0..size {
                         cache.insert(i as u32, (i * 2) as u64);
                     }
-                    
+
                     let memory_usage = estimate_cache_memory_usage(&cache);
                     let memory_per_item = memory_usage as f64 / size as f64;
-                    
+
                     growth_data.push((size, memory_usage, memory_per_item));
-                    
-                    println!("Size: {}, Total memory: {} bytes, Per item: {:.2} bytes", 
-                            size, memory_usage, memory_per_item);
+
+                    println!(
+                        "Size: {}, Total memory: {} bytes, Per item: {:.2} bytes",
+                        size, memory_usage, memory_per_item
+                    );
                 }
-                
+
                 // Analyze growth patterns
                 for i in 1..growth_data.len() {
-                    let (prev_size, prev_memory, _prev_per_item) = growth_data[i-1];
+                    let (prev_size, prev_memory, _prev_per_item) = growth_data[i - 1];
                     let (curr_size, curr_memory, _curr_per_item) = growth_data[i];
-                    
+
                     let size_multiplier = curr_size as f64 / prev_size as f64;
                     let memory_multiplier = curr_memory as f64 / prev_memory as f64;
-                    
-                    println!("Size {}->{}; Size ratio: {:.2}, Memory ratio: {:.2}", 
-                            prev_size, curr_size, size_multiplier, memory_multiplier);
-                    
+
+                    println!(
+                        "Size {}->{}; Size ratio: {:.2}, Memory ratio: {:.2}",
+                        prev_size, curr_size, size_multiplier, memory_multiplier
+                    );
+
                     // Memory growth should be roughly linear with size growth
                     // Allow for some variance due to allocation strategies
                     let growth_ratio_difference = (memory_multiplier / size_multiplier - 1.0).abs();
-                    assert!(growth_ratio_difference < 1.0, 
-                           "Memory growth ({:.2}x) should be roughly proportional to size growth ({:.2}x)",
-                           memory_multiplier, size_multiplier);
+                    assert!(
+                        growth_ratio_difference < 1.0,
+                        "Memory growth ({:.2}x) should be roughly proportional to size growth ({:.2}x)",
+                        memory_multiplier,
+                        size_multiplier
+                    );
                 }
-                
+
                 // Test memory efficiency: larger caches should not have significantly worse per-item overhead
                 if growth_data.len() >= 2 {
                     let small_per_item = growth_data[0].2;
-                    let large_per_item = growth_data[growth_data.len()-1].2;
-                    
+                    let large_per_item = growth_data[growth_data.len() - 1].2;
+
                     let efficiency_ratio = large_per_item / small_per_item;
-                    println!("Efficiency ratio (large/small per-item): {:.2}", efficiency_ratio);
-                    
+                    println!(
+                        "Efficiency ratio (large/small per-item): {:.2}",
+                        efficiency_ratio
+                    );
+
                     // Larger caches should not be dramatically less efficient per item
-                    assert!(efficiency_ratio < 5.0, 
-                           "Large caches should not be dramatically less efficient per item. Ratio: {:.2}", 
-                           efficiency_ratio);
+                    assert!(
+                        efficiency_ratio < 5.0,
+                        "Large caches should not be dramatically less efficient per item. Ratio: {:.2}",
+                        efficiency_ratio
+                    );
                 }
-                
+
                 // Test with different data types to ensure consistent patterns
                 let mut string_cache = FIFOCache::<String, String>::new(500);
                 for i in 0..500 {
                     string_cache.insert(format!("key_{:06}", i), format!("value_{:06}", i));
                 }
-                
+
                 let string_memory = estimate_cache_memory_usage(&string_cache);
                 let string_per_item = string_memory as f64 / 500.0;
-                
-                println!("String cache - Total: {} bytes, Per item: {:.2} bytes", 
-                        string_memory, string_per_item);
-                
+
+                println!(
+                    "String cache - Total: {} bytes, Per item: {:.2} bytes",
+                    string_memory, string_per_item
+                );
+
                 // String cache should use more memory per item than numeric cache (expected)
-                let numeric_per_item = growth_data.iter()
+                let numeric_per_item = growth_data
+                    .iter()
                     .find(|(size, _, _)| *size == 500)
                     .map(|(_, _, per_item)| *per_item)
                     .unwrap_or(0.0);
-                
+
                 if numeric_per_item > 0.0 {
-                    assert!(string_per_item > numeric_per_item, 
-                           "String cache should use more memory per item than numeric cache");
+                    assert!(
+                        string_per_item > numeric_per_item,
+                        "String cache should use more memory per item than numeric cache"
+                    );
                 }
-                
+
                 // Test empty vs full cache memory difference
                 let empty_cache = FIFOCache::<String, String>::new(1000);
                 let empty_memory = estimate_cache_memory_usage(&empty_cache);
-                
+
                 let mut full_cache = FIFOCache::<String, String>::new(1000);
                 for i in 0..1000 {
                     full_cache.insert(format!("key_{}", i), format!("value_{}", i));
                 }
                 let full_memory = estimate_cache_memory_usage(&full_cache);
-                
-                println!("Empty vs Full cache: {} bytes -> {} bytes", empty_memory, full_memory);
-                
+
+                println!(
+                    "Empty vs Full cache: {} bytes -> {} bytes",
+                    empty_memory, full_memory
+                );
+
                 // In Rust, collections pre-allocate based on capacity, so memory usage may be similar
                 // We just verify that full cache doesn't use less memory than empty cache
                 let growth_factor = full_memory as f64 / empty_memory as f64;
-                assert!(growth_factor >= 1.0, 
-                       "Full cache should use at least as much memory as empty cache. Growth: {:.2}x", 
-                       growth_factor);
+                assert!(
+                    growth_factor >= 1.0,
+                    "Full cache should use at least as much memory as empty cache. Growth: {:.2}x",
+                    growth_factor
+                );
             }
         }
 
@@ -2322,7 +2439,7 @@ mod tests {
                     } else {
                         0.0
                     };
-                    
+
                     let avg_time_per_op_ns = if total_operations > 0 {
                         total_time_ns as f64 / total_operations as f64
                     } else {
@@ -2353,16 +2470,17 @@ mod tests {
                 let start = Instant::now();
                 let (total_ops, cache_hits) = operation();
                 let duration = start.elapsed();
-                
-                let metrics = PerformanceMetrics::new(total_ops, duration.as_nanos() as u64, cache_hits);
-                
+
+                let metrics =
+                    PerformanceMetrics::new(total_ops, duration.as_nanos() as u64, cache_hits);
+
                 println!("  Operations: {}", metrics.total_operations);
                 println!("  Time: {:.2} ms", duration.as_secs_f64() * 1000.0);
                 println!("  Ops/sec: {:.0}", metrics.ops_per_second);
                 println!("  Avg time/op: {:.2} ns", metrics.avg_time_per_op_ns);
                 println!("  Cache hit rate: {:.1}%", metrics.cache_hit_rate * 100.0);
                 println!();
-                
+
                 metrics
             }
 
@@ -2370,16 +2488,19 @@ mod tests {
             fn test_small_cache_performance() {
                 let cache_size = 100;
                 let total_operations = 10_000;
-                
+
                 let metrics = run_benchmark("Small Cache (100 entries)", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Mix of insertions and lookups
                     for i in 0..total_operations {
                         if i % 3 == 0 {
                             // Insert operation
-                            cache.insert(format!("key_{}", i % (cache_size * 2)), format!("value_{}", i));
+                            cache.insert(
+                                format!("key_{}", i % (cache_size * 2)),
+                                format!("value_{}", i),
+                            );
                         } else {
                             // Lookup operation
                             let key = format!("key_{}", i % (cache_size * 2));
@@ -2388,32 +2509,41 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Performance assertions for small cache
-                assert!(metrics.ops_per_second > 10_000.0, 
-                       "Small cache should handle >10K ops/sec, got {:.0}", metrics.ops_per_second);
-                assert!(metrics.avg_time_per_op_ns < 100_000.0, 
-                       "Small cache operations should be <100μs, got {:.2}ns", metrics.avg_time_per_op_ns);
+                assert!(
+                    metrics.ops_per_second > 10_000.0,
+                    "Small cache should handle >10K ops/sec, got {:.0}",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.avg_time_per_op_ns < 100_000.0,
+                    "Small cache operations should be <100μs, got {:.2}ns",
+                    metrics.avg_time_per_op_ns
+                );
             }
 
             #[test]
             fn test_medium_cache_performance() {
                 let cache_size = 1_000;
                 let total_operations = 50_000;
-                
+
                 let metrics = run_benchmark("Medium Cache (1K entries)", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // More complex workload with different operation ratios
                     for i in 0..total_operations {
                         match i % 5 {
                             0 | 1 => {
                                 // Insert operations (40%)
-                                cache.insert(format!("key_{}", i % (cache_size * 3)), format!("value_{}", i));
+                                cache.insert(
+                                    format!("key_{}", i % (cache_size * 3)),
+                                    format!("value_{}", i),
+                                );
                             }
                             _ => {
                                 // Lookup operations (60%)
@@ -2424,26 +2554,32 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Performance assertions for medium cache
-                assert!(metrics.ops_per_second > 5_000.0, 
-                       "Medium cache should handle >5K ops/sec, got {:.0}", metrics.ops_per_second);
-                assert!(metrics.avg_time_per_op_ns < 200_000.0, 
-                       "Medium cache operations should be <200μs, got {:.2}ns", metrics.avg_time_per_op_ns);
+                assert!(
+                    metrics.ops_per_second > 5_000.0,
+                    "Medium cache should handle >5K ops/sec, got {:.0}",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.avg_time_per_op_ns < 200_000.0,
+                    "Medium cache operations should be <200μs, got {:.2}ns",
+                    metrics.avg_time_per_op_ns
+                );
             }
 
             #[test]
             fn test_large_cache_performance() {
                 let cache_size = 10_000;
                 let total_operations = 100_000;
-                
+
                 let metrics = run_benchmark("Large Cache (10K entries)", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Realistic workload with batch operations
                     for batch in 0..100 {
                         // Batch insert
@@ -2451,7 +2587,7 @@ mod tests {
                             let key = format!("batch_{}_{}", batch, i);
                             cache.insert(key, format!("data_{}", batch * 500 + i));
                         }
-                        
+
                         // Batch lookup
                         for i in 0..500 {
                             let key = format!("batch_{}_{}", batch, i % 200); // Some lookups will miss
@@ -2460,26 +2596,32 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Performance assertions for large cache
-                assert!(metrics.ops_per_second > 1_000.0, 
-                       "Large cache should handle >1K ops/sec, got {:.0}", metrics.ops_per_second);
-                assert!(metrics.avg_time_per_op_ns < 1_000_000.0, 
-                       "Large cache operations should be <1ms, got {:.2}ns", metrics.avg_time_per_op_ns);
+                assert!(
+                    metrics.ops_per_second > 1_000.0,
+                    "Large cache should handle >1K ops/sec, got {:.0}",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.avg_time_per_op_ns < 1_000_000.0,
+                    "Large cache operations should be <1ms, got {:.2}ns",
+                    metrics.avg_time_per_op_ns
+                );
             }
 
             #[test]
             fn test_very_large_cache_performance() {
                 let cache_size = 100_000;
                 let total_operations = 200_000;
-                
+
                 let metrics = run_benchmark("Very Large Cache (100K entries)", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Stress test with large data
                     for i in 0..total_operations {
                         if i % 4 == 0 {
@@ -2494,35 +2636,41 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Performance assertions for very large cache (more lenient due to size)
-                assert!(metrics.ops_per_second > 100.0, 
-                       "Very large cache should handle >100 ops/sec, got {:.0}", metrics.ops_per_second);
-                assert!(metrics.avg_time_per_op_ns < 10_000_000.0, 
-                       "Very large cache operations should be <10ms, got {:.2}ns", metrics.avg_time_per_op_ns);
+                assert!(
+                    metrics.ops_per_second > 100.0,
+                    "Very large cache should handle >100 ops/sec, got {:.0}",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.avg_time_per_op_ns < 10_000_000.0,
+                    "Very large cache operations should be <10ms, got {:.2}ns",
+                    metrics.avg_time_per_op_ns
+                );
             }
 
             #[test]
             fn test_sequential_access_pattern() {
                 let cache_size = 1_000;
                 let total_operations = 20_000;
-                
+
                 let metrics = run_benchmark("Sequential Access Pattern", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Phase 1: Sequential insertion
                     for i in 0..cache_size {
                         cache.insert(format!("seq_{}", i), format!("data_{}", i));
                     }
-                    
+
                     // Phase 2: Sequential access with some overwrites
                     for i in 0..(total_operations - cache_size) {
                         let idx = i % (cache_size * 2); // Some keys will be new, some existing
-                        
+
                         if i % 3 == 0 {
                             // Insert/update
                             cache.insert(format!("seq_{}", idx), format!("updated_data_{}", i));
@@ -2534,15 +2682,21 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Sequential access should be efficient
-                assert!(metrics.ops_per_second > 10_000.0, 
-                       "Sequential access should be fast, got {:.0} ops/sec", metrics.ops_per_second);
-                assert!(metrics.cache_hit_rate > 0.3, 
-                       "Sequential access should have reasonable hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
+                assert!(
+                    metrics.ops_per_second > 10_000.0,
+                    "Sequential access should be fast, got {:.0} ops/sec",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.cache_hit_rate > 0.3,
+                    "Sequential access should have reasonable hit rate, got {:.1}%",
+                    metrics.cache_hit_rate * 100.0
+                );
             }
 
             #[test]
@@ -2550,24 +2704,27 @@ mod tests {
                 let cache_size = 1_000;
                 let total_operations = 20_000;
                 let key_space = cache_size * 5; // Larger key space for more misses
-                
+
                 let metrics = run_benchmark("Random Access Pattern", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Simulate random access using deterministic sequence
                     let mut rng_state = 12345u64; // Simple LCG for deterministic "randomness"
-                    
+
                     for _ in 0..total_operations {
                         // Simple LCG: a = 1664525, c = 1013904223, m = 2^32
                         rng_state = rng_state.wrapping_mul(1664525).wrapping_add(1013904223);
                         let key_idx = (rng_state % key_space as u64) as usize;
                         let operation = rng_state % 4;
-                        
+
                         match operation {
                             0 => {
                                 // Insert (25%)
-                                cache.insert(format!("rand_{}", key_idx), format!("random_data_{}", rng_state));
+                                cache.insert(
+                                    format!("rand_{}", key_idx),
+                                    format!("random_data_{}", rng_state),
+                                );
                             }
                             _ => {
                                 // Lookup (75%)
@@ -2578,27 +2735,32 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Random access typically has lower hit rates but should still be performant
-                assert!(metrics.ops_per_second > 5_000.0, 
-                       "Random access should be reasonably fast, got {:.0} ops/sec", metrics.ops_per_second);
-                assert!(metrics.cache_hit_rate < 0.5, 
-                       "Random access should have lower hit rate due to larger key space, got {:.1}%", 
-                       metrics.cache_hit_rate * 100.0);
+                assert!(
+                    metrics.ops_per_second > 5_000.0,
+                    "Random access should be reasonably fast, got {:.0} ops/sec",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.cache_hit_rate < 0.5,
+                    "Random access should have lower hit rate due to larger key space, got {:.1}%",
+                    metrics.cache_hit_rate * 100.0
+                );
             }
 
             #[test]
             fn test_mixed_workload_performance() {
                 let cache_size = 2_000;
                 let total_operations = 30_000;
-                
+
                 let metrics = run_benchmark("Mixed Workload (Read/Write/Update)", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Complex mixed workload simulating real-world usage
                     for i in 0..total_operations {
                         match i % 10 {
@@ -2613,7 +2775,10 @@ mod tests {
                             }
                             2 | 3 => {
                                 // Write phase (20%)
-                                cache.insert(format!("mixed_{}", i % cache_size), format!("data_{}", i));
+                                cache.insert(
+                                    format!("mixed_{}", i % cache_size),
+                                    format!("data_{}", i),
+                                );
                             }
                             4 => {
                                 // Update existing (10%)
@@ -2641,29 +2806,35 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Mixed workload should maintain good performance across operation types
-                assert!(metrics.ops_per_second > 3_000.0, 
-                       "Mixed workload should maintain good performance, got {:.0} ops/sec", metrics.ops_per_second);
-                assert!(metrics.cache_hit_rate > 0.1 && metrics.cache_hit_rate < 0.8, 
-                       "Mixed workload should have moderate hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
+                assert!(
+                    metrics.ops_per_second > 3_000.0,
+                    "Mixed workload should maintain good performance, got {:.0} ops/sec",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.cache_hit_rate > 0.1 && metrics.cache_hit_rate < 0.8,
+                    "Mixed workload should have moderate hit rate, got {:.1}%",
+                    metrics.cache_hit_rate * 100.0
+                );
             }
 
             #[test]
             fn test_heavy_eviction_performance() {
                 let cache_size = 500;
                 let total_operations = 15_000;
-                
+
                 let metrics = run_benchmark("Heavy Eviction Scenario", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Create scenario that causes frequent evictions
                     let key_space = cache_size * 10; // 10x larger key space forces evictions
-                    
+
                     for i in 0..total_operations {
                         if i % 5 == 0 {
                             // Lookup (20% - mostly misses due to evictions)
@@ -2676,41 +2847,54 @@ mod tests {
                             cache.insert(format!("evict_{}", i % key_space), format!("data_{}", i));
                         }
                     }
-                    
+
                     // Verify we're actually at capacity (heavy eviction occurred)
-                    assert_eq!(cache.len(), cache_size, "Cache should be at capacity after heavy eviction");
-                    
+                    assert_eq!(
+                        cache.len(),
+                        cache_size,
+                        "Cache should be at capacity after heavy eviction"
+                    );
+
                     (total_operations, cache_hits)
                 });
 
                 // Heavy eviction should still maintain reasonable performance
-                assert!(metrics.ops_per_second > 1_000.0, 
-                       "Heavy eviction should still maintain >1K ops/sec, got {:.0}", metrics.ops_per_second);
-                assert!(metrics.cache_hit_rate < 0.3, 
-                       "Heavy eviction should result in low hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
-                
+                assert!(
+                    metrics.ops_per_second > 1_000.0,
+                    "Heavy eviction should still maintain >1K ops/sec, got {:.0}",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.cache_hit_rate < 0.3,
+                    "Heavy eviction should result in low hit rate, got {:.1}%",
+                    metrics.cache_hit_rate * 100.0
+                );
+
                 // Test that eviction mechanism is working efficiently
-                assert!(metrics.avg_time_per_op_ns < 1_000_000.0, 
-                       "Eviction operations should be efficient, got {:.2}ns avg", metrics.avg_time_per_op_ns);
+                assert!(
+                    metrics.avg_time_per_op_ns < 1_000_000.0,
+                    "Eviction operations should be efficient, got {:.2}ns avg",
+                    metrics.avg_time_per_op_ns
+                );
             }
 
             #[test]
             fn test_light_eviction_performance() {
                 let cache_size = 2_000;
                 let total_operations = 25_000;
-                
+
                 let metrics = run_benchmark("Light Eviction Scenario", || {
                     let mut cache = FIFOCache::new(cache_size);
                     let mut cache_hits = 0;
-                    
+
                     // Create scenario with minimal evictions (working set fits mostly in cache)
                     let working_set_size = cache_size * 3 / 4; // 75% of cache size for good locality
-                    
+
                     // Pre-populate cache
                     for i in 0..working_set_size {
                         cache.insert(format!("stable_{}", i), format!("data_{}", i));
                     }
-                    
+
                     // Workload with high temporal locality (minimal evictions)
                     for i in 0..total_operations {
                         match i % 16 {
@@ -2728,7 +2912,10 @@ mod tests {
                             }
                             14 => {
                                 // Very occasional new insert within working set (6.25% - minimal eviction)
-                                let key = format!("stable_{}", (i + working_set_size / 2) % working_set_size);
+                                let key = format!(
+                                    "stable_{}",
+                                    (i + working_set_size / 2) % working_set_size
+                                );
                                 cache.insert(key, format!("refreshed_data_{}", i));
                             }
                             _ => {
@@ -2746,17 +2933,26 @@ mod tests {
                             }
                         }
                     }
-                    
+
                     (total_operations, cache_hits)
                 });
 
                 // Light eviction should have excellent performance and high hit rates
-                assert!(metrics.ops_per_second > 8_000.0, 
-                       "Light eviction should have excellent performance, got {:.0} ops/sec", metrics.ops_per_second);
-                assert!(metrics.cache_hit_rate > 0.5, 
-                       "Light eviction should have high hit rate, got {:.1}%", metrics.cache_hit_rate * 100.0);
-                assert!(metrics.avg_time_per_op_ns < 125_000.0, 
-                       "Light eviction operations should be very fast, got {:.2}ns avg", metrics.avg_time_per_op_ns);
+                assert!(
+                    metrics.ops_per_second > 8_000.0,
+                    "Light eviction should have excellent performance, got {:.0} ops/sec",
+                    metrics.ops_per_second
+                );
+                assert!(
+                    metrics.cache_hit_rate > 0.5,
+                    "Light eviction should have high hit rate, got {:.1}%",
+                    metrics.cache_hit_rate * 100.0
+                );
+                assert!(
+                    metrics.avg_time_per_op_ns < 125_000.0,
+                    "Light eviction operations should be very fast, got {:.2}ns avg",
+                    metrics.avg_time_per_op_ns
+                );
             }
         }
     }
@@ -2780,97 +2976,113 @@ mod tests {
 
             #[test]
             fn test_basic_thread_safe_operations() {
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(100)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(100)));
                 let num_threads = 8;
                 let operations_per_thread = 250;
                 let success_count = Arc::new(AtomicUsize::new(0));
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let success_count = success_count.clone();
-                    
-                    thread::spawn(move || {
-                        let mut thread_successes = 0;
-                        
-                        for i in 0..operations_per_thread {
-                            // Test different operations with proper synchronization
-                            match i % 4 {
-                                0 => {
-                                    // Insert operation
-                                    let key = format!("thread_{}_{}", thread_id, i);
-                                    let value = format!("value_{}_{}", thread_id, i);
-                                    
-                                    if let Ok(mut cache_guard) = cache.lock() {
-                                        cache_guard.insert(key, value);
-                                        thread_successes += 1;
-                                    }
-                                }
-                                1 => {
-                                    // Get operation
-                                    let key = format!("thread_{}_0", thread_id);
-                                    
-                                    if let Ok(mut cache_guard) = cache.lock() {
-                                        let _ = cache_guard.get(&key);
-                                        thread_successes += 1;
-                                    }
-                                }
-                                2 => {
-                                    // Contains operation
-                                    let key = format!("thread_{}_{}", thread_id, i / 2);
-                                    
-                                    if let Ok(cache_guard) = cache.lock() {
-                                        let _ = cache_guard.contains(&key);
-                                        thread_successes += 1;
-                                    }
-                                }
-                                _ => {
-                                    // FIFO-specific operations
-                                    if let Ok(mut cache_guard) = cache.lock() {
-                                        let _ = cache_guard.peek_oldest();
-                                        if i % 20 == 0 {
-                                            let _ = cache_guard.pop_oldest();
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let success_count = success_count.clone();
+
+                        thread::spawn(move || {
+                            let mut thread_successes = 0;
+
+                            for i in 0..operations_per_thread {
+                                // Test different operations with proper synchronization
+                                match i % 4 {
+                                    0 => {
+                                        // Insert operation
+                                        let key = format!("thread_{}_{}", thread_id, i);
+                                        let value = format!("value_{}_{}", thread_id, i);
+
+                                        if let Ok(mut cache_guard) = cache.lock() {
+                                            cache_guard.insert(key, value);
+                                            thread_successes += 1;
                                         }
-                                        thread_successes += 1;
+                                    }
+                                    1 => {
+                                        // Get operation
+                                        let key = format!("thread_{}_0", thread_id);
+
+                                        if let Ok(mut cache_guard) = cache.lock() {
+                                            let _ = cache_guard.get(&key);
+                                            thread_successes += 1;
+                                        }
+                                    }
+                                    2 => {
+                                        // Contains operation
+                                        let key = format!("thread_{}_{}", thread_id, i / 2);
+
+                                        if let Ok(cache_guard) = cache.lock() {
+                                            let _ = cache_guard.contains(&key);
+                                            thread_successes += 1;
+                                        }
+                                    }
+                                    _ => {
+                                        // FIFO-specific operations
+                                        if let Ok(mut cache_guard) = cache.lock() {
+                                            let _ = cache_guard.peek_oldest();
+                                            if i % 20 == 0 {
+                                                let _ = cache_guard.pop_oldest();
+                                            }
+                                            thread_successes += 1;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        
-                        success_count.fetch_add(thread_successes, Ordering::SeqCst);
+
+                            success_count.fetch_add(thread_successes, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let total_successes = success_count.load(Ordering::SeqCst);
                 let expected_operations = num_threads * operations_per_thread;
-                
-                println!("Basic thread-safe operations: {}/{} successful", total_successes, expected_operations);
-                
+
+                println!(
+                    "Basic thread-safe operations: {}/{} successful",
+                    total_successes, expected_operations
+                );
+
                 // Verify cache consistency
                 let final_cache = cache.lock().unwrap();
                 let cache_len = final_cache.len();
                 let capacity = final_cache.capacity();
-                
-                assert!(cache_len <= capacity, "Cache length should not exceed capacity");
-                assert!(total_successes > expected_operations / 2, "Most operations should succeed");
-                
-                println!("Final cache state: {} items, capacity {}", cache_len, capacity);
+
+                assert!(
+                    cache_len <= capacity,
+                    "Cache length should not exceed capacity"
+                );
+                assert!(
+                    total_successes > expected_operations / 2,
+                    "Most operations should succeed"
+                );
+
+                println!(
+                    "Final cache state: {} items, capacity {}",
+                    cache_len, capacity
+                );
             }
 
             #[test]
             fn test_read_heavy_workload() {
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(200)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(200)));
                 let num_reader_threads = 12;
                 let num_writer_threads = 2;
                 let reads_per_thread = 500;
                 let writes_per_thread = 100;
-                
+
                 let read_successes = Arc::new(AtomicUsize::new(0));
                 let write_successes = Arc::new(AtomicUsize::new(0));
-                
+
                 // Pre-populate cache
                 {
                     let mut cache_guard = cache.lock().unwrap();
@@ -2878,64 +3090,71 @@ mod tests {
                         cache_guard.insert(format!("initial_{}", i), format!("value_{}", i));
                     }
                 }
-                
-                // Spawn reader threads
-                let reader_handles: Vec<_> = (0..num_reader_threads).map(|thread_id| {
-                    let cache = cache.clone();
 
-                    thread::spawn(move || {
-                        let mut successful_reads = 0;
-                        
-                        for i in 0..reads_per_thread {
-                            let key = format!("initial_{}", i % 150);
-                            
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                if cache_guard.get(&key).is_some() {
-                                    successful_reads += 1;
+                // Spawn reader threads
+                let reader_handles: Vec<_> = (0..num_reader_threads)
+                    .map(|_thread_id| {
+                        let cache = cache.clone();
+
+                        thread::spawn({
+                            let value = read_successes.clone();
+                            move || {
+                                let mut successful_reads = 0;
+
+                                for i in 0..reads_per_thread {
+                                    let key = format!("initial_{}", i % 150);
+
+                                    if let Ok(mut cache_guard) = cache.lock() {
+                                        if cache_guard.get(&key).is_some() {
+                                            successful_reads += 1;
+                                        }
+
+                                        // Occasionally use FIFO read operations
+                                        if i % 10 == 0 {
+                                            let _ = cache_guard.peek_oldest();
+                                            let _ = cache_guard.age_rank(&key);
+                                        }
+                                    }
                                 }
-                                
-                                // Occasionally use FIFO read operations
-                                if i % 10 == 0 {
-                                    let _ = cache_guard.peek_oldest();
-                                    let _ = cache_guard.age_rank(&key);
-                                }
+
+                                value.fetch_add(successful_reads, Ordering::SeqCst);
                             }
-                        }
-                        
-                        read_successes.fetch_add(successful_reads, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 // Spawn writer threads (fewer writers, occasional writes)
-                let writer_handles: Vec<_> = (0..num_writer_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let write_successes = write_successes.clone();
-                    
-                    thread::spawn(move || {
-                        let mut successful_writes = 0;
-                        
-                        for i in 0..writes_per_thread {
-                            let key = format!("writer_{}_{}", thread_id, i);
-                            let value = format!("writer_value_{}_{}", thread_id, i);
-                            
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                cache_guard.insert(key, value);
-                                successful_writes += 1;
-                                
-                                // Occasionally trigger eviction
-                                if i % 50 == 0 {
-                                    let _ = cache_guard.pop_oldest();
+                let writer_handles: Vec<_> = (0..num_writer_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let write_successes = write_successes.clone();
+
+                        thread::spawn(move || {
+                            let mut successful_writes = 0;
+
+                            for i in 0..writes_per_thread {
+                                let key = format!("writer_{}_{}", thread_id, i);
+                                let value = format!("writer_value_{}_{}", thread_id, i);
+
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    cache_guard.insert(key, value);
+                                    successful_writes += 1;
+
+                                    // Occasionally trigger eviction
+                                    if i % 50 == 0 {
+                                        let _ = cache_guard.pop_oldest();
+                                    }
                                 }
+
+                                // Writers sleep slightly to allow more reader access
+                                thread::sleep(Duration::from_millis(1));
                             }
-                            
-                            // Writers sleep slightly to allow more reader access
-                            thread::sleep(Duration::from_millis(1));
-                        }
-                        
-                        write_successes.fetch_add(successful_writes, Ordering::SeqCst);
+
+                            write_successes.fetch_add(successful_writes, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 // Wait for all threads
                 for handle in reader_handles {
                     handle.join().unwrap();
@@ -2943,19 +3162,24 @@ mod tests {
                 for handle in writer_handles {
                     handle.join().unwrap();
                 }
-                
+
                 let total_reads = read_successes.load(Ordering::SeqCst);
                 let total_writes = write_successes.load(Ordering::SeqCst);
                 let expected_reads = num_reader_threads * reads_per_thread;
                 let expected_writes = num_writer_threads * writes_per_thread;
-                
-                println!("Read-heavy workload: {} successful reads, {} successful writes", 
-                        total_reads, total_writes);
-                
+
+                println!(
+                    "Read-heavy workload: {} successful reads, {} successful writes",
+                    total_reads, total_writes
+                );
+
                 // Most reads should succeed since we pre-populated
-                assert!(total_reads > expected_reads / 3, "Should have many successful reads");
+                assert!(
+                    total_reads > expected_reads / 3,
+                    "Should have many successful reads"
+                );
                 assert_eq!(total_writes, expected_writes, "All writes should succeed");
-                
+
                 // Verify final state
                 let final_cache = cache.lock().unwrap();
                 assert!(final_cache.len() <= final_cache.capacity());
@@ -2963,83 +3187,96 @@ mod tests {
 
             #[test]
             fn test_write_heavy_workload() {
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(150)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(150)));
                 let num_threads = 10;
                 let writes_per_thread = 200;
                 let total_writes = Arc::new(AtomicUsize::new(0));
                 let evictions_triggered = Arc::new(AtomicUsize::new(0));
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let total_writes = total_writes.clone();
-                    let evictions_triggered = evictions_triggered.clone();
-                    
-                    thread::spawn(move || {
-                        let mut writes_count = 0;
-                        let mut evictions_count = 0;
-                        
-                        for i in 0..writes_per_thread {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                let len_before = cache_guard.len();
-                                
-                                // Heavy insertion workload
-                                let key = format!("heavy_{}_{}", thread_id, i);
-                                let value = format!("data_{}_{}", thread_id, i);
-                                cache_guard.insert(key, value);
-                                writes_count += 1;
-                                
-                                // Check if eviction occurred
-                                let len_after = cache_guard.len();
-                                let capacity = cache_guard.capacity();
-                                
-                                if len_before == capacity && len_after == capacity {
-                                    evictions_count += 1;
-                                }
-                                
-                                // Occasionally use FIFO-specific operations
-                                if i % 25 == 0 {
-                                    let _ = cache_guard.pop_oldest();
-                                    evictions_count += 1;
-                                }
-                                
-                                if i % 30 == 0 {
-                                    let _ = cache_guard.pop_oldest_batch(3);
-                                    evictions_count += 3;
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let total_writes = total_writes.clone();
+                        let evictions_triggered = evictions_triggered.clone();
+
+                        thread::spawn(move || {
+                            let mut writes_count = 0;
+                            let mut evictions_count = 0;
+
+                            for i in 0..writes_per_thread {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    let len_before = cache_guard.len();
+
+                                    // Heavy insertion workload
+                                    let key = format!("heavy_{}_{}", thread_id, i);
+                                    let value = format!("data_{}_{}", thread_id, i);
+                                    cache_guard.insert(key, value);
+                                    writes_count += 1;
+
+                                    // Check if eviction occurred
+                                    let len_after = cache_guard.len();
+                                    let capacity = cache_guard.capacity();
+
+                                    if len_before == capacity && len_after == capacity {
+                                        evictions_count += 1;
+                                    }
+
+                                    // Occasionally use FIFO-specific operations
+                                    if i % 25 == 0 {
+                                        let _ = cache_guard.pop_oldest();
+                                        evictions_count += 1;
+                                    }
+
+                                    if i % 30 == 0 {
+                                        let _ = cache_guard.pop_oldest_batch(3);
+                                        evictions_count += 3;
+                                    }
                                 }
                             }
-                        }
-                        
-                        total_writes.fetch_add(writes_count, Ordering::SeqCst);
-                        evictions_triggered.fetch_add(evictions_count, Ordering::SeqCst);
+
+                            total_writes.fetch_add(writes_count, Ordering::SeqCst);
+                            evictions_triggered.fetch_add(evictions_count, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let writes = total_writes.load(Ordering::SeqCst);
                 let evictions = evictions_triggered.load(Ordering::SeqCst);
                 let expected_writes = num_threads * writes_per_thread;
-                
-                println!("Write-heavy workload: {} writes, {} evictions", writes, evictions);
-                
+
+                println!(
+                    "Write-heavy workload: {} writes, {} evictions",
+                    writes, evictions
+                );
+
                 assert_eq!(writes, expected_writes, "All writes should succeed");
-                assert!(evictions > 0, "Should have triggered evictions under heavy write load");
-                
+                assert!(
+                    evictions > 0,
+                    "Should have triggered evictions under heavy write load"
+                );
+
                 // Verify final state
                 let final_cache = cache.lock().unwrap();
-                assert_eq!(final_cache.len(), final_cache.capacity(), 
-                          "Cache should be at capacity after heavy writes");
+                assert_eq!(
+                    final_cache.len(),
+                    final_cache.capacity(),
+                    "Cache should be at capacity after heavy writes"
+                );
             }
 
             #[test]
             fn test_mixed_operations_concurrency() {
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(100)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(100)));
                 let num_threads = 16;
                 let operations_per_thread = 150;
                 let operation_counts = Arc::new(AtomicUsize::new(0));
-                
+
                 // Pre-populate with some data
                 {
                     let mut cache_guard = cache.lock().unwrap();
@@ -3047,143 +3284,163 @@ mod tests {
                         cache_guard.insert(format!("base_{}", i), format!("base_value_{}", i));
                     }
                 }
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let operation_counts = operation_counts.clone();
-                    
-                    thread::spawn(move || {
-                        let mut ops_completed = 0;
-                        
-                        for i in 0..operations_per_thread {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                // Randomized operation mix
-                                let operation = (thread_id + i) % 7;
-                                
-                                match operation {
-                                    0 | 1 => {
-                                        // Insert (high frequency)
-                                        let key = format!("mixed_{}_{}", thread_id, i);
-                                        let value = format!("mixed_value_{}_{}", thread_id, i);
-                                        cache_guard.insert(key, value);
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let operation_counts = operation_counts.clone();
+
+                        thread::spawn(move || {
+                            let mut ops_completed = 0;
+
+                            for i in 0..operations_per_thread {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    // Randomized operation mix
+                                    let operation = (thread_id + i) % 7;
+
+                                    match operation {
+                                        0 | 1 => {
+                                            // Insert (high frequency)
+                                            let key = format!("mixed_{}_{}", thread_id, i);
+                                            let value = format!("mixed_value_{}_{}", thread_id, i);
+                                            cache_guard.insert(key, value);
+                                        }
+                                        2 => {
+                                            // Get
+                                            let key = format!("base_{}", i % 50);
+                                            let _ = cache_guard.get(&key);
+                                        }
+                                        3 => {
+                                            // Contains
+                                            let key = format!("mixed_{}_{}", thread_id, i / 2);
+                                            let _ = cache_guard.contains(&key);
+                                        }
+                                        4 => {
+                                            // FIFO peek
+                                            let _ = cache_guard.peek_oldest();
+                                        }
+                                        5 => {
+                                            // FIFO pop
+                                            let _ = cache_guard.pop_oldest();
+                                        }
+                                        _ => {
+                                            // FIFO batch operations
+                                            let _ = cache_guard.pop_oldest_batch(2);
+                                            let key = format!("base_{}", i % 30);
+                                            let _ = cache_guard.age_rank(&key);
+                                        }
                                     }
-                                    2 => {
-                                        // Get
-                                        let key = format!("base_{}", i % 50);
-                                        let _ = cache_guard.get(&key);
-                                    }
-                                    3 => {
-                                        // Contains
-                                        let key = format!("mixed_{}_{}", thread_id, i / 2);
-                                        let _ = cache_guard.contains(&key);
-                                    }
-                                    4 => {
-                                        // FIFO peek
-                                        let _ = cache_guard.peek_oldest();
-                                    }
-                                    5 => {
-                                        // FIFO pop
-                                        let _ = cache_guard.pop_oldest();
-                                    }
-                                    _ => {
-                                        // FIFO batch operations
-                                        let _ = cache_guard.pop_oldest_batch(2);
-                                        let key = format!("base_{}", i % 30);
-                                        let _ = cache_guard.age_rank(&key);
-                                    }
+
+                                    ops_completed += 1;
                                 }
-                                
-                                ops_completed += 1;
                             }
-                        }
-                        
-                        operation_counts.fetch_add(ops_completed, Ordering::SeqCst);
+
+                            operation_counts.fetch_add(ops_completed, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let total_operations = operation_counts.load(Ordering::SeqCst);
                 let expected_operations = num_threads * operations_per_thread;
-                
-                println!("Mixed operations concurrency: {}/{} operations completed", 
-                        total_operations, expected_operations);
-                
-                assert_eq!(total_operations, expected_operations, "All operations should complete");
-                
+
+                println!(
+                    "Mixed operations concurrency: {}/{} operations completed",
+                    total_operations, expected_operations
+                );
+
+                assert_eq!(
+                    total_operations, expected_operations,
+                    "All operations should complete"
+                );
+
                 // Verify cache consistency
                 let final_cache = cache.lock().unwrap();
                 let cache_len = final_cache.len();
                 let capacity = final_cache.capacity();
                 let insertion_order_len = final_cache.insertion_order_len();
-                
+
                 assert!(cache_len <= capacity, "Cache should not exceed capacity");
-                assert!(insertion_order_len >= cache_len, "Insertion order should track at least current entries");
-                
-                println!("Final state: {} items, {} in insertion order, capacity {}", 
-                        cache_len, insertion_order_len, capacity);
+                assert!(
+                    insertion_order_len >= cache_len,
+                    "Insertion order should track at least current entries"
+                );
+
+                println!(
+                    "Final state: {} items, {} in insertion order, capacity {}",
+                    cache_len, insertion_order_len, capacity
+                );
             }
 
             #[test]
             fn test_deadlock_prevention() {
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(50)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(50)));
                 let num_threads = 20;
                 let timeout_duration = Duration::from_secs(10);
                 let start_time = Instant::now();
                 let completed_operations = Arc::new(AtomicUsize::new(0));
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let completed_operations = completed_operations.clone();
-                    
-                    thread::spawn(move || {
-                        let mut operations = 0;
-                        let thread_start = Instant::now();
-                        
-                        while thread_start.elapsed() < timeout_duration {
-                            // Try to acquire lock with timeout to detect deadlocks
-                            if let Ok(mut cache_guard) = cache.try_lock() {
-                                // Perform operation that might cause deadlock in poorly designed code
-                                let key = format!("deadlock_test_{}_{}", thread_id, operations);
-                                let value = format!("value_{}", operations);
-                                
-                                cache_guard.insert(key.clone(), value);
-                                let _ = cache_guard.get(&key);
-                                let _ = cache_guard.peek_oldest();
-                                
-                                operations += 1;
-                                
-                                // Don't hold lock too long
-                                if operations % 10 == 0 {
-                                    drop(cache_guard);
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let completed_operations = completed_operations.clone();
+
+                        thread::spawn(move || {
+                            let mut operations = 0;
+                            let thread_start = Instant::now();
+
+                            while thread_start.elapsed() < timeout_duration {
+                                // Try to acquire lock with timeout to detect deadlocks
+                                if let Ok(mut cache_guard) = cache.try_lock() {
+                                    // Perform operation that might cause deadlock in poorly designed code
+                                    let key = format!("deadlock_test_{}_{}", thread_id, operations);
+                                    let value = format!("value_{}", operations);
+
+                                    cache_guard.insert(key.clone(), value);
+                                    let _ = cache_guard.get(&key);
+                                    let _ = cache_guard.peek_oldest();
+
+                                    operations += 1;
+
+                                    // Don't hold lock too long
+                                    if operations % 10 == 0 {
+                                        drop(cache_guard);
+                                        thread::sleep(Duration::from_millis(1));
+                                    }
+                                } else {
+                                    // If we can't acquire lock, wait briefly and try again
                                     thread::sleep(Duration::from_millis(1));
                                 }
-                            } else {
-                                // If we can't acquire lock, wait briefly and try again
-                                thread::sleep(Duration::from_millis(1));
                             }
-                        }
-                        
-                        completed_operations.fetch_add(operations, Ordering::SeqCst);
+
+                            completed_operations.fetch_add(operations, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let elapsed = start_time.elapsed();
                 let total_operations = completed_operations.load(Ordering::SeqCst);
-                
-                println!("Deadlock prevention test: {} operations in {:?}", total_operations, elapsed);
-                
+
+                println!(
+                    "Deadlock prevention test: {} operations in {:?}",
+                    total_operations, elapsed
+                );
+
                 // Test should complete within timeout (no deadlocks)
-                assert!(elapsed < timeout_duration + Duration::from_secs(1), 
-                       "Test should complete without deadlocks");
+                assert!(
+                    elapsed < timeout_duration + Duration::from_secs(1),
+                    "Test should complete without deadlocks"
+                );
                 assert!(total_operations > 0, "Should complete some operations");
-                
+
                 // Verify cache is still functional
                 let final_cache = cache.lock().unwrap();
                 assert!(final_cache.len() <= final_cache.capacity());
@@ -3191,76 +3448,87 @@ mod tests {
 
             #[test]
             fn test_fairness_across_threads() {
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(80)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(80)));
                 let num_threads = 8;
                 let target_operations = 200;
                 let test_duration = Duration::from_secs(5);
-                
+
                 let thread_operation_counts = Arc::new(Mutex::new(vec![0; num_threads]));
                 let start_time = Instant::now();
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let thread_operation_counts = thread_operation_counts.clone();
-                    
-                    thread::spawn(move || {
-                        let mut operations = 0;
-                        
-                        while start_time.elapsed() < test_duration && operations < target_operations {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                // Perform operation
-                                let key = format!("fair_{}_{}", thread_id, operations);
-                                let value = format!("value_{}_{}", thread_id, operations);
-                                cache_guard.insert(key, value);
-                                
-                                operations += 1;
-                                
-                                // Release lock periodically to allow other threads
-                                if operations % 5 == 0 {
-                                    drop(cache_guard);
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let thread_operation_counts = thread_operation_counts.clone();
+
+                        thread::spawn(move || {
+                            let mut operations = 0;
+
+                            while start_time.elapsed() < test_duration
+                                && operations < target_operations
+                            {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    // Perform operation
+                                    let key = format!("fair_{}_{}", thread_id, operations);
+                                    let value = format!("value_{}_{}", thread_id, operations);
+                                    cache_guard.insert(key, value);
+
+                                    operations += 1;
+
+                                    // Release lock periodically to allow other threads
+                                    if operations % 5 == 0 {
+                                        drop(cache_guard);
+                                        thread::yield_now();
+                                    }
+                                } else {
                                     thread::yield_now();
                                 }
-                            } else {
-                                thread::yield_now();
                             }
-                        }
-                        
-                        // Record this thread's operation count
-                        if let Ok(mut counts) = thread_operation_counts.lock() {
-                            counts[thread_id] = operations;
-                        }
+
+                            // Record this thread's operation count
+                            if let Ok(mut counts) = thread_operation_counts.lock() {
+                                counts[thread_id] = operations;
+                            }
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let operation_counts = thread_operation_counts.lock().unwrap();
                 let total_operations: usize = operation_counts.iter().sum();
                 let min_operations = *operation_counts.iter().min().unwrap();
                 let max_operations = *operation_counts.iter().max().unwrap();
                 let avg_operations = total_operations as f64 / num_threads as f64;
-                
+
                 println!("Fairness test results:");
                 println!("  Total operations: {}", total_operations);
                 println!("  Average per thread: {:.1}", avg_operations);
                 println!("  Min operations: {}", min_operations);
                 println!("  Max operations: {}", max_operations);
                 println!("  Operation counts: {:?}", *operation_counts);
-                
+
                 // Check fairness - no thread should be starved
                 assert!(min_operations > 0, "No thread should be completely starved");
-                
+
                 // Check that the difference between min and max isn't too extreme
                 let fairness_ratio = max_operations as f64 / min_operations.max(1) as f64;
-                assert!(fairness_ratio < 10.0, 
-                       "Fairness ratio should be reasonable, got {:.2}", fairness_ratio);
-                
+                assert!(
+                    fairness_ratio < 10.0,
+                    "Fairness ratio should be reasonable, got {:.2}",
+                    fairness_ratio
+                );
+
                 // Verify cache final state
                 let final_cache = cache.lock().unwrap();
-                assert_eq!(final_cache.len(), final_cache.capacity(), 
-                          "Cache should be at capacity with high thread contention");
+                assert_eq!(
+                    final_cache.len(),
+                    final_cache.capacity(),
+                    "Cache should be at capacity with high thread contention"
+                );
             }
         }
 
@@ -3276,267 +3544,306 @@ mod tests {
             #[test]
             fn test_high_contention_scenario() {
                 // Many threads accessing same small set of keys
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(50)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(50)));
                 let num_threads = 20;
                 let operations_per_thread = 500;
                 let hot_keys = 10; // Small set of hotly contested keys
-                
+
                 let successful_ops = Arc::new(AtomicUsize::new(0));
                 let contention_detected = Arc::new(AtomicBool::new(false));
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let successful_ops = successful_ops.clone();
-                    let contention_detected = contention_detected.clone();
-                    
-                    thread::spawn(move || {
-                        let mut ops = 0;
-                        let mut lock_failures = 0;
-                        
-                        for i in 0..operations_per_thread {
-                            // All threads compete for same hot keys
-                            let hot_key = format!("hot_key_{}", i % hot_keys);
-                            let value = format!("thread_{}_value_{}", thread_id, i);
-                            
-                            // Try with timeout to detect high contention
-                            let start = Instant::now();
-                            match cache.try_lock() {
-                                Ok(mut cache_guard) => {
-                                    cache_guard.insert(hot_key.clone(), value);
-                                    let _ = cache_guard.get(&hot_key);
-                                    ops += 1;
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let successful_ops = successful_ops.clone();
+                        let contention_detected = contention_detected.clone();
+
+                        thread::spawn(move || {
+                            let mut ops = 0;
+                            let mut lock_failures = 0;
+
+                            for i in 0..operations_per_thread {
+                                // All threads compete for same hot keys
+                                let hot_key = format!("hot_key_{}", i % hot_keys);
+                                let value = format!("thread_{}_value_{}", thread_id, i);
+
+                                // Try with timeout to detect high contention
+                                let start = Instant::now();
+                                match cache.try_lock() {
+                                    Ok(mut cache_guard) => {
+                                        cache_guard.insert(hot_key.clone(), value);
+                                        let _ = cache_guard.get(&hot_key);
+                                        ops += 1;
+                                    }
+                                    Err(_) => {
+                                        lock_failures += 1;
+                                        thread::sleep(Duration::from_millis(1));
+                                    }
                                 }
-                                Err(_) => {
-                                    lock_failures += 1;
-                                    thread::sleep(Duration::from_millis(1));
+
+                                // Detect high contention
+                                if start.elapsed() > Duration::from_millis(10) {
+                                    contention_detected.store(true, Ordering::SeqCst);
                                 }
                             }
-                            
-                            // Detect high contention
-                            if start.elapsed() > Duration::from_millis(10) {
-                                contention_detected.store(true, Ordering::SeqCst);
-                            }
-                        }
-                        
-                        successful_ops.fetch_add(ops, Ordering::SeqCst);
-                        
-                        println!("Thread {}: {} successful ops, {} lock failures", 
-                                thread_id, ops, lock_failures);
+
+                            successful_ops.fetch_add(ops, Ordering::SeqCst);
+
+                            println!(
+                                "Thread {}: {} successful ops, {} lock failures",
+                                thread_id, ops, lock_failures
+                            );
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let total_ops = successful_ops.load(Ordering::SeqCst);
                 let had_contention = contention_detected.load(Ordering::SeqCst);
-                
-                println!("High contention test: {} operations completed, contention detected: {}", 
-                        total_ops, had_contention);
-                
+
+                println!(
+                    "High contention test: {} operations completed, contention detected: {}",
+                    total_ops, had_contention
+                );
+
                 // Verify system remained functional under high contention
-                assert!(total_ops > 0, "Should complete some operations despite contention");
-                
+                assert!(
+                    total_ops > 0,
+                    "Should complete some operations despite contention"
+                );
+
                 // Verify final cache state is consistent
                 let final_cache = cache.lock().unwrap();
                 assert!(final_cache.len() <= final_cache.capacity());
-                
+
                 println!("Final cache state: {} items", final_cache.len());
             }
 
             #[test]
             fn test_cache_thrashing_scenario() {
                 // Rapid insertions causing constant evictions (cache thrashing)
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(100)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(100)));
                 let num_threads = 15;
                 let operations_per_thread = 300;
                 let key_space_multiplier = 10; // 10x more keys than capacity
-                
+
                 let evictions_detected = Arc::new(AtomicUsize::new(0));
                 let total_insertions = Arc::new(AtomicUsize::new(0));
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let evictions_detected = evictions_detected.clone();
-                    let total_insertions = total_insertions.clone();
-                    
-                    thread::spawn(move || {
-                        let mut insertions = 0;
-                        let mut evictions = 0;
-                        
-                        for i in 0..operations_per_thread {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                let len_before = cache_guard.len();
-                                
-                                // Insert with large key space to force thrashing
-                                let key_idx = (thread_id * operations_per_thread + i) % 
-                                             (cache_guard.capacity() * key_space_multiplier);
-                                let key = format!("thrash_key_{}", key_idx);
-                                let value = format!("thrash_value_{}_{}", thread_id, i);
-                                
-                                cache_guard.insert(key, value);
-                                insertions += 1;
-                                
-                                let len_after = cache_guard.len();
-                                let capacity = cache_guard.capacity();
-                                
-                                // Detect if eviction occurred
-                                if len_before == capacity && len_after == capacity {
-                                    evictions += 1;
-                                }
-                                
-                                // Occasionally force more evictions
-                                if i % 20 == 0 {
-                                    let _ = cache_guard.pop_oldest_batch(5);
-                                    evictions += 5;
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let evictions_detected = evictions_detected.clone();
+                        let total_insertions = total_insertions.clone();
+
+                        thread::spawn(move || {
+                            let mut insertions = 0;
+                            let mut evictions = 0;
+
+                            for i in 0..operations_per_thread {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    let len_before = cache_guard.len();
+
+                                    // Insert with large key space to force thrashing
+                                    let key_idx = (thread_id * operations_per_thread + i)
+                                        % (cache_guard.capacity() * key_space_multiplier);
+                                    let key = format!("thrash_key_{}", key_idx);
+                                    let value = format!("thrash_value_{}_{}", thread_id, i);
+
+                                    cache_guard.insert(key, value);
+                                    insertions += 1;
+
+                                    let len_after = cache_guard.len();
+                                    let capacity = cache_guard.capacity();
+
+                                    // Detect if eviction occurred
+                                    if len_before == capacity && len_after == capacity {
+                                        evictions += 1;
+                                    }
+
+                                    // Occasionally force more evictions
+                                    if i % 20 == 0 {
+                                        let _ = cache_guard.pop_oldest_batch(5);
+                                        evictions += 5;
+                                    }
                                 }
                             }
-                        }
-                        
-                        total_insertions.fetch_add(insertions, Ordering::SeqCst);
-                        evictions_detected.fetch_add(evictions, Ordering::SeqCst);
-                        
-                        println!("Thread {}: {} insertions, {} evictions", 
-                                thread_id, insertions, evictions);
+
+                            total_insertions.fetch_add(insertions, Ordering::SeqCst);
+                            evictions_detected.fetch_add(evictions, Ordering::SeqCst);
+
+                            println!(
+                                "Thread {}: {} insertions, {} evictions",
+                                thread_id, insertions, evictions
+                            );
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let insertions = total_insertions.load(Ordering::SeqCst);
                 let evictions = evictions_detected.load(Ordering::SeqCst);
                 let expected_insertions = num_threads * operations_per_thread;
-                
-                println!("Cache thrashing test: {} insertions, {} evictions", insertions, evictions);
-                
-                assert_eq!(insertions, expected_insertions, "All insertions should complete");
-                assert!(evictions > insertions / 2, "Should have high eviction rate due to thrashing");
-                
+
+                println!(
+                    "Cache thrashing test: {} insertions, {} evictions",
+                    insertions, evictions
+                );
+
+                assert_eq!(
+                    insertions, expected_insertions,
+                    "All insertions should complete"
+                );
+                assert!(
+                    evictions > insertions / 2,
+                    "Should have high eviction rate due to thrashing"
+                );
+
                 // Verify cache remained stable despite thrashing
                 let final_cache = cache.lock().unwrap();
-                assert_eq!(final_cache.len(), final_cache.capacity(), 
-                          "Cache should be at capacity after thrashing");
+                assert_eq!(
+                    final_cache.len(),
+                    final_cache.capacity(),
+                    "Cache should be at capacity after thrashing"
+                );
             }
 
             #[test]
             fn test_long_running_stability() {
                 // Verify stability over extended periods with continuous load
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(200)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(200)));
                 let num_threads = 8;
                 let test_duration = Duration::from_secs(15); // Extended test
                 let stability_check_interval = Duration::from_secs(3);
-                
+
                 let operations_completed = Arc::new(AtomicUsize::new(0));
                 let consistency_violations = Arc::new(AtomicUsize::new(0));
                 let stop_signal = Arc::new(AtomicBool::new(false));
-                
+
                 // Stability checker thread
                 let cache_checker = cache.clone();
                 let consistency_violations_checker = consistency_violations.clone();
                 let stop_signal_checker = stop_signal.clone();
-                
+
                 let checker_handle = thread::spawn(move || {
                     let mut check_count = 0;
-                    
+
                     while !stop_signal_checker.load(Ordering::SeqCst) {
                         if let Ok(cache_guard) = cache_checker.try_lock() {
                             let len = cache_guard.len();
                             let capacity = cache_guard.capacity();
                             let insertion_order_len = cache_guard.insertion_order_len();
-                            
+
                             // Check consistency invariants
-                            if len > capacity || 
-                               (len > 0 && insertion_order_len == 0) ||
-                               insertion_order_len > capacity * 3 { // Allow for stale entries
+                            if len > capacity
+                                || (len > 0 && insertion_order_len == 0)
+                                || insertion_order_len > capacity * 3
+                            {
+                                // Allow for stale entries
                                 consistency_violations_checker.fetch_add(1, Ordering::SeqCst);
                             }
-                            
+
                             check_count += 1;
                         }
-                        
+
                         thread::sleep(stability_check_interval);
                     }
-                    
+
                     println!("Stability checker completed {} checks", check_count);
                 });
-                
+
                 // Worker threads
                 let start_time = Instant::now();
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let operations_completed = operations_completed.clone();
-                    
-                    thread::spawn(move || {
-                        let mut ops = 0;
-                        let thread_start = Instant::now();
-                        
-                        while thread_start.elapsed() < test_duration {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                // Varied workload over time
-                                let phase = (thread_start.elapsed().as_secs() / 5) % 3;
-                                
-                                match phase {
-                                    0 => {
-                                        // Insert phase
-                                        let key = format!("stable_{}_{}", thread_id, ops);
-                                        let value = format!("stable_value_{}_{}", thread_id, ops);
-                                        cache_guard.insert(key, value);
-                                    }
-                                    1 => {
-                                        // Mixed operations phase
-                                        if ops % 3 == 0 {
-                                            let _ = cache_guard.pop_oldest();
-                                        } else {
-                                            let key = format!("stable_{}_{}", thread_id, ops / 2);
-                                            let _ = cache_guard.get(&key);
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let operations_completed = operations_completed.clone();
+
+                        thread::spawn(move || {
+                            let mut ops = 0;
+                            let thread_start = Instant::now();
+
+                            while thread_start.elapsed() < test_duration {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    // Varied workload over time
+                                    let phase = (thread_start.elapsed().as_secs() / 5) % 3;
+
+                                    match phase {
+                                        0 => {
+                                            // Insert phase
+                                            let key = format!("stable_{}_{}", thread_id, ops);
+                                            let value =
+                                                format!("stable_value_{}_{}", thread_id, ops);
+                                            cache_guard.insert(key, value);
+                                        }
+                                        1 => {
+                                            // Mixed operations phase
+                                            if ops % 3 == 0 {
+                                                let _ = cache_guard.pop_oldest();
+                                            } else {
+                                                let key =
+                                                    format!("stable_{}_{}", thread_id, ops / 2);
+                                                let _ = cache_guard.get(&key);
+                                            }
+                                        }
+                                        _ => {
+                                            // FIFO operations phase
+                                            let _ = cache_guard.peek_oldest();
+                                            if ops % 10 == 0 {
+                                                let _ = cache_guard.pop_oldest_batch(3);
+                                            }
                                         }
                                     }
-                                    _ => {
-                                        // FIFO operations phase
-                                        let _ = cache_guard.peek_oldest();
-                                        if ops % 10 == 0 {
-                                            let _ = cache_guard.pop_oldest_batch(3);
-                                        }
-                                    }
+
+                                    ops += 1;
                                 }
-                                
-                                ops += 1;
+
+                                // Brief pause to prevent overwhelming
+                                if ops % 100 == 0 {
+                                    thread::sleep(Duration::from_millis(10));
+                                }
                             }
-                            
-                            // Brief pause to prevent overwhelming
-                            if ops % 100 == 0 {
-                                thread::sleep(Duration::from_millis(10));
-                            }
-                        }
-                        
-                        operations_completed.fetch_add(ops, Ordering::SeqCst);
-                        println!("Thread {} completed {} operations", thread_id, ops);
+
+                            operations_completed.fetch_add(ops, Ordering::SeqCst);
+                            println!("Thread {} completed {} operations", thread_id, ops);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 // Wait for all worker threads
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 // Stop checker and wait
                 stop_signal.store(true, Ordering::SeqCst);
                 checker_handle.join().unwrap();
-                
+
                 let total_ops = operations_completed.load(Ordering::SeqCst);
                 let violations = consistency_violations.load(Ordering::SeqCst);
                 let elapsed = start_time.elapsed();
-                
-                println!("Long-running stability test: {} operations in {:?}, {} violations", 
-                        total_ops, elapsed, violations);
-                
-                assert!(total_ops > 1000, "Should complete substantial number of operations");
+
+                println!(
+                    "Long-running stability test: {} operations in {:?}, {} violations",
+                    total_ops, elapsed, violations
+                );
+
+                assert!(
+                    total_ops > 1000,
+                    "Should complete substantial number of operations"
+                );
                 assert_eq!(violations, 0, "Should maintain consistency throughout test");
                 assert!(elapsed >= test_duration, "Should run for full duration");
-                
+
                 // Final consistency check
                 let final_cache = cache.lock().unwrap();
                 assert!(final_cache.len() <= final_cache.capacity());
@@ -3546,67 +3853,81 @@ mod tests {
             fn test_memory_pressure_scenario() {
                 // Test behavior with large cache and memory-intensive operations
                 let large_capacity = 5000;
-                let cache: ThreadSafeFIFOCache<String, String> = 
+                let cache: ThreadSafeFIFOCache<String, String> =
                     Arc::new(Mutex::new(FIFOCache::new(large_capacity)));
                 let num_threads = 12;
                 let operations_per_thread = 500;
-                
+
                 let memory_operations = Arc::new(AtomicUsize::new(0));
                 let large_value_size = 1024; // 1KB values to increase memory pressure
-                
-                let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let memory_operations = memory_operations.clone();
-                    
-                    thread::spawn(move || {
-                        let mut ops = 0;
-                        
-                        for i in 0..operations_per_thread {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                // Create large values to increase memory pressure
-                                let large_value = "x".repeat(large_value_size);
-                                let key = format!("memory_{}_{}", thread_id, i);
-                                let value = format!("{}_{}", large_value, i);
-                                
-                                cache_guard.insert(key.clone(), value);
-                                
-                                // Occasionally read back to test memory access
-                                if i % 10 == 0 {
-                                    let _ = cache_guard.get(&key);
+
+                let handles: Vec<_> = (0..num_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let memory_operations = memory_operations.clone();
+
+                        thread::spawn(move || {
+                            let mut ops = 0;
+
+                            for i in 0..operations_per_thread {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    // Create large values to increase memory pressure
+                                    let large_value = "x".repeat(large_value_size);
+                                    let key = format!("memory_{}_{}", thread_id, i);
+                                    let value = format!("{}_{}", large_value, i);
+
+                                    cache_guard.insert(key.clone(), value);
+
+                                    // Occasionally read back to test memory access
+                                    if i % 10 == 0 {
+                                        let _ = cache_guard.get(&key);
+                                    }
+
+                                    // Trigger evictions to test memory cleanup
+                                    if i % 50 == 0 {
+                                        let _ = cache_guard.pop_oldest_batch(10);
+                                    }
+
+                                    ops += 1;
                                 }
-                                
-                                // Trigger evictions to test memory cleanup
-                                if i % 50 == 0 {
-                                    let _ = cache_guard.pop_oldest_batch(10);
-                                }
-                                
-                                ops += 1;
                             }
-                        }
-                        
-                        memory_operations.fetch_add(ops, Ordering::SeqCst);
-                        println!("Thread {} completed {} memory operations", thread_id, ops);
+
+                            memory_operations.fetch_add(ops, Ordering::SeqCst);
+                            println!("Thread {} completed {} memory operations", thread_id, ops);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 for handle in handles {
                     handle.join().unwrap();
                 }
-                
+
                 let total_memory_ops = memory_operations.load(Ordering::SeqCst);
                 let expected_ops = num_threads * operations_per_thread;
-                
-                println!("Memory pressure test: {} operations with large values", total_memory_ops);
-                
-                assert_eq!(total_memory_ops, expected_ops, "All memory operations should complete");
-                
+
+                println!(
+                    "Memory pressure test: {} operations with large values",
+                    total_memory_ops
+                );
+
+                assert_eq!(
+                    total_memory_ops, expected_ops,
+                    "All memory operations should complete"
+                );
+
                 // Verify cache handles memory pressure correctly
                 let final_cache = cache.lock().unwrap();
                 let final_len = final_cache.len();
-                
-                assert!(final_len <= large_capacity, "Cache should not exceed capacity under memory pressure");
-                println!("Final cache state: {} items (capacity {})", final_len, large_capacity);
-                
+
+                assert!(
+                    final_len <= large_capacity,
+                    "Cache should not exceed capacity under memory pressure"
+                );
+                println!(
+                    "Final cache state: {} items (capacity {})",
+                    final_len, large_capacity
+                );
+
                 // Estimate memory usage
                 let estimated_memory = final_len * large_value_size;
                 println!("Estimated memory usage: ~{} KB", estimated_memory / 1024);
@@ -3615,271 +3936,321 @@ mod tests {
             #[test]
             fn test_rapid_thread_creation_destruction() {
                 // Test with threads being created and destroyed rapidly
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(150)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(150)));
                 let num_thread_waves = 20;
                 let threads_per_wave = 10;
                 let operations_per_thread = 50;
-                
+
                 let total_operations = Arc::new(AtomicUsize::new(0));
                 let thread_creation_count = Arc::new(AtomicUsize::new(0));
-                
+
                 for wave in 0..num_thread_waves {
-                    let wave_handles: Vec<_> = (0..threads_per_wave).map(|thread_id| {
-                        let cache = cache.clone();
-                        let total_operations = total_operations.clone();
-                        let thread_creation_count = thread_creation_count.clone();
-                        
-                        thread_creation_count.fetch_add(1, Ordering::SeqCst);
-                        
-                        thread::spawn(move || {
-                            let mut ops = 0;
-                            
-                            for i in 0..operations_per_thread {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    let key = format!("rapid_{}_{}_{}", wave, thread_id, i);
-                                    let value = format!("rapid_value_{}", i);
-                                    cache_guard.insert(key, value);
-                                    
-                                    // Mix in some reads and FIFO operations
-                                    if i % 5 == 0 {
-                                        let _ = cache_guard.peek_oldest();
+                    let wave_handles: Vec<_> = (0..threads_per_wave)
+                        .map(|thread_id| {
+                            let cache = cache.clone();
+                            let total_operations = total_operations.clone();
+                            let thread_creation_count = thread_creation_count.clone();
+
+                            thread_creation_count.fetch_add(1, Ordering::SeqCst);
+
+                            thread::spawn(move || {
+                                let mut ops = 0;
+
+                                for i in 0..operations_per_thread {
+                                    if let Ok(mut cache_guard) = cache.lock() {
+                                        let key = format!("rapid_{}_{}_{}", wave, thread_id, i);
+                                        let value = format!("rapid_value_{}", i);
+                                        cache_guard.insert(key, value);
+
+                                        // Mix in some reads and FIFO operations
+                                        if i % 5 == 0 {
+                                            let _ = cache_guard.peek_oldest();
+                                        }
+                                        if i % 15 == 0 {
+                                            let _ = cache_guard.pop_oldest();
+                                        }
+
+                                        ops += 1;
                                     }
-                                    if i % 15 == 0 {
-                                        let _ = cache_guard.pop_oldest();
-                                    }
-                                    
-                                    ops += 1;
                                 }
-                            }
-                            
-                            total_operations.fetch_add(ops, Ordering::SeqCst);
+
+                                total_operations.fetch_add(ops, Ordering::SeqCst);
+                            })
                         })
-                    }).collect();
-                    
+                        .collect();
+
                     // Wait for this wave to complete before starting next
                     for handle in wave_handles {
                         handle.join().unwrap();
                     }
-                    
+
                     // Brief pause between waves
                     thread::sleep(Duration::from_millis(50));
                 }
-                
+
                 let total_ops = total_operations.load(Ordering::SeqCst);
                 let thread_count = thread_creation_count.load(Ordering::SeqCst);
                 let expected_ops = num_thread_waves * threads_per_wave * operations_per_thread;
                 let expected_threads = num_thread_waves * threads_per_wave;
-                
-                println!("Rapid thread creation test: {} threads created, {} operations", 
-                        thread_count, total_ops);
-                
-                assert_eq!(thread_count, expected_threads, "Should create expected number of threads");
+
+                println!(
+                    "Rapid thread creation test: {} threads created, {} operations",
+                    thread_count, total_ops
+                );
+
+                assert_eq!(
+                    thread_count, expected_threads,
+                    "Should create expected number of threads"
+                );
                 assert_eq!(total_ops, expected_ops, "All operations should complete");
-                
+
                 // Verify cache consistency after rapid thread churn
                 let final_cache = cache.lock().unwrap();
                 assert!(final_cache.len() <= final_cache.capacity());
-                
-                println!("Final cache state after rapid thread churn: {} items", final_cache.len());
+
+                println!(
+                    "Final cache state after rapid thread churn: {} items",
+                    final_cache.len()
+                );
             }
 
             #[test]
             fn test_burst_load_handling() {
                 // Test handling of sudden burst loads
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(300)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(300)));
                 let burst_threads = 25;
                 let operations_per_burst_thread = 100;
                 let background_threads = 5;
                 let background_operations = 200;
-                
+
                 let burst_operations = Arc::new(AtomicUsize::new(0));
                 let background_operations_count = Arc::new(AtomicUsize::new(0));
                 let burst_start_signal = Arc::new(AtomicBool::new(false));
-                
+
                 // Start background threads first (steady load)
-                let background_handles: Vec<_> = (0..background_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let background_operations_count = background_operations_count.clone();
-                    let burst_start_signal = burst_start_signal.clone();
-                    
-                    thread::spawn(move || {
-                        let mut ops = 0;
-                        
-                        for i in 0..background_operations {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                let key = format!("background_{}_{}", thread_id, i);
-                                let value = format!("bg_value_{}", i);
-                                cache_guard.insert(key, value);
-                                ops += 1;
+                let background_handles: Vec<_> = (0..background_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let background_operations_count = background_operations_count.clone();
+                        let burst_start_signal = burst_start_signal.clone();
+
+                        thread::spawn(move || {
+                            let mut ops = 0;
+
+                            for i in 0..background_operations {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    let key = format!("background_{}_{}", thread_id, i);
+                                    let value = format!("bg_value_{}", i);
+                                    cache_guard.insert(key, value);
+                                    ops += 1;
+                                }
+
+                                // Signal burst to start midway through background load
+                                if i == background_operations / 2 && thread_id == 0 {
+                                    burst_start_signal.store(true, Ordering::SeqCst);
+                                }
+
+                                thread::sleep(Duration::from_millis(10)); // Steady pace
                             }
-                            
-                            // Signal burst to start midway through background load
-                            if i == background_operations / 2 && thread_id == 0 {
-                                burst_start_signal.store(true, Ordering::SeqCst);
-                            }
-                            
-                            thread::sleep(Duration::from_millis(10)); // Steady pace
-                        }
-                        
-                        background_operations_count.fetch_add(ops, Ordering::SeqCst);
+
+                            background_operations_count.fetch_add(ops, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 // Wait for burst signal
                 while !burst_start_signal.load(Ordering::SeqCst) {
                     thread::sleep(Duration::from_millis(10));
                 }
-                
+
                 // Create sudden burst of threads
                 println!("Starting burst load...");
                 let burst_start_time = Instant::now();
-                
-                let burst_handles: Vec<_> = (0..burst_threads).map(|thread_id| {
-                    let cache = cache.clone();
-                    let burst_operations = burst_operations.clone();
-                    
-                    thread::spawn(move || {
-                        let mut ops = 0;
-                        
-                        for i in 0..operations_per_burst_thread {
-                            if let Ok(mut cache_guard) = cache.lock() {
-                                let key = format!("burst_{}_{}", thread_id, i);
-                                let value = format!("burst_value_{}_{}", thread_id, i);
-                                cache_guard.insert(key, value);
-                                
-                                // High-frequency operations during burst
-                                if i % 3 == 0 {
-                                    let _ = cache_guard.pop_oldest();
+
+                let burst_handles: Vec<_> = (0..burst_threads)
+                    .map(|thread_id| {
+                        let cache = cache.clone();
+                        let burst_operations = burst_operations.clone();
+
+                        thread::spawn(move || {
+                            let mut ops = 0;
+
+                            for i in 0..operations_per_burst_thread {
+                                if let Ok(mut cache_guard) = cache.lock() {
+                                    let key = format!("burst_{}_{}", thread_id, i);
+                                    let value = format!("burst_value_{}_{}", thread_id, i);
+                                    cache_guard.insert(key, value);
+
+                                    // High-frequency operations during burst
+                                    if i % 3 == 0 {
+                                        let _ = cache_guard.pop_oldest();
+                                    }
+
+                                    ops += 1;
                                 }
-                                
-                                ops += 1;
                             }
-                        }
-                        
-                        burst_operations.fetch_add(ops, Ordering::SeqCst);
+
+                            burst_operations.fetch_add(ops, Ordering::SeqCst);
+                        })
                     })
-                }).collect();
-                
+                    .collect();
+
                 // Wait for burst to complete
                 for handle in burst_handles {
                     handle.join().unwrap();
                 }
-                
+
                 let burst_duration = burst_start_time.elapsed();
                 println!("Burst completed in {:?}", burst_duration);
-                
+
                 // Wait for background threads to complete
                 for handle in background_handles {
                     handle.join().unwrap();
                 }
-                
+
                 let total_burst_ops = burst_operations.load(Ordering::SeqCst);
                 let total_bg_ops = background_operations_count.load(Ordering::SeqCst);
                 let expected_burst_ops = burst_threads * operations_per_burst_thread;
                 let expected_bg_ops = background_threads * background_operations;
-                
-                println!("Burst load test: {} burst operations, {} background operations", 
-                        total_burst_ops, total_bg_ops);
-                
-                assert_eq!(total_burst_ops, expected_burst_ops, "All burst operations should complete");
-                assert_eq!(total_bg_ops, expected_bg_ops, "Background operations should not be disrupted");
-                
+
+                println!(
+                    "Burst load test: {} burst operations, {} background operations",
+                    total_burst_ops, total_bg_ops
+                );
+
+                assert_eq!(
+                    total_burst_ops, expected_burst_ops,
+                    "All burst operations should complete"
+                );
+                assert_eq!(
+                    total_bg_ops, expected_bg_ops,
+                    "Background operations should not be disrupted"
+                );
+
                 // Verify system handled burst gracefully
-                assert!(burst_duration < Duration::from_secs(30), "Burst should complete in reasonable time");
-                
+                assert!(
+                    burst_duration < Duration::from_secs(30),
+                    "Burst should complete in reasonable time"
+                );
+
                 let final_cache = cache.lock().unwrap();
-                assert!(final_cache.len() <= final_cache.capacity(), "Cache should remain consistent after burst");
+                assert!(
+                    final_cache.len() <= final_cache.capacity(),
+                    "Cache should remain consistent after burst"
+                );
             }
 
             #[test]
             fn test_gradual_load_increase() {
                 // Test behavior as load gradually increases
-                let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(200)));
+                let cache: ThreadSafeFIFOCache<String, String> =
+                    Arc::new(Mutex::new(FIFOCache::new(200)));
                 let max_threads = 20;
                 let operations_per_thread = 100;
                 let ramp_up_steps = 10;
-                
+
                 let mut total_operations = 0;
                 let mut performance_metrics = Vec::new();
-                
+
                 for step in 1..=ramp_up_steps {
                     let num_threads = (max_threads * step) / ramp_up_steps;
                     let step_operations = Arc::new(AtomicUsize::new(0));
-                    
-                    println!("Load step {}/{}: {} threads", step, ramp_up_steps, num_threads);
-                    
+
+                    println!(
+                        "Load step {}/{}: {} threads",
+                        step, ramp_up_steps, num_threads
+                    );
+
                     let step_start = Instant::now();
-                    
-                    let handles: Vec<_> = (0..num_threads).map(|thread_id| {
-                        let cache = cache.clone();
-                        let step_operations = step_operations.clone();
-                        
-                        thread::spawn(move || {
-                            let mut ops = 0;
-                            
-                            for i in 0..operations_per_thread {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    let key = format!("gradual_{}_{}_{}", step, thread_id, i);
-                                    let value = format!("gradual_value_{}", i);
-                                    cache_guard.insert(key, value);
-                                    
-                                    // Mix operations based on load level
-                                    if step > 5 { // Higher load levels
-                                        if i % 7 == 0 {
-                                            let _ = cache_guard.pop_oldest();
+
+                    let handles: Vec<_> = (0..num_threads)
+                        .map(|thread_id| {
+                            let cache = cache.clone();
+                            let step_operations = step_operations.clone();
+
+                            thread::spawn(move || {
+                                let mut ops = 0;
+
+                                for i in 0..operations_per_thread {
+                                    if let Ok(mut cache_guard) = cache.lock() {
+                                        let key = format!("gradual_{}_{}_{}", step, thread_id, i);
+                                        let value = format!("gradual_value_{}", i);
+                                        cache_guard.insert(key, value);
+
+                                        // Mix operations based on load level
+                                        if step > 5 {
+                                            // Higher load levels
+                                            if i % 7 == 0 {
+                                                let _ = cache_guard.pop_oldest();
+                                            }
                                         }
+
+                                        ops += 1;
                                     }
-                                    
-                                    ops += 1;
                                 }
-                            }
-                            
-                            step_operations.fetch_add(ops, Ordering::SeqCst);
+
+                                step_operations.fetch_add(ops, Ordering::SeqCst);
+                            })
                         })
-                    }).collect();
-                    
+                        .collect();
+
                     for handle in handles {
                         handle.join().unwrap();
                     }
-                    
+
                     let step_duration = step_start.elapsed();
                     let step_ops = step_operations.load(Ordering::SeqCst);
                     let ops_per_sec = step_ops as f64 / step_duration.as_secs_f64();
-                    
+
                     performance_metrics.push((step, num_threads, step_ops, ops_per_sec));
                     total_operations += step_ops;
-                    
-                    println!("  Completed {} operations in {:?} ({:.1} ops/sec)", 
-                            step_ops, step_duration, ops_per_sec);
-                    
+
+                    println!(
+                        "  Completed {} operations in {:?} ({:.1} ops/sec)",
+                        step_ops, step_duration, ops_per_sec
+                    );
+
                     // Brief pause between load increases
                     thread::sleep(Duration::from_millis(200));
                 }
-                
+
                 println!("\nGradual load increase results:");
                 for (step, threads, ops, ops_per_sec) in &performance_metrics {
-                    println!("  Step {}: {} threads, {} ops, {:.1} ops/sec", 
-                            step, threads, ops, ops_per_sec);
+                    println!(
+                        "  Step {}: {} threads, {} ops, {:.1} ops/sec",
+                        step, threads, ops, ops_per_sec
+                    );
                 }
-                
+
                 let expected_total_ops = (1..=ramp_up_steps)
                     .map(|step| ((max_threads * step) / ramp_up_steps) * operations_per_thread)
                     .sum::<usize>();
-                
-                assert_eq!(total_operations, expected_total_ops, "All operations should complete");
-                
+
+                assert_eq!(
+                    total_operations, expected_total_ops,
+                    "All operations should complete"
+                );
+
                 // Verify performance doesn't degrade catastrophically with load
                 let first_step_perf = performance_metrics[0].3;
                 let last_step_perf = performance_metrics.last().unwrap().3;
                 let performance_ratio = last_step_perf / first_step_perf;
-                
+
                 println!("Performance ratio (last/first): {:.2}", performance_ratio);
-                assert!(performance_ratio > 0.1, "Performance shouldn't degrade too severely with load");
-                
+                assert!(
+                    performance_ratio > 0.1,
+                    "Performance shouldn't degrade too severely with load"
+                );
+
                 // Verify final cache state
                 let final_cache = cache.lock().unwrap();
-                assert_eq!(final_cache.len(), final_cache.capacity(), 
-                          "Cache should be at capacity after gradual load increase");
+                assert_eq!(
+                    final_cache.len(),
+                    final_cache.capacity(),
+                    "Cache should be at capacity after gradual load increase"
+                );
             }
         }
     }
