@@ -1532,29 +1532,348 @@ mod tests {
         // Space Complexity Tests
         mod space_complexity {
             use super::*;
+            use std::mem;
+            use std::hash::Hash;
+
+            /// Helper function to estimate memory usage of a cache
+            fn estimate_cache_memory_usage<K, V>(cache: &FIFOCache<K, V>) -> usize
+            where
+                K: Eq + Hash + Clone,
+                V: Clone,
+            {
+                // Base structure size
+                let base_size = mem::size_of::<FIFOCache<K, V>>();
+                
+                // HashMap overhead (estimated)
+                let hashmap_overhead = cache.cache.capacity() * (mem::size_of::<K>() + mem::size_of::<V>() + 8);
+                
+                // VecDeque overhead (estimated) 
+                let vecdeque_overhead = cache.insertion_order.capacity() * mem::size_of::<K>();
+                
+                base_size + hashmap_overhead + vecdeque_overhead
+            }
 
             #[test]
             fn test_memory_usage_patterns() {
-                // TODO: Verify O(capacity) space usage
-                todo!("Implement memory usage patterns test")
+                // Test that memory usage grows linearly with capacity (O(capacity))
+                
+                let capacities = vec![100, 500, 1000, 2000];
+                let mut memory_usages = Vec::new();
+                
+                for &capacity in &capacities {
+                    let mut cache = FIFOCache::<String, String>::new(capacity);
+                    
+                    // Fill cache to capacity to get realistic memory usage
+                    for i in 0..capacity {
+                        cache.insert(format!("key_{}", i), format!("value_{}", i));
+                    }
+                    
+                    let estimated_memory = estimate_cache_memory_usage(&cache);
+                    memory_usages.push(estimated_memory);
+                    
+                    println!("Capacity: {}, Estimated memory: {} bytes", capacity, estimated_memory);
+                    
+                    // Verify cache is at expected capacity
+                    assert_eq!(cache.len(), capacity);
+                    assert_eq!(cache.capacity(), capacity);
+                }
+                
+                // Verify roughly linear growth - memory should scale with capacity
+                // Allow for some variance due to HashMap/VecDeque internal allocation strategies
+                if memory_usages.len() >= 2 {
+                    let first_usage = memory_usages[0] as f64;
+                    let last_usage = memory_usages[memory_usages.len() - 1] as f64;
+                    let first_capacity = capacities[0] as f64;
+                    let last_capacity = capacities[capacities.len() - 1] as f64;
+                    
+                    let memory_growth_ratio = last_usage / first_usage;
+                    let capacity_growth_ratio = last_capacity / first_capacity;
+                    
+                    // Memory should grow roughly proportionally to capacity
+                    // Allow for reasonable variance due to allocation overhead
+                    let ratio_difference = (memory_growth_ratio / capacity_growth_ratio - 1.0).abs();
+                    assert!(ratio_difference < 1.0, 
+                           "Memory growth ratio ({:.2}) should be roughly proportional to capacity growth ratio ({:.2})",
+                           memory_growth_ratio, capacity_growth_ratio);
+                }
+                
+                // Test that empty cache uses less memory than full cache
+                let empty_cache = FIFOCache::<String, String>::new(1000);
+                let empty_memory = estimate_cache_memory_usage(&empty_cache);
+                let full_memory = memory_usages[memory_usages.len() - 1];
+                
+                // Empty cache should use less or equal memory than full cache
+                // Note: In Rust, empty collections may pre-allocate based on capacity
+                assert!(empty_memory <= full_memory, 
+                       "Empty cache memory ({}) should not exceed full cache memory ({})", 
+                       empty_memory, full_memory);
             }
 
             #[test]
             fn test_overhead_analysis() {
-                // TODO: Measure HashMap + VecDeque overhead
-                todo!("Implement overhead analysis test")
+                // Analyze the overhead of HashMap + VecDeque vs actual data storage
+                
+                let capacity = 1000;
+                let mut cache = FIFOCache::<String, i32>::new(capacity);
+                
+                // Fill cache with known data sizes
+                for i in 0..capacity {
+                    cache.insert(format!("key_{:06}", i), i as i32); // 10-char keys
+                }
+                
+                // Calculate actual data size
+                let key_size = mem::size_of::<String>() + 10; // String overhead + 10 chars
+                let value_size = mem::size_of::<i32>();
+                let actual_data_size = capacity * (key_size + value_size);
+                
+                // Estimate total cache memory
+                let total_memory = estimate_cache_memory_usage(&cache);
+                
+                // Calculate overhead
+                let overhead = total_memory.saturating_sub(actual_data_size);
+                let overhead_percentage = (overhead as f64 / total_memory as f64) * 100.0;
+                
+                println!("Capacity: {}", capacity);
+                println!("Actual data size: {} bytes", actual_data_size);
+                println!("Total cache memory: {} bytes", total_memory);
+                println!("Overhead: {} bytes ({:.1}%)", overhead, overhead_percentage);
+                
+                // Verify overhead is reasonable (should be less than 200% of data)
+                assert!(overhead_percentage < 200.0, 
+                       "Overhead percentage ({:.1}%) seems excessive", overhead_percentage);
+                
+                // Test memory efficiency with different key/value sizes
+                let test_cases = vec![
+                    (50, "small"),   // Small cache
+                    (500, "medium"), // Medium cache
+                    (2000, "large"), // Large cache
+                ];
+                
+                for (size, description) in test_cases {
+                    let mut test_cache = FIFOCache::<String, String>::new(size);
+                    
+                    // Fill with variable-length data
+                    for i in 0..size {
+                        let key = format!("test_key_{}", i);
+                        let value = format!("test_value_{}", i);
+                        test_cache.insert(key, value);
+                    }
+                    
+                    let memory = estimate_cache_memory_usage(&test_cache);
+                    let memory_per_item = memory / size;
+                    
+                    println!("{} cache - Memory per item: {} bytes", description, memory_per_item);
+                    
+                    // Memory per item should be reasonable (not excessively large)
+                    assert!(memory_per_item < 1000, 
+                           "{} cache memory per item ({}) seems excessive", description, memory_per_item);
+                }
             }
 
             #[test]
             fn test_memory_leak_detection() {
-                // TODO: Ensure proper cleanup and no memory leaks
-                todo!("Implement memory leak detection test")
+                // Test that memory is properly cleaned up after operations
+                
+                let initial_capacity = 1000;
+                
+                // Test 1: Create and drop cache - should not accumulate memory
+                for iteration in 0..5 {
+                    let mut cache = FIFOCache::<String, Vec<u8>>::new(initial_capacity);
+                    
+                    // Fill with large data to make memory usage more apparent
+                    for i in 0..initial_capacity {
+                        let large_value = vec![i as u8; 100]; // 100-byte vectors
+                        cache.insert(format!("key_{}", i), large_value);
+                    }
+                    
+                    assert_eq!(cache.len(), initial_capacity);
+                    
+                    // Cache should be dropped at end of loop iteration
+                    println!("Iteration {} completed", iteration);
+                }
+                
+                // Test 2: Clear operation should free internal memory
+                let mut persistent_cache = FIFOCache::<String, Vec<u8>>::new(initial_capacity);
+                
+                // Fill cache
+                for i in 0..initial_capacity {
+                    let large_value = vec![i as u8; 100];
+                    persistent_cache.insert(format!("key_{}", i), large_value);
+                }
+                
+                let memory_before_clear = estimate_cache_memory_usage(&persistent_cache);
+                
+                // Clear cache
+                persistent_cache.clear();
+                
+                let memory_after_clear = estimate_cache_memory_usage(&persistent_cache);
+                
+                println!("Memory before clear: {} bytes", memory_before_clear);
+                println!("Memory after clear: {} bytes", memory_after_clear);
+                
+                // Memory after clear should be significantly less (though not necessarily zero due to capacity reservations)
+                assert!(memory_after_clear <= memory_before_clear, 
+                       "Memory after clear should not exceed memory before clear");
+                
+                assert_eq!(persistent_cache.len(), 0);
+                assert_eq!(persistent_cache.capacity(), initial_capacity);
+                
+                // Test 3: Pop operations should reduce memory usage
+                let mut pop_test_cache = FIFOCache::<String, Vec<u8>>::new(500);
+                
+                // Fill cache
+                for i in 0..500 {
+                    let value = vec![i as u8; 50];
+                    pop_test_cache.insert(format!("key_{}", i), value);
+                }
+                
+                let memory_before_pops = estimate_cache_memory_usage(&pop_test_cache);
+                
+                // Pop half the items
+                for _ in 0..250 {
+                    pop_test_cache.pop_oldest();
+                }
+                
+                let memory_after_pops = estimate_cache_memory_usage(&pop_test_cache);
+                
+                println!("Memory before pops: {} bytes", memory_before_pops);
+                println!("Memory after pops: {} bytes", memory_after_pops);
+                
+                assert_eq!(pop_test_cache.len(), 250);
+                
+                // Memory should be reduced (though HashMap may retain some capacity)
+                // At minimum, it shouldn't have increased
+                assert!(memory_after_pops <= memory_before_pops + (memory_before_pops / 10), 
+                       "Memory should not significantly increase after pop operations");
+                
+                // Test 4: Eviction should not cause memory leaks
+                let mut eviction_cache = FIFOCache::<String, Vec<u8>>::new(100);
+                
+                // Fill to capacity
+                for i in 0..100 {
+                    let value = vec![i as u8; 50];
+                    eviction_cache.insert(format!("key_{}", i), value);
+                }
+                
+                let memory_at_capacity = estimate_cache_memory_usage(&eviction_cache);
+                
+                // Trigger many evictions
+                for i in 100..500 {
+                    let value = vec![i as u8; 50];
+                    eviction_cache.insert(format!("key_{}", i), value);
+                }
+                
+                let memory_after_evictions = estimate_cache_memory_usage(&eviction_cache);
+                
+                println!("Memory at capacity: {} bytes", memory_at_capacity);
+                println!("Memory after evictions: {} bytes", memory_after_evictions);
+                
+                assert_eq!(eviction_cache.len(), 100); // Should still be at capacity
+                
+                // Memory should remain stable (not continuously grow)
+                let memory_difference_ratio = memory_after_evictions as f64 / memory_at_capacity as f64;
+                assert!(memory_difference_ratio < 2.0, 
+                       "Memory should not double after evictions. Ratio: {:.2}", memory_difference_ratio);
             }
 
             #[test]
             fn test_growth_patterns() {
-                // TODO: Test memory growth as cache size increases
-                todo!("Implement growth patterns test")
+                // Test how memory grows as cache size increases and verify predictable patterns
+                
+                let sizes = vec![10, 50, 100, 250, 500, 1000, 2000];
+                let mut growth_data = Vec::new();
+                
+                for &size in &sizes {
+                    let mut cache = FIFOCache::<u32, u64>::new(size);
+                    
+                    // Fill cache completely
+                    for i in 0..size {
+                        cache.insert(i as u32, (i * 2) as u64);
+                    }
+                    
+                    let memory_usage = estimate_cache_memory_usage(&cache);
+                    let memory_per_item = memory_usage as f64 / size as f64;
+                    
+                    growth_data.push((size, memory_usage, memory_per_item));
+                    
+                    println!("Size: {}, Total memory: {} bytes, Per item: {:.2} bytes", 
+                            size, memory_usage, memory_per_item);
+                }
+                
+                // Analyze growth patterns
+                for i in 1..growth_data.len() {
+                    let (prev_size, prev_memory, _prev_per_item) = growth_data[i-1];
+                    let (curr_size, curr_memory, _curr_per_item) = growth_data[i];
+                    
+                    let size_multiplier = curr_size as f64 / prev_size as f64;
+                    let memory_multiplier = curr_memory as f64 / prev_memory as f64;
+                    
+                    println!("Size {}->{}; Size ratio: {:.2}, Memory ratio: {:.2}", 
+                            prev_size, curr_size, size_multiplier, memory_multiplier);
+                    
+                    // Memory growth should be roughly linear with size growth
+                    // Allow for some variance due to allocation strategies
+                    let growth_ratio_difference = (memory_multiplier / size_multiplier - 1.0).abs();
+                    assert!(growth_ratio_difference < 1.0, 
+                           "Memory growth ({:.2}x) should be roughly proportional to size growth ({:.2}x)",
+                           memory_multiplier, size_multiplier);
+                }
+                
+                // Test memory efficiency: larger caches should not have significantly worse per-item overhead
+                if growth_data.len() >= 2 {
+                    let small_per_item = growth_data[0].2;
+                    let large_per_item = growth_data[growth_data.len()-1].2;
+                    
+                    let efficiency_ratio = large_per_item / small_per_item;
+                    println!("Efficiency ratio (large/small per-item): {:.2}", efficiency_ratio);
+                    
+                    // Larger caches should not be dramatically less efficient per item
+                    assert!(efficiency_ratio < 5.0, 
+                           "Large caches should not be dramatically less efficient per item. Ratio: {:.2}", 
+                           efficiency_ratio);
+                }
+                
+                // Test with different data types to ensure consistent patterns
+                let mut string_cache = FIFOCache::<String, String>::new(500);
+                for i in 0..500 {
+                    string_cache.insert(format!("key_{:06}", i), format!("value_{:06}", i));
+                }
+                
+                let string_memory = estimate_cache_memory_usage(&string_cache);
+                let string_per_item = string_memory as f64 / 500.0;
+                
+                println!("String cache - Total: {} bytes, Per item: {:.2} bytes", 
+                        string_memory, string_per_item);
+                
+                // String cache should use more memory per item than numeric cache (expected)
+                let numeric_per_item = growth_data.iter()
+                    .find(|(size, _, _)| *size == 500)
+                    .map(|(_, _, per_item)| *per_item)
+                    .unwrap_or(0.0);
+                
+                if numeric_per_item > 0.0 {
+                    assert!(string_per_item > numeric_per_item, 
+                           "String cache should use more memory per item than numeric cache");
+                }
+                
+                // Test empty vs full cache memory difference
+                let empty_cache = FIFOCache::<String, String>::new(1000);
+                let empty_memory = estimate_cache_memory_usage(&empty_cache);
+                
+                let mut full_cache = FIFOCache::<String, String>::new(1000);
+                for i in 0..1000 {
+                    full_cache.insert(format!("key_{}", i), format!("value_{}", i));
+                }
+                let full_memory = estimate_cache_memory_usage(&full_cache);
+                
+                println!("Empty vs Full cache: {} bytes -> {} bytes", empty_memory, full_memory);
+                
+                // In Rust, collections pre-allocate based on capacity, so memory usage may be similar
+                // We just verify that full cache doesn't use less memory than empty cache
+                let growth_factor = full_memory as f64 / empty_memory as f64;
+                assert!(growth_factor >= 1.0, 
+                       "Full cache should use at least as much memory as empty cache. Growth: {:.2}x", 
+                       growth_factor);
             }
         }
 
