@@ -57,25 +57,35 @@ impl AsyncDiskManager {
         debug!("Config - io_threads: {}, max_concurrent_ops: {}, batch_size: {}", 
                config.io_threads, config.max_concurrent_ops, config.batch_size);
         
-        // Open database and log files, creating them if they don't exist
-        debug!("Opening database file: {}", db_file_path);
+        // Create direct I/O configuration
+        let direct_io_config = crate::storage::disk::direct_io::DirectIOConfig {
+            enabled: config.direct_io,
+            alignment: 512,
+        };
+
+        // Open database and log files with direct I/O support
+        debug!("Opening database file with direct_io={}: {}", config.direct_io, db_file_path);
+        let db_file_std = crate::storage::disk::direct_io::open_direct_io(
+            &db_file_path, 
+            true, 
+            true, 
+            true, 
+            &direct_io_config
+        )?;
         let db_file = Arc::new(Mutex::new(
-            File::options()
-                .create(true)
-                .read(true)
-                .write(true)
-                .open(&db_file_path)
-                .await?
+            File::from_std(db_file_std)
         ));
         
-        debug!("Opening log file: {}", log_file_path);
+        debug!("Opening log file with direct_io={}: {}", config.direct_io, log_file_path);
+        let log_file_std = crate::storage::disk::direct_io::open_direct_io(
+            &log_file_path, 
+            true, 
+            true, 
+            true, 
+            &direct_io_config
+        )?;
         let log_file = Arc::new(Mutex::new(
-            File::options()
-                .create(true)
-                .read(true)
-                .write(true)
-                .open(&log_file_path)
-                .await?
+            File::from_std(log_file_std)
         ));
         
         // Create IO engine

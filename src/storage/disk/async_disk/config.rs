@@ -110,7 +110,7 @@ impl Default for DiskManagerConfig {
             io_threads: 4,
             max_concurrent_ops: 1000,
             batch_size: 64,
-            direct_io: false,
+            direct_io: true,
 
             cache_size_mb: 512,
             hot_cache_ratio: 0.1,

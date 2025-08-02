@@ -261,6 +261,7 @@ mod tests {
     use crate::storage::disk::disk_manager::MockDiskIO;
     use mockall::predicate::*;
     use tempfile::TempDir;
+    use crate::storage::disk::async_disk::DiskManagerConfig;
 
     pub struct TestContext {
         disk_manager: Arc<FileDiskManager>,
@@ -285,8 +286,13 @@ mod tests {
                 .unwrap()
                 .to_string();
 
+            let buffered_config = DiskManagerConfig {
+                direct_io: false,
+                ..Default::default()
+            };
+
             // Create disk manager with mock disk IO
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 10));
+            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 64 * 1024, buffered_config));
             let disk_scheduler =
                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             Self {
