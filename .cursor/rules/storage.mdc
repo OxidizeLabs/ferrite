@@ -1,0 +1,122 @@
+---
+description: Storage layer, indexing, and page management guidelines
+globs: ["src/storage/**/*.rs"]
+alwaysApply: false
+---
+
+# Storage Layer Guidelines
+
+When working with storage components, focus on data durability, efficient layout, and index performance.
+
+## Page Layout Design
+
+### Page Structure Principles
+- Page layout must be carefully designed for performance
+- Align data to word boundaries where possible
+- Use fixed-size headers for consistent access
+- Implement proper page checksum verification
+- Handle page fragmentation appropriately
+
+### Serialization/Deserialization
+- Implement proper serialization for persistence
+- Handle endianness consistently
+- Use zero-copy deserialization where possible
+- Validate data integrity during deserialization
+- Handle schema evolution gracefully
+
+```rust
+// Proper page serialization pattern
+impl Serialize for MyPage {
+    fn serialize(&self, buf: &mut [u8]) -> Result<usize> {
+        let mut offset = 0;
+        // Write header first
+        offset += self.header.serialize(&mut buf[offset..])?;
+        // Then write data
+        offset += self.data.serialize(&mut buf[offset..])?;
+        Ok(offset)
+    }
+}
+```
+
+## B+ Tree Implementation
+
+### Invariant Maintenance
+- B+ tree operations must maintain all invariants
+- Leaf nodes contain actual data, internal nodes contain keys
+- All leaf nodes at same level
+- Keys in internal nodes guide search
+- Handle split and merge operations correctly
+
+### Concurrent B+ Tree Operations
+- Use crab protocol for concurrent access
+- Handle structural modifications atomically
+- Implement proper lock coupling
+- Avoid deadlocks in tree traversal
+
+### B+ Tree Performance
+- Minimize tree height through proper fan-out
+- Cache frequently accessed internal nodes
+- Batch leaf modifications when possible
+- Use bulk loading for initial tree construction
+
+## Hash Table Implementation
+
+### Hash Function Design
+- Use consistent, high-quality hash functions
+- Handle hash collisions gracefully
+- Implement proper hash table resizing
+- Maintain load factor within reasonable bounds
+
+### Extendable Hash Tables
+- Implement global and local depth correctly
+- Handle bucket splits and merges
+- Manage directory growth efficiently
+- Handle concurrent access to shared structures
+
+### Linear Probe Hash Tables
+- Handle probe sequences correctly
+- Implement proper deletion with tombstones
+- Manage clustering and probe distance
+- Optimize for cache performance
+
+## Table Heap Management
+
+### Record Storage
+- Implement slotted page format for variable-length records
+- Handle record insertion, deletion, and updates
+- Manage free space tracking
+- Implement record versioning for MVCC
+
+### Page Space Management
+- Track free space efficiently
+- Handle page compaction when needed
+- Implement proper space allocation policies
+- Handle large records that span pages
+
+## Disk Management
+
+### I/O Operations
+- Implement proper async I/O where beneficial
+- Handle I/O errors and retries gracefully
+- Use direct I/O for performance when appropriate
+- Batch I/O operations to reduce system calls
+
+### Data Durability
+- Ensure write ordering for consistency
+- Implement proper fsync usage
+- Handle partial writes correctly
+- Verify data integrity after writes
+
+## Index Management
+
+### Index Selection
+- Choose appropriate index type for workload
+- Consider memory vs. disk trade-offs
+- Handle index maintenance during updates
+- Implement proper index statistics collection
+
+### Index Performance
+- Minimize index overhead for writes
+- Optimize index scans for range queries
+- Handle index fragmentation
+- Consider index compression where beneficial

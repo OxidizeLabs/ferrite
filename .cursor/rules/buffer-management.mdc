@@ -1,0 +1,60 @@
+---
+description: Buffer pool management and LRU-K replacement guidelines
+globs: ["src/buffer/**/*.rs"]
+alwaysApply: false
+---
+
+# Buffer Pool Management Guidelines
+
+When working with buffer pool components, follow these specific patterns and best practices.
+
+## Core Principles
+
+- **Always pin pages before use, unpin when done**
+- Handle page eviction carefully - check if page is dirty before eviction
+- Use proper locking hierarchy: page table → free list → individual pages
+- Implement LRU-K algorithm correctly for page replacement
+
+## Buffer Pool Operations
+
+### Page Management Pattern
+```rust
+// Pin page before use
+let page_guard = buffer_pool.fetch_page(page_id)?;
+// Use page
+let result = page_guard.read().process();
+// Page automatically unpinned when guard drops
+```
+
+### Locking Hierarchy
+1. Acquire page table lock first
+2. Then free list lock if needed
+3. Finally individual page locks
+4. Always release in reverse order
+
+### Error Handling in Buffer Operations
+- Handle `PageNotFound` errors gracefully
+- Check for buffer pool full conditions
+- Properly handle page eviction failures
+- Log page I/O errors with context
+
+## LRU-K Implementation
+
+- Track K most recent accesses for each page
+- Use efficient data structures for access history
+- Handle concurrent access to LRU-K data structures
+- Implement proper backward K-distance calculation
+
+## Page Replacement Policy
+
+- Prefer pages with largest backward K-distance
+- Handle tie-breaking consistently
+- Consider page dirtiness in replacement decisions
+- Implement efficient eviction victim selection
+
+## Performance Considerations
+
+- Minimize lock contention in hot paths
+- Use atomic operations for statistics
+- Batch page operations when possible
+- Avoid unnecessary page copies

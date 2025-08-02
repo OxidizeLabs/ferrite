@@ -1,0 +1,100 @@
+---
+description: SQL processing pipeline and execution engine guidelines
+globs: ["src/sql/**/*.rs"]
+alwaysApply: false
+---
+
+# SQL Processing Pipeline Guidelines
+
+When working with SQL components, follow the complete pipeline: Parse → Bind → Plan → Optimize → Execute.
+
+## Binder Guidelines
+
+### Expression Binding
+- Use visitor pattern for expression evaluation
+- Implement proper type checking and casting
+- Handle schema resolution correctly
+- Validate column references against available tables
+
+### Type System Integration
+- Use the `types_db` module for all type operations
+- Handle NULL values correctly throughout the pipeline
+- Implement proper type coercion rules
+- Validate compatible types for operations
+
+### Bound Statement Creation
+```rust
+// Proper binding pattern
+let bound_stmt = binder
+    .bind_statement(&ast_stmt, &schema_context)?
+    .validate_semantics()?;
+```
+
+## Planner Guidelines
+
+### Plan Node Creation
+- Keep plan nodes immutable where possible
+- Separate plan nodes from executor implementations
+- Include cost estimates in plan nodes
+- Handle subquery planning recursively
+
+### Schema Handling
+- Validate table and column existence
+- Handle qualified vs unqualified column names
+- Manage schema changes during planning
+- Cache schema information appropriately
+
+## Optimizer Guidelines
+
+### Rule-Based Optimization
+- Implement transformation rules as separate functions
+- Apply rules in proper order (logical before physical)
+- Handle plan equivalence checking
+- Consider cost-based decisions where appropriate
+
+### Expression Optimization
+- Constant folding where safe
+- Predicate pushdown optimization
+- Join reordering based on selectivity
+- Index utilization optimization
+
+## Executor Guidelines
+
+### Executor Pattern
+```rust
+impl AbstractExecutor for MyExecutor {
+    fn init(&mut self) -> Result<()> {
+        // Initialize executor state
+    }
+    
+    fn next(&mut self) -> Result<Option<Tuple>> {
+        // Return next tuple or None if exhausted
+    }
+}
+```
+
+### Resource Management
+- Initialize executors before first use
+- Clean up resources in executor drop
+- Handle partial execution properly
+- Propagate errors up the execution tree
+
+### Expression Evaluation
+- Cache expression results when beneficial
+- Handle NULL propagation correctly
+- Use efficient evaluation for common expressions
+- Implement proper short-circuit evaluation
+
+## Common SQL Processing Patterns
+
+### Null Handling
+- SQL three-valued logic (TRUE, FALSE, NULL)
+- NULL propagation in arithmetic operations
+- Special handling for comparison operators
+- Proper NULL semantics in aggregations
+
+### Transaction Integration
+- Respect transaction isolation levels
+- Handle concurrent modifications properly
+- Integrate with lock manager for reading
+- Ensure proper cleanup on transaction abort
