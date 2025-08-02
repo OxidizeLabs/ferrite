@@ -253,11 +253,15 @@ impl DB for TKDBTest {
     fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
         let mut writer = TestResultWriter::new();
 
-        // Execute the query
-        match self
-            .instance
-            .execute_sql(sql, IsolationLevel::ReadCommitted, &mut writer)
-        {
+        // Execute the query - use block_in_place to run async function in sync context
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                self.instance
+                    .execute_sql(sql, IsolationLevel::ReadCommitted, &mut writer)
+            )
+        });
+
+        match result {
             Ok(success) => {
                 if success {
                     let output = if writer.column_names.is_empty() {

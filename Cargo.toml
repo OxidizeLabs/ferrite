@@ -21,6 +21,7 @@ bincode = "2.0"
 colored = "3.0"
 rustyline = "16.0.0"
 thiserror = "2.0"
+libc = "0.2"
 
 # Testing
 mockall = "0.13"

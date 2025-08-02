@@ -1,9 +1,11 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::logger::initialize_logger;
+use crate::storage::disk::async_disk::config::DiskManagerConfig;
+use crate::storage::disk::direct_io::{DirectIOConfig, open_direct_io};
 use log::{debug, error, info, trace, warn};
 use mockall::automock;
 use std::collections::{HashMap, VecDeque};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::future::Future;
 use std::io::{
     BufReader, BufWriter, Error, ErrorKind, Read, Result as IoResult, Seek, SeekFrom, Write,
@@ -119,6 +121,9 @@ pub struct FileDiskManager {
     read_cache: Arc<RwLock<ReadAheadCache>>,
     async_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     background_flush_enabled: AtomicUsize, // 0 = disabled, 1 = enabled
+    // Direct I/O configuration
+    config: DiskManagerConfig,
+    direct_io_config: DirectIOConfig,
 }
 
 #[derive(Debug, Default)]
@@ -239,18 +244,31 @@ impl FileDiskManager {
     ///
     /// * `db_file` - The path to the database file.
     /// * `log_file` - The path to the log file.
+    /// * `buffer_size` - Size of the buffer for I/O operations.
+    /// * `config` - Configuration for disk manager including direct I/O settings.
     ///
     /// # Returns
     ///
     /// A new `FileDiskManager` instance.
-    pub fn new(db_file: String, log_file: String, buffer_size: usize) -> Self {
+    pub fn new(
+        db_file: String, 
+        log_file: String, 
+        buffer_size: usize,
+        config: DiskManagerConfig,
+    ) -> Self {
         // Initialize logger at startup
         initialize_logger();
 
+        // Create direct I/O configuration
+        let direct_io_config = DirectIOConfig {
+            enabled: config.direct_io,
+            alignment: 512, // Standard sector size
+        };
+
         info!(
             target: "tkdb::storage",
-            "Initializing FileDiskManager: buffer_size={}, db_file={}, log_file={}",
-            buffer_size, db_file, log_file
+            "Initializing FileDiskManager: buffer_size={}, db_file={}, log_file={}, direct_io={}",
+            buffer_size, db_file, log_file, config.direct_io
         );
 
         // Ensure parent directories exist for both files
@@ -273,11 +291,7 @@ impl FileDiskManager {
             }
         }
 
-        let db_io = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(db_file.clone())
+        let db_io = open_direct_io(&db_file, true, true, true, &direct_io_config)
             .unwrap_or_else(|e| {
                 error!(
                     target: "tkdb::storage",
@@ -286,11 +300,7 @@ impl FileDiskManager {
                 panic!("Failed to open database file {}: {}", db_file, e)
             });
 
-        let log_io = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(log_file.clone())
+        let log_io = open_direct_io(&log_file, true, true, true, &direct_io_config)
             .unwrap_or_else(|e| {
                 error!(
                     target: "tkdb::storage",
@@ -299,9 +309,24 @@ impl FileDiskManager {
                 panic!("Failed to open log file {}: {}", log_file, e)
             });
 
-        // Create separate read buffers
-        let db_read = OpenOptions::new().read(true).open(db_file).unwrap();
-        OpenOptions::new().read(true).open(log_file).unwrap();
+        // Create separate read buffers with direct I/O
+        let db_read = open_direct_io(&db_file, true, false, false, &direct_io_config)
+            .unwrap_or_else(|e| {
+                error!(
+                    target: "tkdb::storage",
+                    "Failed to open database file for reading {}: {}", db_file, e
+                );
+                panic!("Failed to open database file for reading {}: {}", db_file, e)
+            });
+        
+        let _log_read = open_direct_io(&log_file, true, false, false, &direct_io_config)
+            .unwrap_or_else(|e| {
+                error!(
+                    target: "tkdb::storage",
+                    "Failed to open log file for reading {}: {}", log_file, e
+                );
+                panic!("Failed to open log file for reading {}: {}", log_file, e)
+            });
 
         // Clone the file handle for the real disk IO
         let real_disk_io = RealDiskIO {
@@ -330,7 +355,15 @@ impl FileDiskManager {
             read_cache: Arc::new(RwLock::new(ReadAheadCache::new())),
             async_handles: Arc::new(RwLock::new(Vec::new())),
             background_flush_enabled: AtomicUsize::new(1), // Enable by default
+            // Direct I/O configuration
+            config,
+            direct_io_config,
         }
+    }
+
+    /// Creates a new instance with default configuration (for backward compatibility).
+    pub fn new_with_defaults(db_file: String, log_file: String, buffer_size: usize) -> Self {
+        Self::new(db_file, log_file, buffer_size, DiskManagerConfig::default())
     }
 
     /// Shuts down the `FileDiskManager` by flushing any buffered data to disk.
@@ -575,6 +608,8 @@ impl FileDiskManager {
                 }
             }
 
+            // Always flush the buffer to disk
+            // TODO: Implement proper fsync based on self.config.fsync_policy
             writer.flush()
         };
 
@@ -1114,7 +1149,7 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(RwLock::new(FileDiskManager::new(db_path, log_path, 10)));
+            let disk_manager = Arc::new(RwLock::new(FileDiskManager::new_with_defaults(db_path, log_path, 64 * 1024)));
 
             Self {
                 disk_manager,
@@ -1853,7 +1888,7 @@ mod tests {
                 .to_string();
 
             // Re-create disk manager with the known file
-            let disk_manager2 = FileDiskManager::new(db_file.clone(),
+            let disk_manager2 = FileDiskManager::new_with_defaults(db_file.clone(),
                 temp_dir.path().join("test.log").to_str().unwrap().to_string(), 1024);
             assert!(disk_manager2.write_page(0, &test_data).is_ok());
             assert!(disk_manager2.shut_down().is_ok());
@@ -1907,7 +1942,7 @@ mod tests {
                 .to_string();
 
             // This should create the necessary directories
-            let disk_manager = FileDiskManager::new(nested_db_path.clone(), nested_log_path.clone(), 1024);
+            let disk_manager = FileDiskManager::new_with_defaults(nested_db_path.clone(), nested_log_path.clone(), 1024);
 
             // Verify files were created
             assert!(fs::metadata(&nested_db_path).is_ok());
@@ -1988,7 +2023,7 @@ mod tests {
             let db_path = temp_dir.path().join("pressure_test.db").to_str().unwrap().to_string();
             let log_path = temp_dir.path().join("pressure_test.log").to_str().unwrap().to_string();
 
-            let disk_manager = FileDiskManager::new(db_path, log_path, 64); // Very small buffer
+            let disk_manager = FileDiskManager::new_with_defaults(db_path, log_path, 64); // Very small buffer
 
             // Perform many operations to stress the small buffer
             for i in 0..500 {
@@ -2410,7 +2445,7 @@ mod tests {
                     .unwrap()
                     .to_string();
 
-                let disk_manager = FileDiskManager::new(db_path, log_path, buffer_size);
+                let disk_manager = FileDiskManager::new_with_defaults(db_path, log_path, buffer_size);
 
                 // Test basic operations with different buffer sizes
                 let test_data = [42u8; DB_PAGE_SIZE as usize];
