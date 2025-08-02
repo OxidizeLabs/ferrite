@@ -13,7 +13,7 @@ use std::io::Result as IoResult;
 use log::{debug, info, warn, error, trace};
 use tokio::sync::oneshot;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
-use crate::storage::disk::async_disk::cache::CacheManager;
+use crate::storage::disk::async_disk::cache::cache_manager::CacheManager;
 use crate::storage::disk::async_disk::config::{IOPriority, FsyncPolicy};
 use crate::storage::disk::async_disk::io::io::AsyncIOEngine;
 use crate::storage::disk::async_disk::memory::{WriteBufferStats, WriteManager};
@@ -104,7 +104,7 @@ impl AsyncDiskManager {
         
         // Create cache manager
         debug!("Initializing CacheManager");
-        let cache_manager = Arc::new(super::cache::CacheManager::new(&config));
+        let cache_manager = Arc::new(CacheManager::new(&config));
         
         // Create write manager
         debug!("Initializing WriteManager");
