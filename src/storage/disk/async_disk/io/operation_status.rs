@@ -84,11 +84,6 @@ impl OperationStatus {
         matches!(self, Self::Completed { .. })
     }
 
-    /// Returns true if the operation was cancelled
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled { .. })
-    }
-
     /// Returns the duration since the operation started
     pub fn elapsed(&self) -> Duration {
         let started_at = match self {
