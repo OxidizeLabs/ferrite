@@ -32,7 +32,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// | `age_rank()`| O(n)       | O(n)       | Linear scan of insertion order |
 ///
 /// **Note**: `get()` and `insert()` require Arc<K> comparison which may scan the HashMap 
-/// in worst case, but typically perform at O(1) due to hash distribution.
+/// in the worst case, but typically perform at O(1) due to hash distribution.
 ///
 /// ## Space Complexity
 ///
@@ -50,11 +50,11 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// In TKDB, it should be used as:
 ///
 /// ```rust,no_run
-/// use std::sync::{Arc, RwLock};
+/// # use std::sync::{Arc, RwLock};
 /// # use std::collections::HashMap;
 /// # use std::collections::VecDeque;
 /// # use std::hash::Hash;
-/// # use std::sync::Arc;
+/// #
 /// # #[derive(Debug)]
 /// # pub struct FIFOCache<K, V> where K: Eq + Hash {
 /// #     capacity: usize,
@@ -72,7 +72,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> { None }
 /// # }
 /// 
-/// // Correct usage in multi-threaded environment
+/// // Correct usage in multithreaded environment
 /// let thread_safe_cache = Arc::new(RwLock::new(FIFOCache::new(1000)));
 /// 
 /// // Multiple threads can safely access through the RwLock
@@ -219,8 +219,10 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// ```rust,no_run
 /// # use std::collections::HashMap;
 /// # use std::collections::VecDeque;
-/// # use std::hash::Hash;
-/// # trait CoreCache<K, V> {}
+/// # use std::hash::Hash;/// #
+/// use std::sync::Arc;
+///
+/// trait CoreCache<K, V> {}
 /// # trait FIFOCacheTrait<K, V> {
 /// #     fn peek_oldest(&self) -> Option<(&K, &V)>;
 /// #     fn pop_oldest(&mut self) -> Option<(K, V)>;
@@ -1558,7 +1560,6 @@ mod tests {
                 assert_eq!(cache.insertion_order_len(), 4); // All entries in insertion_order
                 
                 // Test 1: pop_oldest cleans up stale entries as it encounters them
-                let initial_order_len = cache.insertion_order_len();
                 assert_eq!(cache.pop_oldest(), Some(("valid1", "value1")));
                 
                 // Should have cleaned up stale entries encountered during traversal
@@ -1651,7 +1652,6 @@ mod tests {
     // ==============================================
     mod complexity {
         use super::*;
-        use std::time::Instant;
 
         // Time Complexity Tests
         mod time_complexity {
@@ -2310,7 +2310,6 @@ mod tests {
             #[derive(Debug)]
             struct PerformanceMetrics {
                 total_operations: usize,
-                total_time_ns: u64,
                 ops_per_second: f64,
                 avg_time_per_op_ns: f64,
                 cache_hit_rate: f64,
@@ -2338,7 +2337,6 @@ mod tests {
 
                     PerformanceMetrics {
                         total_operations,
-                        total_time_ns,
                         ops_per_second,
                         avg_time_per_op_ns,
                         cache_hit_rate,
@@ -2884,8 +2882,7 @@ mod tests {
                 // Spawn reader threads
                 let reader_handles: Vec<_> = (0..num_reader_threads).map(|thread_id| {
                     let cache = cache.clone();
-                    let read_successes = read_successes.clone();
-                    
+
                     thread::spawn(move || {
                         let mut successful_reads = 0;
                         
