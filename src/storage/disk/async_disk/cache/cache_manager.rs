@@ -18,23 +18,12 @@ use super::lfu::LFUCache;
 use super::fifo::FIFOCache;
 
 /// Page data with metadata
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PageData {
-    pub data: Vec<u8>,
+    pub data: Arc<Vec<u8>>,
     pub last_accessed: Instant,
     pub access_count: u64,
     pub temperature: DataTemperature,
-}
-
-impl Clone for PageData {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data.clone(),
-            last_accessed: self.last_accessed,
-            access_count: self.access_count,
-            temperature: self.temperature.clone(),
-        }
-    }
 }
 
 /// Data temperature classification
@@ -158,7 +147,7 @@ pub struct CacheStatistics {
 #[derive(Debug)]
 pub struct CacheManager {
     // L1: Hot page cache (fastest access) - LRU-K based
-    hot_cache: Arc<RwLock<LRUKCache<PageId, Vec<u8>>>>,
+    hot_cache: Arc<RwLock<LRUKCache<PageId, Arc<Vec<u8>>>>>,
 
     // L2: Warm page cache (medium access) - LFU based
     warm_cache: Arc<RwLock<LFUCache<PageId, PageData>>>,
@@ -276,33 +265,34 @@ impl CacheManager {
         self.check_prefetch_hit(page_id);
 
         // Check L1 hot cache first (LRU-K)
-        if let Some(data) = self.hot_cache.try_write().ok()?.get(&page_id) {
+        if let Some(data_arc) = self.hot_cache.try_write().ok()?.get(&page_id) {
             if let Some(metrics) = metrics_collector {
                 metrics.record_cache_operation("hot", true);
             }
-            return Some(data.clone());
+            // Only clone the actual data when returning to caller
+            return Some((**data_arc).clone());
         }
 
         // Check L2 warm cache (LFU)
         if let Some(page_data) = self.warm_cache.try_write().ok()?.get(&page_id) {
-            // Promote to hot cache on hit
+            // Promote to hot cache on hit - share the Arc, no data copying
             self.promotion_count.fetch_add(1, Ordering::Relaxed);
-            let data_copy = page_data.data.clone();
+            let data_arc = Arc::clone(&page_data.data);
             if let Ok(mut hot_cache) = self.hot_cache.try_write() {
-                hot_cache.insert(page_id, data_copy.clone());
+                hot_cache.insert(page_id, data_arc);
             }
             if let Some(metrics) = metrics_collector {
                 metrics.record_cache_operation("warm", true);
                 metrics.record_cache_migration(true);
             }
-            return Some(data_copy);
+            // Only clone the actual data when returning to caller
+            return Some((*page_data.data).clone());
         }
 
         // Check L3 cold cache (FIFO)
         if let Some(page_data) = self.cold_cache.try_write().ok()?.get(&page_id) {
-            // Promote to warm cache on hit
+            // Promote to warm cache on hit - clone the PageData (cheap with Arc)
             self.promotion_count.fetch_add(1, Ordering::Relaxed);
-            let data_copy = page_data.data.clone();
             if let Ok(mut warm_cache) = self.warm_cache.try_write() {
                 warm_cache.insert(page_id, page_data.clone());
             }
@@ -310,7 +300,8 @@ impl CacheManager {
                 metrics.record_cache_operation("cold", true);
                 metrics.record_cache_migration(true);
             }
-            return Some(data_copy);
+            // Only clone the actual data when returning to caller
+            return Some((*page_data.data).clone());
         }
 
         // Cache miss - record for metrics
@@ -390,25 +381,33 @@ impl CacheManager {
         // Determine the appropriate cache level based on access patterns
         let temperature = self.determine_data_temperature(page_id);
 
-        let page_data = PageData {
-            data: data.clone(),
-            last_accessed: Instant::now(),
-            access_count: 1,
-            temperature: temperature.clone(),
-        };
+        // Wrap data in Arc for efficient sharing between cache levels
+        let data_arc = Arc::new(data);
 
         match temperature {
             DataTemperature::Hot => {
                 if let Ok(mut cache) = self.hot_cache.try_write() {
-                    cache.insert(page_id, data);
+                    cache.insert(page_id, Arc::clone(&data_arc));
                 }
             },
             DataTemperature::Warm => {
+                let page_data = PageData {
+                    data: Arc::clone(&data_arc),
+                    last_accessed: Instant::now(),
+                    access_count: 1,
+                    temperature: temperature.clone(),
+                };
                 if let Ok(mut cache) = self.warm_cache.try_write() {
                     cache.insert(page_id, page_data);
                 }
             },
             _ => {
+                let page_data = PageData {
+                    data: Arc::clone(&data_arc),
+                    last_accessed: Instant::now(),
+                    access_count: 1,
+                    temperature: temperature.clone(),
+                };
                 if let Ok(mut cache) = self.cold_cache.try_write() {
                     cache.insert(page_id, page_data);
                 }
