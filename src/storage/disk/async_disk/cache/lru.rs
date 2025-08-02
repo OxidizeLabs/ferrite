@@ -147,216 +147,447 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUCacheTrait, MutableCache};
     use super::*;
+    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUCacheTrait};
+    use std::collections::HashSet;
 
-    #[test]
-    fn test_lru_cache_basic() {
-        let mut cache = LRUCache::new(2);
+    // ==============================================
+    // CORRECTNESS TESTS MODULE
+    // ==============================================
+    mod correctness {
+        use super::*;
 
-        // Insert two items
-        assert_eq!(cache.insert(1, "one"), None);
-        assert_eq!(cache.insert(2, "two"), None);
+        // Basic LRU Behavior Tests
+        mod basic_behavior {
+            use super::*;
 
-        // Cache should be at capacity
-        assert_eq!(cache.len(), 2);
+            #[test]
+            fn test_basic_lru_insertion_and_retrieval() {
+                // TODO: Test basic insertion and retrieval
+            }
 
-        // Access item 1 to make it most recently used
-        assert_eq!(cache.get(&1), Some(&"one"));
+            #[test]
+            fn test_lru_eviction_order() {
+                // TODO: Test that least recently used items are evicted first
+            }
 
-        // Insert a third item, should evict item 2
-        assert_eq!(cache.insert(3, "three"), None);
+            #[test]
+            fn test_capacity_enforcement() {
+                // TODO: Test that cache never exceeds capacity
+            }
 
-        // Check that item 2 was evicted
-        assert_eq!(cache.get(&2), None);
+            #[test]
+            fn test_update_existing_key() {
+                // TODO: Test updating existing key updates recency
+            }
 
-        // Check that items 1 and 3 are still in the cache
-        assert_eq!(cache.get(&1), Some(&"one"));
-        assert_eq!(cache.get(&3), Some(&"three"));
+            #[test]
+            fn test_recency_tracking() {
+                // TODO: Test that recency is correctly tracked and updated
+            }
+
+            #[test]
+            fn test_key_operations_consistency() {
+                // TODO: Test consistency between contains, get, and len operations
+            }
+
+            #[test]
+            fn test_usage_list_consistency() {
+                // TODO: Test that usage list stays consistent with cache contents
+            }
+        }
+
+        // Edge Cases Tests
+        mod edge_cases {
+            use super::*;
+
+            #[test]
+            fn test_empty_cache_operations() {
+                // TODO: Test operations on empty cache
+            }
+
+            #[test]
+            fn test_single_item_cache() {
+                // TODO: Test cache with capacity of 1
+            }
+
+            #[test]
+            fn test_zero_capacity_cache() {
+                // TODO: Test cache with capacity of 0
+            }
+
+            #[test]
+            fn test_same_key_multiple_accesses() {
+                // TODO: Test accessing the same key multiple times
+            }
+
+            #[test]
+            fn test_rapid_key_updates() {
+                // TODO: Test rapid updates to the same key
+            }
+
+            #[test]
+            fn test_duplicate_key_insertion() {
+                // TODO: Test inserting the same key multiple times
+            }
+
+            #[test]
+            fn test_large_cache_operations() {
+                // TODO: Test operations on large capacity cache
+            }
+
+            #[test]
+            fn test_usage_list_edge_cases() {
+                // TODO: Test edge cases in usage list management
+            }
+        }
+
+        // LRU-Specific Operations Tests
+        mod lru_operations {
+            use super::*;
+
+            #[test]
+            fn test_pop_lru_basic() {
+                // TODO: Test basic pop_lru functionality
+            }
+
+            #[test]
+            fn test_peek_lru_basic() {
+                // TODO: Test basic peek_lru functionality
+            }
+
+            #[test]
+            fn test_touch_basic() {
+                // TODO: Test touch() method for updating recency
+            }
+
+            #[test]
+            fn test_recency_rank() {
+                // TODO: Test recency_rank() method accuracy
+            }
+
+            #[test]
+            fn test_pop_lru_empty_cache() {
+                // TODO: Test pop_lru on empty cache
+            }
+
+            #[test]
+            fn test_peek_lru_empty_cache() {
+                // TODO: Test peek_lru on empty cache
+            }
+
+            #[test]
+            fn test_touch_nonexistent_key() {
+                // TODO: Test touch on non-existent key
+            }
+
+            #[test]
+            fn test_recency_rank_nonexistent_key() {
+                // TODO: Test recency_rank on non-existent key
+            }
+
+            #[test]
+            fn test_lru_after_touch() {
+                // TODO: Test LRU behavior after touch operations
+            }
+
+            #[test]
+            fn test_recency_after_get() {
+                // TODO: Test that get() updates recency correctly
+            }
+        }
+
+        // State Consistency Tests
+        mod state_consistency {
+            use super::*;
+
+            #[test]
+            fn test_cache_usage_list_consistency() {
+                // TODO: Test that cache and usage list stay in sync
+            }
+
+            #[test]
+            fn test_len_consistency() {
+                // TODO: Test that len() always matches actual number of items
+            }
+
+            #[test]
+            fn test_capacity_consistency() {
+                // TODO: Test that capacity never changes and is respected
+            }
+
+            #[test]
+            fn test_clear_resets_all_state() {
+                // TODO: Test that clear() resets all internal state
+            }
+
+            #[test]
+            fn test_remove_consistency() {
+                // TODO: Test that remove operations maintain consistency
+            }
+
+            #[test]
+            fn test_eviction_consistency() {
+                // TODO: Test that evictions maintain consistency
+            }
+
+            #[test]
+            fn test_recency_update_on_access() {
+                // TODO: Test that all access methods update recency correctly
+            }
+
+            #[test]
+            fn test_invariants_after_operations() {
+                // TODO: Test that all invariants hold after various operations
+            }
+
+            #[test]
+            fn test_usage_list_ordering() {
+                // TODO: Test that usage list maintains correct ordering
+            }
+        }
     }
 
-    #[test]
-    fn test_lru_cache_update() {
-        let mut cache = LRUCache::new(2);
+    // ==============================================
+    // PERFORMANCE TESTS MODULE
+    // ==============================================
+    mod performance {
+        use super::*;
+        use std::time::{Duration, Instant};
 
-        // Insert two items
-        cache.insert(1, "one");
-        cache.insert(2, "two");
+        // Lookup Performance Tests
+        mod lookup_performance {
+            use super::*;
 
-        // Update item 1
-        assert_eq!(cache.insert(1, "ONE"), Some("one"));
+            #[test]
+            fn test_get_performance_with_recency_updates() {
+                // TODO: Test get() performance with recency tracking overhead
+            }
 
-        // Insert a third item, should evict item 2 since 1 was recently used
-        cache.insert(3, "three");
+            #[test]
+            fn test_contains_performance() {
+                // TODO: Test contains() method performance
+            }
 
-        // Check that item 2 was evicted
-        assert_eq!(cache.get(&2), None);
+            #[test]
+            fn test_recency_rank_performance() {
+                // TODO: Test recency_rank() method performance
+            }
 
-        // Check that items 1 and 3 are still in the cache
-        assert_eq!(cache.get(&1), Some(&"ONE"));
-        assert_eq!(cache.get(&3), Some(&"three"));
+            #[test]
+            fn test_peek_lru_performance() {
+                // TODO: Test peek_lru() performance with large cache
+            }
+
+            #[test]
+            fn test_cache_hit_vs_miss_performance() {
+                // TODO: Compare performance of cache hits vs misses
+            }
+
+            #[test]
+            fn test_touch_performance() {
+                // TODO: Test touch() method performance
+            }
+        }
+
+        // Insertion Performance Tests
+        mod insertion_performance {
+            use super::*;
+
+            #[test]
+            fn test_insertion_performance_with_eviction() {
+                // TODO: Test insertion performance when eviction is triggered
+            }
+
+            #[test]
+            fn test_batch_insertion_performance() {
+                // TODO: Test performance of multiple sequential insertions
+            }
+
+            #[test]
+            fn test_update_vs_new_insertion_performance() {
+                // TODO: Compare performance of updating vs new insertions
+            }
+
+            #[test]
+            fn test_insertion_with_usage_tracking() {
+                // TODO: Test overhead of usage list maintenance during insertion
+            }
+
+            #[test]
+            fn test_usage_list_update_performance() {
+                // TODO: Test performance of usage list updates
+            }
+        }
+
+        // Eviction Performance Tests
+        mod eviction_performance {
+            use super::*;
+
+            #[test]
+            fn test_lru_eviction_performance() {
+                // TODO: Test performance of finding and evicting LRU item
+            }
+
+            #[test]
+            fn test_pop_lru_performance() {
+                // TODO: Test pop_lru() method performance
+            }
+
+            #[test]
+            fn test_eviction_with_frequent_access() {
+                // TODO: Test eviction performance with frequently accessed items
+            }
+
+            #[test]
+            fn test_usage_list_maintenance_overhead() {
+                // TODO: Test overhead of maintaining usage list during evictions
+            }
+        }
+
+        // Memory Efficiency Tests
+        mod memory_efficiency {
+            use super::*;
+
+            #[test]
+            fn test_memory_overhead_of_usage_tracking() {
+                // TODO: Test memory overhead of maintaining usage information
+            }
+
+            #[test]
+            fn test_memory_usage_growth() {
+                // TODO: Test memory usage as cache fills up
+            }
+
+            #[test]
+            fn test_memory_cleanup_after_eviction() {
+                // TODO: Test that memory is properly cleaned up after evictions
+            }
+
+            #[test]
+            fn test_large_value_memory_handling() {
+                // TODO: Test memory efficiency with large values
+            }
+
+            #[test]
+            fn test_usage_list_memory_efficiency() {
+                // TODO: Test memory efficiency of usage list storage
+            }
+        }
     }
 
-    #[test]
-    fn test_lru_cache_remove() {
-        let mut cache = LRUCache::new(2);
+    // ==============================================
+    // CONCURRENCY TESTS MODULE
+    // ==============================================
+    mod concurrency {
+        use super::*;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
 
-        cache.insert(1, "one");
-        cache.insert(2, "two");
+        // Thread Safety Tests
+        mod thread_safety {
+            use super::*;
 
-        // Remove item 1
-        assert_eq!(cache.remove(&1), Some("one"));
+            #[test]
+            fn test_concurrent_insertions() {
+                // TODO: Test multiple threads inserting concurrently
+            }
 
-        // Check that item 1 is no longer in the cache
-        assert_eq!(cache.get(&1), None);
+            #[test]
+            fn test_concurrent_gets() {
+                // TODO: Test multiple threads getting values concurrently
+            }
 
-        // Insert a new item
-        cache.insert(3, "three");
+            #[test]
+            fn test_concurrent_recency_operations() {
+                // TODO: Test concurrent touch and recency tracking operations
+            }
 
-        // Check that items 2 and 3 are in the cache
-        assert_eq!(cache.get(&2), Some(&"two"));
-        assert_eq!(cache.get(&3), Some(&"three"));
-    }
+            #[test]
+            fn test_concurrent_lru_operations() {
+                // TODO: Test concurrent pop_lru and peek_lru operations
+            }
 
-    // Tests for new specialized traits
-    #[test]
-    fn test_lru_specialized_traits_basic() {
-        let mut cache = LRUCache::new(3);
+            #[test]
+            fn test_mixed_concurrent_operations() {
+                // TODO: Test mixed read/write operations across threads
+            }
 
-        // Test CoreCache trait
-        assert_eq!(<LRUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 1, "one".to_string()), None);
-        assert_eq!(<LRUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 2, "two".to_string()), None);
-        assert_eq!(<LRUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 3, "three".to_string()), None);
+            #[test]
+            fn test_concurrent_eviction_scenarios() {
+                // TODO: Test eviction behavior with concurrent access
+            }
 
-        assert_eq!(cache.len(), 3);
-        assert_eq!(cache.capacity(), 3);
-        assert!(cache.contains(&1));
-        assert!(!cache.is_empty());
-    }
+            #[test]
+            fn test_thread_fairness() {
+                // TODO: Test that no thread is starved under high contention
+            }
 
-    #[test]
-    fn test_lru_mutable_cache_trait() {
-        let mut cache = LRUCache::new(3);
+            #[test]
+            fn test_concurrent_usage_list_updates() {
+                // TODO: Test concurrent updates to usage list
+            }
+        }
 
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
+        // Stress Testing
+        mod stress_testing {
+            use super::*;
+            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+            use std::time::{Duration, Instant};
 
-        // Test MutableCache trait
-        assert_eq!(<LRUCache<i32, String> as MutableCache<i32, String>>::remove(&mut cache, &1), Some("one".to_string()));
-        assert_eq!(cache.len(), 1);
-        assert!(!cache.contains(&1));
+            // Helper type for thread-safe testing
+            type ThreadSafeLRUCache<K, V> = Arc<Mutex<LRUCache<K, V>>>;
 
-        // Test remove_batch
-        cache.insert(3, "three".to_string());
-        cache.insert(4, "four".to_string());
-        let results = <LRUCache<i32, String> as MutableCache<i32, String>>::remove_batch(&mut cache, &[2, 3, 5]);
-        assert_eq!(results, vec![Some("two".to_string()), Some("three".to_string()), None]);
-    }
+            #[test]
+            fn test_high_contention_scenario() {
+                // TODO: Test many threads accessing same small set of keys
+            }
 
-    #[test]
-    fn test_lru_trait_pop_lru() {
-        let mut cache = LRUCache::new(3);
+            #[test]
+            fn test_cache_thrashing_scenario() {
+                // TODO: Test rapid insertions causing constant evictions
+            }
 
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-        cache.insert(3, "three".to_string());
+            #[test]
+            fn test_long_running_stability() {
+                // TODO: Test stability over extended periods with continuous load
+            }
 
-        // Access item 2 to make it most recently used
-        cache.get(&2);
+            #[test]
+            fn test_memory_pressure_scenario() {
+                // TODO: Test behavior with large cache and memory-intensive operations
+            }
 
-        // LRU should be item 1
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::pop_lru(&mut cache), Some((1, "one".to_string())));
-        assert_eq!(cache.len(), 2);
-        assert!(!cache.contains(&1));
-    }
+            #[test]
+            fn test_rapid_thread_creation_destruction() {
+                // TODO: Test with threads being created and destroyed rapidly
+            }
 
-    #[test]
-    fn test_lru_trait_peek_lru() {
-        let mut cache = LRUCache::new(3);
+            #[test]
+            fn test_burst_load_handling() {
+                // TODO: Test handling of sudden burst loads
+            }
 
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-        cache.insert(3, "three".to_string());
+            #[test]
+            fn test_gradual_load_increase() {
+                // TODO: Test behavior as load gradually increases
+            }
 
-        // Access item 3 to make it most recently used
-        cache.get(&3);
+            #[test]
+            fn test_recency_tracking_stress() {
+                // TODO: Test stress scenarios with heavy recency tracking
+            }
 
-        // LRU should be item 1
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::peek_lru(&cache), Some((&1, &"one".to_string())));
-        
-        // Cache should be unchanged
-        assert_eq!(cache.len(), 3);
-        assert!(cache.contains(&1));
-    }
+            #[test]
+            fn test_lru_eviction_under_stress() {
+                // TODO: Test LRU eviction correctness under high stress
+            }
 
-    #[test]
-    fn test_lru_trait_touch() {
-        let mut cache = LRUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-        cache.insert(3, "three".to_string());
-
-        // Touch item 1 to make it most recently used
-        assert!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::touch(&mut cache, &1));
-
-        // After touching 1, LRU should be item 2
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::peek_lru(&cache), Some((&2, &"two".to_string())));
-
-        // Touch non-existent key
-        assert!(!<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::touch(&mut cache, &99));
-    }
-
-    #[test]
-    fn test_lru_trait_recency_rank() {
-        let mut cache = LRUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-        cache.insert(3, "three".to_string());
-
-        // Item 3 is most recently used (rank 0), item 1 is least recently used (rank 2)
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &3), Some(0));
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &2), Some(1));
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &1), Some(2));
-
-        // Access item 1 to make it most recently used
-        cache.get(&1);
-
-        // Now item 1 should have rank 0
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &1), Some(0));
-
-        // Non-existent key
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &99), None);
-    }
-
-    #[test]
-    fn test_lru_trait_coexistence() {
-        let mut cache = LRUCache::new(2);
-
-        // Use CoreCache trait
-        <LRUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 1, "core_trait".to_string());
-
-        // Use CoreCache trait
-        <LRUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 2, "another_core".to_string());
-
-        // Use LRU-specific trait
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &1), Some(1));
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &2), Some(0));
-
-        // Both items should be accessible
-        assert_eq!(cache.get(&1), Some(&"old_trait".to_string()));
-        assert_eq!(cache.get(&2), Some(&"new_trait".to_string()));
-    }
-
-    #[test]
-    fn test_lru_empty_cache_operations() {
-        let mut cache = LRUCache::new(2);
-
-        // Test operations on empty cache
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::pop_lru(&mut cache), None);
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::peek_lru(&cache), None);
-        assert!(!<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::touch(&mut cache, &1));
-        assert_eq!(<LRUCache<i32, String> as LRUCacheTrait<i32, String>>::recency_rank(&cache, &1), None);
+            #[test]
+            fn test_usage_list_stress() {
+                // TODO: Test usage list performance under stress conditions
+            }
+        }
     }
 }

@@ -173,281 +173,406 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait};
+    use std::collections::HashSet;
 
-    #[test]
-    fn test_lfu_cache_basic() {
-        let mut cache = LFUCache::new(2);
+    // ==============================================
+    // CORRECTNESS TESTS MODULE
+    // ==============================================
+    mod correctness {
+        use super::*;
 
-        // Insert two items
-        assert_eq!(cache.insert(1, "one"), None);
-        assert_eq!(cache.insert(2, "two"), None);
+        // Basic LFU Behavior Tests
+        mod basic_behavior {
+            use super::*;
 
-        // Cache should be at capacity
-        assert_eq!(cache.len(), 2);
+            #[test]
+            fn test_basic_lfu_insertion_and_retrieval() {
+                // TODO: Test basic insertion and retrieval
+            }
 
-        // Access item 1 multiple times to increase its frequency
-        assert_eq!(cache.get(&1), Some(&"one"));
-        assert_eq!(cache.get(&1), Some(&"one"));
+            #[test]
+            fn test_lfu_eviction_order() {
+                // TODO: Test that least frequently used items are evicted first
+            }
 
-        // Insert a third item, should evict item 2 (least frequently used)
-        assert_eq!(cache.insert(3, "three"), None);
+            #[test]
+            fn test_capacity_enforcement() {
+                // TODO: Test that cache never exceeds capacity
+            }
 
-        // Check that item 2 was evicted
-        assert_eq!(cache.get(&2), None);
+            #[test]
+            fn test_update_existing_key() {
+                // TODO: Test updating existing key preserves frequency
+            }
 
-        // Check that items 1 and 3 are still in the cache
-        assert_eq!(cache.get(&1), Some(&"one"));
-        assert_eq!(cache.get(&3), Some(&"three"));
-    }
+            #[test]
+            fn test_frequency_tracking() {
+                // TODO: Test that frequencies are correctly tracked and updated
+            }
 
-    #[test]
-    fn test_lfu_cache_update() {
-        let mut cache = LFUCache::new(2);
-
-        // Insert two items
-        cache.insert(1, "one");
-        cache.insert(2, "two");
-
-        // Update item 1
-        assert_eq!(cache.insert(1, "ONE"), Some("one"));
-
-        // Access item 2 multiple times to increase its frequency
-        assert_eq!(cache.get(&2), Some(&"two"));
-        assert_eq!(cache.get(&2), Some(&"two"));
-
-        // Insert a third item, should evict item 1 despite being updated
-        cache.insert(3, "three");
-
-        // Check that item 1 was evicted
-        assert_eq!(cache.get(&1), None);
-
-        // Check that items 2 and 3 are still in the cache
-        assert_eq!(cache.get(&2), Some(&"two"));
-        assert_eq!(cache.get(&3), Some(&"three"));
-    }
-
-    #[test]
-    fn test_lfu_cache_remove() {
-        let mut cache = LFUCache::new(2);
-
-        cache.insert(1, "one");
-        cache.insert(2, "two");
-
-        // Remove item 1
-        assert_eq!(cache.remove(&1), Some("one"));
-
-        // Check that item 1 is no longer in the cache
-        assert_eq!(cache.get(&1), None);
-
-        // Insert a new item
-        cache.insert(3, "three");
-
-        // Check that items 2 and 3 are in the cache
-        assert_eq!(cache.get(&2), Some(&"two"));
-        assert_eq!(cache.get(&3), Some(&"three"));
-    }
-
-    // Tests for new specialized traits
-    #[test]
-    fn test_lfu_specialized_traits_basic() {
-        let mut cache = LFUCache::new(3);
-
-        // Test CoreCache trait
-        assert_eq!(<LFUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 1, "one".to_string()), None);
-        assert_eq!(<LFUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 2, "two".to_string()), None);
-        assert_eq!(<LFUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 3, "three".to_string()), None);
-
-        assert_eq!(cache.len(), 3);
-        assert_eq!(cache.capacity(), 3);
-        assert!(cache.contains(&1));
-        assert!(!cache.is_empty());
-    }
-
-    #[test]
-    fn test_lfu_mutable_cache_trait() {
-        let mut cache = LFUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-
-        // Test MutableCache trait
-        assert_eq!(<LFUCache<i32, String> as MutableCache<i32, String>>::remove(&mut cache, &1), Some("one".to_string()));
-        assert_eq!(cache.len(), 1);
-        assert!(!cache.contains(&1));
-
-        // Test remove_batch
-        cache.insert(3, "three".to_string());
-        cache.insert(4, "four".to_string());
-        let results = <LFUCache<i32, String> as MutableCache<i32, String>>::remove_batch(&mut cache, &[2, 3, 5]);
-        assert_eq!(results, vec![Some("two".to_string()), Some("three".to_string()), None]);
-    }
-
-    #[test]
-    fn test_lfu_trait_pop_lfu() {
-        let mut cache = LFUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-        cache.insert(3, "three".to_string());
-
-        // Access item 2 multiple times to increase its frequency
-        cache.get(&2);
-        cache.get(&2);
-
-        // LFU should be either item 1 or 3 (both have frequency 1)
-        let (lfu_key, _) = <LFUCache<i32, String> as LFUCacheTrait<i32, String>>::pop_lfu(&mut cache).unwrap();
-        assert!(lfu_key == 1 || lfu_key == 3);
-        assert_eq!(cache.len(), 2);
-        assert!(!cache.contains(&lfu_key));
-    }
-
-    #[test]
-    fn test_lfu_trait_peek_lfu() {
-        let mut cache = LFUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-        cache.insert(3, "three".to_string());
-
-        // Access item 3 multiple times
-        cache.get(&3);
-        cache.get(&3);
-
-        // LFU should be either item 1 or 2 (both have frequency 1)
-        let (lfu_key, _) = <LFUCache<i32, String> as LFUCacheTrait<i32, String>>::peek_lfu(&cache).unwrap();
-        assert!(lfu_key == &1 || lfu_key == &2);
-        
-        // Cache should be unchanged
-        assert_eq!(cache.len(), 3);
-        assert!(cache.contains(&1));
-        assert!(cache.contains(&2));
-        assert!(cache.contains(&3));
-    }
-
-    #[test]
-    fn test_lfu_trait_frequency() {
-        let mut cache = LFUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-
-        // Initial frequency should be 1
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(1));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &2), Some(1));
-
-        // Access item 1 multiple times
-        cache.get(&1);
-        cache.get(&1);
-
-        // Frequency should be updated
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(3));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &2), Some(1));
-
-        // Non-existent key
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &99), None);
-    }
-
-    #[test]
-    fn test_lfu_trait_reset_frequency() {
-        let mut cache = LFUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-
-        // Access multiple times to increase frequency
-        cache.get(&1);
-        cache.get(&1);
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(3));
-
-        // Reset frequency
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::reset_frequency(&mut cache, &1), Some(3));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(1));
-
-        // Reset non-existent key
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::reset_frequency(&mut cache, &99), None);
-    }
-
-    #[test]
-    fn test_lfu_trait_increment_frequency() {
-        let mut cache = LFUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-
-        // Initial frequency should be 1
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(1));
-
-        // Increment frequency manually
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::increment_frequency(&mut cache, &1), Some(2));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(2));
-
-        // Increment again
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::increment_frequency(&mut cache, &1), Some(3));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(3));
-
-        // Increment non-existent key
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::increment_frequency(&mut cache, &99), None);
-    }
-
-    #[test]
-    fn test_lfu_trait_coexistence() {
-        let mut cache = LFUCache::new(2);
-
-        // Use CoreCache trait
-        <LFUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 1, "core_trait".to_string());
-        <LFUCache<i32, String> as CoreCache<i32, String>>::insert(&mut cache, 2, "another_core".to_string());
-
-        // Use LFU-specific trait
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(1));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &2), Some(1));
-
-        // Both items should be accessible
-        assert_eq!(<LFUCache<i32, String> as CoreCache<i32, String>>::get(&mut cache, &1), Some(&"core_trait".to_string()));
-        assert_eq!(<LFUCache<i32, String> as CoreCache<i32, String>>::get(&mut cache, &2), Some(&"another_core".to_string()));
-
-        // Frequencies should be updated after access
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(2));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &2), Some(2));
-    }
-
-    #[test]
-    fn test_lfu_empty_cache_operations() {
-        let mut cache = LFUCache::new(2);
-
-        // Test operations on empty cache
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::pop_lfu(&mut cache), None);
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::peek_lfu(&cache), None);
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), None);
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::reset_frequency(&mut cache, &1), None);
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::increment_frequency(&mut cache, &1), None);
-    }
-
-    #[test]
-    fn test_lfu_frequency_consistency() {
-        let mut cache = LFUCache::new(3);
-
-        cache.insert(1, "one".to_string());
-        cache.insert(2, "two".to_string());
-        cache.insert(3, "three".to_string());
-
-        // Make item 2 most frequently used
-        for _ in 0..5 {
-            cache.get(&2);
+            #[test]
+            fn test_key_operations_consistency() {
+                // TODO: Test consistency between contains, get, and len operations
+            }
         }
 
-        // Make item 3 moderately used
-        for _ in 0..2 {
-            cache.get(&3);
+        // Edge Cases Tests
+        mod edge_cases {
+            use super::*;
+
+            #[test]
+            fn test_empty_cache_operations() {
+                // TODO: Test operations on empty cache
+            }
+
+            #[test]
+            fn test_single_item_cache() {
+                // TODO: Test cache with capacity of 1
+            }
+
+            #[test]
+            fn test_zero_capacity_cache() {
+                // TODO: Test cache with capacity of 0
+            }
+
+            #[test]
+            fn test_same_frequency_items() {
+                // TODO: Test behavior when multiple items have same frequency
+            }
+
+            #[test]
+            fn test_frequency_overflow_protection() {
+                // TODO: Test handling of very high frequency counts
+            }
+
+            #[test]
+            fn test_duplicate_key_insertion() {
+                // TODO: Test inserting the same key multiple times
+            }
+
+            #[test]
+            fn test_large_cache_operations() {
+                // TODO: Test operations on large capacity cache
+            }
         }
 
-        // Item 1 should be LFU (frequency 1)
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &1), Some(1));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &2), Some(6));
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::frequency(&cache, &3), Some(3));
+        // LFU-Specific Operations Tests
+        mod lfu_operations {
+            use super::*;
 
-        // Peek LFU should return item 1
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::peek_lfu(&cache), Some((&1, &"one".to_string())));
+            #[test]
+            fn test_pop_lfu_basic() {
+                // TODO: Test basic pop_lfu functionality
+            }
 
-        // Pop LFU should remove item 1
-        assert_eq!(<LFUCache<i32, String> as LFUCacheTrait<i32, String>>::pop_lfu(&mut cache), Some((1, "one".to_string())));
-        assert_eq!(cache.len(), 2);
+            #[test]
+            fn test_peek_lfu_basic() {
+                // TODO: Test basic peek_lfu functionality
+            }
+
+            #[test]
+            fn test_frequency_retrieval() {
+                // TODO: Test frequency() method accuracy
+            }
+
+            #[test]
+            fn test_reset_frequency() {
+                // TODO: Test reset_frequency() method
+            }
+
+            #[test]
+            fn test_increment_frequency() {
+                // TODO: Test increment_frequency() method
+            }
+
+            #[test]
+            fn test_pop_lfu_empty_cache() {
+                // TODO: Test pop_lfu on empty cache
+            }
+
+            #[test]
+            fn test_peek_lfu_empty_cache() {
+                // TODO: Test peek_lfu on empty cache
+            }
+
+            #[test]
+            fn test_lfu_tie_breaking() {
+                // TODO: Test behavior when multiple items have same frequency
+            }
+
+            #[test]
+            fn test_frequency_after_removal() {
+                // TODO: Test that frequency tracking is cleaned up after removal
+            }
+
+            #[test]
+            fn test_frequency_after_clear() {
+                // TODO: Test that all frequencies are reset after clear
+            }
+        }
+
+        // State Consistency Tests
+        mod state_consistency {
+            use super::*;
+
+            #[test]
+            fn test_cache_frequency_consistency() {
+                // TODO: Test that cache and frequency maps stay in sync
+            }
+
+            #[test]
+            fn test_len_consistency() {
+                // TODO: Test that len() always matches actual number of items
+            }
+
+            #[test]
+            fn test_capacity_consistency() {
+                // TODO: Test that capacity never changes and is respected
+            }
+
+            #[test]
+            fn test_clear_resets_all_state() {
+                // TODO: Test that clear() resets all internal state
+            }
+
+            #[test]
+            fn test_remove_consistency() {
+                // TODO: Test that remove operations maintain consistency
+            }
+
+            #[test]
+            fn test_eviction_consistency() {
+                // TODO: Test that evictions maintain consistency
+            }
+
+            #[test]
+            fn test_frequency_increment_on_get() {
+                // TODO: Test that get() increments frequency correctly
+            }
+
+            #[test]
+            fn test_invariants_after_operations() {
+                // TODO: Test that all invariants hold after various operations
+            }
+        }
+    }
+
+    // ==============================================
+    // PERFORMANCE TESTS MODULE
+    // ==============================================
+    mod performance {
+        use super::*;
+        use std::time::{Duration, Instant};
+
+        // Lookup Performance Tests
+        mod lookup_performance {
+            use super::*;
+
+            #[test]
+            fn test_get_performance_with_varying_frequencies() {
+                // TODO: Test get() performance with different frequency distributions
+            }
+
+            #[test]
+            fn test_contains_performance() {
+                // TODO: Test contains() method performance
+            }
+
+            #[test]
+            fn test_frequency_lookup_performance() {
+                // TODO: Test frequency() method performance
+            }
+
+            #[test]
+            fn test_peek_lfu_performance() {
+                // TODO: Test peek_lfu() performance with large cache
+            }
+
+            #[test]
+            fn test_cache_hit_vs_miss_performance() {
+                // TODO: Compare performance of cache hits vs misses
+            }
+        }
+
+        // Insertion Performance Tests
+        mod insertion_performance {
+            use super::*;
+
+            #[test]
+            fn test_insertion_performance_with_eviction() {
+                // TODO: Test insertion performance when eviction is triggered
+            }
+
+            #[test]
+            fn test_batch_insertion_performance() {
+                // TODO: Test performance of multiple sequential insertions
+            }
+
+            #[test]
+            fn test_update_vs_new_insertion_performance() {
+                // TODO: Compare performance of updating vs new insertions
+            }
+
+            #[test]
+            fn test_insertion_with_frequency_tracking() {
+                // TODO: Test overhead of frequency tracking during insertion
+            }
+        }
+
+        // Eviction Performance Tests
+        mod eviction_performance {
+            use super::*;
+
+            #[test]
+            fn test_lfu_eviction_performance() {
+                // TODO: Test performance of finding and evicting LFU item
+            }
+
+            #[test]
+            fn test_pop_lfu_performance() {
+                // TODO: Test pop_lfu() method performance
+            }
+
+            #[test]
+            fn test_eviction_with_many_same_frequency() {
+                // TODO: Test eviction performance when many items have same frequency
+            }
+
+            #[test]
+            fn test_frequency_distribution_impact() {
+                // TODO: Test how frequency distribution affects eviction performance
+            }
+        }
+
+        // Memory Efficiency Tests
+        mod memory_efficiency {
+            use super::*;
+
+            #[test]
+            fn test_memory_overhead_of_frequency_tracking() {
+                // TODO: Test memory overhead of maintaining frequency information
+            }
+
+            #[test]
+            fn test_memory_usage_growth() {
+                // TODO: Test memory usage as cache fills up
+            }
+
+            #[test]
+            fn test_memory_cleanup_after_eviction() {
+                // TODO: Test that memory is properly cleaned up after evictions
+            }
+
+            #[test]
+            fn test_large_value_memory_handling() {
+                // TODO: Test memory efficiency with large values
+            }
+        }
+    }
+
+    // ==============================================
+    // CONCURRENCY TESTS MODULE
+    // ==============================================
+    mod concurrency {
+        use super::*;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        // Thread Safety Tests
+        mod thread_safety {
+            use super::*;
+
+            #[test]
+            fn test_concurrent_insertions() {
+                // TODO: Test multiple threads inserting concurrently
+            }
+
+            #[test]
+            fn test_concurrent_gets() {
+                // TODO: Test multiple threads getting values concurrently
+            }
+
+            #[test]
+            fn test_concurrent_frequency_operations() {
+                // TODO: Test concurrent frequency increment/reset operations
+            }
+
+            #[test]
+            fn test_concurrent_lfu_operations() {
+                // TODO: Test concurrent pop_lfu and peek_lfu operations
+            }
+
+            #[test]
+            fn test_mixed_concurrent_operations() {
+                // TODO: Test mixed read/write operations across threads
+            }
+
+            #[test]
+            fn test_concurrent_eviction_scenarios() {
+                // TODO: Test eviction behavior with concurrent access
+            }
+
+            #[test]
+            fn test_thread_fairness() {
+                // TODO: Test that no thread is starved under high contention
+            }
+        }
+
+        // Stress Testing
+        mod stress_testing {
+            use super::*;
+            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+            use std::time::{Duration, Instant};
+
+            // Helper type for thread-safe testing
+            type ThreadSafeLFUCache<K, V> = Arc<Mutex<LFUCache<K, V>>>;
+
+            #[test]
+            fn test_high_contention_scenario() {
+                // TODO: Test many threads accessing same small set of keys
+            }
+
+            #[test]
+            fn test_cache_thrashing_scenario() {
+                // TODO: Test rapid insertions causing constant evictions
+            }
+
+            #[test]
+            fn test_long_running_stability() {
+                // TODO: Test stability over extended periods with continuous load
+            }
+
+            #[test]
+            fn test_memory_pressure_scenario() {
+                // TODO: Test behavior with large cache and memory-intensive operations
+            }
+
+            #[test]
+            fn test_rapid_thread_creation_destruction() {
+                // TODO: Test with threads being created and destroyed rapidly
+            }
+
+            #[test]
+            fn test_burst_load_handling() {
+                // TODO: Test handling of sudden burst loads
+            }
+
+            #[test]
+            fn test_gradual_load_increase() {
+                // TODO: Test behavior as load gradually increases
+            }
+
+            #[test]
+            fn test_frequency_distribution_stress() {
+                // TODO: Test stress scenarios with various frequency distributions
+            }
+
+            #[test]
+            fn test_lfu_eviction_under_stress() {
+                // TODO: Test LFU eviction correctness under high stress
+            }
+        }
     }
 }

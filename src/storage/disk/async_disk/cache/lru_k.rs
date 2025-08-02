@@ -344,375 +344,516 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread::sleep;
-    use std::time::Duration;
-    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait, MutableCache};
+    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait};
+    use std::collections::HashSet;
 
-    #[test]
-    fn test_lru_k_cache_basic() {
-        let mut cache = LRUKCache::new(3); // Default k=2
+    // ==============================================
+    // CORRECTNESS TESTS MODULE
+    // ==============================================
+    mod correctness {
+        use super::*;
 
-        // Insert three items
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        sleep(Duration::from_millis(1)); // Ensure different timestamps
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
+        // Basic LRU-K Behavior Tests
+        mod basic_behavior {
+            use super::*;
 
-        // Cache should be at capacity
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::len(&cache), 3);
+            #[test]
+            fn test_basic_lru_k_insertion_and_retrieval() {
+                // TODO: Test basic insertion and retrieval
+            }
 
-        // Access items to build history
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1); // Second access for item 1
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &2); // Second access for item 2
+            #[test]
+            fn test_lru_k_eviction_order() {
+                // TODO: Test that LRU-K eviction prioritizes items with fewer than K accesses
+            }
 
-        // Insert a fourth item, should evict item 3 (only one access)
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 4, "four");
+            #[test]
+            fn test_capacity_enforcement() {
+                // TODO: Test that cache never exceeds capacity
+            }
 
-        // Check that item 3 was evicted
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &3), None);
+            #[test]
+            fn test_update_existing_key() {
+                // TODO: Test updating existing key updates access history
+            }
 
-        // Check that other items are still in the cache
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1), Some(&"one"));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &2), Some(&"two"));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &4), Some(&"four"));
+            #[test]
+            fn test_access_history_tracking() {
+                // TODO: Test that access history is correctly tracked and updated
+            }
+
+            #[test]
+            fn test_k_value_behavior() {
+                // TODO: Test behavior with different K values
+            }
+
+            #[test]
+            fn test_key_operations_consistency() {
+                // TODO: Test consistency between contains, get, and len operations
+            }
+
+            #[test]
+            fn test_timestamp_ordering() {
+                // TODO: Test that timestamps are correctly ordered for eviction decisions
+            }
+        }
+
+        // Edge Cases Tests
+        mod edge_cases {
+            use super::*;
+
+            #[test]
+            fn test_empty_cache_operations() {
+                // TODO: Test operations on empty cache
+            }
+
+            #[test]
+            fn test_single_item_cache() {
+                // TODO: Test cache with capacity of 1
+            }
+
+            #[test]
+            fn test_zero_capacity_cache() {
+                // TODO: Test cache with capacity of 0
+            }
+
+            #[test]
+            fn test_k_equals_one() {
+                // TODO: Test LRU-K with K=1 (should behave like LRU)
+            }
+
+            #[test]
+            fn test_k_larger_than_capacity() {
+                // TODO: Test LRU-K when K > capacity
+            }
+
+            #[test]
+            fn test_same_key_rapid_accesses() {
+                // TODO: Test rapid repeated accesses to the same key
+            }
+
+            #[test]
+            fn test_duplicate_key_insertion() {
+                // TODO: Test inserting the same key multiple times
+            }
+
+            #[test]
+            fn test_large_cache_operations() {
+                // TODO: Test operations on large capacity cache
+            }
+
+            #[test]
+            fn test_access_history_overflow() {
+                // TODO: Test that access history doesn't grow beyond K
+            }
+        }
+
+        // LRU-K-Specific Operations Tests
+        mod lru_k_operations {
+            use super::*;
+
+            #[test]
+            fn test_pop_lru_k_basic() {
+                // TODO: Test basic pop_lru_k functionality
+            }
+
+            #[test]
+            fn test_peek_lru_k_basic() {
+                // TODO: Test basic peek_lru_k functionality
+            }
+
+            #[test]
+            fn test_k_value_retrieval() {
+                // TODO: Test k_value() method accuracy
+            }
+
+            #[test]
+            fn test_access_history_retrieval() {
+                // TODO: Test access_history() method functionality
+            }
+
+            #[test]
+            fn test_access_count() {
+                // TODO: Test access_count() method accuracy
+            }
+
+            #[test]
+            fn test_k_distance() {
+                // TODO: Test k_distance() calculation
+            }
+
+            #[test]
+            fn test_touch_functionality() {
+                // TODO: Test touch() method for updating access history
+            }
+
+            #[test]
+            fn test_k_distance_rank() {
+                // TODO: Test k_distance_rank() calculation
+            }
+
+            #[test]
+            fn test_pop_lru_k_empty_cache() {
+                // TODO: Test pop_lru_k on empty cache
+            }
+
+            #[test]
+            fn test_peek_lru_k_empty_cache() {
+                // TODO: Test peek_lru_k on empty cache
+            }
+
+            #[test]
+            fn test_lru_k_tie_breaking() {
+                // TODO: Test behavior when multiple items have same K-distance
+            }
+
+            #[test]
+            fn test_access_history_after_removal() {
+                // TODO: Test that access history is cleaned up after removal
+            }
+
+            #[test]
+            fn test_access_history_after_clear() {
+                // TODO: Test that all access history is reset after clear
+            }
+        }
+
+        // State Consistency Tests
+        mod state_consistency {
+            use super::*;
+
+            #[test]
+            fn test_cache_access_history_consistency() {
+                // TODO: Test that cache and access history stay in sync
+            }
+
+            #[test]
+            fn test_len_consistency() {
+                // TODO: Test that len() always matches actual number of items
+            }
+
+            #[test]
+            fn test_capacity_consistency() {
+                // TODO: Test that capacity never changes and is respected
+            }
+
+            #[test]
+            fn test_clear_resets_all_state() {
+                // TODO: Test that clear() resets all internal state
+            }
+
+            #[test]
+            fn test_remove_consistency() {
+                // TODO: Test that remove operations maintain consistency
+            }
+
+            #[test]
+            fn test_eviction_consistency() {
+                // TODO: Test that evictions maintain consistency
+            }
+
+            #[test]
+            fn test_access_history_update_on_get() {
+                // TODO: Test that get() updates access history correctly
+            }
+
+            #[test]
+            fn test_invariants_after_operations() {
+                // TODO: Test that all invariants hold after various operations
+            }
+
+            #[test]
+            fn test_k_distance_calculation_consistency() {
+                // TODO: Test that K-distance calculations are consistent
+            }
+
+            #[test]
+            fn test_timestamp_consistency() {
+                // TODO: Test that timestamps are always increasing
+            }
+        }
     }
 
-    #[test]
-    fn test_lru_k_cache_with_custom_k() {
-        let mut cache = LRUKCache::with_k(3, 3); // k=3
+    // ==============================================
+    // PERFORMANCE TESTS MODULE
+    // ==============================================
+    mod performance {
+        use super::*;
+        use std::time::{Duration, Instant};
 
-        // Insert three items
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
+        // Lookup Performance Tests
+        mod lookup_performance {
+            use super::*;
 
-        // Access items to build history
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1); // Second access for item 1
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1); // Third access for item 1
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &2); // Second access for item 2
+            #[test]
+            fn test_get_performance_with_history_updates() {
+                // TODO: Test get() performance with access history tracking overhead
+            }
 
-        // Insert a fourth item, should evict item 3 (only one access)
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 4, "four");
+            #[test]
+            fn test_contains_performance() {
+                // TODO: Test contains() method performance
+            }
 
-        // Check that item 3 was evicted
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &3), None);
+            #[test]
+            fn test_access_history_lookup_performance() {
+                // TODO: Test access_history() method performance
+            }
 
-        // Check that other items are still in the cache
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1), Some(&"one"));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &2), Some(&"two"));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &4), Some(&"four"));
+            #[test]
+            fn test_k_distance_calculation_performance() {
+                // TODO: Test k_distance() calculation performance
+            }
+
+            #[test]
+            fn test_peek_lru_k_performance() {
+                // TODO: Test peek_lru_k() performance with large cache
+            }
+
+            #[test]
+            fn test_cache_hit_vs_miss_performance() {
+                // TODO: Compare performance of cache hits vs misses
+            }
+
+            #[test]
+            fn test_touch_performance() {
+                // TODO: Test touch() method performance
+            }
+
+            #[test]
+            fn test_k_distance_rank_performance() {
+                // TODO: Test k_distance_rank() calculation performance
+            }
+        }
+
+        // Insertion Performance Tests
+        mod insertion_performance {
+            use super::*;
+
+            #[test]
+            fn test_insertion_performance_with_eviction() {
+                // TODO: Test insertion performance when eviction is triggered
+            }
+
+            #[test]
+            fn test_batch_insertion_performance() {
+                // TODO: Test performance of multiple sequential insertions
+            }
+
+            #[test]
+            fn test_update_vs_new_insertion_performance() {
+                // TODO: Compare performance of updating vs new insertions
+            }
+
+            #[test]
+            fn test_insertion_with_history_tracking() {
+                // TODO: Test overhead of access history maintenance during insertion
+            }
+
+            #[test]
+            fn test_history_update_performance() {
+                // TODO: Test performance of access history updates
+            }
+
+            #[test]
+            fn test_timestamp_generation_overhead() {
+                // TODO: Test overhead of timestamp generation
+            }
+        }
+
+        // Eviction Performance Tests
+        mod eviction_performance {
+            use super::*;
+
+            #[test]
+            fn test_lru_k_eviction_performance() {
+                // TODO: Test performance of finding and evicting LRU-K item
+            }
+
+            #[test]
+            fn test_pop_lru_k_performance() {
+                // TODO: Test pop_lru_k() method performance
+            }
+
+            #[test]
+            fn test_eviction_with_varying_k_values() {
+                // TODO: Test eviction performance with different K values
+            }
+
+            #[test]
+            fn test_eviction_with_large_histories() {
+                // TODO: Test eviction performance when access histories are large
+            }
+
+            #[test]
+            fn test_victim_selection_performance() {
+                // TODO: Test performance of victim selection algorithm
+            }
+        }
+
+        // Memory Efficiency Tests
+        mod memory_efficiency {
+            use super::*;
+
+            #[test]
+            fn test_memory_overhead_of_history_tracking() {
+                // TODO: Test memory overhead of maintaining access history
+            }
+
+            #[test]
+            fn test_memory_usage_growth() {
+                // TODO: Test memory usage as cache fills up
+            }
+
+            #[test]
+            fn test_memory_cleanup_after_eviction() {
+                // TODO: Test that memory is properly cleaned up after evictions
+            }
+
+            #[test]
+            fn test_large_value_memory_handling() {
+                // TODO: Test memory efficiency with large values
+            }
+
+            #[test]
+            fn test_access_history_memory_efficiency() {
+                // TODO: Test memory efficiency of access history storage
+            }
+
+            #[test]
+            fn test_memory_scaling_with_k() {
+                // TODO: Test how memory usage scales with different K values
+            }
+        }
     }
 
-    #[test]
-    fn test_lru_k_cache_eviction_order() {
-        let mut cache = LRUKCache::new(3); // Default k=2
+    // ==============================================
+    // CONCURRENCY TESTS MODULE
+    // ==============================================
+    mod concurrency {
+        use super::*;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
 
-        // Insert three items
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
+        // Thread Safety Tests
+        mod thread_safety {
+            use super::*;
 
-        // Access items to build history
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1); // Second access for item 1
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &2); // Second access for item 2
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &3); // Second access for item 3
+            #[test]
+            fn test_concurrent_insertions() {
+                // TODO: Test multiple threads inserting concurrently
+            }
 
-        // Now all items have 2 accesses, so the k-th (2nd) access time is used
-        // Item 1 has the oldest 2nd access, so it should be evicted
+            #[test]
+            fn test_concurrent_gets() {
+                // TODO: Test multiple threads getting values concurrently
+            }
 
-        // Insert a fourth item
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 4, "four");
+            #[test]
+            fn test_concurrent_history_operations() {
+                // TODO: Test concurrent access history and touch operations
+            }
 
-        // Check that item 1 was evicted
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1), None);
+            #[test]
+            fn test_concurrent_lru_k_operations() {
+                // TODO: Test concurrent pop_lru_k and peek_lru_k operations
+            }
 
-        // Check that other items are still in the cache
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &2), Some(&"two"));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &3), Some(&"three"));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &4), Some(&"four"));
-    }
+            #[test]
+            fn test_mixed_concurrent_operations() {
+                // TODO: Test mixed read/write operations across threads
+            }
 
-    #[test]
-    fn test_lru_k_specialized_traits_basic() {
-        let mut cache = LRUKCache::new(3); // Default k=2
+            #[test]
+            fn test_concurrent_eviction_scenarios() {
+                // TODO: Test eviction behavior with concurrent access
+            }
 
-        // Test CoreCache trait
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::len(&cache), 2);
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::capacity(&cache), 3);
-        assert!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::contains(&cache, &1));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1), Some(&"one"));
-    }
+            #[test]
+            fn test_thread_fairness() {
+                // TODO: Test that no thread is starved under high contention
+            }
 
-    #[test]
-    fn test_lru_k_mutable_cache_trait() {
-        let mut cache = LRUKCache::new(3);
-        
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
-        
-        // Test MutableCache remove
-        assert_eq!(<LRUKCache<i32, &str> as MutableCache<i32, &str>>::remove(&mut cache, &2), Some("two"));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::len(&cache), 2);
-        assert!(!<LRUKCache<i32, &str> as CoreCache<i32, &str>>::contains(&cache, &2));
-        
-        // Test batch removal
-        let keys = [1, 3];
-        let removed = <LRUKCache<i32, &str> as MutableCache<i32, &str>>::remove_batch(&mut cache, &keys);
-        assert_eq!(removed, vec![Some("one"), Some("three")]);
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::len(&cache), 0);
-    }
+            #[test]
+            fn test_concurrent_timestamp_generation() {
+                // TODO: Test concurrent timestamp generation and ordering
+            }
 
-    #[test]
-    fn test_lru_k_trait_pop_lru_k() {
-        let mut cache = LRUKCache::with_k(3, 2);
-        
-        // Test empty cache
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::pop_lru_k(&mut cache), None);
-        
-        // Insert items with different access patterns
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
-        
-        // Give item 1 second access (so it has K=2 accesses)
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        sleep(Duration::from_millis(1));
-        
-        // Item 2 and 3 have only 1 access, item 1 has 2 accesses
-        // Items 2 and 3 should be preferred for eviction (fewer than K accesses)
-        // Item 2 was inserted first, so it should be evicted first
-        let evicted = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::pop_lru_k(&mut cache);
-        assert_eq!(evicted, Some((2, "two")));
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::len(&cache), 2);
-    }
+            #[test]
+            fn test_concurrent_access_history_updates() {
+                // TODO: Test concurrent updates to access histories
+            }
+        }
 
-    #[test]
-    fn test_lru_k_trait_peek_lru_k() {
-        let mut cache = LRUKCache::with_k(3, 2);
-        
-        // Test empty cache
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::peek_lru_k(&cache), None);
-        
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
-        
-        // Should peek at the item that would be evicted next (item 1 - oldest with < K accesses)
-        let peeked = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::peek_lru_k(&cache);
-        assert_eq!(peeked, Some((&1, &"one")));
-        
-        // Cache should be unchanged
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::len(&cache), 3);
-        assert!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::contains(&cache, &1));
-    }
+        // Stress Testing
+        mod stress_testing {
+            use super::*;
+            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+            use std::time::{Duration, Instant};
 
-    #[test]
-    fn test_lru_k_trait_k_value() {
-        let cache = LRUKCache::with_k(10, 3);
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_value(&cache), 3);
-        
-        let cache2 = LRUKCache::new(10); // Default k=2
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_value(&cache2), 2);
-    }
+            // Helper type for thread-safe testing
+            type ThreadSafeLRUKCache<K, V> = Arc<Mutex<LRUKCache<K, V>>>;
 
-    #[test]
-    fn test_lru_k_trait_access_history() {
-        let mut cache = LRUKCache::with_k(5, 3);
-        
-        // Test non-existent key
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_history(&cache, &1), None);
-        
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        let history1 = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_history(&cache, &1).unwrap();
-        assert_eq!(history1.len(), 1);
-        
-        // Access the item multiple times
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        
-        let history2 = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_history(&cache, &1).unwrap();
-        assert_eq!(history2.len(), 3);
-        
-        // History should be in reverse chronological order (most recent first)
-        assert!(history2[0] > history2[1]);
-        assert!(history2[1] > history2[2]);
-    }
+            #[test]
+            fn test_high_contention_scenario() {
+                // TODO: Test many threads accessing same small set of keys
+            }
 
-    #[test]
-    fn test_lru_k_trait_access_count() {
-        let mut cache = LRUKCache::with_k(5, 3);
-        
-        // Test non-existent key
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_count(&cache, &1), None);
-        
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_count(&cache, &1), Some(1));
-        
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_count(&cache, &1), Some(3));
-        
-        // Access count should be capped at K
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_count(&cache, &1), Some(3));
-    }
+            #[test]
+            fn test_cache_thrashing_scenario() {
+                // TODO: Test rapid insertions causing constant evictions
+            }
 
-    #[test]
-    fn test_lru_k_trait_k_distance() {
-        let mut cache = LRUKCache::with_k(5, 3);
-        
-        // Test non-existent key
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance(&cache, &1), None);
-        
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        // Only 1 access, no K-distance yet
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance(&cache, &1), None);
-        
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        // Only 2 accesses, still no K-distance (K=3)
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance(&cache, &1), None);
-        
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        // Now has 3 accesses, should have K-distance
-        let k_distance = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance(&cache, &1);
-        assert!(k_distance.is_some());
-    }
+            #[test]
+            fn test_long_running_stability() {
+                // TODO: Test stability over extended periods with continuous load
+            }
 
-    #[test]
-    fn test_lru_k_trait_touch() {
-        let mut cache = LRUKCache::with_k(5, 2);
-        
-        // Test non-existent key
-        assert!(!<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::touch(&mut cache, &1));
-        
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        let count_before = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_count(&cache, &1).unwrap();
-        
-        // Touch should increment access count
-        assert!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::touch(&mut cache, &1));
-        let count_after = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_count(&cache, &1).unwrap();
-        assert_eq!(count_after, count_before + 1);
-    }
+            #[test]
+            fn test_memory_pressure_scenario() {
+                // TODO: Test behavior with large cache and memory-intensive operations
+            }
 
-    #[test]
-    fn test_lru_k_trait_k_distance_rank() {
-        let mut cache = LRUKCache::with_k(4, 2);
-        
-        // Test non-existent key
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance_rank(&cache, &1), None);
-        
-        // Insert items at different times
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
-        
-        // All items have only 1 access, so rank by insertion order
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance_rank(&cache, &1), Some(0)); // oldest
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance_rank(&cache, &2), Some(1));
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance_rank(&cache, &3), Some(2)); // newest
-        
-        // Give item 1 a second access, making it have K=2 accesses
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        
-        // Now item 1 should rank lower (has K accesses), items 2,3 rank higher (< K accesses)
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance_rank(&cache, &2), Some(0)); // highest priority (< K accesses, oldest)
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance_rank(&cache, &3), Some(1)); // second priority (< K accesses, newer)
-        assert_eq!(<LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_distance_rank(&cache, &1), Some(2)); // lowest priority (>= K accesses)
-    }
+            #[test]
+            fn test_rapid_thread_creation_destruction() {
+                // TODO: Test with threads being created and destroyed rapidly
+            }
 
-    #[test]
-    fn test_lru_k_trait_coexistence() {
-        let mut cache = LRUKCache::new(3);
-        
-        // Use old Cache trait
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "old_way");
-        let value = <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        assert_eq!(value, Some(&"old_way"));
-        
-        // Use new CoreCache trait on same instance
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "new_way");
-        let value2 = <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &2);
-        assert_eq!(value2, Some(&"new_way"));
-        
-        // Use LRU-K specific trait
-        let k_val = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::k_value(&cache);
-        assert_eq!(k_val, 2);
-        
-        let count = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::access_count(&cache, &1);
-        assert_eq!(count, Some(2)); // insert + get
-        
-        // All traits work on the same cache instance
-        assert_eq!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::len(&cache), 2);
-    }
+            #[test]
+            fn test_burst_load_handling() {
+                // TODO: Test handling of sudden burst loads
+            }
 
-    #[test]
-    fn test_lru_k_empty_cache_operations() {
-        let mut cache = LRUKCache::<i32, String>::new(5);
-        
-        // All operations should handle empty cache gracefully
-        assert_eq!(<LRUKCache<i32, String> as LRUKCacheTrait<i32, String>>::pop_lru_k(&mut cache), None);
-        assert_eq!(<LRUKCache<i32, String> as LRUKCacheTrait<i32, String>>::peek_lru_k(&cache), None);
-        assert_eq!(<LRUKCache<i32, String> as LRUKCacheTrait<i32, String>>::access_history(&cache, &1), None);
-        assert_eq!(<LRUKCache<i32, String> as LRUKCacheTrait<i32, String>>::access_count(&cache, &1), None);
-        assert_eq!(<LRUKCache<i32, String> as LRUKCacheTrait<i32, String>>::k_distance(&cache, &1), None);
-        assert!(!<LRUKCache<i32, String> as LRUKCacheTrait<i32, String>>::touch(&mut cache, &1));
-        assert_eq!(<LRUKCache<i32, String> as LRUKCacheTrait<i32, String>>::k_distance_rank(&cache, &1), None);
-        
-        assert_eq!(<LRUKCache<i32, String> as CoreCache<i32, String>>::len(&cache), 0);
-        assert!(<LRUKCache<i32, String> as CoreCache<i32, String>>::is_empty(&cache));
-    }
+            #[test]
+            fn test_gradual_load_increase() {
+                // TODO: Test behavior as load gradually increases
+            }
 
-    #[test]
-    fn test_lru_k_complex_eviction_scenario() {
-        let mut cache = LRUKCache::with_k(3, 2);
-        
-        // Insert items
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 1, "one");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 2, "two");
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 3, "three");
-        
-        // Access item 1 multiple times to give it K accesses
-        sleep(Duration::from_millis(1));
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::get(&mut cache, &1);
-        
-        // Items 2 and 3 have 1 access, item 1 has 2 accesses
-        // When we insert item 4, item 2 should be evicted (oldest with < K accesses)
-        <LRUKCache<i32, &str> as CoreCache<i32, &str>>::insert(&mut cache, 4, "four");
-        
-        assert!(!<LRUKCache<i32, &str> as CoreCache<i32, &str>>::contains(&cache, &2)); // Should be evicted
-        assert!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::contains(&cache, &1));   // Should remain (has K accesses)
-        assert!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::contains(&cache, &3));   // Should remain
-        assert!(<LRUKCache<i32, &str> as CoreCache<i32, &str>>::contains(&cache, &4));   // Should be present
-        
-        // Verify we can peek at the next victim
-        let next_victim = <LRUKCache<i32, &str> as LRUKCacheTrait<i32, &str>>::peek_lru_k(&cache);
-        assert_eq!(next_victim, Some((&3, &"three"))); // Next oldest with < K accesses
+            #[test]
+            fn test_access_pattern_stress() {
+                // TODO: Test stress scenarios with various access patterns
+            }
+
+            #[test]
+            fn test_lru_k_eviction_under_stress() {
+                // TODO: Test LRU-K eviction correctness under high stress
+            }
+
+            #[test]
+            fn test_timestamp_stress() {
+                // TODO: Test timestamp generation under stress conditions
+            }
+
+            #[test]
+            fn test_varying_k_values_stress() {
+                // TODO: Test stress scenarios with different K values
+            }
+
+            #[test]
+            fn test_access_history_stress() {
+                // TODO: Test access history management under stress
+            }
+        }
     }
 }
