@@ -14,7 +14,7 @@ use tokio::time::Instant;
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
-use crate::storage::disk::async_disk::cache::CacheManager;
+use crate::storage::disk::async_disk::cache::cache_manager::CacheManager;
 use crate::storage::disk::async_disk::config::FsyncPolicy;
 pub use crate::storage::disk::async_disk::DiskManagerConfig;
 use crate::storage::disk::async_disk::io::io::AsyncIOEngine;
