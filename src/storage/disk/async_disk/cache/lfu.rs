@@ -2583,22 +2583,606 @@ mod tests {
 
             #[test]
             fn test_insertion_performance_with_eviction() {
-                // TODO: Test insertion performance when eviction is triggered
+                let cache_capacity = 5000;
+                let mut cache = LFUCache::new(cache_capacity);
+                
+                // Phase 1: Fill cache to capacity without eviction
+                let start = Instant::now();
+                for i in 0..cache_capacity {
+                    cache.insert(format!("initial_{}", i), i as i32);
+                }
+                let fill_duration = start.elapsed();
+                assert_eq!(cache.len(), cache_capacity);
+                
+                // Phase 2: Insert additional items that trigger eviction
+                let eviction_count = 2000;
+                let start = Instant::now();
+                for i in 0..eviction_count {
+                    cache.insert(format!("evict_{}", i), (i + cache_capacity) as i32);
+                }
+                let eviction_duration = start.elapsed();
+                assert_eq!(cache.len(), cache_capacity); // Should still be at capacity
+                
+                // Phase 3: Compare performance per operation
+                let fill_per_op = fill_duration / cache_capacity as u32;
+                let eviction_per_op = eviction_duration / eviction_count as u32;
+                
+                // Eviction operations should be slower due to LFU finding
+                println!("Fill performance: {:?} per op, Eviction performance: {:?} per op", 
+                    fill_per_op, eviction_per_op);
+                
+                // Performance assertions
+                assert!(fill_duration < Duration::from_millis(500), 
+                    "Filling cache should be fast: {:?}", fill_duration);
+                assert!(eviction_duration < Duration::from_millis(2000), 
+                    "Eviction insertions should be reasonable: {:?}", eviction_duration);
+                
+                // Test with frequent access patterns during eviction
+                let mut cache_with_access = LFUCache::new(1000);
+                
+                // Fill cache
+                for i in 0..1000 {
+                    cache_with_access.insert(format!("access_{}", i), i as i32);
+                }
+                
+                // Create frequency distribution by accessing some items
+                for _ in 0..5 {
+                    for i in 0..200 {
+                        cache_with_access.get(&format!("access_{}", i));
+                    }
+                }
+                
+                // Now test eviction with mixed frequency items
+                let start = Instant::now();
+                for i in 0..500 {
+                    cache_with_access.insert(format!("new_evict_{}", i), (i + 2000) as i32);
+                }
+                let mixed_eviction_duration = start.elapsed();
+                
+                assert!(mixed_eviction_duration < Duration::from_millis(1000), 
+                    "Mixed frequency eviction should be reasonable: {:?}", mixed_eviction_duration);
+                
+                // Verify that high-frequency items are preserved
+                assert!(cache_with_access.contains(&"access_0".to_string()));
+                assert!(cache_with_access.contains(&"access_100".to_string()));
+                
+                // Test eviction performance scaling
+                let sizes = [100, 500, 1000, 2000];
+                let mut eviction_times = Vec::new();
+                
+                for &size in &sizes {
+                    let mut test_cache = LFUCache::new(size);
+                    
+                    // Fill to capacity
+                    for i in 0..size {
+                        test_cache.insert(format!("scale_{}", i), i as i32);
+                    }
+                    
+                    // Measure eviction performance
+                    let start = Instant::now();
+                    for i in 0..100 {
+                        test_cache.insert(format!("evict_scale_{}", i), (i + size) as i32);
+                    }
+                    let duration = start.elapsed();
+                    eviction_times.push(duration);
+                }
+                
+                // Performance should scale reasonably with cache size
+                for (i, &duration) in eviction_times.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(200 * (i + 1) as u64), 
+                        "Eviction performance should scale reasonably for size {}: {:?}", 
+                        sizes[i], duration);
+                }
+                
+                println!("Eviction scaling: {:?}", eviction_times);
             }
 
             #[test]
             fn test_batch_insertion_performance() {
-                // TODO: Test performance of multiple sequential insertions
+                // Test 1: Small batch insertions
+                let mut small_cache = LFUCache::new(1000);
+                let batch_sizes = [10, 50, 100, 500];
+                let mut small_batch_times = Vec::new();
+                
+                for &batch_size in &batch_sizes {
+                    let start = Instant::now();
+                    for i in 0..batch_size {
+                        small_cache.insert(format!("small_batch_{}_{}", batch_size, i), i as i32);
+                    }
+                    small_batch_times.push(start.elapsed());
+                }
+                
+                // Performance should scale roughly linearly with batch size
+                for (i, &duration) in small_batch_times.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(50 * (i + 1) as u64), 
+                        "Small batch {} should be fast: {:?}", batch_sizes[i], duration);
+                }
+                
+                // Test 2: Large sequential insertions
+                let large_cache_size = 20000;
+                let mut large_cache = LFUCache::new(large_cache_size);
+                
+                let start = Instant::now();
+                for i in 0..large_cache_size {
+                    large_cache.insert(format!("large_{}", i), i as i32);
+                }
+                let large_batch_duration = start.elapsed();
+                
+                assert!(large_batch_duration < Duration::from_millis(1000), 
+                    "Large batch insertion should be reasonable: {:?}", large_batch_duration);
+                
+                // Test 3: Insertion performance with different value sizes
+                let mut value_size_cache = LFUCache::new(5000);
+                
+                // Small values (integers)
+                let start = Instant::now();
+                for i in 0..1000 {
+                    value_size_cache.insert(format!("int_{}", i), i as i32);
+                }
+                let small_value_duration = start.elapsed();
+                
+                // Large values (also integers for consistency, but simulating larger data)
+                let start = Instant::now();
+                for i in 0..1000 {
+                    value_size_cache.insert(format!("large_{}", i), (i * 1000000) as i32);
+                }
+                let large_value_duration = start.elapsed();
+                
+                // Both should be reasonably fast since they're both integers
+                assert!(small_value_duration < Duration::from_millis(100), 
+                    "Small value insertion should be fast: {:?}", small_value_duration);
+                assert!(large_value_duration < Duration::from_millis(200), 
+                    "Large value insertion should be reasonable: {:?}", large_value_duration);
+                
+                // Test 4: Batch insertion with interleaved operations
+                let mut mixed_cache = LFUCache::new(2000);
+                
+                let start = Instant::now();
+                for i in 0..1000 {
+                    // Insert
+                    mixed_cache.insert(format!("mixed_{}", i), i as i32);
+                    
+                    // Occasionally read to create frequency variance
+                    if i % 10 == 0 && i > 0 {
+                        mixed_cache.get(&format!("mixed_{}", i / 2));
+                    }
+                    
+                    // Occasionally check existence
+                    if i % 15 == 0 {
+                        mixed_cache.contains(&format!("mixed_{}", i));
+                    }
+                }
+                let mixed_operations_duration = start.elapsed();
+                
+                assert!(mixed_operations_duration < Duration::from_millis(200), 
+                    "Mixed operations should be fast: {:?}", mixed_operations_duration);
+                
+                // Test 5: Throughput measurement
+                let throughput_cache_size = 10000;
+                let mut throughput_cache = LFUCache::new(throughput_cache_size);
+                
+                let start = Instant::now();
+                for i in 0..throughput_cache_size {
+                    throughput_cache.insert(format!("throughput_{}", i), i as i32);
+                }
+                let throughput_duration = start.elapsed();
+                
+                let ops_per_second = throughput_cache_size as f64 / throughput_duration.as_secs_f64();
+                
+                assert!(ops_per_second > 10000.0, 
+                    "Should achieve at least 10k insertions per second, got: {:.2}", ops_per_second);
+                
+                println!("Batch insertion performance:");
+                println!("  Small batches: {:?}", small_batch_times);
+                println!("  Large batch: {:?}", large_batch_duration);
+                println!("  Small values: {:?}", small_value_duration);
+                println!("  Large values: {:?}", large_value_duration);
+                println!("  Mixed ops: {:?}", mixed_operations_duration);
+                println!("  Throughput: {:.2} ops/sec", ops_per_second);
+                
+                // Test 6: Memory allocation impact during batch insertion
+                let mut allocation_cache = LFUCache::new(5000);
+                
+                // Measure insertion of progressively larger batches
+                let progressive_sizes = [100, 500, 1000, 2000];
+                let mut progressive_times = Vec::new();
+                
+                for &size in &progressive_sizes {
+                    allocation_cache.clear();
+                    
+                    let start = Instant::now();
+                    for i in 0..size {
+                        allocation_cache.insert(format!("prog_{}_{}", size, i), i as i32);
+                    }
+                    progressive_times.push(start.elapsed());
+                }
+                
+                // Each batch should complete in reasonable time
+                for (i, &duration) in progressive_times.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(100 + (i * 50) as u64), 
+                        "Progressive batch {} should be efficient: {:?}", 
+                        progressive_sizes[i], duration);
+                }
+                
+                println!("  Progressive batches: {:?}", progressive_times);
             }
 
             #[test]
             fn test_update_vs_new_insertion_performance() {
-                // TODO: Compare performance of updating vs new insertions
+                let cache_size = 5000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Phase 1: Initial population with new insertions
+                let start = Instant::now();
+                for i in 0..cache_size {
+                    cache.insert(format!("new_{}", i), i as i32);
+                }
+                let new_insertion_duration = start.elapsed();
+                assert_eq!(cache.len(), cache_size);
+                
+                // Phase 2: Update existing keys
+                let update_count = 2000;
+                let start = Instant::now();
+                for i in 0..update_count {
+                    let key = format!("new_{}", i % cache_size);
+                    cache.insert(key, (i + 10000) as i32);
+                }
+                let update_duration = start.elapsed();
+                assert_eq!(cache.len(), cache_size); // Length shouldn't change
+                
+                // Phase 3: Compare per-operation performance
+                let new_per_op = new_insertion_duration / cache_size as u32;
+                let update_per_op = update_duration / update_count as u32;
+                
+                // Updates should be faster since they don't require eviction logic
+                println!("New insertion: {:?} per op, Update: {:?} per op", new_per_op, update_per_op);
+                
+                // Both should be fast, but updates might be slightly faster
+                assert!(new_insertion_duration < Duration::from_millis(500), 
+                    "New insertions should be fast: {:?}", new_insertion_duration);
+                assert!(update_duration < Duration::from_millis(300), 
+                    "Updates should be fast: {:?}", update_duration);
+                
+                // Test 4: Mixed new vs update operations
+                let mut mixed_cache = LFUCache::new(3000);
+                
+                // Pre-populate half the cache
+                for i in 0..1500 {
+                    mixed_cache.insert(format!("mixed_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                for i in 0..2000 {
+                    if i % 2 == 0 {
+                        // Update existing key
+                        let key = format!("mixed_{}", i % 1500);
+                        mixed_cache.insert(key, (i + 5000) as i32);
+                    } else {
+                        // Insert new key (might trigger eviction)
+                        mixed_cache.insert(format!("new_mixed_{}", i), i as i32);
+                    }
+                }
+                let mixed_duration = start.elapsed();
+                
+                assert!(mixed_duration < Duration::from_millis(400), 
+                    "Mixed operations should be reasonable: {:?}", mixed_duration);
+                
+                // Test 5: Update performance with different frequency distributions
+                let mut freq_cache = LFUCache::new(2000);
+                
+                // Create items with different frequencies
+                for i in 0..2000 {
+                    freq_cache.insert(format!("freq_{}", i), i as i32);
+                }
+                
+                // Create frequency distribution
+                for _ in 0..10 {
+                    for i in 0..200 {
+                        freq_cache.get(&format!("freq_{}", i)); // High frequency
+                    }
+                }
+                
+                for _ in 0..3 {
+                    for i in 200..800 {
+                        freq_cache.get(&format!("freq_{}", i)); // Medium frequency
+                    }
+                }
+                // Items 800-2000 remain at frequency 1 (low frequency)
+                
+                // Test updating items with different frequencies
+                let start = Instant::now();
+                for i in 0..100 {
+                    freq_cache.insert(format!("freq_{}", i), (i + 10000) as i32); // High freq
+                }
+                let high_freq_update_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 200..300 {
+                    freq_cache.insert(format!("freq_{}", i), (i + 10000) as i32); // Medium freq
+                }
+                let medium_freq_update_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 1800..1900 {
+                    freq_cache.insert(format!("freq_{}", i), (i + 10000) as i32); // Low freq
+                }
+                let low_freq_update_duration = start.elapsed();
+                
+                // All should be fast since they're updates, not dependent on frequency
+                assert!(high_freq_update_duration < Duration::from_millis(50), 
+                    "High frequency updates should be fast: {:?}", high_freq_update_duration);
+                assert!(medium_freq_update_duration < Duration::from_millis(50), 
+                    "Medium frequency updates should be fast: {:?}", medium_freq_update_duration);
+                assert!(low_freq_update_duration < Duration::from_millis(50), 
+                    "Low frequency updates should be fast: {:?}", low_freq_update_duration);
+                
+                // Test 6: Update vs new insertion when cache is full
+                let mut full_cache = LFUCache::new(1000);
+                
+                // Fill to capacity
+                for i in 0..1000 {
+                    full_cache.insert(format!("full_{}", i), i as i32);
+                }
+                
+                // Test updates on full cache
+                let start = Instant::now();
+                for i in 0..500 {
+                    full_cache.insert(format!("full_{}", i), (i + 2000) as i32);
+                }
+                let full_update_duration = start.elapsed();
+                
+                // Test new insertions on full cache (triggers eviction)
+                let start = Instant::now();
+                for i in 0..500 {
+                    full_cache.insert(format!("new_full_{}", i), (i + 3000) as i32);
+                }
+                let full_new_duration = start.elapsed();
+                
+                // Updates should be significantly faster than new insertions requiring eviction
+                assert!(full_update_duration < Duration::from_millis(100), 
+                    "Updates on full cache should be fast: {:?}", full_update_duration);
+                assert!(full_new_duration < Duration::from_millis(500), 
+                    "New insertions on full cache should be reasonable: {:?}", full_new_duration);
+                
+                // Test 7: Batch update performance
+                let mut batch_cache = LFUCache::new(5000);
+                
+                // Initial population
+                for i in 0..5000 {
+                    batch_cache.insert(format!("batch_{}", i), i as i32);
+                }
+                
+                // Batch updates
+                let batch_sizes = [100, 500, 1000, 2000];
+                let mut batch_update_times = Vec::new();
+                
+                for &batch_size in &batch_sizes {
+                    let start = Instant::now();
+                    for i in 0..batch_size {
+                        batch_cache.insert(format!("batch_{}", i), (i + 20000) as i32);
+                    }
+                    batch_update_times.push(start.elapsed());
+                }
+                
+                // Batch updates should scale linearly
+                for (i, &duration) in batch_update_times.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(50 + (i * 25) as u64), 
+                        "Batch update {} should be efficient: {:?}", batch_sizes[i], duration);
+                }
+                
+                println!("Update vs New Performance:");
+                println!("  New insertions: {:?} total, {:?} per op", new_insertion_duration, new_per_op);
+                println!("  Updates: {:?} total, {:?} per op", update_duration, update_per_op);
+                println!("  Mixed operations: {:?}", mixed_duration);
+                println!("  Frequency-based updates - High: {:?}, Medium: {:?}, Low: {:?}", 
+                    high_freq_update_duration, medium_freq_update_duration, low_freq_update_duration);
+                println!("  Full cache - Updates: {:?}, New: {:?}", full_update_duration, full_new_duration);
+                println!("  Batch updates: {:?}", batch_update_times);
+                
+                // Verify functional correctness after performance tests
+                assert!(batch_cache.contains(&"batch_0".to_string()));
+                assert_eq!(batch_cache.get(&"batch_0".to_string()), Some(&20000));
+                assert_eq!(batch_cache.len(), 5000);
             }
 
             #[test]
             fn test_insertion_with_frequency_tracking() {
-                // TODO: Test overhead of frequency tracking during insertion
+                // Test 1: Basic frequency tracking overhead during insertion
+                let cache_size = 10000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Measure pure insertion time (frequency tracking included)
+                let start = Instant::now();
+                for i in 0..cache_size {
+                    cache.insert(format!("track_{}", i), i as i32);
+                }
+                let insertion_with_tracking_duration = start.elapsed();
+                
+                // All items should have frequency 1 after insertion
+                for i in (0..100).step_by(10) {
+                    assert_eq!(cache.frequency(&format!("track_{}", i)), Some(1));
+                }
+                
+                assert!(insertion_with_tracking_duration < Duration::from_millis(800), 
+                    "Insertion with frequency tracking should be reasonable: {:?}", insertion_with_tracking_duration);
+                
+                // Test 2: Frequency tracking during updates vs new insertions
+                let mut tracking_cache = LFUCache::new(5000);
+                
+                // Initial population
+                for i in 0..5000 {
+                    tracking_cache.insert(format!("freq_track_{}", i), i as i32);
+                }
+                
+                // Measure update performance (should preserve frequency)
+                let start = Instant::now();
+                for i in 0..1000 {
+                    tracking_cache.insert(format!("freq_track_{}", i), (i + 10000) as i32);
+                }
+                let update_tracking_duration = start.elapsed();
+                
+                // Verify frequencies are preserved during updates
+                for i in (0..100).step_by(10) {
+                    assert_eq!(tracking_cache.frequency(&format!("freq_track_{}", i)), Some(1));
+                }
+                
+                assert!(update_tracking_duration < Duration::from_millis(200), 
+                    "Update tracking should be fast: {:?}", update_tracking_duration);
+                
+                // Test 3: Frequency tracking impact during eviction
+                let mut eviction_cache = LFUCache::new(2000);
+                
+                // Fill cache
+                for i in 0..2000 {
+                    eviction_cache.insert(format!("evict_track_{}", i), i as i32);
+                }
+                
+                // Create frequency variance
+                for _ in 0..5 {
+                    for i in 0..400 {
+                        eviction_cache.get(&format!("evict_track_{}", i));
+                    }
+                }
+                
+                // Now measure eviction with frequency consideration
+                let start = Instant::now();
+                for i in 0..1000 {
+                    eviction_cache.insert(format!("new_evict_track_{}", i), (i + 5000) as i32);
+                }
+                let eviction_tracking_duration = start.elapsed();
+                
+                // Verify that high-frequency items were preserved
+                assert!(eviction_cache.contains(&"evict_track_0".to_string()));
+                assert!(eviction_cache.contains(&"evict_track_100".to_string()));
+                
+                assert!(eviction_tracking_duration < Duration::from_millis(1500), 
+                    "Eviction with frequency tracking should be reasonable: {:?}", eviction_tracking_duration);
+                
+                // Test 4: Frequency tracking accuracy under load
+                let mut accuracy_cache = LFUCache::new(3000);
+                
+                // Insert items
+                for i in 0..3000 {
+                    accuracy_cache.insert(format!("accuracy_{}", i), i as i32);
+                }
+                
+                // Create complex frequency patterns
+                for access_round in 0..20 {
+                    for i in 0..100 {
+                        accuracy_cache.get(&format!("accuracy_{}", i)); // Very high frequency
+                    }
+                    for i in 100..500 {
+                        if access_round % 2 == 0 {
+                            accuracy_cache.get(&format!("accuracy_{}", i)); // Medium frequency
+                        }
+                    }
+                    for i in 500..1000 {
+                        if access_round % 5 == 0 {
+                            accuracy_cache.get(&format!("accuracy_{}", i)); // Low frequency
+                        }
+                    }
+                }
+                
+                // Verify frequency tracking accuracy
+                assert!(accuracy_cache.frequency(&"accuracy_0".to_string()).unwrap() > 15);
+                assert!(accuracy_cache.frequency(&"accuracy_100".to_string()).unwrap() > 5);
+                assert!(accuracy_cache.frequency(&"accuracy_500".to_string()).unwrap() >= 1);
+                assert_eq!(accuracy_cache.frequency(&"accuracy_2000".to_string()), Some(1));
+                
+                // Test 5: Frequency tracking memory overhead
+                let mut memory_test_cache = LFUCache::new(20000);
+                
+                // Insert large number of items and verify each has correct frequency
+                let start = Instant::now();
+                for i in 0..20000 {
+                    memory_test_cache.insert(format!("memory_test_{}", i), i as i32);
+                    
+                    // Verify frequency tracking for every 1000th item
+                    if i % 1000 == 0 {
+                        assert_eq!(memory_test_cache.frequency(&format!("memory_test_{}", i)), Some(1));
+                    }
+                }
+                let large_scale_duration = start.elapsed();
+                
+                assert!(large_scale_duration < Duration::from_millis(1500), 
+                    "Large scale frequency tracking should be efficient: {:?}", large_scale_duration);
+                
+                // Test 6: Frequency increment performance during mixed operations
+                let mut mixed_freq_cache = LFUCache::new(5000);
+                
+                // Populate cache
+                for i in 0..5000 {
+                    mixed_freq_cache.insert(format!("mixed_freq_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                for i in 0..10000 {
+                    if i % 3 == 0 {
+                        // Insert new (might evict)
+                        mixed_freq_cache.insert(format!("new_mixed_{}", i), i as i32);
+                    } else if i % 3 == 1 {
+                        // Update existing
+                        mixed_freq_cache.insert(format!("mixed_freq_{}", i % 5000), (i + 20000) as i32);
+                    } else {
+                        // Access existing (increment frequency)
+                        mixed_freq_cache.get(&format!("mixed_freq_{}", i % 5000));
+                    }
+                }
+                let mixed_ops_duration = start.elapsed();
+                
+                assert!(mixed_ops_duration < Duration::from_millis(2000), 
+                    "Mixed operations with frequency tracking should be reasonable: {:?}", mixed_ops_duration);
+                
+                // Test 7: Frequency tracking during rapid insertions
+                let mut rapid_cache = LFUCache::new(1000);
+                
+                let start = Instant::now();
+                for i in 0..5000 {
+                    rapid_cache.insert(format!("rapid_{}", i), i as i32);
+                    
+                    // Verify frequency tracking works under rapid insertion
+                    if i < 1000 && i % 100 == 0 {
+                        assert_eq!(rapid_cache.frequency(&format!("rapid_{}", i)), Some(1));
+                    }
+                }
+                let rapid_insertion_duration = start.elapsed();
+                
+                assert!(rapid_insertion_duration < Duration::from_millis(1000), 
+                    "Rapid insertion with frequency tracking should be efficient: {:?}", rapid_insertion_duration);
+                
+                // Verify cache is still at capacity and LFU logic worked
+                assert_eq!(rapid_cache.len(), 1000);
+                
+                // Test 8: Frequency bounds checking
+                let mut bounds_cache = LFUCache::new(100);
+                
+                // Insert and access to create very high frequencies
+                for i in 0..100 {
+                    bounds_cache.insert(format!("bounds_{}", i), i as i32);
+                }
+                
+                // Create extremely high frequency for one item
+                let start = Instant::now();
+                for _ in 0..10000 {
+                    bounds_cache.get(&"bounds_0".to_string());
+                }
+                let high_freq_duration = start.elapsed();
+                
+                let final_frequency = bounds_cache.frequency(&"bounds_0".to_string()).unwrap();
+                assert_eq!(final_frequency, 10001); // 1 (insert) + 10000 (gets)
+                
+                assert!(high_freq_duration < Duration::from_millis(200), 
+                    "High frequency increment should be fast: {:?}", high_freq_duration);
+                
+                println!("Frequency tracking performance:");
+                println!("  Basic insertion: {:?}", insertion_with_tracking_duration);
+                println!("  Update tracking: {:?}", update_tracking_duration);
+                println!("  Eviction tracking: {:?}", eviction_tracking_duration);
+                println!("  Large scale: {:?}", large_scale_duration);
+                println!("  Mixed operations: {:?}", mixed_ops_duration);
+                println!("  Rapid insertion: {:?}", rapid_insertion_duration);
+                println!("  High frequency: {:?}", high_freq_duration);
+                println!("  Final frequency achieved: {}", final_frequency);
             }
         }
 
