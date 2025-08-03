@@ -1976,27 +1976,604 @@ mod tests {
 
             #[test]
             fn test_get_performance_with_varying_frequencies() {
-                // TODO: Test get() performance with different frequency distributions
+                let cache_size = 10000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Setup: Fill cache with items
+                for i in 0..cache_size {
+                    cache.insert(format!("key_{}", i), i as i32);
+                }
+                
+                // Test 1: Uniform frequency distribution (all items accessed equally)
+                let start = Instant::now();
+                for i in 0..1000 {
+                    let key = format!("key_{}", i % cache_size);
+                    cache.get(&key);
+                }
+                let uniform_duration = start.elapsed();
+                
+                // Test 2: Skewed frequency distribution (80/20 rule - 20% of keys get 80% of accesses)
+                let start = Instant::now();
+                for i in 0..1000 {
+                    let key_index = if i % 5 == 0 {
+                        // 20% of requests go to first 20% of keys
+                        i % (cache_size / 5)
+                    } else {
+                        // 80% of requests go to remaining 80% of keys
+                        (cache_size / 5) + (i % (4 * cache_size / 5))
+                    };
+                    let key = format!("key_{}", key_index);
+                    cache.get(&key);
+                }
+                let skewed_duration = start.elapsed();
+                
+                // Test 3: Highly concentrated access pattern (90% of accesses to 10% of keys)
+                let start = Instant::now();
+                for i in 0..1000 {
+                    let key_index = if i % 10 < 9 {
+                        // 90% of requests go to first 10% of keys
+                        i % (cache_size / 10)
+                    } else {
+                        // 10% of requests go to remaining 90% of keys
+                        (cache_size / 10) + (i % (9 * cache_size / 10))
+                    };
+                    let key = format!("key_{}", key_index);
+                    cache.get(&key);
+                }
+                let concentrated_duration = start.elapsed();
+                
+                // Performance assertions (get operations should be fast)
+                assert!(uniform_duration < Duration::from_millis(100), 
+                    "Uniform access pattern should be fast: {:?}", uniform_duration);
+                assert!(skewed_duration < Duration::from_millis(100), 
+                    "Skewed access pattern should be fast: {:?}", skewed_duration);
+                assert!(concentrated_duration < Duration::from_millis(100), 
+                    "Concentrated access pattern should be fast: {:?}", concentrated_duration);
+                
+                // All patterns should have similar performance characteristics
+                // since HashMap lookup is O(1) average case
+                println!("Get performance - Uniform: {:?}, Skewed: {:?}, Concentrated: {:?}", 
+                    uniform_duration, skewed_duration, concentrated_duration);
+                
+                // Verify cache functionality wasn't broken
+                assert_eq!(cache.len(), cache_size);
+                assert!(cache.get(&"key_0".to_string()).is_some());
             }
 
             #[test]
             fn test_contains_performance() {
-                // TODO: Test contains() method performance
+                let cache_size = 50000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Setup: Fill cache with items
+                for i in 0..cache_size {
+                    cache.insert(format!("item_{}", i), i as i32);
+                }
+                
+                // Test 1: Contains performance for existing keys
+                let start = Instant::now();
+                let mut hit_count = 0;
+                for i in 0..10000 {
+                    let key = format!("item_{}", i % cache_size);
+                    if cache.contains(&key) {
+                        hit_count += 1;
+                    }
+                }
+                let existing_keys_duration = start.elapsed();
+                assert_eq!(hit_count, 10000); // All keys should exist
+                
+                // Test 2: Contains performance for non-existing keys
+                let start = Instant::now();
+                let mut miss_count = 0;
+                for i in 0..10000 {
+                    let key = format!("missing_{}", i);
+                    if !cache.contains(&key) {
+                        miss_count += 1;
+                    }
+                }
+                let missing_keys_duration = start.elapsed();
+                assert_eq!(miss_count, 10000); // No keys should exist
+                
+                // Test 3: Mixed contains performance (50% hits, 50% misses)
+                let start = Instant::now();
+                let mut mixed_hit_count = 0;
+                for i in 0..10000 {
+                    let key = if i % 2 == 0 {
+                        format!("item_{}", i % cache_size)
+                    } else {
+                        format!("missing_{}", i)
+                    };
+                    if cache.contains(&key) {
+                        mixed_hit_count += 1;
+                    }
+                }
+                let mixed_duration = start.elapsed();
+                assert_eq!(mixed_hit_count, 5000); // 50% should be hits
+                
+                // Performance assertions
+                assert!(existing_keys_duration < Duration::from_millis(50), 
+                    "Contains for existing keys should be fast: {:?}", existing_keys_duration);
+                assert!(missing_keys_duration < Duration::from_millis(50), 
+                    "Contains for missing keys should be fast: {:?}", missing_keys_duration);
+                assert!(mixed_duration < Duration::from_millis(50), 
+                    "Mixed contains operations should be fast: {:?}", mixed_duration);
+                
+                // Contains should be consistently fast regardless of hit/miss
+                println!("Contains performance - Existing: {:?}, Missing: {:?}, Mixed: {:?}", 
+                    existing_keys_duration, missing_keys_duration, mixed_duration);
+                
+                // Verify cache wasn't modified by contains operations
+                assert_eq!(cache.len(), cache_size);
+                
+                // Test 4: Performance comparison with very large cache
+                let large_cache_size = 100000;
+                let mut large_cache = LFUCache::new(large_cache_size);
+                
+                for i in 0..large_cache_size {
+                    large_cache.insert(format!("large_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                for i in 0..1000 {
+                    let key = format!("large_{}", i % large_cache_size);
+                    large_cache.contains(&key);
+                }
+                let large_cache_duration = start.elapsed();
+                
+                assert!(large_cache_duration < Duration::from_millis(25), 
+                    "Large cache contains should still be fast: {:?}", large_cache_duration);
             }
 
             #[test]
             fn test_frequency_lookup_performance() {
-                // TODO: Test frequency() method performance
+                let cache_size = 25000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Setup: Fill cache and create varied frequency distributions
+                for i in 0..cache_size {
+                    cache.insert(format!("freq_{}", i), i as i32);
+                }
+                
+                // Create different frequency patterns
+                // High frequency items (accessed 50+ times)
+                for _ in 0..50 {
+                    for i in 0..100 {
+                        cache.get(&format!("freq_{}", i));
+                    }
+                }
+                
+                // Medium frequency items (accessed 10 times)
+                for _ in 0..10 {
+                    for i in 100..500 {
+                        cache.get(&format!("freq_{}", i));
+                    }
+                }
+                
+                // Low frequency items (accessed 2-5 times)
+                for _ in 0..3 {
+                    for i in 500..2000 {
+                        cache.get(&format!("freq_{}", i));
+                    }
+                }
+                
+                // Items with frequency 1 (only inserted, never accessed): 2000..cache_size
+                
+                // Test 1: Frequency lookup performance for high-frequency items
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("freq_{}", i % 100);
+                    cache.frequency(&key);
+                }
+                let high_freq_duration = start.elapsed();
+                
+                // Test 2: Frequency lookup performance for medium-frequency items
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("freq_{}", 100 + (i % 400));
+                    cache.frequency(&key);
+                }
+                let medium_freq_duration = start.elapsed();
+                
+                // Test 3: Frequency lookup performance for low-frequency items
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("freq_{}", 500 + (i % 1500));
+                    cache.frequency(&key);
+                }
+                let low_freq_duration = start.elapsed();
+                
+                // Test 4: Frequency lookup performance for frequency-1 items
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("freq_{}", 2000 + (i % (cache_size - 2000)));
+                    cache.frequency(&key);
+                }
+                let freq_one_duration = start.elapsed();
+                
+                // Test 5: Frequency lookup performance for non-existent items
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("nonexistent_{}", i);
+                    cache.frequency(&key);
+                }
+                let nonexistent_duration = start.elapsed();
+                
+                // Performance assertions
+                assert!(high_freq_duration < Duration::from_millis(50), 
+                    "High frequency lookups should be fast: {:?}", high_freq_duration);
+                assert!(medium_freq_duration < Duration::from_millis(50), 
+                    "Medium frequency lookups should be fast: {:?}", medium_freq_duration);
+                assert!(low_freq_duration < Duration::from_millis(50), 
+                    "Low frequency lookups should be fast: {:?}", low_freq_duration);
+                assert!(freq_one_duration < Duration::from_millis(50), 
+                    "Frequency-1 lookups should be fast: {:?}", freq_one_duration);
+                assert!(nonexistent_duration < Duration::from_millis(50), 
+                    "Non-existent key lookups should be fast: {:?}", nonexistent_duration);
+                
+                // All frequency lookups should have similar performance (O(1) HashMap access)
+                println!("Frequency lookup performance - High: {:?}, Medium: {:?}, Low: {:?}, Freq-1: {:?}, Non-existent: {:?}", 
+                    high_freq_duration, medium_freq_duration, low_freq_duration, freq_one_duration, nonexistent_duration);
+                
+                // Verify frequency values are correct
+                assert!(cache.frequency(&"freq_0".to_string()).unwrap() > 50);
+                assert!(cache.frequency(&"freq_100".to_string()).unwrap() > 10);
+                assert!(cache.frequency(&"freq_500".to_string()).unwrap() > 1);
+                assert_eq!(cache.frequency(&"freq_2000".to_string()), Some(1));
+                assert_eq!(cache.frequency(&"nonexistent_0".to_string()), None);
+                
+                // Test 6: Batch frequency lookup performance
+                let keys_to_test: Vec<String> = (0..1000)
+                    .map(|i| format!("freq_{}", i % cache_size))
+                    .collect();
+                
+                let start = Instant::now();
+                for key in &keys_to_test {
+                    cache.frequency(key);
+                }
+                let batch_duration = start.elapsed();
+                
+                assert!(batch_duration < Duration::from_millis(25), 
+                    "Batch frequency lookups should be fast: {:?}", batch_duration);
+                
+                // Verify cache state wasn't affected by frequency lookups
+                assert_eq!(cache.len(), cache_size);
             }
 
             #[test]
             fn test_peek_lfu_performance() {
-                // TODO: Test peek_lfu() performance with large cache
+                // Test 1: Small cache peek_lfu performance
+                let small_cache_size = 1000;
+                let mut small_cache = LFUCache::new(small_cache_size);
+                
+                for i in 0..small_cache_size {
+                    small_cache.insert(format!("small_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                for _ in 0..1000 {
+                    small_cache.peek_lfu();
+                }
+                let small_cache_duration = start.elapsed();
+                
+                // Test 2: Medium cache peek_lfu performance
+                let medium_cache_size = 10000;
+                let mut medium_cache = LFUCache::new(medium_cache_size);
+                
+                for i in 0..medium_cache_size {
+                    medium_cache.insert(format!("medium_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                for _ in 0..1000 {
+                    medium_cache.peek_lfu();
+                }
+                let medium_cache_duration = start.elapsed();
+                
+                // Test 3: Large cache peek_lfu performance
+                let large_cache_size = 100000;
+                let mut large_cache = LFUCache::new(large_cache_size);
+                
+                for i in 0..large_cache_size {
+                    large_cache.insert(format!("large_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                for _ in 0..1000 {
+                    large_cache.peek_lfu();
+                }
+                let large_cache_duration = start.elapsed();
+                
+                // Test 4: Performance with varied frequency distributions
+                let mut varied_cache = LFUCache::new(50000);
+                
+                // Insert items with intentionally varied frequencies
+                for i in 0..50000 {
+                    varied_cache.insert(format!("varied_{}", i), i as i32);
+                }
+                
+                // Create frequency distribution: some high, some medium, many low
+                // High frequency (100+ accesses): first 100 items
+                for _ in 0..100 {
+                    for i in 0..100 {
+                        varied_cache.get(&format!("varied_{}", i));
+                    }
+                }
+                
+                // Medium frequency (10 accesses): next 500 items
+                for _ in 0..10 {
+                    for i in 100..600 {
+                        varied_cache.get(&format!("varied_{}", i));
+                    }
+                }
+                
+                // Low frequency (1-3 accesses): next 1000 items
+                for _ in 0..2 {
+                    for i in 600..1600 {
+                        varied_cache.get(&format!("varied_{}", i));
+                    }
+                }
+                
+                // Frequency 1 (inserted only): remaining items
+                
+                let start = Instant::now();
+                for _ in 0..1000 {
+                    varied_cache.peek_lfu();
+                }
+                let varied_cache_duration = start.elapsed();
+                
+                // Test 5: Performance when LFU changes frequently
+                let mut dynamic_cache = LFUCache::new(5000);
+                for i in 0..5000 {
+                    dynamic_cache.insert(format!("dynamic_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                for i in 0..1000 {
+                    // Peek LFU
+                    dynamic_cache.peek_lfu();
+                    
+                    // Occasionally access a random item to change frequency distribution
+                    if i % 10 == 0 {
+                        dynamic_cache.get(&format!("dynamic_{}", i % 5000));
+                    }
+                }
+                let dynamic_cache_duration = start.elapsed();
+                
+                // Performance assertions
+                // Note: peek_lfu performance scales with cache size since it needs to find minimum frequency
+                assert!(small_cache_duration < Duration::from_millis(100), 
+                    "Small cache peek_lfu should be fast: {:?}", small_cache_duration);
+                assert!(medium_cache_duration < Duration::from_millis(1000), 
+                    "Medium cache peek_lfu should be reasonably fast: {:?}", medium_cache_duration);
+                assert!(large_cache_duration < Duration::from_millis(5000), 
+                    "Large cache peek_lfu should be acceptable: {:?}", large_cache_duration);
+                assert!(varied_cache_duration < Duration::from_millis(5000), 
+                    "Varied frequency cache peek_lfu should be acceptable: {:?}", varied_cache_duration);
+                assert!(dynamic_cache_duration < Duration::from_millis(500), 
+                    "Dynamic cache peek_lfu should be fast: {:?}", dynamic_cache_duration);
+                
+                println!("Peek LFU performance - Small: {:?}, Medium: {:?}, Large: {:?}, Varied: {:?}, Dynamic: {:?}", 
+                    small_cache_duration, medium_cache_duration, large_cache_duration, 
+                    varied_cache_duration, dynamic_cache_duration);
+                
+                // Verify peek_lfu returns correct results
+                let (lfu_key, _) = small_cache.peek_lfu().unwrap();
+                assert!(lfu_key.starts_with("small_"));
+                
+                let (lfu_key, _) = varied_cache.peek_lfu().unwrap();
+                // Should be one of the frequency-1 items (index >= 1600)
+                let key_index: usize = lfu_key.strip_prefix("varied_")
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert!(key_index >= 1600);
+                
+                // Test 6: Performance consistency across multiple operations
+                let mut consistency_cache = LFUCache::new(20000);
+                for i in 0..20000 {
+                    consistency_cache.insert(format!("consistency_{}", i), i as i32);
+                }
+                
+                let mut durations = Vec::new();
+                for _ in 0..10 {
+                    let start = Instant::now();
+                    for _ in 0..100 {
+                        consistency_cache.peek_lfu();
+                    }
+                    durations.push(start.elapsed());
+                }
+                
+                // Check that performance is consistent (allow for reasonable variance)
+                let avg_duration = durations.iter().sum::<Duration>() / durations.len() as u32;
+                for duration in &durations {
+                    assert!(duration.as_millis() <= avg_duration.as_millis() * 10, 
+                        "Performance should be reasonably consistent, got {:?} vs avg {:?}", duration, avg_duration);
+                }
             }
 
             #[test]
             fn test_cache_hit_vs_miss_performance() {
-                // TODO: Compare performance of cache hits vs misses
+                let cache_size = 20000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Setup: Fill cache with items
+                for i in 0..cache_size {
+                    cache.insert(format!("hit_{}", i), i as i32);
+                }
+                
+                // Test 1: Pure cache hits performance
+                let start = Instant::now();
+                let mut hit_count = 0;
+                for i in 0..10000 {
+                    let key = format!("hit_{}", i % cache_size);
+                    if cache.get(&key).is_some() {
+                        hit_count += 1;
+                    }
+                }
+                let pure_hits_duration = start.elapsed();
+                assert_eq!(hit_count, 10000);
+                
+                // Test 2: Pure cache misses performance
+                let start = Instant::now();
+                let mut miss_count = 0;
+                for i in 0..10000 {
+                    let key = format!("miss_{}", i);
+                    if cache.get(&key).is_none() {
+                        miss_count += 1;
+                    }
+                }
+                let pure_misses_duration = start.elapsed();
+                assert_eq!(miss_count, 10000);
+                
+                // Test 3: Mixed hit/miss performance (50/50)
+                let start = Instant::now();
+                let mut mixed_hits = 0;
+                let mut mixed_misses = 0;
+                for i in 0..10000 {
+                    let key = if i % 2 == 0 {
+                        format!("hit_{}", i % cache_size)
+                    } else {
+                        format!("miss_{}", i)
+                    };
+                    if cache.get(&key).is_some() {
+                        mixed_hits += 1;
+                    } else {
+                        mixed_misses += 1;
+                    }
+                }
+                let mixed_duration = start.elapsed();
+                assert_eq!(mixed_hits, 5000);
+                assert_eq!(mixed_misses, 5000);
+                
+                // Test 4: High hit ratio performance (90% hits, 10% misses)
+                let start = Instant::now();
+                let mut high_hits = 0;
+                let mut high_misses = 0;
+                for i in 0..10000 {
+                    let key = if i % 10 < 9 {
+                        format!("hit_{}", i % cache_size)
+                    } else {
+                        format!("miss_{}", i)
+                    };
+                    if cache.get(&key).is_some() {
+                        high_hits += 1;
+                    } else {
+                        high_misses += 1;
+                    }
+                }
+                let high_hit_ratio_duration = start.elapsed();
+                assert_eq!(high_hits, 9000);
+                assert_eq!(high_misses, 1000);
+                
+                // Test 5: Low hit ratio performance (10% hits, 90% misses)
+                let start = Instant::now();
+                let mut low_hits = 0;
+                let mut low_misses = 0;
+                for i in 0..10000 {
+                    let key = if i % 10 == 0 {
+                        format!("hit_{}", i % cache_size)
+                    } else {
+                        format!("miss_{}", i)
+                    };
+                    if cache.get(&key).is_some() {
+                        low_hits += 1;
+                    } else {
+                        low_misses += 1;
+                    }
+                }
+                let low_hit_ratio_duration = start.elapsed();
+                assert_eq!(low_hits, 1000);
+                assert_eq!(low_misses, 9000);
+                
+                // Performance assertions
+                assert!(pure_hits_duration < Duration::from_millis(100), 
+                    "Pure hits should be fast: {:?}", pure_hits_duration);
+                assert!(pure_misses_duration < Duration::from_millis(100), 
+                    "Pure misses should be fast: {:?}", pure_misses_duration);
+                assert!(mixed_duration < Duration::from_millis(100), 
+                    "Mixed hits/misses should be fast: {:?}", mixed_duration);
+                assert!(high_hit_ratio_duration < Duration::from_millis(100), 
+                    "High hit ratio should be fast: {:?}", high_hit_ratio_duration);
+                assert!(low_hit_ratio_duration < Duration::from_millis(100), 
+                    "Low hit ratio should be fast: {:?}", low_hit_ratio_duration);
+                
+                println!("Hit vs Miss performance - Pure hits: {:?}, Pure misses: {:?}, Mixed: {:?}, High hit ratio: {:?}, Low hit ratio: {:?}", 
+                    pure_hits_duration, pure_misses_duration, mixed_duration, 
+                    high_hit_ratio_duration, low_hit_ratio_duration);
+                
+                // Test 6: Performance difference analysis between contains vs get
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("hit_{}", i % cache_size);
+                    cache.contains(&key);
+                }
+                let contains_hits_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("miss_{}", i);
+                    cache.contains(&key);
+                }
+                let contains_misses_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("hit_{}", i % cache_size);
+                    cache.get(&key);
+                }
+                let get_hits_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 0..5000 {
+                    let key = format!("miss_{}", i);
+                    cache.get(&key);
+                }
+                let get_misses_duration = start.elapsed();
+                
+                // Get should be slightly slower than contains for hits due to frequency updates
+                // but similar for misses since both fail at HashMap lookup
+                println!("Contains vs Get - Contains hits: {:?}, Contains misses: {:?}, Get hits: {:?}, Get misses: {:?}", 
+                    contains_hits_duration, contains_misses_duration, get_hits_duration, get_misses_duration);
+                
+                // Test 7: Performance with different cache sizes for hit/miss patterns
+                let mut small_cache = LFUCache::<String, i32>::new(100);
+                let mut medium_cache = LFUCache::<String, i32>::new(5000);
+                let mut large_cache = LFUCache::<String, i32>::new(50000);
+                
+                // All caches should have similar miss performance (O(1) HashMap lookup failure)
+                let start = Instant::now();
+                for i in 0..1000 {
+                    let key = format!("definitely_missing_{}", i);
+                    small_cache.get(&key);
+                }
+                let small_miss_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 0..1000 {
+                    let key = format!("definitely_missing_{}", i);
+                    medium_cache.get(&key);
+                }
+                let medium_miss_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 0..1000 {
+                    let key = format!("definitely_missing_{}", i);
+                    large_cache.get(&key);
+                }
+                let large_miss_duration = start.elapsed();
+                
+                // Miss performance should be consistent across cache sizes
+                assert!(small_miss_duration < Duration::from_millis(25));
+                assert!(medium_miss_duration < Duration::from_millis(25));
+                assert!(large_miss_duration < Duration::from_millis(25));
+                
+                println!("Miss performance across sizes - Small: {:?}, Medium: {:?}, Large: {:?}", 
+                    small_miss_duration, medium_miss_duration, large_miss_duration);
+                
+                // Verify cache state integrity after all performance tests
+                assert_eq!(cache.len(), cache_size);
+                // Frequencies should have been updated due to get() calls
+                assert!(cache.frequency(&"hit_0".to_string()).unwrap() > 1);
             }
         }
 
