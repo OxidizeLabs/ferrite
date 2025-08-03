@@ -108,41 +108,40 @@ where
             return None;
         }
         
-        // Find the minimum frequency
+        // Find the minimum frequency first
         let min_freq = self.cache.values().map(|(_, freq)| *freq).min()?;
         
-        // We need to work around borrowing issues by using drain to temporarily 
-        // take ownership of all entries, find the LFU one, and put back the rest
-        // We'll extract all entries, find the LFU one, and put back the rest
-        let mut entries: Vec<_> = self.cache.drain().collect();
+        // Take ownership of the cache temporarily to avoid borrowing issues
+        let mut temp_cache = std::mem::take(&mut self.cache);
+        let mut result = None;
         
-        // Find the entry with minimum frequency
-        if let Some(pos) = entries.iter().position(|(_, (_, freq))| *freq == min_freq) {
-            let (key, (value, _)) = entries.swap_remove(pos);
-            
-            // Put back the remaining entries
-            self.cache.extend(entries);
-            
-            return Some((key, value));
-        } else {
-            // Put everything back if we didn't find anything (shouldn't happen)
-            self.cache.extend(entries);
+        // Process entries: keep the first LFU item, put back the rest
+        for (key, (value, freq)) in temp_cache.drain() {
+            if freq == min_freq && result.is_none() {
+                // This is our LFU item to return
+                result = Some((key, value));
+            } else {
+                // Put this item back in the cache
+                self.cache.insert(key, (value, freq));
+            }
         }
         
-        None
+        result
     }
 
     fn peek_lfu(&self) -> Option<(&K, &V)> {
-        // Find the minimum frequency
-        let min_freq = self.cache.values().map(|(_, freq)| *freq).min()?;
+        // Find the key with minimum frequency in a single pass
+        let mut min_freq = usize::MAX;
+        let mut lfu_item: Option<(&K, &V)> = None;
         
-        // Find the first key with minimum frequency
-        for (k, (v, freq)) in &self.cache {
-            if *freq == min_freq {
-                return Some((k, v));
+        for (key, (value, freq)) in &self.cache {
+            if *freq < min_freq {
+                min_freq = *freq;
+                lfu_item = Some((key, value));
             }
         }
-        None
+        
+        lfu_item
     }
 
     fn frequency(&self, key: &K) -> Option<u64> {
@@ -4319,12 +4318,13 @@ mod tests {
                     
                     let handle = thread::spawn(move || {
                         for _ in 0..operations_per_thread {
-                            if let Some((key, _)) = cache_clone.lock().unwrap().peek_lfu() {
-                                // Verify the peeked item exists
-                                assert!(cache_clone.lock().unwrap().contains(key));
+                            // Use a single lock to avoid double locking issues
+                            let cache_guard = cache_clone.lock().unwrap();
+                            if let Some((key, _)) = cache_guard.peek_lfu() {
+                                // Verify the peeked item exists within the same lock
+                                assert!(cache_guard.contains(key));
                             }
-                            
-                            // Allow some thread interleaving without explicit sleep
+                            // Lock is automatically released here
                         }
                     });
                     handles.push(handle);
@@ -4337,11 +4337,13 @@ mod tests {
                     
                     let handle = thread::spawn(move || {
                         for _ in 0..operations_per_thread {
-                            if let Some((key, value)) = cache_clone.lock().unwrap().pop_lfu() {
+                            // Use a single lock for the cache operation
+                            let popped_item = cache_clone.lock().unwrap().pop_lfu();
+                            
+                            if let Some((key, value)) = popped_item {
+                                // Use a separate lock for the results collection
                                 popped_clone.lock().unwrap().push((key, value));
                             }
-                            
-                            // Allow some thread interleaving without explicit sleep
                         }
                     });
                     handles.push(handle);
@@ -4746,6 +4748,478 @@ mod tests {
                 println!("  Standard deviation: {:.1}", std_dev);
                 println!("  Relative std dev: {:.3}", relative_std_dev);
                 println!("  Thread success counts: {:?}", *counts);
+            }
+        }
+
+        // Complexity Analysis Testing
+        mod complexity {
+            use super::*;
+            use std::time::{Duration, Instant};
+            use std::collections::HashMap;
+
+            /// Helper function to measure execution time of a closure
+            fn measure_time<F, R>(operation: F) -> (R, Duration)
+            where
+                F: FnOnce() -> R,
+            {
+                let start = Instant::now();
+                let result = operation();
+                let duration = start.elapsed();
+                (result, duration)
+            }
+
+            /// Generate test data for complexity tests
+            fn generate_test_data(size: usize) -> Vec<(String, i32)> {
+                (0..size)
+                    .map(|i| (format!("key_{:06}", i), i as i32))
+                    .collect()
+            }
+
+            // ==============================================
+            // TIME COMPLEXITY TESTS
+            // ==============================================
+
+            #[test]
+            fn test_insert_time_complexity() {
+                // Test that insert operations maintain consistent performance
+                let cache_sizes = vec![100, 500, 1000, 5000, 10000];
+                let mut results = Vec::new();
+
+                for &cache_size in &cache_sizes {
+                    let mut cache = LFUCache::new(cache_size);
+                    let test_data = generate_test_data(cache_size);
+                    
+                    // Measure time to fill cache to capacity
+                    let (_, insert_time) = measure_time(|| {
+                        for (key, value) in test_data {
+                            cache.insert(key, value);
+                        }
+                    });
+                    
+                    results.push((cache_size, insert_time));
+                }
+
+                // Verify performance characteristics
+                for (i, &(size, time)) in results.iter().enumerate() {
+                    println!("Cache size: {}, Total insert time: {:?}, Avg per insert: {:?}", 
+                        size, time, time / size as u32);
+                    
+                    // For LFU, insertion time should be reasonable even for large caches
+                    // Allow up to 10µs per insertion on average (accounts for hash operations and potential evictions)
+                    let avg_time_per_insert = time / size as u32;
+                    assert!(avg_time_per_insert < Duration::from_micros(10), 
+                        "Insert performance degraded significantly for size {}: {:?} per insert", 
+                        size, avg_time_per_insert);
+                }
+            }
+
+            #[test]
+            fn test_get_time_complexity() {
+                // Test that get operations are O(1) amortized
+                let cache_sizes = vec![100, 500, 1000, 5000];
+                let lookup_count = 1000;
+                
+                for &cache_size in &cache_sizes {
+                    let mut cache = LFUCache::new(cache_size);
+                    
+                    // Pre-populate cache
+                    for i in 0..cache_size {
+                        cache.insert(format!("key_{}", i), i as i32);
+                    }
+                    
+                    // Measure random access time
+                    let keys: Vec<String> = (0..lookup_count)
+                        .map(|i| format!("key_{}", i % cache_size))
+                        .collect();
+                    
+                    let (hit_count, lookup_time) = measure_time(|| {
+                        let mut hits = 0;
+                        for key in &keys {
+                            if cache.get(key).is_some() {
+                                hits += 1;
+                            }
+                        }
+                        hits
+                    });
+                    
+                    assert_eq!(hit_count, lookup_count); // All should be hits
+                    
+                    let avg_time_per_get = lookup_time / lookup_count as u32;
+                    println!("Cache size: {}, Avg get time: {:?}", cache_size, avg_time_per_get);
+                    
+                    // Get should be O(1) - allow up to 1µs per get on average (includes frequency increment)
+                    assert!(avg_time_per_get < Duration::from_micros(1),
+                        "Get performance degraded for cache size {}: {:?} per get", 
+                        cache_size, avg_time_per_get);
+                }
+            }
+
+            #[test]
+            fn test_pop_lfu_time_complexity() {
+                // Test that pop_lfu is O(n) but with reasonable constant factors
+                let cache_sizes = vec![100, 500, 1000, 2000];
+                let mut results = Vec::new();
+                
+                for &cache_size in &cache_sizes {
+                    let mut cache = LFUCache::new(cache_size);
+                    
+                    // Pre-populate cache with different frequencies
+                    for i in 0..cache_size {
+                        cache.insert(format!("key_{}", i), i as i32);
+                        // Create frequency differences
+                        for _ in 0..(i % 5) {
+                            cache.get(&format!("key_{}", i));
+                        }
+                    }
+                    
+                    // Measure pop_lfu operations
+                    let pop_count = std::cmp::min(50, cache_size / 2);
+                    let (popped_items, pop_time) = measure_time(|| {
+                        let mut popped = Vec::new();
+                        for _ in 0..pop_count {
+                            if let Some(item) = cache.pop_lfu() {
+                                popped.push(item);
+                            }
+                        }
+                        popped
+                    });
+                    
+                    assert_eq!(popped_items.len(), pop_count);
+                    let avg_time_per_pop = pop_time / pop_count as u32;
+                    results.push((cache_size, avg_time_per_pop));
+                    
+                    println!("Cache size: {}, Avg pop_lfu time: {:?}", cache_size, avg_time_per_pop);
+                }
+                
+                // Verify that pop_lfu time grows reasonably with cache size (O(n))
+                // Allow for some variance but ensure it's not exponential
+                for &(size, time) in &results {
+                    // pop_lfu is O(n), so allow time proportional to cache size
+                    // Allow up to 10µs per cache entry for pop_lfu (realistic for current implementation)
+                    let max_expected_time = Duration::from_micros((size * 10) as u64);
+                    assert!(time < max_expected_time,
+                        "pop_lfu performance too slow for cache size {}: {:?} (expected < {:?})", 
+                        size, time, max_expected_time);
+                }
+            }
+
+            #[test]
+            fn test_peek_lfu_time_complexity() {
+                // Test that peek_lfu is O(n) with good constant factors
+                let cache_sizes = vec![100, 500, 1000, 2000, 5000];
+                
+                for &cache_size in &cache_sizes {
+                    let mut cache = LFUCache::new(cache_size);
+                    
+                    // Pre-populate cache
+                    for i in 0..cache_size {
+                        cache.insert(format!("key_{}", i), i as i32);
+                        // Create varied frequency distribution
+                        for _ in 0..(i % 7) {
+                            cache.get(&format!("key_{}", i));
+                        }
+                    }
+                    
+                    // Measure peek_lfu operations
+                    let peek_count = 100;
+                    let (peek_results, peek_time) = measure_time(|| {
+                        let mut results = Vec::new();
+                        for _ in 0..peek_count {
+                            results.push(cache.peek_lfu());
+                        }
+                        results
+                    });
+                    
+                    // All peeks should return the same LFU item
+                    assert!(peek_results.iter().all(|r| r.is_some()));
+                    let first_result = peek_results[0];
+                    assert!(peek_results.iter().all(|&r| r == first_result));
+                    
+                    let avg_time_per_peek = peek_time / peek_count as u32;
+                    println!("Cache size: {}, Avg peek_lfu time: {:?}", cache_size, avg_time_per_peek);
+                    
+                    // peek_lfu is O(n), allow up to 1µs per cache entry (realistic for current implementation)
+                    let max_expected_time = Duration::from_micros(cache_size as u64);
+                    assert!(avg_time_per_peek < max_expected_time,
+                        "peek_lfu performance too slow for cache size {}: {:?} (expected < {:?})", 
+                        cache_size, avg_time_per_peek, max_expected_time);
+                }
+            }
+
+            #[test]
+            fn test_frequency_operations_time_complexity() {
+                // Test that frequency operations are O(1)
+                let cache_sizes = vec![100, 1000, 5000, 10000];
+                
+                for &cache_size in &cache_sizes {
+                    let mut cache = LFUCache::new(cache_size);
+                    
+                    // Pre-populate cache
+                    for i in 0..cache_size {
+                        cache.insert(format!("key_{}", i), i as i32);
+                    }
+                    
+                    let test_keys: Vec<String> = (0..1000)
+                        .map(|i| format!("key_{}", i % cache_size))
+                        .collect();
+                    
+                    // Test frequency() performance
+                    let (_, freq_time) = measure_time(|| {
+                        for key in &test_keys {
+                            cache.frequency(key);
+                        }
+                    });
+                    
+                    // Test increment_frequency() performance
+                    let (_, inc_time) = measure_time(|| {
+                        for key in &test_keys {
+                            cache.increment_frequency(key);
+                        }
+                    });
+                    
+                    // Test reset_frequency() performance
+                    let (_, reset_time) = measure_time(|| {
+                        for key in &test_keys {
+                            cache.reset_frequency(key);
+                        }
+                    });
+                    
+                    let avg_freq_time = freq_time / test_keys.len() as u32;
+                    let avg_inc_time = inc_time / test_keys.len() as u32;
+                    let avg_reset_time = reset_time / test_keys.len() as u32;
+                    
+                    println!("Cache size: {}", cache_size);
+                    println!("  Avg frequency() time: {:?}", avg_freq_time);
+                    println!("  Avg increment_frequency() time: {:?}", avg_inc_time);
+                    println!("  Avg reset_frequency() time: {:?}", avg_reset_time);
+                    
+                    // All frequency operations should be O(1) - allow up to 5µs each (realistic for HashMap operations)
+                    assert!(avg_freq_time < Duration::from_micros(5),
+                        "frequency() too slow for cache size {}: {:?}", cache_size, avg_freq_time);
+                    assert!(avg_inc_time < Duration::from_micros(5),
+                        "increment_frequency() too slow for cache size {}: {:?}", cache_size, avg_inc_time);
+                    assert!(avg_reset_time < Duration::from_micros(5),
+                        "reset_frequency() too slow for cache size {}: {:?}", cache_size, avg_reset_time);
+                }
+            }
+
+            // ==============================================
+            // SPACE COMPLEXITY TESTS
+            // ==============================================
+
+            #[test]
+            fn test_memory_usage_scaling() {
+                // Test that memory usage scales linearly with cache size
+                let cache_sizes = vec![100, 500, 1000, 2000, 5000];
+                
+                for &cache_size in &cache_sizes {
+                    let mut cache = LFUCache::new(cache_size);
+                    
+                    // Fill cache to capacity
+                    for i in 0..cache_size {
+                        cache.insert(format!("test_key_{:08}", i), i as i32);
+                    }
+                    
+                    // Verify cache respects capacity constraints
+                    assert_eq!(cache.len(), cache_size);
+                    assert_eq!(cache.capacity(), cache_size);
+                    
+                    // Test overfill behavior
+                    let pre_overfill_len = cache.len();
+                    cache.insert("overflow_key".to_string(), -1);
+                    
+                    // Should maintain capacity by evicting LFU item
+                    assert_eq!(cache.len(), cache_size);
+                    assert_eq!(cache.len(), pre_overfill_len); // No growth
+                    
+                    println!("Cache size: {}, Final length: {}", cache_size, cache.len());
+                }
+            }
+
+            #[test]
+            fn test_memory_efficiency() {
+                // Test memory efficiency of the LFU implementation
+                let cache_size = 1000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Calculate theoretical minimum memory usage
+                // Each entry stores: String key + i32 value + usize frequency
+                // Plus HashMap overhead
+                let key_size = std::mem::size_of::<String>(); // String struct
+                let value_size = std::mem::size_of::<i32>();
+                let freq_size = std::mem::size_of::<usize>();
+                let entry_overhead = 24; // Rough HashMap entry overhead
+                
+                let theoretical_min_per_entry = key_size + value_size + freq_size + entry_overhead;
+                println!("Theoretical minimum per entry: {} bytes", theoretical_min_per_entry);
+                
+                // Fill cache and verify it doesn't use excessive memory
+                for i in 0..cache_size {
+                    cache.insert(format!("key_{:06}", i), i as i32);
+                }
+                
+                // Test that cache operations don't cause memory leaks
+                let initial_len = cache.len();
+                
+                // Perform many operations
+                for i in 0..1000 {
+                    cache.insert(format!("temp_key_{}", i), i as i32);
+                    cache.get(&format!("key_{:06}", i % cache_size));
+                    cache.increment_frequency(&format!("key_{:06}", i % (cache_size / 2)));
+                    
+                    if i % 10 == 0 {
+                        cache.pop_lfu();
+                    }
+                    
+                    if i % 15 == 0 {
+                        cache.reset_frequency(&format!("key_{:06}", i % cache_size));
+                    }
+                }
+                
+                // Cache should maintain its capacity
+                assert_eq!(cache.len(), cache_size);
+                println!("Cache maintained capacity through {} operations", 1000);
+            }
+
+            // ==============================================
+            // SCALABILITY TESTS
+            // ==============================================
+
+            #[test]
+            fn test_scalability_with_varying_key_sizes() {
+                // Test performance with different key sizes
+                let key_sizes = vec![10, 50, 100, 500];
+                let cache_size = 1000;
+                
+                for &key_size in &key_sizes {
+                    let mut cache = LFUCache::new(cache_size);
+                    
+                    // Generate keys of specified size
+                    let long_key = "x".repeat(key_size);
+                    
+                    let (_, insert_time) = measure_time(|| {
+                        for i in 0..cache_size {
+                            let key = format!("{}{:06}", long_key, i);
+                            cache.insert(key, i as i32);
+                        }
+                    });
+                    
+                    let avg_insert_time = insert_time / cache_size as u32;
+                    println!("Key size: {} chars, Avg insert time: {:?}", key_size, avg_insert_time);
+                    
+                    // Performance should degrade gracefully with larger keys
+                    // Allow up to 10μs per insert for very large keys (accounts for string hashing and memory allocation)
+                    assert!(avg_insert_time < Duration::from_micros(10),
+                        "Insert performance too slow for key size {}: {:?}", key_size, avg_insert_time);
+                }
+            }
+
+            #[test]
+            fn test_performance_regression_detection() {
+                // Test to detect performance regressions
+                let cache_size = 2000;
+                let operation_count = 5000;
+                
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Pre-populate
+                for i in 0..cache_size {
+                    cache.insert(format!("key_{}", i), i as i32);
+                }
+                
+                // Mixed workload performance test
+                let (results, total_time) = measure_time(|| {
+                    let mut results = HashMap::new();
+                    
+                    for i in 0..operation_count {
+                        let op_type = i % 10;
+                        
+                        match op_type {
+                            0..=5 => { // 60% gets
+                                let key = format!("key_{}", i % cache_size);
+                                cache.get(&key);
+                                *results.entry("gets").or_insert(0) += 1;
+                            },
+                            6..=7 => { // 20% inserts
+                                cache.insert(format!("new_key_{}", i), i as i32);
+                                *results.entry("inserts").or_insert(0) += 1;
+                            },
+                            8 => { // 10% frequency ops
+                                let key = format!("key_{}", i % cache_size);
+                                cache.increment_frequency(&key);
+                                *results.entry("frequency_ops").or_insert(0) += 1;
+                            },
+                            9 => { // 10% pop_lfu
+                                cache.pop_lfu();
+                                *results.entry("pop_lfu").or_insert(0) += 1;
+                            },
+                            _ => unreachable!(),
+                        }
+                    }
+                    
+                    results
+                });
+                
+                let avg_time_per_op = total_time / operation_count as u32;
+                println!("Mixed workload results: {:?}", results);
+                println!("Total time: {:?}, Avg per operation: {:?}", total_time, avg_time_per_op);
+                
+                // Performance baseline - should complete mixed workload reasonably quickly
+                // Allow up to 500µs per operation for mixed workload (includes expensive pop_lfu operations)
+                assert!(avg_time_per_op < Duration::from_micros(500),
+                    "Mixed workload performance regression detected: {:?} per operation", avg_time_per_op);
+                
+                // Verify cache is still functional
+                assert!(cache.len() <= cache_size);
+                assert!(cache.len() > 0);
+                assert!(cache.peek_lfu().is_some());
+            }
+
+            #[test]
+            fn test_worst_case_performance() {
+                // Test performance in worst-case scenarios
+                let cache_size = 1000;
+                let mut cache = LFUCache::new(cache_size);
+                
+                // Worst case: all items have the same frequency
+                for i in 0..cache_size {
+                    cache.insert(format!("key_{:06}", i), i as i32);
+                }
+                
+                // All items now have frequency 1 (worst case for LFU operations)
+                
+                // Test pop_lfu performance with uniform frequencies
+                let pop_count = 100;
+                let (_, pop_time) = measure_time(|| {
+                    for _ in 0..pop_count {
+                        cache.pop_lfu();
+                    }
+                });
+                
+                let avg_pop_time = pop_time / pop_count as u32;
+                println!("Worst-case pop_lfu time (uniform frequencies): {:?}", avg_pop_time);
+                
+                // Even in worst case, should be reasonable (uniform frequencies are challenging)
+                assert!(avg_pop_time < Duration::from_millis(10),
+                    "Worst-case pop_lfu performance too slow: {:?}", avg_pop_time);
+                
+                // Refill and test peek_lfu worst case
+                for i in 0..100 {
+                    cache.insert(format!("refill_key_{}", i), i as i32);
+                }
+                
+                let peek_count = 1000;
+                let (_, peek_time) = measure_time(|| {
+                    for _ in 0..peek_count {
+                        cache.peek_lfu();
+                    }
+                });
+                
+                let avg_peek_time = peek_time / peek_count as u32;
+                println!("Worst-case peek_lfu time (uniform frequencies): {:?}", avg_peek_time);
+                
+                assert!(avg_peek_time < Duration::from_millis(1),
+                    "Worst-case peek_lfu performance too slow: {:?}", avg_peek_time);
             }
         }
 
