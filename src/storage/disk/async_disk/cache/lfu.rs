@@ -4111,40 +4111,641 @@ mod tests {
         // Thread Safety Tests
         mod thread_safety {
             use super::*;
+            use std::thread;
+            use std::sync::atomic::{AtomicUsize, Ordering};
 
             #[test]
             fn test_concurrent_insertions() {
-                // TODO: Test multiple threads inserting concurrently
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(1000)));
+                let num_threads = 8;
+                let items_per_thread = 100;
+                
+                let mut handles = vec![];
+                
+                // Spawn threads that each insert items
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let handle = thread::spawn(move || {
+                        for i in 0..items_per_thread {
+                            let key = format!("thread_{}_{}", thread_id, i);
+                            let value = (thread_id * items_per_thread + i) as i32;
+                            
+                            cache_clone.lock().unwrap().insert(key, value);
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for all threads to complete
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                // Verify results
+                let mut cache = cache.lock().unwrap();
+                assert_eq!(cache.len(), num_threads * items_per_thread);
+                
+                // Verify all items exist and have correct values
+                for thread_id in 0..num_threads {
+                    for i in 0..items_per_thread {
+                        let key = format!("thread_{}_{}", thread_id, i);
+                        let expected_value = (thread_id * items_per_thread + i) as i32;
+                        assert_eq!(cache.get(&key), Some(&expected_value));
+                        assert_eq!(cache.frequency(&key), Some(2)); // 1 from insert, 1 from get
+                    }
+                }
             }
 
             #[test]
             fn test_concurrent_gets() {
-                // TODO: Test multiple threads getting values concurrently
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(500)));
+                
+                // Pre-populate cache with test data
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..500 {
+                        cache_guard.insert(format!("key_{}", i), i as i32);
+                    }
+                }
+                
+                let num_threads = 10;
+                let reads_per_thread = 1000;
+                let hit_count = Arc::new(AtomicUsize::new(0));
+                let mut handles = vec![];
+                
+                // Spawn threads that each perform read operations
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let hit_count_clone = Arc::clone(&hit_count);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..reads_per_thread {
+                            let key = format!("key_{}", i % 500); // Ensure keys exist
+                            
+                            if cache_clone.lock().unwrap().get(&key).is_some() {
+                                hit_count_clone.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for all threads to complete
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                // Verify results
+                let expected_hits = num_threads * reads_per_thread;
+                assert_eq!(hit_count.load(Ordering::Relaxed), expected_hits, 
+                    "All reads should hit since all keys exist");
+                
+                // Verify frequency counts increased due to concurrent access
+                let cache = cache.lock().unwrap();
+                for i in (0..500).step_by(50) {
+                    let freq = cache.frequency(&format!("key_{}", i)).unwrap();
+                    // Each key should have been accessed multiple times (once for insert + multiple gets)
+                    assert!(freq > 1, "Key key_{} should have frequency > 1, got {}", i, freq);
+                }
             }
 
             #[test]
             fn test_concurrent_frequency_operations() {
-                // TODO: Test concurrent frequency increment/reset operations
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(100)));
+                
+                // Pre-populate cache
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..100 {
+                        cache_guard.insert(format!("freq_key_{}", i), i as i32);
+                    }
+                }
+                
+                let num_threads = 6;
+                let operations_per_thread = 500;
+                let mut handles = vec![];
+                
+                // Spawn threads performing different frequency operations
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..operations_per_thread {
+                            let key = format!("freq_key_{}", i % 100);
+                            
+                            match thread_id % 3 {
+                                0 => {
+                                    // Thread type 1: increment frequency via get
+                                    cache_clone.lock().unwrap().get(&key);
+                                },
+                                1 => {
+                                    // Thread type 2: increment frequency directly
+                                    cache_clone.lock().unwrap().increment_frequency(&key);
+                                },
+                                2 => {
+                                    // Thread type 3: reset frequency (less frequently)
+                                    if i % 10 == 0 {
+                                        cache_clone.lock().unwrap().reset_frequency(&key);
+                                    } else {
+                                        cache_clone.lock().unwrap().get(&key);
+                                    }
+                                },
+                                _ => unreachable!(),
+                            }
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for all threads to complete
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                // Verify cache consistency after concurrent frequency operations
+                let mut cache = cache.lock().unwrap();
+                assert_eq!(cache.len(), 100, "Cache should still contain all items");
+                
+                // Verify all items still exist and have reasonable frequency values
+                for i in 0..100 {
+                    let key = format!("freq_key_{}", i);
+                    assert!(cache.contains(&key), "Key {} should still exist", key);
+                    
+                    let freq = cache.frequency(&key).unwrap();
+                    assert!(freq >= 1, "Frequency should be at least 1 for key {}, got {}", key, freq);
+                    assert!(freq <= 1200, "Frequency should be reasonable for key {}, got {}", key, freq);
+                }
+                
+                // Verify cache is still functional
+                assert!(cache.get(&"freq_key_0".to_string()).is_some());
+                assert!(cache.peek_lfu().is_some());
             }
 
             #[test]
             fn test_concurrent_lfu_operations() {
-                // TODO: Test concurrent pop_lfu and peek_lfu operations
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(200)));
+                
+                // Pre-populate cache with different frequency patterns
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..200 {
+                        cache_guard.insert(format!("lfu_key_{}", i), i as i32);
+                    }
+                    
+                    // Create frequency differences - some items will be more frequent
+                    for _ in 0..5 {
+                        for i in 0..50 {
+                            cache_guard.get(&format!("lfu_key_{}", i)); // High frequency
+                        }
+                    }
+                    
+                    for _ in 0..2 {
+                        for i in 50..100 {
+                            cache_guard.get(&format!("lfu_key_{}", i)); // Medium frequency
+                        }
+                    }
+                    // Items 100-199 remain at frequency 1 (low frequency)
+                }
+                
+                let num_peek_threads = 2;
+                let num_pop_threads = 1;
+                let operations_per_thread = 10;
+                let popped_items = Arc::new(Mutex::new(Vec::new()));
+                let mut handles = vec![];
+                
+                // Spawn peek threads
+                for _ in 0..num_peek_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    
+                    let handle = thread::spawn(move || {
+                        for _ in 0..operations_per_thread {
+                            if let Some((key, _)) = cache_clone.lock().unwrap().peek_lfu() {
+                                // Verify the peeked item exists
+                                assert!(cache_clone.lock().unwrap().contains(key));
+                            }
+                            
+                            // Allow some thread interleaving without explicit sleep
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Spawn pop threads (fewer since they modify the cache)
+                for _ in 0..num_pop_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let popped_clone = Arc::clone(&popped_items);
+                    
+                    let handle = thread::spawn(move || {
+                        for _ in 0..operations_per_thread {
+                            if let Some((key, value)) = cache_clone.lock().unwrap().pop_lfu() {
+                                popped_clone.lock().unwrap().push((key, value));
+                            }
+                            
+                            // Allow some thread interleaving without explicit sleep
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for all threads to complete
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                // Verify results
+                let cache = cache.lock().unwrap();
+                let popped = popped_items.lock().unwrap();
+                
+                // Verify cache size is reduced by the number of popped items
+                assert_eq!(cache.len() + popped.len(), 200, 
+                    "Cache size + popped items should equal original size");
+                
+                // Verify all popped items are unique
+                let mut popped_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for (key, _) in popped.iter() {
+                    assert!(popped_keys.insert(key.clone()), "Duplicate key popped: {}", key);
+                }
+                
+                // Verify popped items are no longer in cache
+                for (key, _) in popped.iter() {
+                    assert!(!cache.contains(key), "Popped key {} should not be in cache", key);
+                }
+                
+                // Verify cache is still functional after concurrent operations
+                if !cache.is_empty() {
+                    assert!(cache.peek_lfu().is_some());
+                }
             }
 
             #[test]
             fn test_mixed_concurrent_operations() {
-                // TODO: Test mixed read/write operations across threads
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(300)));
+                let num_threads = 8;
+                let operations_per_thread = 200;
+                let operation_counts = Arc::new(Mutex::new((0, 0, 0, 0, 0))); // (inserts, gets, removes, frequency_ops, lfu_ops)
+                let mut handles = vec![];
+                
+                // Pre-populate with some initial data
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..150 {
+                        cache_guard.insert(format!("initial_{}", i), i as i32);
+                    }
+                }
+                
+                // Spawn threads performing mixed operations
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let counts_clone = Arc::clone(&operation_counts);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..operations_per_thread {
+                            let operation = (thread_id + i) % 8;
+                            
+                            match operation {
+                                0 | 1 => {
+                                    // Insert operations (25% of operations)
+                                    let key = format!("mixed_{}_{}", thread_id, i);
+                                    let value = (thread_id * 1000 + i) as i32;
+                                    cache_clone.lock().unwrap().insert(key, value);
+                                    counts_clone.lock().unwrap().0 += 1;
+                                },
+                                2 | 3 | 4 => {
+                                    // Get operations (37.5% of operations)
+                                    let key = if i % 2 == 0 {
+                                        format!("initial_{}", i % 150)
+                                    } else {
+                                        format!("mixed_{}_{}", thread_id % num_threads, i % operations_per_thread)
+                                    };
+                                    cache_clone.lock().unwrap().get(&key);
+                                    counts_clone.lock().unwrap().1 += 1;
+                                },
+                                5 => {
+                                    // Remove operations (12.5% of operations)
+                                    let key = format!("initial_{}", i % 150);
+                                    cache_clone.lock().unwrap().remove(&key);
+                                    counts_clone.lock().unwrap().2 += 1;
+                                },
+                                6 => {
+                                    // Frequency operations (12.5% of operations)
+                                    let key = format!("initial_{}", i % 150);
+                                    if i % 3 == 0 {
+                                        cache_clone.lock().unwrap().increment_frequency(&key);
+                                    } else {
+                                        cache_clone.lock().unwrap().reset_frequency(&key);
+                                    }
+                                    counts_clone.lock().unwrap().3 += 1;
+                                },
+                                7 => {
+                                    // LFU operations (12.5% of operations)
+                                    if i % 2 == 0 {
+                                        cache_clone.lock().unwrap().peek_lfu();
+                                    } else {
+                                        cache_clone.lock().unwrap().pop_lfu();
+                                    }
+                                    counts_clone.lock().unwrap().4 += 1;
+                                },
+                                _ => unreachable!(),
+                            }
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for all threads to complete
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                // Verify results
+                let mut cache = cache.lock().unwrap();
+                let counts = operation_counts.lock().unwrap();
+                
+                // Verify cache is still functional and consistent
+                assert!(cache.len() <= 300, "Cache should not exceed capacity");
+                assert!(cache.capacity() == 300, "Capacity should remain unchanged");
+                
+                // Verify operation counts
+                let (inserts, gets, removes, freq_ops, lfu_ops) = *counts;
+                let total_operations = inserts + gets + removes + freq_ops + lfu_ops;
+                assert_eq!(total_operations, num_threads * operations_per_thread);
+                
+                // Verify cache operations still work correctly
+                cache.insert("test_after_concurrent".to_string(), 999);
+                assert_eq!(cache.get(&"test_after_concurrent".to_string()), Some(&999));
+                assert!(cache.contains(&"test_after_concurrent".to_string()));
+                
+                // Verify LFU operations still work
+                if !cache.is_empty() {
+                    assert!(cache.peek_lfu().is_some());
+                }
+                
+                println!("Mixed operations completed - Inserts: {}, Gets: {}, Removes: {}, Freq: {}, LFU: {}", 
+                    inserts, gets, removes, freq_ops, lfu_ops);
             }
 
             #[test]
             fn test_concurrent_eviction_scenarios() {
-                // TODO: Test eviction behavior with concurrent access
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(100)));
+                let num_insert_threads = 6;
+                let num_access_threads = 3;
+                let inserts_per_thread = 50;
+                let accesses_per_thread = 200;
+                let mut handles = vec![];
+                
+                // Pre-populate cache to capacity
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..100 {
+                        cache_guard.insert(format!("base_{}", i), i as i32);
+                    }
+                    
+                    // Create frequency differences to establish clear LFU candidates
+                    for _ in 0..10 {
+                        for i in 0..20 {
+                            cache_guard.get(&format!("base_{}", i)); // High frequency
+                        }
+                    }
+                    
+                    for _ in 0..3 {
+                        for i in 20..50 {
+                            cache_guard.get(&format!("base_{}", i)); // Medium frequency
+                        }
+                    }
+                    // Items 50-99 remain at frequency 1 (low frequency - eviction candidates)
+                }
+                
+                // Spawn threads that insert new items (triggering evictions)
+                for thread_id in 0..num_insert_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..inserts_per_thread {
+                            let key = format!("evict_trigger_{}_{}", thread_id, i);
+                            let value = (thread_id * 1000 + i) as i32;
+                            cache_clone.lock().unwrap().insert(key, value);
+                            
+                            // Small delay to increase thread interleaving
+                            thread::sleep(std::time::Duration::from_nanos(100));
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Spawn threads that access existing items (changing frequencies)
+                for thread_id in 0..num_access_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..accesses_per_thread {
+                            // Access different ranges to create frequency competition
+                            let key = match thread_id % 3 {
+                                0 => format!("base_{}", i % 30), // Access high-freq items
+                                1 => format!("base_{}", 30 + (i % 30)), // Access medium-freq items
+                                2 => format!("base_{}", 60 + (i % 40)), // Access low-freq items
+                                _ => unreachable!(),
+                            };
+                            
+                            cache_clone.lock().unwrap().get(&key);
+                            
+                            // Small delay to increase thread interleaving
+                            thread::sleep(std::time::Duration::from_nanos(50));
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for all threads to complete
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                // Verify results after concurrent evictions
+                let cache = cache.lock().unwrap();
+                
+                // Cache should maintain its capacity
+                assert_eq!(cache.len(), 100, "Cache should maintain capacity after evictions");
+                
+                // High frequency items should be preserved
+                let mut high_freq_preserved = 0;
+                for i in 0..20 {
+                    if cache.contains(&format!("base_{}", i)) {
+                        high_freq_preserved += 1;
+                    }
+                }
+                
+                // Medium frequency items may be partially preserved
+                let mut medium_freq_preserved = 0;
+                for i in 20..50 {
+                    if cache.contains(&format!("base_{}", i)) {
+                        medium_freq_preserved += 1;
+                    }
+                }
+                
+                // Low frequency items should be mostly evicted
+                let mut low_freq_preserved = 0;
+                for i in 50..100 {
+                    if cache.contains(&format!("base_{}", i)) {
+                        low_freq_preserved += 1;
+                    }
+                }
+                
+                // Some new items should be present
+                let mut new_items_present = 0;
+                for thread_id in 0..num_insert_threads {
+                    for i in 0..inserts_per_thread {
+                        let key = format!("evict_trigger_{}_{}", thread_id, i);
+                        if cache.contains(&key) {
+                            new_items_present += 1;
+                        }
+                    }
+                }
+                
+                // Verify LFU behavior: high frequency items preserved more than low frequency
+                assert!(high_freq_preserved > low_freq_preserved, 
+                    "High frequency items ({}) should be preserved more than low frequency items ({})",
+                    high_freq_preserved, low_freq_preserved);
+                
+                // Some new items should have been inserted
+                assert!(new_items_present > 0, "Some new items should be present after evictions");
+                
+                // Verify cache is still functional
+                assert!(cache.peek_lfu().is_some());
+                
+                println!("Eviction results - High freq preserved: {}, Medium: {}, Low: {}, New items: {}", 
+                    high_freq_preserved, medium_freq_preserved, low_freq_preserved, new_items_present);
             }
 
             #[test]
             fn test_thread_fairness() {
-                // TODO: Test that no thread is starved under high contention
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(200)));
+                let num_threads = 10;
+                let operations_per_thread = 500;
+                let success_counts = Arc::new(Mutex::new(vec![0; num_threads]));
+                let mut handles = vec![];
+                
+                // Pre-populate cache
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..100 {
+                        cache_guard.insert(format!("fair_{}", i), i as i32);
+                    }
+                }
+                
+                // Spawn threads that compete for cache access
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let counts_clone = Arc::clone(&success_counts);
+                    
+                    let handle = thread::spawn(move || {
+                        let mut successful_operations = 0;
+                        
+                        for i in 0..operations_per_thread {
+                            let operation_type = i % 4;
+                            let mut operation_successful = false;
+                            
+                            match operation_type {
+                                0 => {
+                                    // Insert operation
+                                    let key = format!("thread_{}_insert_{}", thread_id, i);
+                                    let value = (thread_id * 10000 + i) as i32;
+                                    cache_clone.lock().unwrap().insert(key, value);
+                                    operation_successful = true;
+                                },
+                                1 => {
+                                    // Get operation
+                                    let key = format!("fair_{}", i % 100);
+                                    if cache_clone.lock().unwrap().get(&key).is_some() {
+                                        operation_successful = true;
+                                    }
+                                },
+                                2 => {
+                                    // Frequency operation
+                                    let key = format!("fair_{}", i % 100);
+                                    if i % 2 == 0 {
+                                        cache_clone.lock().unwrap().increment_frequency(&key);
+                                    } else {
+                                        cache_clone.lock().unwrap().reset_frequency(&key);
+                                    }
+                                    operation_successful = true;
+                                },
+                                3 => {
+                                    // LFU operation
+                                    if cache_clone.lock().unwrap().peek_lfu().is_some() {
+                                        operation_successful = true;
+                                    }
+                                },
+                                _ => unreachable!(),
+                            }
+                            
+                            if operation_successful {
+                                successful_operations += 1;
+                            }
+                            
+                            // Add some variability to create different contention patterns
+                            if thread_id % 3 == 0 {
+                                thread::sleep(std::time::Duration::from_nanos(10));
+                            }
+                        }
+                        
+                        // Record successful operations count for this thread
+                        counts_clone.lock().unwrap()[thread_id] = successful_operations;
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for all threads to complete
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                // Analyze fairness results
+                let counts = success_counts.lock().unwrap();
+                let cache = cache.lock().unwrap();
+                
+                // Calculate statistics
+                let total_successes: usize = counts.iter().sum();
+                let avg_successes = total_successes as f64 / num_threads as f64;
+                let min_successes = *counts.iter().min().unwrap();
+                let max_successes = *counts.iter().max().unwrap();
+                let variance = counts.iter()
+                    .map(|&x| {
+                        let diff = x as f64 - avg_successes;
+                        diff * diff
+                    })
+                    .sum::<f64>() / num_threads as f64;
+                let std_dev = variance.sqrt();
+                
+                // Fairness checks
+                assert!(min_successes > 0, "No thread should be completely starved");
+                
+                // Check that no thread is dramatically underperforming
+                // Allow for some variance but ensure no thread gets less than 70% of average
+                let fairness_threshold = (avg_successes * 0.7) as usize;
+                assert!(min_successes >= fairness_threshold, 
+                    "Thread fairness violated: min_successes {} < threshold {} (avg: {:.1})", 
+                    min_successes, fairness_threshold, avg_successes);
+                
+                // Check that standard deviation is reasonable (not too high)
+                let relative_std_dev = std_dev / avg_successes;
+                assert!(relative_std_dev < 0.5, 
+                    "Standard deviation too high for fairness: {:.3} (should be < 0.5)", 
+                    relative_std_dev);
+                
+                // Verify cache is still functional and consistent
+                assert!(cache.len() <= 200, "Cache should not exceed capacity");
+                assert_eq!(cache.capacity(), 200, "Capacity should remain unchanged");
+                
+                // Verify basic operations still work
+                assert!(cache.peek_lfu().is_some() || cache.is_empty());
+                
+                println!("Fairness test results:");
+                println!("  Total operations: {}", total_successes);
+                println!("  Average per thread: {:.1}", avg_successes);
+                println!("  Min: {}, Max: {}", min_successes, max_successes);
+                println!("  Standard deviation: {:.1}", std_dev);
+                println!("  Relative std dev: {:.3}", relative_std_dev);
+                println!("  Thread success counts: {:?}", *counts);
             }
         }
 
