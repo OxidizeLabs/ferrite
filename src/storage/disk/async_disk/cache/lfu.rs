@@ -4255,7 +4255,6 @@ mod tests {
 
         // Memory Efficiency Tests
         mod memory_efficiency {
-            use super::*;
 
             #[test]
             fn test_memory_overhead_of_frequency_tracking() {
@@ -5624,51 +5623,1402 @@ mod tests {
             use super::*;
             use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
             use std::time::{Duration, Instant};
+            use std::thread;
 
 
             #[test]
             fn test_high_contention_scenario() {
-                // TODO: Test many threads accessing same small set of keys
+                // Test many threads accessing same small set of keys
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(50)));
+                let num_threads = 20;
+                let operations_per_thread = 1000;
+                let hot_keys = 5; // Small set of highly contended keys
+                
+                let success_count = Arc::new(AtomicUsize::new(0));
+                let conflict_count = Arc::new(AtomicUsize::new(0));
+                let mut handles = vec![];
+                
+                // Pre-populate with hot keys
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..hot_keys {
+                        cache_guard.insert(format!("hot_key_{}", i), i);
+                    }
+                }
+                
+                let start_time = Instant::now();
+                
+                // Spawn threads that aggressively access the same keys
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let success_count_clone = Arc::clone(&success_count);
+                    let conflict_count_clone = Arc::clone(&conflict_count);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..operations_per_thread {
+                            let key = format!("hot_key_{}", i % hot_keys);
+                            
+                            // Mix of operations to create contention
+                            match i % 4 {
+                                0 | 1 => {
+                                    // Read operations (most common)
+                                    if let Ok(mut cache) = cache_clone.try_lock() {
+                                        cache.get(&key);
+                                        success_count_clone.fetch_add(1, Ordering::Relaxed);
+                                    } else {
+                                        conflict_count_clone.fetch_add(1, Ordering::Relaxed);
+                                        // Retry with blocking lock
+                                        cache_clone.lock().unwrap().get(&key);
+                                        success_count_clone.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                }
+                                2 => {
+                                    // Frequency check
+                                    if let Ok(cache) = cache_clone.try_lock() {
+                                        cache.frequency(&key);
+                                        success_count_clone.fetch_add(1, Ordering::Relaxed);
+                                    } else {
+                                        conflict_count_clone.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                }
+                                3 => {
+                                    // Insert operation (creates most contention)
+                                    let new_key = format!("thread_{}_{}", thread_id, i);
+                                    if let Ok(mut cache) = cache_clone.try_lock() {
+                                        cache.insert(new_key, thread_id as i32);
+                                        success_count_clone.fetch_add(1, Ordering::Relaxed);
+                                    } else {
+                                        conflict_count_clone.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                }
+                                _ => unreachable!(),
+                            }
+                            
+                            // Small yield to increase contention
+                            if i % 100 == 0 {
+                                thread::yield_now();
+                            }
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for completion
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                let duration = start_time.elapsed();
+                let total_successes = success_count.load(Ordering::Relaxed);
+                let total_conflicts = conflict_count.load(Ordering::Relaxed);
+                
+                // Verify cache integrity
+                let cache = cache.lock().unwrap();
+                assert!(cache.len() <= 50, "Cache should not exceed capacity");
+                
+                // Hot keys should still exist and have high frequencies
+                let mut hot_keys_present = 0;
+                let mut total_hot_frequency = 0;
+                for i in 0..hot_keys {
+                    let key = format!("hot_key_{}", i);
+                    if cache.contains(&key) {
+                        hot_keys_present += 1;
+                        if let Some(freq) = cache.frequency(&key) {
+                            total_hot_frequency += freq;
+                        }
+                    }
+                }
+                
+                // Most hot keys should survive the contention
+                assert!(hot_keys_present >= hot_keys / 2, 
+                    "At least half of hot keys should survive: {}/{}", hot_keys_present, hot_keys);
+                
+                // Performance assertions
+                assert!(total_successes > 0, "Should have successful operations");
+                let conflict_rate = total_conflicts as f64 / (total_successes + total_conflicts) as f64;
+                assert!(conflict_rate < 0.5, "Conflict rate too high: {:.2}", conflict_rate);
+                
+                println!("High contention test completed in {:?}", duration);
+                println!("  Successful operations: {}", total_successes);
+                println!("  Lock conflicts: {} ({:.1}%)", total_conflicts, conflict_rate * 100.0);
+                println!("  Hot keys preserved: {}/{}", hot_keys_present, hot_keys);
+                println!("  Average hot key frequency: {:.1}", total_hot_frequency as f64 / hot_keys_present.max(1) as f64);
             }
 
             #[test]
             fn test_cache_thrashing_scenario() {
-                // TODO: Test rapid insertions causing constant evictions
+                // Test rapid insertions causing constant evictions
+                let capacity = 100;
+                let cache: ThreadSafeLFUCache<String, Vec<u8>> = Arc::new(Mutex::new(LFUCache::new(capacity)));
+                let num_threads = 8;
+                let insertions_per_thread: usize = 500;
+                let data_size = 1024; // 1KB per entry
+                
+                let eviction_count = Arc::new(AtomicUsize::new(0));
+                let successful_insertions = Arc::new(AtomicUsize::new(0));
+                let mut handles = vec![];
+                
+                let start_time = Instant::now();
+                
+                // Pre-populate cache to trigger immediate evictions
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..capacity {
+                        let data = vec![i as u8; data_size];
+                        cache_guard.insert(format!("initial_{}", i), data);
+                    }
+                }
+                
+                // Spawn threads that rapidly insert data
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let eviction_count_clone = Arc::clone(&eviction_count);
+                    let successful_insertions_clone = Arc::clone(&successful_insertions);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..insertions_per_thread {
+                            let key = format!("thrash_{}_{}", thread_id, i);
+                            let data = vec![(thread_id + i) as u8; data_size];
+                            
+                            let mut cache = cache_clone.lock().unwrap();
+                            let old_len = cache.len();
+                            
+                            cache.insert(key, data);
+                            successful_insertions_clone.fetch_add(1, Ordering::Relaxed);
+                            
+                            // Check if eviction occurred
+                            if cache.len() == old_len {
+                                eviction_count_clone.fetch_add(1, Ordering::Relaxed);
+                            }
+                            
+                            // Occasionally access existing items to vary frequencies
+                            if i % 10 == 0 && i > 0 {
+                                let access_key = format!("thrash_{}_{}", thread_id, i - 1);
+                                cache.get(&access_key);
+                            }
+                            
+                            // Very small delay to prevent complete thread starvation
+                            if i % 50 == 0 {
+                                drop(cache); // Release lock
+                                thread::yield_now();
+                            }
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for completion
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                let duration = start_time.elapsed();
+                let total_evictions = eviction_count.load(Ordering::Relaxed);
+                let total_insertions = successful_insertions.load(Ordering::Relaxed);
+                
+                // Verify cache state after thrashing
+                let cache = cache.lock().unwrap();
+                assert_eq!(cache.len(), capacity, "Cache should maintain capacity during thrashing");
+                
+                // Most items should be recent insertions (LFU should evict old low-frequency items)
+                let mut recent_items = 0;
+                for thread_id in 0..num_threads {
+                    for i in insertions_per_thread.saturating_sub(20)..insertions_per_thread {
+                        let key = format!("thrash_{}_{}", thread_id, i);
+                        if cache.contains(&key) {
+                            recent_items += 1;
+                        }
+                    }
+                }
+                
+                // Should have significant evictions due to thrashing
+                assert!(total_evictions > total_insertions / 2, 
+                    "Should have many evictions during thrashing: {}/{}", total_evictions, total_insertions);
+                
+                // Cache should still be functional
+                assert!(cache.peek_lfu().is_some(), "Cache should still have LFU item");
+                
+                // Performance should be reasonable despite thrashing
+                let ops_per_sec = total_insertions as f64 / duration.as_secs_f64();
+                assert!(ops_per_sec > 100.0, "Should maintain reasonable throughput: {:.0} ops/sec", ops_per_sec);
+                
+                println!("Cache thrashing test completed in {:?}", duration);
+                println!("  Total insertions: {}", total_insertions);
+                println!("  Total evictions: {}", total_evictions);
+                println!("  Eviction rate: {:.1}%", total_evictions as f64 / total_insertions as f64 * 100.0);
+                println!("  Recent items preserved: {}", recent_items);
+                println!("  Throughput: {:.0} ops/sec", ops_per_sec);
             }
 
             #[test]
             fn test_long_running_stability() {
-                // TODO: Test stability over extended periods with continuous load
+                // Test stability over extended periods with continuous load
+                let cache: ThreadSafeLFUCache<String, i64> = Arc::new(Mutex::new(LFUCache::new(200)));
+                let duration = Duration::from_millis(2000); // 2 second test
+                let num_threads = 6;
+                
+                let should_stop = Arc::new(AtomicBool::new(false));
+                let operations_completed = Arc::new(AtomicUsize::new(0));
+                let errors_encountered = Arc::new(AtomicUsize::new(0));
+                let mut handles = vec![];
+                
+                let start_time = Instant::now();
+                
+                // Initialize with some baseline data
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..100 {
+                        cache_guard.insert(format!("baseline_{}", i), i);
+                    }
+                }
+                
+                // Spawn different types of worker threads
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let should_stop_clone = Arc::clone(&should_stop);
+                    let operations_completed_clone = Arc::clone(&operations_completed);
+                    let errors_encountered_clone = Arc::clone(&errors_encountered);
+                    
+                    let handle = thread::spawn(move || {
+                        let mut local_operations = 0;
+                        let mut cycle = 0;
+                        
+                        while !should_stop_clone.load(Ordering::Relaxed) {
+                            match thread_id % 3 {
+                                0 => {
+                                    // Reader thread - accesses existing data
+                                    let key = format!("baseline_{}", cycle % 100);
+                                    match cache_clone.lock() {
+                                        Ok(mut cache) => {
+                                            cache.get(&key);
+                                            local_operations += 1;
+                                        }
+                                        Err(_) => {
+                                            errors_encountered_clone.fetch_add(1, Ordering::Relaxed);
+                                        }
+                                    }
+                                }
+                                1 => {
+                                    // Writer thread - adds new data
+                                    let key = format!("long_run_{}_{}", thread_id, cycle);
+                                    match cache_clone.lock() {
+                                        Ok(mut cache) => {
+                                            cache.insert(key, (thread_id as i64) * 1000 + cycle);
+                                            local_operations += 1;
+                                        }
+                                        Err(_) => {
+                                            errors_encountered_clone.fetch_add(1, Ordering::Relaxed);
+                                        }
+                                    }
+                                }
+                                2 => {
+                                    // Mixed operations thread
+                                    match cycle % 4 {
+                                        0 => {
+                                            let key = format!("baseline_{}", cycle % 50);
+                                            if let Ok(mut cache) = cache_clone.lock() {
+                                                cache.get(&key);
+                                                local_operations += 1;
+                                            }
+                                        }
+                                        1 => {
+                                            if let Ok(cache) = cache_clone.lock() {
+                                                cache.peek_lfu();
+                                                local_operations += 1;
+                                            }
+                                        }
+                                        2 => {
+                                            let key = format!("mixed_{}_{}", thread_id, cycle);
+                                            if let Ok(mut cache) = cache_clone.lock() {
+                                                cache.insert(key, cycle);
+                                                local_operations += 1;
+                                            }
+                                        }
+                                        3 => {
+                                            let key = format!("baseline_{}", cycle % 100);
+                                            if let Ok(cache) = cache_clone.lock() {
+                                                cache.frequency(&key);
+                                                local_operations += 1;
+                                            }
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                }
+                                _ => unreachable!(),
+                            }
+                            
+                            cycle += 1;
+                            
+                            // Prevent tight loops from overwhelming the system
+                            if cycle % 100 == 0 {
+                                thread::yield_now();
+                            }
+                        }
+                        
+                        operations_completed_clone.fetch_add(local_operations, Ordering::Relaxed);
+                    });
+                    handles.push(handle);
+                }
+                
+                // Let threads run for the specified duration
+                thread::sleep(duration);
+                should_stop.store(true, Ordering::Relaxed);
+                
+                // Wait for all threads to finish
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                let actual_duration = start_time.elapsed();
+                let total_operations = operations_completed.load(Ordering::Relaxed);
+                let total_errors = errors_encountered.load(Ordering::Relaxed);
+                
+                // Verify cache integrity after long run
+                let cache = cache.lock().unwrap();
+                assert!(cache.len() <= 200, "Cache should not exceed capacity");
+                assert_eq!(cache.capacity(), 200, "Capacity should remain unchanged");
+                
+                // Cache should still be functional
+                assert!(cache.peek_lfu().is_some() || cache.is_empty(), "Cache should be functional");
+                
+                // Some baseline items should still exist (they were accessed repeatedly)
+                let mut baseline_survivors = 0;
+                for i in 0..100 {
+                    if cache.contains(&format!("baseline_{}", i)) {
+                        baseline_survivors += 1;
+                    }
+                }
+                assert!(baseline_survivors > 0, "Some baseline items should survive");
+                
+                // Performance metrics
+                let ops_per_sec = total_operations as f64 / actual_duration.as_secs_f64();
+                let error_rate = total_errors as f64 / (total_operations + total_errors) as f64;
+                
+                // Should have completed many operations
+                assert!(total_operations > 1000, "Should complete substantial operations: {}", total_operations);
+                
+                // Error rate should be very low
+                assert!(error_rate < 0.01, "Error rate should be < 1%: {:.3}", error_rate);
+                
+                // Should maintain reasonable performance
+                assert!(ops_per_sec > 500.0, "Should maintain performance: {:.0} ops/sec", ops_per_sec);
+                
+                println!("Long running stability test completed in {:?}", actual_duration);
+                println!("  Total operations: {}", total_operations);
+                println!("  Operations/sec: {:.0}", ops_per_sec);
+                println!("  Errors: {} ({:.3}%)", total_errors, error_rate * 100.0);
+                println!("  Baseline items surviving: {}/100", baseline_survivors);
+                println!("  Final cache size: {}/200", cache.len());
             }
 
             #[test]
             fn test_memory_pressure_scenario() {
-                // TODO: Test behavior with large cache and memory-intensive operations
+                // Test behavior with large cache and memory-intensive operations
+                let large_capacity = 1000;
+                let cache: ThreadSafeLFUCache<String, Vec<u8>> = Arc::new(Mutex::new(LFUCache::new(large_capacity)));
+                let num_threads = 4;
+                let large_data_size = 8192; // 8KB per entry
+                let operations_per_thread = 300;
+                
+                let memory_allocated = Arc::new(AtomicUsize::new(0));
+                let successful_ops = Arc::new(AtomicUsize::new(0));
+                let mut handles = vec![];
+                
+                let start_time = Instant::now();
+                
+                // Pre-allocate significant memory
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..500 {
+                        let data = vec![i as u8; large_data_size];
+                        cache_guard.insert(format!("large_data_{}", i), data);
+                        memory_allocated.fetch_add(large_data_size, Ordering::Relaxed);
+                    }
+                }
+                
+                // Spawn threads that work with large data
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let memory_allocated_clone = Arc::clone(&memory_allocated);
+                    let successful_ops_clone = Arc::clone(&successful_ops);
+                    
+                    let handle = thread::spawn(move || {
+                        for i in 0..operations_per_thread {
+                            match i % 5 {
+                                0 | 1 => {
+                                    // Insert large data
+                                    let key = format!("memory_test_{}_{}", thread_id, i);
+                                    let large_data = vec![(thread_id + i) as u8; large_data_size];
+                                    
+                                    let mut cache = cache_clone.lock().unwrap();
+                                    let old_len = cache.len();
+                                    cache.insert(key, large_data);
+                                    
+                                    // Track memory if cache grew
+                                    if cache.len() > old_len {
+                                        memory_allocated_clone.fetch_add(large_data_size, Ordering::Relaxed);
+                                    } else {
+                                        // Eviction occurred, memory freed
+                                        memory_allocated_clone.fetch_sub(large_data_size, Ordering::Relaxed);
+                                    }
+                                    
+                                    successful_ops_clone.fetch_add(1, Ordering::Relaxed);
+                                }
+                                2 => {
+                                    // Access existing large data
+                                    let key = format!("large_data_{}", i % 500);
+                                    cache_clone.lock().unwrap().get(&key);
+                                    successful_ops_clone.fetch_add(1, Ordering::Relaxed);
+                                }
+                                3 => {
+                                    // Check frequencies of large items
+                                    let key = format!("large_data_{}", i % 100);
+                                    cache_clone.lock().unwrap().frequency(&key);
+                                    successful_ops_clone.fetch_add(1, Ordering::Relaxed);
+                                }
+                                4 => {
+                                    // Find LFU candidate (expensive with large cache)
+                                    let start = Instant::now();
+                                    cache_clone.lock().unwrap().peek_lfu();
+                                    let elapsed = start.elapsed();
+                                    
+                                    // LFU operation should complete in reasonable time even with large cache
+                                    assert!(elapsed < Duration::from_millis(10), 
+                                        "LFU operation too slow with large cache: {:?}", elapsed);
+                                    
+                                    successful_ops_clone.fetch_add(1, Ordering::Relaxed);
+                                }
+                                _ => unreachable!(),
+                            }
+                            
+                            // Yield periodically to allow other threads
+                            if i % 50 == 0 {
+                                thread::yield_now();
+                            }
+                        }
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait for completion
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                let duration = start_time.elapsed();
+                let final_memory = memory_allocated.load(Ordering::Relaxed);
+                let total_ops = successful_ops.load(Ordering::Relaxed);
+                
+                // Verify cache state
+                let cache = cache.lock().unwrap();
+                assert_eq!(cache.len(), large_capacity, "Cache should be at capacity");
+                assert_eq!(cache.capacity(), large_capacity, "Capacity should be unchanged");
+                
+                // Memory should be bounded by cache capacity
+                let expected_memory = large_capacity * large_data_size;
+                assert!(final_memory <= expected_memory * 11 / 10, // Allow 10% overhead
+                    "Memory usage should be bounded: {} vs expected {}", final_memory, expected_memory);
+                
+                // Should have handled significant operations
+                assert!(total_ops > 500, "Should complete many operations: {}", total_ops);
+                
+                // Performance under memory pressure
+                let ops_per_sec = total_ops as f64 / duration.as_secs_f64();
+                assert!(ops_per_sec > 50.0, "Should maintain performance under memory pressure: {:.0} ops/sec", ops_per_sec);
+                
+                println!("Memory pressure test completed in {:?}", duration);
+                println!("  Total operations: {}", total_ops);
+                println!("  Operations/sec: {:.0}", ops_per_sec);
+                println!("  Final memory usage: {:.1} MB", final_memory as f64 / 1024.0 / 1024.0);
+                println!("  Cache utilization: {}/{}", cache.len(), cache.capacity());
             }
 
             #[test]
             fn test_rapid_thread_creation_destruction() {
-                // TODO: Test with threads being created and destroyed rapidly
+                // Test with threads being created and destroyed rapidly
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(100)));
+                let num_waves = 10;
+                let threads_per_wave = 8;
+                let operations_per_thread = 50;
+                
+                let total_operations = Arc::new(AtomicUsize::new(0));
+                
+                // Pre-populate cache
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..50 {
+                        cache_guard.insert(format!("persistent_{}", i), i as i32);
+                    }
+                }
+                
+                let start_time = Instant::now();
+                
+                // Create and destroy threads in waves
+                for wave in 0..num_waves {
+                    let mut wave_handles = vec![];
+                    
+                    // Create a wave of threads
+                    for thread_id in 0..threads_per_wave {
+                        let cache_clone = Arc::clone(&cache);
+                        let total_operations_clone = Arc::clone(&total_operations);
+                        
+                        let handle = thread::spawn(move || {
+                            let mut local_ops = 0;
+                            
+                            for i in 0..operations_per_thread {
+                                let operation = i % 4;
+                                
+                                match operation {
+                                    0 => {
+                                        // Access persistent data
+                                        let key = format!("persistent_{}", i % 50);
+                                        cache_clone.lock().unwrap().get(&key);
+                                        local_ops += 1;
+                                    }
+                                    1 => {
+                                        // Insert wave-specific data
+                                        let key = format!("wave_{}_thread_{}_item_{}", wave, thread_id, i);
+                                        cache_clone.lock().unwrap().insert(key, wave * 100 + thread_id);
+                                        local_ops += 1;
+                                    }
+                                    2 => {
+                                        // Check frequency
+                                        let key = format!("persistent_{}", i % 25);
+                                        cache_clone.lock().unwrap().frequency(&key);
+                                        local_ops += 1;
+                                    }
+                                    3 => {
+                                        // Peek LFU
+                                        cache_clone.lock().unwrap().peek_lfu();
+                                        local_ops += 1;
+                                    }
+                                    _ => unreachable!(),
+                                }
+                                
+                                // Very brief pause to allow thread scheduling
+                                if i % 10 == 0 {
+                                    thread::yield_now();
+                                }
+                            }
+                            
+                            total_operations_clone.fetch_add(local_ops, Ordering::Relaxed);
+                        });
+                        wave_handles.push(handle);
+                    }
+                    
+                    // Wait for this wave to complete before creating the next
+                    for handle in wave_handles {
+                        handle.join().unwrap();
+                    }
+                    
+                    // Brief pause between waves to simulate realistic usage
+                    thread::sleep(Duration::from_millis(10));
+                }
+                
+                let duration = start_time.elapsed();
+                let total_ops = total_operations.load(Ordering::Relaxed);
+                
+                // Verify cache integrity
+                let cache = cache.lock().unwrap();
+                assert!(cache.len() <= 100, "Cache should not exceed capacity");
+                
+                // Persistent items should have high frequencies
+                let mut persistent_survivors = 0;
+                for i in 0..50 {
+                    let key = format!("persistent_{}", i);
+                    if cache.contains(&key) {
+                        persistent_survivors += 1;
+                    }
+                }
+                
+                // Should have completed substantial work
+                let expected_operations = num_waves * threads_per_wave * operations_per_thread;
+                assert!(total_ops >= (expected_operations * 9 / 10) as usize, // Allow some variance
+                    "Should complete most operations: {}/{}", total_ops, expected_operations);
+                
+                // Many persistent items should survive (they were frequently accessed)
+                assert!(persistent_survivors >= 25, 
+                    "Many persistent items should survive: {}/50", persistent_survivors);
+                
+                println!("Rapid thread creation/destruction test completed in {:?}", duration);
+                println!("  Total operations: {}", total_ops);
+                println!("  Persistent items surviving: {}/50", persistent_survivors);
             }
 
             #[test]
             fn test_burst_load_handling() {
-                // TODO: Test handling of sudden burst loads
+                // Test handling of sudden burst loads
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(150)));
+                let burst_threads = 15;
+                let burst_operations = 200;
+                let background_threads = 3;
+                
+                let burst_completed = Arc::new(AtomicUsize::new(0));
+                let background_completed = Arc::new(AtomicUsize::new(0));
+                let mut handles = vec![];
+                
+                // Pre-populate with baseline data
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..75 {
+                        cache_guard.insert(format!("baseline_{}", i), i as i32);
+                    }
+                }
+                
+                // Start background threads (simulate normal load)
+                for thread_id in 0..background_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let background_completed_clone = Arc::clone(&background_completed);
+                    
+                    let handle = thread::spawn(move || {
+                        let mut ops = 0;
+                        let start_time = Instant::now();
+                        
+                        // Run for about 500ms
+                        while start_time.elapsed() < Duration::from_millis(500) {
+                            let cycle = ops % 100;
+                            
+                            match cycle % 3 {
+                                0 => {
+                                    // Access baseline data
+                                    let key = format!("baseline_{}", cycle % 75);
+                                    cache_clone.lock().unwrap().get(&key);
+                                }
+                                1 => {
+                                    // Insert background data
+                                    let key = format!("background_{}_{}", thread_id, ops);
+                                    cache_clone.lock().unwrap().insert(key, (thread_id * 1000 + ops) as i32);
+                                }
+                                2 => {
+                                    // Check frequency
+                                    let key = format!("baseline_{}", cycle % 50);
+                                    cache_clone.lock().unwrap().frequency(&key);
+                                }
+                                _ => unreachable!(),
+                            }
+                            
+                            ops += 1;
+                            
+                            // Pace background load
+                            thread::sleep(Duration::from_micros(100));
+                        }
+                        
+                        background_completed_clone.fetch_add(ops, Ordering::Relaxed);
+                    });
+                    handles.push(handle);
+                }
+                
+                // Wait a bit for background load to establish
+                thread::sleep(Duration::from_millis(50));
+                
+                // Launch burst load (many threads starting simultaneously)
+                let burst_handles: Vec<_> = (0..burst_threads).map(|thread_id| {
+                    let cache_clone = Arc::clone(&cache);
+                    let burst_completed_clone = Arc::clone(&burst_completed);
+                    
+                    thread::spawn(move || {
+                        let mut ops = 0;
+                        
+                        for i in 0..burst_operations {
+                            let operation = i % 5;
+                            
+                            match operation {
+                                0 | 1 => {
+                                    // Burst insertions
+                                    let key = format!("burst_{}_{}", thread_id, i);
+                                    cache_clone.lock().unwrap().insert(key, thread_id * 10000 + i);
+                                    ops += 1;
+                                }
+                                2 => {
+                                    // Access baseline during burst
+                                    let key = format!("baseline_{}", i % 75);
+                                    cache_clone.lock().unwrap().get(&key);
+                                    ops += 1;
+                                }
+                                3 => {
+                                    // Access recent burst items
+                                    if i > 10 {
+                                        let key = format!("burst_{}_{}", thread_id, i - 5);
+                                        cache_clone.lock().unwrap().get(&key);
+                                        ops += 1;
+                                    }
+                                }
+                                4 => {
+                                    // LFU operations during burst
+                                    cache_clone.lock().unwrap().peek_lfu();
+                                    ops += 1;
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        
+                        burst_completed_clone.fetch_add(ops, Ordering::Relaxed);
+                    })
+                }).collect();
+                
+                // Wait for burst to complete
+                for handle in burst_handles {
+                    handle.join().unwrap();
+                }
+                
+                // Wait for background threads to finish
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                let total_burst_ops = burst_completed.load(Ordering::Relaxed);
+                let total_background_ops = background_completed.load(Ordering::Relaxed);
+                
+                // Verify cache state after burst
+                let cache = cache.lock().unwrap();
+                assert_eq!(cache.len(), 150, "Cache should be at capacity after burst");
+                
+                // Baseline items should still exist (they were accessed during burst)
+                let mut baseline_survivors = 0;
+                for i in 0..75 {
+                    if cache.contains(&format!("baseline_{}", i)) {
+                        baseline_survivors += 1;
+                    }
+                }
+                
+                // Some burst items should be present
+                let mut burst_survivors = 0;
+                for thread_id in 0..burst_threads {
+                    for i in (burst_operations.saturating_sub(20))..burst_operations {
+                        if cache.contains(&format!("burst_{}_{}", thread_id, i)) {
+                            burst_survivors += 1;
+                        }
+                    }
+                }
+                
+                // Verify burst was handled correctly
+                assert!(total_burst_ops > (burst_threads * burst_operations * 8 / 10) as usize,
+                    "Most burst operations should complete: {}/{}", 
+                    total_burst_ops, burst_threads * burst_operations);
+                
+                // Background should continue functioning during burst
+                assert!(total_background_ops > 100, 
+                    "Background operations should continue: {}", total_background_ops);
+                
+                // Cache should prioritize frequently accessed items
+                assert!(baseline_survivors > 30, 
+                    "Frequently accessed baseline items should survive burst: {}/75", baseline_survivors);
+                
+                // Some recent burst items should survive
+                assert!(burst_survivors > 0, "Some burst items should survive");
+                
+                println!("Burst load test completed");
+                println!("  Burst operations completed: {}", total_burst_ops);
+                println!("  Background operations during burst: {}", total_background_ops);
+                println!("  Baseline items surviving burst: {}/75", baseline_survivors);
+                println!("  Recent burst items surviving: {}", burst_survivors);
             }
 
             #[test]
             fn test_gradual_load_increase() {
-                // TODO: Test behavior as load gradually increases
+                // Test behavior as load gradually increases
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(100)));
+                let max_threads = 12;
+                let phase_duration = Duration::from_millis(100);
+                let operations_per_phase = 50;
+                
+                let total_operations = Arc::new(AtomicUsize::new(0));
+                let phase_metrics = Arc::new(Mutex::new(Vec::new()));
+                
+                // Initialize cache
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    for i in 0..50 {
+                        cache_guard.insert(format!("initial_{}", i), i as i32);
+                    }
+                }
+                
+                println!("Starting gradual load increase test...");
+                
+                // Gradually increase load
+                for phase in 1..=max_threads {
+                    let phase_start = Instant::now();
+                    let phase_operations = Arc::new(AtomicUsize::new(0));
+                    let mut phase_handles = vec![];
+                    
+                    // Spawn threads for this phase (cumulative)
+                    for thread_id in 0..phase {
+                        let cache_clone = Arc::clone(&cache);
+                        let phase_operations_clone = Arc::clone(&phase_operations);
+                        let total_operations_clone = Arc::clone(&total_operations);
+                        
+                        let handle = thread::spawn(move || {
+                            let mut local_ops = 0;
+                            let thread_start = Instant::now();
+                            
+                            while thread_start.elapsed() < phase_duration && local_ops < operations_per_phase {
+                                let op_type = local_ops % 4;
+                                
+                                match op_type {
+                                    0 => {
+                                        // Access initial data (create frequency competition)
+                                        let key = format!("initial_{}", local_ops % 50);
+                                        cache_clone.lock().unwrap().get(&key);
+                                    }
+                                    1 => {
+                                        // Insert phase-specific data
+                                        let key = format!("phase_{}_thread_{}_op_{}", phase, thread_id, local_ops);
+                                        cache_clone.lock().unwrap().insert(key, (phase * 1000 + thread_id * 100 + local_ops) as i32);
+                                    }
+                                    2 => {
+                                        // Frequency queries
+                                        let key = format!("initial_{}", local_ops % 25);
+                                        cache_clone.lock().unwrap().frequency(&key);
+                                    }
+                                    3 => {
+                                        // LFU operations (these become more expensive as cache fills)
+                                        let lfu_start = Instant::now();
+                                        cache_clone.lock().unwrap().peek_lfu();
+                                        let lfu_duration = lfu_start.elapsed();
+                                        
+                                        // LFU should remain reasonably fast even under increasing load
+                                        assert!(lfu_duration < Duration::from_millis(5),
+                                            "LFU operation too slow in phase {} with {} threads: {:?}", 
+                                            phase, phase, lfu_duration);
+                                    }
+                                    _ => unreachable!(),
+                                }
+                                
+                                local_ops += 1;
+                                
+                                // Adaptive yielding based on contention
+                                if local_ops % (10 + phase) == 0 {
+                                    thread::yield_now();
+                                }
+                            }
+                            
+                            phase_operations_clone.fetch_add(local_ops, Ordering::Relaxed);
+                            total_operations_clone.fetch_add(local_ops, Ordering::Relaxed);
+                        });
+                        phase_handles.push(handle);
+                    }
+                    
+                    // Wait for phase to complete
+                    for handle in phase_handles {
+                        handle.join().unwrap();
+                    }
+                    
+                    let phase_duration_actual = phase_start.elapsed();
+                    let phase_ops = phase_operations.load(Ordering::Relaxed);
+                    let phase_throughput = phase_ops as f64 / phase_duration_actual.as_secs_f64();
+                    
+                    // Record phase metrics
+                    {
+                        let mut metrics = phase_metrics.lock().unwrap();
+                        metrics.push((phase, phase_ops, phase_throughput));
+                    }
+                    
+                    // Verify cache state during load increase
+                    let cache_state = {
+                        let cache_guard = cache.lock().unwrap();
+                        (cache_guard.len(), cache_guard.capacity())
+                    };
+                    
+                    assert_eq!(cache_state.1, 100, "Capacity should remain constant");
+                    assert!(cache_state.0 <= 100, "Cache should not exceed capacity");
+                    
+                    println!("Phase {} ({} threads): {} ops, {:.0} ops/sec", 
+                        phase, phase, phase_ops, phase_throughput);
+                }
+                
+                // Analyze performance degradation
+                let metrics = phase_metrics.lock().unwrap();
+                let first_phase_throughput = metrics[0].2;
+                let last_phase_throughput = metrics.last().unwrap().2;
+                let throughput_degradation = (first_phase_throughput - last_phase_throughput) / first_phase_throughput;
+                
+                // Performance shouldn't degrade too much with increased load
+                assert!(throughput_degradation < 0.7, 
+                    "Throughput degradation too severe: {:.1}% (from {:.0} to {:.0} ops/sec)",
+                    throughput_degradation * 100.0, first_phase_throughput, last_phase_throughput);
+                
+                // Verify final cache state
+                let cache = cache.lock().unwrap();
+                let mut initial_survivors = 0;
+                let mut total_initial_frequency = 0u64;
+                
+                for i in 0..50 {
+                    let key = format!("initial_{}", i);
+                    if cache.contains(&key) {
+                        initial_survivors += 1;
+                        if let Some(freq) = cache.frequency(&key) {
+                            total_initial_frequency += freq;
+                        }
+                    }
+                }
+                
+                // Initial items should survive due to repeated access
+                assert!(initial_survivors > 20, 
+                    "Initial items should survive load increase: {}/50", initial_survivors);
+                
+                // They should have accumulated high frequencies
+                if initial_survivors > 0 {
+                    let avg_initial_freq = total_initial_frequency / initial_survivors as u64;
+                    assert!(avg_initial_freq > 5, 
+                        "Initial items should have high frequencies: {}", avg_initial_freq);
+                }
+                
+                let total_ops = total_operations.load(Ordering::Relaxed);
+                println!("Gradual load increase test completed");
+                println!("  Total operations: {}", total_ops);
+                println!("  Throughput degradation: {:.1}%", throughput_degradation * 100.0);
+                println!("  Initial items surviving: {}/50", initial_survivors);
+                println!("  Average initial item frequency: {:.1}", 
+                    if initial_survivors > 0 { total_initial_frequency as f64 / initial_survivors as f64 } else { 0.0 });
             }
 
             #[test]
             fn test_frequency_distribution_stress() {
-                // TODO: Test stress scenarios with various frequency distributions
+                // Test stress scenarios with various frequency distributions
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(200)));
+                let num_threads = 8;
+                let operations_per_thread = 400;
+                
+                let distribution_results = Arc::new(Mutex::new(Vec::new()));
+                let total_operations = Arc::new(AtomicUsize::new(0));
+                
+                // Test different frequency distributions
+                let distributions = vec![
+                    ("uniform", 0),      // Uniform access pattern
+                    ("zipf_light", 1),   // Light Zipfian (80/20 rule)
+                    ("zipf_heavy", 2),   // Heavy Zipfian (90/10 rule)
+                    ("bimodal", 3),      // Bimodal (two distinct hot sets)
+                ];
+                
+                for (dist_name, dist_type) in distributions {
+                    println!("Testing {} distribution...", dist_name);
+                    
+                    // Clear cache for each distribution test
+                    {
+                        let mut cache_guard = cache.lock().unwrap();
+                        cache_guard.clear();
+                        
+                        // Pre-populate with base data
+                        for i in 0..100 {
+                            cache_guard.insert(format!("base_{}", i), i as i32);
+                        }
+                    }
+                    
+                    let dist_start = Instant::now();
+                    let dist_operations = Arc::new(AtomicUsize::new(0));
+                    let mut dist_handles = vec![];
+                    
+                    // Spawn threads with specific access patterns
+                    for thread_id in 0..num_threads {
+                        let cache_clone = Arc::clone(&cache);
+                        let dist_operations_clone = Arc::clone(&dist_operations);
+                        let dist_type_local = dist_type;
+                        
+                        let handle = thread::spawn(move || {
+                            let mut local_ops = 0;
+                            
+                            for i in 0..operations_per_thread {
+                                // Choose key based on distribution
+                                let key = match dist_type_local {
+                                    0 => {
+                                        // Uniform: equal probability for all keys
+                                        format!("base_{}", i % 100)
+                                    }
+                                    1 => {
+                                        // Light Zipfian: 80% of accesses to 20% of keys
+                                        if i % 10 < 8 {
+                                            format!("base_{}", i % 20) // Hot 20%
+                                        } else {
+                                            format!("base_{}", 20 + (i % 80)) // Cold 80%
+                                        }
+                                    }
+                                    2 => {
+                                        // Heavy Zipfian: 90% of accesses to 10% of keys
+                                        if i % 10 < 9 {
+                                            format!("base_{}", i % 10) // Very hot 10%
+                                        } else {
+                                            format!("base_{}", 10 + (i % 90)) // Cold 90%
+                                        }
+                                    }
+                                    3 => {
+                                        // Bimodal: two distinct hot sets
+                                        if i % 4 < 2 {
+                                            format!("base_{}", i % 15) // First hot set
+                                        } else if i % 4 == 2 {
+                                            format!("base_{}", 50 + (i % 15)) // Second hot set
+                                        } else {
+                                            format!("base_{}", 20 + (i % 30)) // Cold set
+                                        }
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                
+                                // Mix of operations
+                                match i % 6 {
+                                    0 | 1 | 2 => {
+                                        // Access existing keys (builds frequency)
+                                        cache_clone.lock().unwrap().get(&key);
+                                        local_ops += 1;
+                                    }
+                                    3 => {
+                                        // Insert new data occasionally
+                                        let new_key = format!("new_{}_{}", thread_id, i);
+                                        cache_clone.lock().unwrap().insert(new_key, (thread_id * 1000 + i) as i32);
+                                        local_ops += 1;
+                                    }
+                                    4 => {
+                                        // Check frequency
+                                        cache_clone.lock().unwrap().frequency(&key);
+                                        local_ops += 1;
+                                    }
+                                    5 => {
+                                        // LFU operation
+                                        cache_clone.lock().unwrap().peek_lfu();
+                                        local_ops += 1;
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }
+                            
+                            dist_operations_clone.fetch_add(local_ops, Ordering::Relaxed);
+                        });
+                        dist_handles.push(handle);
+                    }
+                    
+                    // Wait for distribution test to complete
+                    for handle in dist_handles {
+                        handle.join().unwrap();
+                    }
+                    
+                    let dist_duration = dist_start.elapsed();
+                    let dist_ops = dist_operations.load(Ordering::Relaxed);
+                    let dist_throughput = dist_ops as f64 / dist_duration.as_secs_f64();
+                    
+                    // Analyze frequency distribution results
+                    let cache = cache.lock().unwrap();
+                    let mut frequency_stats = Vec::new();
+                    
+                    // Collect frequency statistics
+                    for i in 0..100 {
+                        let key = format!("base_{}", i);
+                        if let Some(freq) = cache.frequency(&key) {
+                            frequency_stats.push(freq);
+                        }
+                    }
+                    
+                    frequency_stats.sort_by(|a, b| b.cmp(a)); // Sort descending
+                    
+                    let total_freq: u64 = frequency_stats.iter().sum();
+                    let max_freq = frequency_stats.first().copied().unwrap_or(0);
+                    let min_freq = frequency_stats.last().copied().unwrap_or(0);
+                    let avg_freq = if frequency_stats.is_empty() { 0.0 } else { total_freq as f64 / frequency_stats.len() as f64 };
+                    
+                    // Distribution-specific validations
+                    match dist_type {
+                        0 => {
+                            // Uniform: frequencies should be relatively even
+                            let freq_range = max_freq - min_freq;
+                            assert!(freq_range as f64 / avg_freq < 3.0, 
+                                "Uniform distribution should have low frequency variance");
+                        }
+                        1 => {
+                            // Light Zipfian: top 20% should have much higher frequencies
+                            let top_20_count = frequency_stats.len() / 5;
+                            let top_20_freq: u64 = frequency_stats.iter().take(top_20_count).sum();
+                            let top_20_ratio = top_20_freq as f64 / total_freq as f64;
+                            assert!(top_20_ratio > 0.6, 
+                                "Light Zipfian: top 20% should have >60% of accesses: {:.2}", top_20_ratio);
+                        }
+                        2 => {
+                            // Heavy Zipfian: top 10% should dominate
+                            let top_10_count = frequency_stats.len() / 10;
+                            let top_10_freq: u64 = frequency_stats.iter().take(top_10_count).sum();
+                            let top_10_ratio = top_10_freq as f64 / total_freq as f64;
+                            assert!(top_10_ratio > 0.8, 
+                                "Heavy Zipfian: top 10% should have >80% of accesses: {:.2}", top_10_ratio);
+                        }
+                        3 => {
+                            // Bimodal: should have two distinct frequency groups
+                            assert!(max_freq > avg_freq as u64 * 2, 
+                                "Bimodal should have distinct high-frequency groups");
+                        }
+                        _ => unreachable!(),
+                    }
+                    
+                    // Record results
+                    {
+                        let mut results = distribution_results.lock().unwrap();
+                        results.push((dist_name.to_string(), dist_ops, dist_throughput, max_freq, min_freq, avg_freq));
+                    }
+                    
+                    total_operations.fetch_add(dist_ops, Ordering::Relaxed);
+                    
+                    println!("  {} distribution: {} ops, {:.0} ops/sec, freq range: {}-{} (avg: {:.1})", 
+                        dist_name, dist_ops, dist_throughput, min_freq, max_freq, avg_freq);
+                }
+                
+                let final_total = total_operations.load(Ordering::Relaxed);
+                
+                // Verify all distributions were tested successfully
+                let results = distribution_results.lock().unwrap();
+                assert_eq!(results.len(), 4, "All distributions should be tested");
+                
+                // Performance should be reasonable across all distributions
+                for (name, ops, throughput, _, _, _) in results.iter() {
+                    assert!(*throughput > 100.0, 
+                        "{} distribution throughput too low: {:.0} ops/sec", name, throughput);
+                    assert!(*ops > 1000, 
+                        "{} distribution completed too few operations: {}", name, ops);
+                }
+                
+                println!("Frequency distribution stress test completed");
+                println!("  Total operations across all distributions: {}", final_total);
+                println!("  All distributions handled successfully");
             }
 
             #[test]
             fn test_lfu_eviction_under_stress() {
-                // TODO: Test LFU eviction correctness under high stress
+                // Test LFU eviction correctness under high stress
+                let cache: ThreadSafeLFUCache<String, i32> = Arc::new(Mutex::new(LFUCache::new(100)));
+                let num_threads = 10;
+                let operations_per_thread = 300;
+                let stress_duration = Duration::from_millis(1000);
+                
+                let eviction_count = Arc::new(AtomicUsize::new(0));
+                let frequency_violations = Arc::new(AtomicUsize::new(0));
+                let successful_operations = Arc::new(AtomicUsize::new(0));
+                let should_stop = Arc::new(AtomicBool::new(false));
+                let mut handles = vec![];
+                
+                // Create frequency tiers for testing
+                {
+                    let mut cache_guard = cache.lock().unwrap();
+                    
+                    // Tier 1: Very high frequency (should never be evicted)
+                    for i in 0..10 {
+                        cache_guard.insert(format!("tier1_{}", i), i);
+                        // Access multiple times to build high frequency
+                        for _ in 0..20 {
+                            cache_guard.get(&format!("tier1_{}", i));
+                        }
+                    }
+                    
+                    // Tier 2: Medium frequency
+                    for i in 0..20 {
+                        cache_guard.insert(format!("tier2_{}", i), i + 100);
+                        for _ in 0..10 {
+                            cache_guard.get(&format!("tier2_{}", i));
+                        }
+                    }
+                    
+                    // Tier 3: Low frequency (likely to be evicted)
+                    for i in 0..30 {
+                        cache_guard.insert(format!("tier3_{}", i), i + 200);
+                        for _ in 0..3 {
+                            cache_guard.get(&format!("tier3_{}", i));
+                        }
+                    }
+                    
+                    // Fill remaining capacity with single-access items
+                    for i in 0..40 {
+                        cache_guard.insert(format!("filler_{}", i), i + 300);
+                    }
+                }
+                
+                let start_time = Instant::now();
+                
+                // Spawn stress threads
+                for thread_id in 0..num_threads {
+                    let cache_clone = Arc::clone(&cache);
+                    let eviction_count_clone = Arc::clone(&eviction_count);
+                    let frequency_violations_clone = Arc::clone(&frequency_violations);
+                    let successful_operations_clone = Arc::clone(&successful_operations);
+                    let should_stop_clone = Arc::clone(&should_stop);
+                    
+                    let handle = thread::spawn(move || {
+                        let mut local_ops = 0;
+                        
+                        for i in 0..operations_per_thread {
+                            if should_stop_clone.load(Ordering::Relaxed) {
+                                break;
+                            }
+                            
+                            let operation = i % 10;
+                            
+                            match operation {
+                                0 | 1 => {
+                                    // Access tier 1 items (maintain high frequency)
+                                    let key = format!("tier1_{}", i % 10);
+                                    cache_clone.lock().unwrap().get(&key);
+                                    local_ops += 1;
+                                }
+                                2 | 3 => {
+                                    // Access tier 2 items (moderate frequency)
+                                    let key = format!("tier2_{}", i % 20);
+                                    cache_clone.lock().unwrap().get(&key);
+                                    local_ops += 1;
+                                }
+                                4 => {
+                                    // Occasionally access tier 3 items
+                                    let key = format!("tier3_{}", i % 30);
+                                    cache_clone.lock().unwrap().get(&key);
+                                    local_ops += 1;
+                                }
+                                5 | 6 | 7 => {
+                                    // Insert new items (triggers evictions)
+                                    let key = format!("stress_{}_{}", thread_id, i);
+                                    let mut cache = cache_clone.lock().unwrap();
+                                    let old_len = cache.len();
+                                    
+                                    // Check LFU before insertion
+                                    let lfu_before = cache.peek_lfu().map(|(k, _)| k.clone());
+                                    
+                                    cache.insert(key, thread_id * 10000 + i);
+                                    
+                                    // Check if eviction occurred
+                                    if cache.len() == old_len {
+                                        eviction_count_clone.fetch_add(1, Ordering::Relaxed);
+                                        
+                                        // Verify LFU correctness: evicted item should not have higher frequency than remaining items
+                                        if let Some(lfu_key) = lfu_before {
+                                            if !cache.contains(&lfu_key) {
+                                                // This item was evicted, verify it had low frequency
+                                                let mut min_remaining_freq = u64::MAX;
+                                                
+                                                // Check a sample of remaining items
+                                                for check_i in 0..10 {
+                                                    if let Some(freq) = cache.frequency(&format!("tier1_{}", check_i)) {
+                                                        min_remaining_freq = min_remaining_freq.min(freq);
+                                                    }
+                                                }
+                                                
+                                                // Note: We can't easily verify the exact evicted frequency without more complex tracking
+                                                // but we can verify tier 1 items (highest frequency) are preserved
+                                            }
+                                        }
+                                    }
+                                    
+                                    local_ops += 1;
+                                }
+                                8 => {
+                                    // Verify LFU eviction candidate
+                                    let cache = cache_clone.lock().unwrap();
+                                    if let Some((lfu_key, _)) = cache.peek_lfu() {
+                                        // LFU should not be a tier 1 item (they have highest frequency)
+                                        if lfu_key.starts_with("tier1_") {
+                                            frequency_violations_clone.fetch_add(1, Ordering::Relaxed);
+                                        }
+                                    }
+                                    local_ops += 1;
+                                }
+                                9 => {
+                                    // Pop LFU and verify correctness
+                                    let mut cache = cache_clone.lock().unwrap();
+                                    if cache.len() > 50 { // Only do this when cache is reasonably full
+                                        if let Some((evicted_key, _)) = cache.pop_lfu() {
+                                            eviction_count_clone.fetch_add(1, Ordering::Relaxed);
+                                            
+                                            // Evicted item should not be tier 1 (highest frequency)
+                                            if evicted_key.starts_with("tier1_") {
+                                                frequency_violations_clone.fetch_add(1, Ordering::Relaxed);
+                                            }
+                                        }
+                                    }
+                                    local_ops += 1;
+                                }
+                                _ => unreachable!(),
+                            }
+                            
+                            // Periodic yielding
+                            if i % 20 == 0 {
+                                thread::yield_now();
+                            }
+                        }
+                        
+                        successful_operations_clone.fetch_add(local_ops, Ordering::Relaxed);
+                    });
+                    handles.push(handle);
+                }
+                
+                // Stop after duration
+                thread::sleep(stress_duration);
+                should_stop.store(true, Ordering::Relaxed);
+                
+                // Wait for all threads
+                for handle in handles {
+                    handle.join().unwrap();
+                }
+                
+                let duration = start_time.elapsed();
+                let total_evictions = eviction_count.load(Ordering::Relaxed);
+                let total_violations = frequency_violations.load(Ordering::Relaxed);
+                let total_ops = successful_operations.load(Ordering::Relaxed);
+                
+                // Verify final cache state and LFU correctness
+                let cache = cache.lock().unwrap();
+                
+                // Tier 1 items should be preserved (they have highest frequency)
+                let mut tier1_survivors = 0;
+                let mut tier1_total_freq = 0u64;
+                for i in 0..10 {
+                    let key = format!("tier1_{}", i);
+                    if cache.contains(&key) {
+                        tier1_survivors += 1;
+                        if let Some(freq) = cache.frequency(&key) {
+                            tier1_total_freq += freq;
+                        }
+                    }
+                }
+                
+                // Tier 2 items may survive partially
+                let mut tier2_survivors = 0;
+                for i in 0..20 {
+                    if cache.contains(&format!("tier2_{}", i)) {
+                        tier2_survivors += 1;
+                    }
+                }
+                
+                // Tier 3 items should mostly be evicted
+                let mut tier3_survivors = 0;
+                for i in 0..30 {
+                    if cache.contains(&format!("tier3_{}", i)) {
+                        tier3_survivors += 1;
+                    }
+                }
+                
+                // LFU correctness assertions
+                assert!(tier1_survivors >= 8, 
+                    "Most tier 1 items should survive (highest frequency): {}/10", tier1_survivors);
+                
+                assert!(tier1_survivors > tier3_survivors, 
+                    "Tier 1 should survive better than tier 3: {} vs {}", tier1_survivors, tier3_survivors);
+                
+                // Frequency violations should be minimal
+                let violation_rate = total_violations as f64 / total_ops as f64;
+                assert!(violation_rate < 0.1, 
+                    "LFU violation rate too high: {:.3} ({}/{})", violation_rate, total_violations, total_ops);
+                
+                // Should have significant evictions under stress
+                assert!(total_evictions > 100, 
+                    "Should have many evictions under stress: {}", total_evictions);
+                
+                // Performance should be maintained
+                let ops_per_sec = total_ops as f64 / duration.as_secs_f64();
+                assert!(ops_per_sec > 200.0, 
+                    "Performance should be reasonable under stress: {:.0} ops/sec", ops_per_sec);
+                
+                // Average tier 1 frequency should be high
+                let avg_tier1_freq = if tier1_survivors > 0 { tier1_total_freq as f64 / tier1_survivors as f64 } else { 0.0 };
+                assert!(avg_tier1_freq > 10.0, 
+                    "Tier 1 items should maintain high frequency: {:.1}", avg_tier1_freq);
+                
+                println!("LFU eviction stress test completed in {:?}", duration);
+                println!("  Total operations: {}", total_ops);
+                println!("  Total evictions: {}", total_evictions);
+                println!("  Frequency violations: {} ({:.2}%)", total_violations, violation_rate * 100.0);
+                println!("  Tier survivors: T1={}/10, T2={}/20, T3={}/30", tier1_survivors, tier2_survivors, tier3_survivors);
+                println!("  Average tier 1 frequency: {:.1}", avg_tier1_freq);
+                println!("  Throughput: {:.0} ops/sec", ops_per_sec);
             }
         }
     }
