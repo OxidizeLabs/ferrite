@@ -150,9 +150,9 @@ where
     }
 
     fn reset_frequency(&mut self, key: &K) -> Option<u64> {
-        if let Some((_, freq)) = self.cache.get_mut(key) {
+            if let Some((_, freq)) = self.cache.get_mut(key) {
             let previous_freq = *freq;
-            *freq = 1;
+                *freq = 1;
             Some(previous_freq as u64)
         } else {
             None
@@ -1267,42 +1267,698 @@ mod tests {
 
             #[test]
             fn test_cache_frequency_consistency() {
-                // TODO: Test that cache and frequency maps stay in sync
+                let mut cache = LFUCache::new(5);
+                
+                // Test initial state consistency
+                assert_eq!(cache.len(), 0);
+                
+                // Insert items and verify frequency consistency
+                cache.insert("key1".to_string(), 100);
+                cache.insert("key2".to_string(), 200);
+                cache.insert("key3".to_string(), 300);
+                
+                // All items should have initial frequency of 1
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(1));
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(1));
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(1));
+                
+                // Access items to change frequencies
+                cache.get(&"key1".to_string()); // key1: freq = 2
+                cache.get(&"key1".to_string()); // key1: freq = 3
+                cache.get(&"key2".to_string()); // key2: freq = 2
+                
+                // Verify frequency updates are consistent
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(3));
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(2));
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(1));
+                
+                // Test update preserves frequency
+                cache.insert("key1".to_string(), 999);
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(3)); // Should be preserved
+                
+                // Test manual frequency operations
+                cache.increment_frequency(&"key3".to_string());
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(2));
+                
+                cache.reset_frequency(&"key1".to_string());
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(1));
+                
+                // Verify that frequency and cache remain consistent
+                assert_eq!(cache.len(), 3);
+                assert!(cache.contains(&"key1".to_string()));
+                assert!(cache.contains(&"key2".to_string()));
+                assert!(cache.contains(&"key3".to_string()));
+                
+                // Verify LFU operations use consistent frequency data
+                let (lfu_key, _) = cache.peek_lfu().unwrap();
+                let lfu_freq = cache.frequency(lfu_key).unwrap();
+                assert_eq!(lfu_freq, 1); // Should be one of the items with frequency 1
             }
 
             #[test]
             fn test_len_consistency() {
-                // TODO: Test that len() always matches actual number of items
+                let mut cache = LFUCache::new(4);
+                
+                // Test empty cache
+                assert_eq!(cache.len(), 0);
+                
+                // Test incremental insertions
+                cache.insert("key1".to_string(), 100);
+                assert_eq!(cache.len(), 1);
+                
+                cache.insert("key2".to_string(), 200);
+                assert_eq!(cache.len(), 2);
+                
+                cache.insert("key3".to_string(), 300);
+                assert_eq!(cache.len(), 3);
+                
+                // Test updating existing key doesn't change length
+                cache.insert("key1".to_string(), 999);
+                assert_eq!(cache.len(), 3);
+                
+                // Test insert at capacity (should increase length)
+                cache.insert("key4".to_string(), 400);
+                assert_eq!(cache.len(), 4);
+                
+                // Test insert beyond capacity (should evict and maintain length)
+                cache.insert("key5".to_string(), 500);
+                assert_eq!(cache.len(), 4); // Should remain at capacity
+                
+                // Test manual removals
+                cache.remove(&"key5".to_string());
+                assert_eq!(cache.len(), 3);
+                
+                cache.remove(&"key4".to_string());
+                assert_eq!(cache.len(), 2);
+                
+                // Test removing non-existent key doesn't change length
+                cache.remove(&"nonexistent".to_string());
+                assert_eq!(cache.len(), 2);
+                
+                // Test pop_lfu operations
+                cache.pop_lfu();
+                assert_eq!(cache.len(), 1);
+                
+                cache.pop_lfu();
+                assert_eq!(cache.len(), 0);
+                
+                // Test pop_lfu on empty cache doesn't change length
+                assert_eq!(cache.pop_lfu(), None);
+                assert_eq!(cache.len(), 0);
+                
+                // Test clear operation
+                cache.insert("test1".to_string(), 1);
+                cache.insert("test2".to_string(), 2);
+                assert_eq!(cache.len(), 2);
+                
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                
+                // Test that get operations don't affect length
+                cache.insert("key1".to_string(), 100);
+                cache.insert("key2".to_string(), 200);
+                assert_eq!(cache.len(), 2);
+                
+                cache.get(&"key1".to_string());
+                cache.get(&"key2".to_string());
+                cache.get(&"nonexistent".to_string());
+                assert_eq!(cache.len(), 2); // Should remain unchanged
             }
 
             #[test]
             fn test_capacity_consistency() {
-                // TODO: Test that capacity never changes and is respected
+                // Test different capacity values
+                let capacities = [0, 1, 3, 10, 100];
+                
+                for &capacity in &capacities {
+                    let mut cache = LFUCache::<String, i32>::new(capacity);
+                    
+                    // Test initial capacity
+                    assert_eq!(cache.capacity(), capacity);
+                    
+                    // Test capacity doesn't change after operations
+                    if capacity > 0 {
+                        // Insert items up to capacity
+                        for i in 0..capacity {
+                            cache.insert(format!("key{}", i), i as i32);
+                            assert_eq!(cache.capacity(), capacity); // Should never change
+                            assert!(cache.len() <= capacity); // Should never exceed capacity
+                        }
+                        
+                        // Insert beyond capacity
+                        for i in capacity..(capacity + 5) {
+                            cache.insert(format!("key{}", i), i as i32);
+                            assert_eq!(cache.capacity(), capacity); // Should never change
+                            assert_eq!(cache.len(), capacity); // Should stay at capacity
+                        }
+                        
+                        // Test other operations don't change capacity
+                        cache.get(&format!("key{}", capacity - 1));
+                        assert_eq!(cache.capacity(), capacity);
+                        
+                        cache.remove(&format!("key{}", capacity - 1));
+                        assert_eq!(cache.capacity(), capacity);
+                        
+                        cache.pop_lfu();
+                        assert_eq!(cache.capacity(), capacity);
+                        
+                        cache.clear();
+                        assert_eq!(cache.capacity(), capacity);
+                        
+                    } else {
+                        // Test zero capacity case
+                        assert_eq!(cache.capacity(), 0);
+                        cache.insert("key1".to_string(), 100);
+                        assert_eq!(cache.len(), 0); // Should remain empty
+                        assert_eq!(cache.capacity(), 0); // Should remain 0
+                    }
+                }
+                
+                // Test capacity consistency across multiple operations
+                let mut cache = LFUCache::new(5);
+                let original_capacity = cache.capacity();
+                
+                // Perform 100 random operations
+                for i in 0..100 {
+                    match i % 4 {
+                        0 => { cache.insert(format!("key{}", i % 10), i); }
+                        1 => { cache.get(&format!("key{}", i % 10)); }
+                        2 => { cache.remove(&format!("key{}", i % 10)); }
+                        3 => { cache.pop_lfu(); }
+                        _ => unreachable!(),
+                    }
+                    
+                    // Verify capacity never changes and constraints are respected
+                    assert_eq!(cache.capacity(), original_capacity);
+                    assert!(cache.len() <= cache.capacity());
+                }
             }
 
             #[test]
             fn test_clear_resets_all_state() {
-                // TODO: Test that clear() resets all internal state
+                let mut cache = LFUCache::new(5);
+                
+                // Populate cache with data and complex state
+                cache.insert("key1".to_string(), 100);
+                cache.insert("key2".to_string(), 200);
+                cache.insert("key3".to_string(), 300);
+                cache.insert("key4".to_string(), 400);
+                cache.insert("key5".to_string(), 500);
+                
+                // Create complex frequency patterns
+                for _ in 0..10 {
+                    cache.get(&"key1".to_string());
+                }
+                for _ in 0..5 {
+                    cache.get(&"key2".to_string());
+                }
+                for _ in 0..3 {
+                    cache.get(&"key3".to_string());
+                }
+                cache.get(&"key4".to_string());
+                // key5 remains at frequency 1
+                
+                // Verify complex state exists
+                assert_eq!(cache.len(), 5);
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(11)); // 1 + 10
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(6));  // 1 + 5
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(4));  // 1 + 3
+                assert_eq!(cache.frequency(&"key4".to_string()), Some(2));  // 1 + 1
+                assert_eq!(cache.frequency(&"key5".to_string()), Some(1));  // 1 + 0
+                
+                // Clear the cache
+                cache.clear();
+                
+                // Verify complete state reset
+                assert_eq!(cache.len(), 0);
+                assert_eq!(cache.capacity(), 5); // Capacity should remain unchanged
+                
+                // Verify all keys are gone
+                assert!(!cache.contains(&"key1".to_string()));
+                assert!(!cache.contains(&"key2".to_string()));
+                assert!(!cache.contains(&"key3".to_string()));
+                assert!(!cache.contains(&"key4".to_string()));
+                assert!(!cache.contains(&"key5".to_string()));
+                
+                // Verify all frequencies are gone
+                assert_eq!(cache.frequency(&"key1".to_string()), None);
+                assert_eq!(cache.frequency(&"key2".to_string()), None);
+                assert_eq!(cache.frequency(&"key3".to_string()), None);
+                assert_eq!(cache.frequency(&"key4".to_string()), None);
+                assert_eq!(cache.frequency(&"key5".to_string()), None);
+                
+                // Verify get operations return None
+                assert_eq!(cache.get(&"key1".to_string()), None);
+                assert_eq!(cache.get(&"key2".to_string()), None);
+                
+                // Verify LFU operations work on empty cache
+                assert_eq!(cache.pop_lfu(), None);
+                assert_eq!(cache.peek_lfu(), None);
+                
+                // Verify cache is ready for fresh use
+                cache.insert("new_key".to_string(), 999);
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.frequency(&"new_key".to_string()), Some(1));
+                assert_eq!(cache.get(&"new_key".to_string()), Some(&999));
+                
+                // Test multiple clears are safe
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                
+                cache.clear(); // Second clear on empty cache
+                assert_eq!(cache.len(), 0);
+                assert_eq!(cache.capacity(), 5); // Capacity still preserved
+                
+                // Test clear after partial population
+                cache.insert("test1".to_string(), 1);
+                cache.insert("test2".to_string(), 2);
+                assert_eq!(cache.len(), 2);
+                
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                assert_eq!(cache.frequency(&"test1".to_string()), None);
+                assert_eq!(cache.frequency(&"test2".to_string()), None);
             }
 
             #[test]
             fn test_remove_consistency() {
-                // TODO: Test that remove operations maintain consistency
+                let mut cache = LFUCache::new(5);
+                
+                // Setup cache with various frequencies
+                cache.insert("key1".to_string(), 100);
+                cache.insert("key2".to_string(), 200);
+                cache.insert("key3".to_string(), 300);
+                cache.insert("key4".to_string(), 400);
+                
+                // Create different frequency patterns
+                cache.get(&"key1".to_string()); // key1: freq = 2
+                cache.get(&"key1".to_string()); // key1: freq = 3
+                cache.get(&"key2".to_string()); // key2: freq = 2
+                cache.get(&"key3".to_string()); // key3: freq = 2
+                // key4: freq = 1
+                
+                assert_eq!(cache.len(), 4);
+                
+                // Test successful removal
+                let removed_value = cache.remove(&"key2".to_string());
+                assert_eq!(removed_value, Some(200));
+                assert_eq!(cache.len(), 3);
+                
+                // Verify key is completely gone
+                assert!(!cache.contains(&"key2".to_string()));
+                assert_eq!(cache.get(&"key2".to_string()), None);
+                assert_eq!(cache.frequency(&"key2".to_string()), None);
+                
+                // Verify other keys are unaffected
+                assert!(cache.contains(&"key1".to_string()));
+                assert!(cache.contains(&"key3".to_string()));
+                assert!(cache.contains(&"key4".to_string()));
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(3));
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(2));
+                assert_eq!(cache.frequency(&"key4".to_string()), Some(1));
+                
+                // Test removal of non-existent key
+                let removed_none = cache.remove(&"nonexistent".to_string());
+                assert_eq!(removed_none, None);
+                assert_eq!(cache.len(), 3); // Should remain unchanged
+                
+                // Test removal of key with highest frequency
+                let removed_high_freq = cache.remove(&"key1".to_string());
+                assert_eq!(removed_high_freq, Some(100));
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.frequency(&"key1".to_string()), None);
+                
+                // Test removal of key with lowest frequency
+                let removed_low_freq = cache.remove(&"key4".to_string());
+                assert_eq!(removed_low_freq, Some(400));
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.frequency(&"key4".to_string()), None);
+                
+                // Verify LFU operations still work correctly after removals
+                let (lfu_key, lfu_value) = cache.peek_lfu().unwrap();
+                assert_eq!(lfu_key, &"key3".to_string());
+                assert_eq!(lfu_value, &300);
+                
+                // Test removing the last item
+                let removed_last = cache.remove(&"key3".to_string());
+                assert_eq!(removed_last, Some(300));
+                assert_eq!(cache.len(), 0);
+                
+                // Verify empty cache state
+                assert_eq!(cache.peek_lfu(), None);
+                assert_eq!(cache.pop_lfu(), None);
+                
+                // Test removal on empty cache
+                let removed_from_empty = cache.remove(&"key1".to_string());
+                assert_eq!(removed_from_empty, None);
+                assert_eq!(cache.len(), 0);
+                
+                // Test cache functionality after complete emptying via removals
+                cache.insert("new_key".to_string(), 999);
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.frequency(&"new_key".to_string()), Some(1));
+                
+                // Test removing and re-inserting same key
+                cache.remove(&"new_key".to_string());
+                assert_eq!(cache.len(), 0);
+                
+                cache.insert("new_key".to_string(), 888);
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.frequency(&"new_key".to_string()), Some(1)); // Fresh frequency
+                assert_eq!(cache.get(&"new_key".to_string()), Some(&888));
             }
 
             #[test]
             fn test_eviction_consistency() {
-                // TODO: Test that evictions maintain consistency
+                let mut cache = LFUCache::new(3);
+                
+                // Fill cache to capacity
+                cache.insert("key1".to_string(), 100);
+                cache.insert("key2".to_string(), 200);
+                cache.insert("key3".to_string(), 300);
+                assert_eq!(cache.len(), 3);
+                
+                // Create frequency differences
+                cache.get(&"key1".to_string()); // key1: freq = 2
+                cache.get(&"key1".to_string()); // key1: freq = 3
+                cache.get(&"key2".to_string()); // key2: freq = 2
+                // key3: freq = 1 (lowest)
+                
+                // Insert beyond capacity - should evict key3 (LFU)
+                cache.insert("key4".to_string(), 400);
+                assert_eq!(cache.len(), 3); // Should remain at capacity
+                
+                // Verify eviction occurred correctly
+                assert!(!cache.contains(&"key3".to_string()));
+                assert_eq!(cache.frequency(&"key3".to_string()), None);
+                
+                // Verify remaining items are correct
+                assert!(cache.contains(&"key1".to_string()));
+                assert!(cache.contains(&"key2".to_string()));
+                assert!(cache.contains(&"key4".to_string()));
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(3));
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(2));
+                assert_eq!(cache.frequency(&"key4".to_string()), Some(1)); // New item
+                
+                // Test eviction with tie-breaking
+                cache.insert("key5".to_string(), 500);
+                assert_eq!(cache.len(), 3);
+                
+                // Either key4 or key5 should be evicted (both have freq=1)
+                // But one of them should remain
+                let has_key4 = cache.contains(&"key4".to_string());
+                let has_key5 = cache.contains(&"key5".to_string());
+                assert!(has_key4 ^ has_key5); // Exactly one should be true (XOR)
+                
+                // High frequency items should always remain
+                assert!(cache.contains(&"key1".to_string()));
+                assert!(cache.contains(&"key2".to_string()));
+                
+                // Test multiple evictions
+                cache.insert("key6".to_string(), 600);
+                cache.insert("key7".to_string(), 700);
+                assert_eq!(cache.len(), 3); // Should still be at capacity
+                
+                // key1 and key2 should still be there due to higher frequency
+                assert!(cache.contains(&"key1".to_string()));
+                assert!(cache.contains(&"key2".to_string()));
+                
+                // Test eviction doesn't break LFU ordering
+                let (lfu_key, _) = cache.peek_lfu().unwrap();
+                let lfu_freq = cache.frequency(lfu_key).unwrap();
+                
+                // LFU frequency should be minimal among current items
+                for (key, (_, freq)) in cache.cache.iter() {
+                    assert!(freq >= &(lfu_freq as usize));
+                }
+                
+                // Test eviction with zero capacity
+                let mut zero_cache = LFUCache::<String, i32>::new(0);
+                zero_cache.insert("key1".to_string(), 100);
+                assert_eq!(zero_cache.len(), 0); // Should reject insertion
+                assert!(!zero_cache.contains(&"key1".to_string()));
+                
+                // Test eviction preserves invariants
+                let mut test_cache = LFUCache::new(2);
+                
+                // Insert items with known frequencies
+                test_cache.insert("low".to_string(), 1);
+                test_cache.insert("high".to_string(), 2);
+                
+                // Make high frequency item
+                for _ in 0..5 {
+                    test_cache.get(&"high".to_string());
+                }
+                
+                // Insert new item - should evict "low"
+                test_cache.insert("new".to_string(), 3);
+                assert_eq!(test_cache.len(), 2);
+                assert!(!test_cache.contains(&"low".to_string()));
+                assert!(test_cache.contains(&"high".to_string()));
+                assert!(test_cache.contains(&"new".to_string()));
+                
+                // Verify frequencies are consistent after eviction
+                assert_eq!(test_cache.frequency(&"low".to_string()), None);
+                assert!(test_cache.frequency(&"high".to_string()).unwrap() > 1);
+                assert_eq!(test_cache.frequency(&"new".to_string()), Some(1));
             }
 
             #[test]
             fn test_frequency_increment_on_get() {
-                // TODO: Test that get() increments frequency correctly
+                let mut cache = LFUCache::new(5);
+                
+                // Insert items with initial frequency of 1
+                cache.insert("key1".to_string(), 100);
+                cache.insert("key2".to_string(), 200);
+                cache.insert("key3".to_string(), 300);
+                
+                // Verify initial frequencies
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(1));
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(1));
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(1));
+                
+                // Test single get operations
+                assert_eq!(cache.get(&"key1".to_string()), Some(&100));
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(2));
+                
+                assert_eq!(cache.get(&"key2".to_string()), Some(&200));
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(2));
+                
+                // Test multiple get operations on same key
+                assert_eq!(cache.get(&"key1".to_string()), Some(&100));
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(3));
+                
+                assert_eq!(cache.get(&"key1".to_string()), Some(&100));
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(4));
+                
+                // Test get on non-existent key doesn't create entry
+                assert_eq!(cache.get(&"nonexistent".to_string()), None);
+                assert_eq!(cache.frequency(&"nonexistent".to_string()), None);
+                assert_eq!(cache.len(), 3); // Should remain unchanged
+                
+                // Test frequency increments are independent per key
+                for _ in 0..10 {
+                    cache.get(&"key2".to_string());
+                }
+                for _ in 0..5 {
+                    cache.get(&"key3".to_string());
+                }
+                
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(4));  // Unchanged
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(12)); // 2 + 10
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(6));  // 1 + 5
+                
+                // Test get after insert update preserves frequency
+                cache.insert("key1".to_string(), 999); // Update value
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(4)); // Frequency preserved
+                assert_eq!(cache.get(&"key1".to_string()), Some(&999)); // New value
+                assert_eq!(cache.frequency(&"key1".to_string()), Some(5)); // Frequency incremented
+                
+                // Test frequency increments affect LFU ordering
+                cache.insert("key4".to_string(), 400);
+                assert_eq!(cache.frequency(&"key4".to_string()), Some(1)); // New item
+                
+                // key4 should be LFU now
+                let (lfu_key, _) = cache.peek_lfu().unwrap();
+                assert_eq!(lfu_key, &"key4".to_string());
+                
+                // After accessing key4, it should no longer be LFU
+                cache.get(&"key4".to_string());
+                cache.get(&"key4".to_string());
+                assert_eq!(cache.frequency(&"key4".to_string()), Some(3));
+                
+                // Insert a new item that will become the new LFU
+                cache.insert("key5".to_string(), 500);
+                assert_eq!(cache.frequency(&"key5".to_string()), Some(1));
+                
+                // Now key5 should be LFU (frequency = 1)
+                let (new_lfu_key, _) = cache.peek_lfu().unwrap();
+                assert_eq!(new_lfu_key, &"key5".to_string());
+                let new_lfu_freq = cache.frequency(new_lfu_key).unwrap();
+                assert_eq!(new_lfu_freq, 1);
+                
+                // Test rapid frequency increments
+                let initial_freq = cache.frequency(&"key1".to_string()).unwrap();
+                for i in 1..=100 {
+                    cache.get(&"key1".to_string());
+                    assert_eq!(cache.frequency(&"key1".to_string()), Some(initial_freq + i));
+                }
+                
+                // Test that get operations don't affect other keys' frequencies
+                let key2_freq_before = cache.frequency(&"key2".to_string()).unwrap();
+                let key3_freq_before = cache.frequency(&"key3".to_string()).unwrap();
+                let key4_freq_before = cache.frequency(&"key4".to_string()).unwrap();
+                
+                cache.get(&"key1".to_string()); // Only affect key1
+                
+                assert_eq!(cache.frequency(&"key2".to_string()), Some(key2_freq_before));
+                assert_eq!(cache.frequency(&"key3".to_string()), Some(key3_freq_before));
+                assert_eq!(cache.frequency(&"key4".to_string()), Some(key4_freq_before));
             }
 
             #[test]
             fn test_invariants_after_operations() {
-                // TODO: Test that all invariants hold after various operations
+                let mut cache = LFUCache::new(4);
+                
+                // Helper function to verify all invariants
+                let verify_invariants = |cache: &LFUCache<String, i32>| {
+                    // Invariant 1: len() never exceeds capacity()
+                    assert!(cache.len() <= cache.capacity());
+                    
+                    // Invariant 2: All keys in cache have corresponding frequencies > 0
+                    for (key, _) in cache.cache.iter() {
+                        let freq = cache.frequency(key);
+                        assert!(freq.is_some() && freq.unwrap() > 0);
+                    }
+                    
+                    // Invariant 3: If cache is not empty, peek_lfu() returns Some
+                    if cache.len() > 0 {
+                        assert!(cache.peek_lfu().is_some());
+                    } else {
+                        assert!(cache.peek_lfu().is_none());
+                    }
+                    
+                    // Invariant 4: LFU item has minimum frequency among all items
+                    if let Some((lfu_key, _)) = cache.peek_lfu() {
+                        let lfu_freq = cache.frequency(lfu_key).unwrap();
+                        for (key, _) in cache.cache.iter() {
+                            let freq = cache.frequency(key).unwrap();
+                            assert!(freq >= lfu_freq);
+                        }
+                    }
+                    
+                    // Invariant 5: contains() is consistent with get()
+                    let test_keys = vec!["key1", "key2", "key3", "key4", "key5", "nonexistent"];
+                    for key in test_keys {
+                        let contains_result = cache.contains(&key.to_string());
+                        let get_result = cache.cache.get(&key.to_string()).is_some();
+                        assert_eq!(contains_result, get_result);
+                    }
+                };
+                
+                // Test invariants after initial state
+                verify_invariants(&cache);
+                
+                // Test invariants after insertions
+                cache.insert("key1".to_string(), 100);
+                verify_invariants(&cache);
+                
+                cache.insert("key2".to_string(), 200);
+                verify_invariants(&cache);
+                
+                cache.insert("key3".to_string(), 300);
+                verify_invariants(&cache);
+                
+                cache.insert("key4".to_string(), 400);
+                verify_invariants(&cache);
+                
+                // Test invariants after gets (frequency changes)
+                cache.get(&"key1".to_string());
+                verify_invariants(&cache);
+                
+                cache.get(&"key1".to_string());
+                cache.get(&"key2".to_string());
+                verify_invariants(&cache);
+                
+                // Test invariants after capacity overflow (eviction)
+                cache.insert("key5".to_string(), 500);
+                verify_invariants(&cache);
+                
+                // Test invariants after multiple operations
+                for i in 0..20 {
+                    match i % 5 {
+                        0 => { cache.insert(format!("temp{}", i), i); }
+                        1 => { cache.get(&"key1".to_string()); }
+                        2 => { cache.remove(&format!("temp{}", i - 1)); }
+                        3 => { cache.pop_lfu(); }
+                        4 => { cache.increment_frequency(&"key2".to_string()); }
+                        _ => unreachable!(),
+                    }
+                    verify_invariants(&cache);
+                }
+                
+                // Test invariants after frequency manipulations
+                cache.reset_frequency(&"key1".to_string());
+                verify_invariants(&cache);
+                
+                cache.increment_frequency(&"key2".to_string());
+                verify_invariants(&cache);
+                
+                // Test invariants after removals
+                let keys_to_remove: Vec<_> = cache.cache.keys().cloned().take(2).collect();
+                for key in keys_to_remove {
+                    cache.remove(&key);
+                    verify_invariants(&cache);
+                }
+                
+                // Test invariants after pop_lfu operations
+                while cache.len() > 0 {
+                    cache.pop_lfu();
+                    verify_invariants(&cache);
+                }
+                
+                // Test invariants after clear
+                cache.insert("test1".to_string(), 1);
+                cache.insert("test2".to_string(), 2);
+                verify_invariants(&cache);
+                
+                cache.clear();
+                verify_invariants(&cache);
+                
+                // Test invariants with edge cases
+                
+                // Zero capacity cache
+                let mut zero_cache = LFUCache::<String, i32>::new(0);
+                verify_invariants(&zero_cache);
+                zero_cache.insert("test".to_string(), 1);
+                verify_invariants(&zero_cache);
+                
+                // Single capacity cache
+                let mut single_cache = LFUCache::new(1);
+                verify_invariants(&single_cache);
+                
+                single_cache.insert("only".to_string(), 1);
+                verify_invariants(&single_cache);
+                
+                single_cache.insert("replace".to_string(), 2);
+                verify_invariants(&single_cache);
+                
+                // Test with complex frequency patterns
+                let mut complex_cache = LFUCache::new(3);
+                complex_cache.insert("a".to_string(), 1);
+                complex_cache.insert("b".to_string(), 2);
+                complex_cache.insert("c".to_string(), 3);
+                
+                // Create Fibonacci-like frequency pattern
+                for i in 1..=10 {
+                    for _ in 0..i {
+                        complex_cache.get(&"a".to_string());
+                    }
+                    for _ in 0..(i/2) {
+                        complex_cache.get(&"b".to_string());
+                    }
+                    verify_invariants(&complex_cache);
+                }
             }
         }
     }
