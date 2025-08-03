@@ -1,9 +1,3 @@
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::hash::Hash;
-use std::sync::Arc;
-
 /// # FIFO (First In, First Out) Cache Implementation
 ///
 /// This module provides a high-performance FIFO cache that evicts the oldest (first inserted)
@@ -331,6 +325,12 @@ use std::sync::Arc;
 ///     }
 /// }
 /// ```
+
+use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::hash::Hash;
+use std::sync::Arc;
 
 /// FIFO (First In, First Out) Cache implementation.
 #[derive(Debug)]
