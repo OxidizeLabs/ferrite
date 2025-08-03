@@ -3192,22 +3192,882 @@ mod tests {
 
             #[test]
             fn test_lfu_eviction_performance() {
-                // TODO: Test performance of finding and evicting LFU item
+                // Test 1: Basic LFU eviction performance
+                let mut cache = LFUCache::new(1000);
+                
+                // Fill cache to capacity
+                for i in 0..1000 {
+                    cache.insert(format!("key_{}", i), i as i32);
+                }
+                
+                // Create frequency distribution to establish clear LFU items
+                for _ in 0..10 {
+                    for i in 0..100 {
+                        cache.get(&format!("key_{}", i)); // High frequency
+                    }
+                }
+                
+                for _ in 0..3 {
+                    for i in 100..500 {
+                        cache.get(&format!("key_{}", i)); // Medium frequency
+                    }
+                }
+                // Items 500-999 remain at frequency 1 (LFU candidates)
+                
+                // Test eviction performance
+                let start = Instant::now();
+                for i in 1000..1500 {
+                    cache.insert(format!("new_key_{}", i), i as i32);
+                }
+                let eviction_duration = start.elapsed();
+                
+                // Should evict 500 LFU items efficiently
+                assert_eq!(cache.len(), 1000);
+                assert!(eviction_duration < Duration::from_millis(500), 
+                    "LFU eviction should be efficient: {:?}", eviction_duration);
+                
+                // Verify that high-frequency items are preserved
+                assert!(cache.contains(&"key_0".to_string()));
+                assert!(cache.contains(&"key_50".to_string()));
+                assert!(cache.contains(&"key_100".to_string()));
+                
+                // Test 2: Performance scaling with cache size
+                let sizes = [100, 500, 1000, 2000];
+                let mut eviction_times = Vec::new();
+                
+                for &size in &sizes {
+                    let mut test_cache = LFUCache::new(size);
+                    
+                    // Fill cache
+                    for i in 0..size {
+                        test_cache.insert(format!("scale_{}", i), i as i32);
+                    }
+                    
+                    // Create some frequency variance
+                    for i in 0..size/10 {
+                        test_cache.get(&format!("scale_{}", i));
+                    }
+                    
+                    // Measure eviction performance
+                    let start = Instant::now();
+                    for i in 0..100 {
+                        test_cache.insert(format!("evict_{}", i), (i + size) as i32);
+                    }
+                    let duration = start.elapsed();
+                    eviction_times.push(duration);
+                }
+                
+                // Performance should scale reasonably
+                for (i, &duration) in eviction_times.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(100 + (i * 50) as u64), 
+                        "Eviction performance should scale reasonably for size {}: {:?}", 
+                        sizes[i], duration);
+                }
+                
+                // Test 3: Eviction with uniform frequency distribution
+                let mut uniform_cache = LFUCache::new(500);
+                
+                // Fill cache with uniform frequency
+                for i in 0..500 {
+                    uniform_cache.insert(format!("uniform_{}", i), i as i32);
+                    uniform_cache.get(&format!("uniform_{}", i)); // All have frequency 2
+                }
+                
+                let start = Instant::now();
+                for i in 0..200 {
+                    uniform_cache.insert(format!("uniform_new_{}", i), (i + 1000) as i32);
+                }
+                let uniform_eviction_duration = start.elapsed();
+                
+                assert!(uniform_eviction_duration < Duration::from_millis(200), 
+                    "Uniform frequency eviction should be reasonable: {:?}", uniform_eviction_duration);
+                
+                // Test 4: Eviction with highly skewed frequency distribution
+                let mut skewed_cache = LFUCache::new(1000);
+                
+                // Fill cache
+                for i in 0..1000 {
+                    skewed_cache.insert(format!("skewed_{}", i), i as i32);
+                }
+                
+                // Create highly skewed distribution
+                for _ in 0..100 {
+                    skewed_cache.get(&"skewed_0".to_string()); // One very hot item
+                }
+                
+                let start = Instant::now();
+                for i in 0..500 {
+                    skewed_cache.insert(format!("skewed_new_{}", i), (i + 2000) as i32);
+                }
+                let skewed_eviction_duration = start.elapsed();
+                
+                assert!(skewed_eviction_duration < Duration::from_millis(400), 
+                    "Skewed frequency eviction should be efficient: {:?}", skewed_eviction_duration);
+                
+                // Hot item should be preserved
+                assert!(skewed_cache.contains(&"skewed_0".to_string()));
+                
+                // Test 5: Repeated eviction performance consistency
+                let mut consistent_cache = LFUCache::new(100);
+                let mut eviction_durations = Vec::new();
+                
+                // Fill cache initially
+                for i in 0..100 {
+                    consistent_cache.insert(format!("consistent_{}", i), i as i32);
+                }
+                
+                // Perform multiple rounds of eviction
+                for round in 0..10 {
+                    let start = Instant::now();
+                    for i in 0..20 {
+                        consistent_cache.insert(format!("round_{}_{}", round, i), (round * 100 + i) as i32);
+                    }
+                    eviction_durations.push(start.elapsed());
+                }
+                
+                // Check consistency
+                let avg_duration = eviction_durations.iter().sum::<Duration>() / eviction_durations.len() as u32;
+                for duration in &eviction_durations {
+                    assert!(duration.as_millis() <= avg_duration.as_millis() * 3, 
+                        "Eviction performance should be consistent: {:?} vs avg {:?}", duration, avg_duration);
+                }
+                
+                println!("LFU eviction performance:");
+                println!("  Basic eviction: {:?}", eviction_duration);
+                println!("  Size scaling: {:?}", eviction_times);
+                println!("  Uniform frequency: {:?}", uniform_eviction_duration);
+                println!("  Skewed frequency: {:?}", skewed_eviction_duration);
+                println!("  Consistency check: {:?}", eviction_durations);
             }
 
             #[test]
             fn test_pop_lfu_performance() {
-                // TODO: Test pop_lfu() method performance
+                // Test 1: Basic pop_lfu performance
+                let mut cache = LFUCache::new(2000);
+                
+                // Fill cache with items
+                for i in 0..2000 {
+                    cache.insert(format!("pop_{}", i), i as i32);
+                }
+                
+                // Create frequency distribution
+                for _ in 0..5 {
+                    for i in 0..200 {
+                        cache.get(&format!("pop_{}", i)); // High frequency
+                    }
+                }
+                
+                for _ in 0..2 {
+                    for i in 200..800 {
+                        cache.get(&format!("pop_{}", i)); // Medium frequency
+                    }
+                }
+                // Items 800-1999 remain at frequency 1 (LFU candidates)
+                
+                // Test pop_lfu performance
+                let start = Instant::now();
+                let mut popped_items = Vec::new();
+                for _ in 0..500 {
+                    if let Some((key, value)) = cache.pop_lfu() {
+                        popped_items.push((key, value));
+                    }
+                }
+                let pop_duration = start.elapsed();
+                
+                assert_eq!(popped_items.len(), 500);
+                assert_eq!(cache.len(), 1500);
+                assert!(pop_duration < Duration::from_millis(500), 
+                    "pop_lfu should be efficient: {:?}", pop_duration);
+                
+                // Verify that high-frequency items remain
+                assert!(cache.contains(&"pop_0".to_string()));
+                assert!(cache.contains(&"pop_100".to_string()));
+                assert!(cache.contains(&"pop_200".to_string()));
+                
+                // Test 2: pop_lfu with different cache sizes
+                let sizes = [50, 200, 500, 1000];
+                let mut pop_times = Vec::new();
+                
+                for &size in &sizes {
+                    let mut test_cache = LFUCache::new(size);
+                    
+                    // Fill cache
+                    for i in 0..size {
+                        test_cache.insert(format!("size_{}", i), i as i32);
+                    }
+                    
+                    // Create some frequency variance
+                    for i in 0..size/5 {
+                        test_cache.get(&format!("size_{}", i));
+                    }
+                    
+                    // Measure pop_lfu performance
+                    let start = Instant::now();
+                    for _ in 0..(size/4) {
+                        test_cache.pop_lfu();
+                    }
+                    let duration = start.elapsed();
+                    pop_times.push(duration);
+                }
+                
+                // Performance should scale reasonably
+                for (i, &duration) in pop_times.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(50 + (i * 25) as u64), 
+                        "pop_lfu performance should scale reasonably for size {}: {:?}", 
+                        sizes[i], duration);
+                }
+                
+                // Test 3: pop_lfu with uniform frequencies (worst case)
+                let mut uniform_cache = LFUCache::new(300);
+                
+                // Fill cache with uniform frequency
+                for i in 0..300 {
+                    uniform_cache.insert(format!("uniform_{}", i), i as i32);
+                    uniform_cache.get(&format!("uniform_{}", i)); // All have frequency 2
+                }
+                
+                let start = Instant::now();
+                let mut uniform_pops = 0;
+                for _ in 0..100 {
+                    if uniform_cache.pop_lfu().is_some() {
+                        uniform_pops += 1;
+                    }
+                }
+                let uniform_pop_duration = start.elapsed();
+                
+                assert_eq!(uniform_pops, 100);
+                assert!(uniform_pop_duration < Duration::from_millis(100), 
+                    "Uniform frequency pop_lfu should be reasonable: {:?}", uniform_pop_duration);
+                
+                // Test 4: pop_lfu until empty
+                let mut empty_cache = LFUCache::new(100);
+                
+                // Fill cache
+                for i in 0..100 {
+                    empty_cache.insert(format!("empty_{}", i), i as i32);
+                }
+                
+                let start = Instant::now();
+                let mut total_popped = 0;
+                while empty_cache.pop_lfu().is_some() {
+                    total_popped += 1;
+                }
+                let empty_duration = start.elapsed();
+                
+                assert_eq!(total_popped, 100);
+                assert_eq!(empty_cache.len(), 0);
+                assert!(empty_duration < Duration::from_millis(100), 
+                    "pop_lfu until empty should be efficient: {:?}", empty_duration);
+                
+                // Test 5: pop_lfu performance with highly skewed distribution
+                let mut skewed_cache = LFUCache::new(1000);
+                
+                // Fill cache
+                for i in 0..1000 {
+                    skewed_cache.insert(format!("skewed_{}", i), i as i32);
+                }
+                
+                // Create very skewed distribution
+                for _ in 0..50 {
+                    skewed_cache.get(&"skewed_0".to_string()); // One very hot item
+                }
+                for _ in 0..10 {
+                    for i in 1..50 {
+                        skewed_cache.get(&format!("skewed_{}", i)); // Some medium items
+                    }
+                }
+                // Items 50-999 remain at frequency 1
+                
+                let start = Instant::now();
+                let mut skewed_pops = 0;
+                for _ in 0..300 {
+                    if skewed_cache.pop_lfu().is_some() {
+                        skewed_pops += 1;
+                    }
+                }
+                let skewed_pop_duration = start.elapsed();
+                
+                assert_eq!(skewed_pops, 300);
+                assert!(skewed_pop_duration < Duration::from_millis(300), 
+                    "Skewed distribution pop_lfu should be efficient: {:?}", skewed_pop_duration);
+                
+                // Hot item should still be there
+                assert!(skewed_cache.contains(&"skewed_0".to_string()));
+                
+                // Test 6: pop_lfu performance consistency
+                let mut consistency_cache = LFUCache::new(200);
+                let mut pop_durations = Vec::new();
+                
+                // Fill cache
+                for i in 0..200 {
+                    consistency_cache.insert(format!("consistency_{}", i), i as i32);
+                }
+                
+                // Perform multiple rounds of pop operations
+                for round in 0..5 {
+                    // Add some new items to maintain cache size
+                    for i in 0..10 {
+                        consistency_cache.insert(format!("round_{}_{}", round, i), (round * 100 + i) as i32);
+                    }
+                    
+                    let start = Instant::now();
+                    for _ in 0..10 {
+                        consistency_cache.pop_lfu();
+                    }
+                    pop_durations.push(start.elapsed());
+                }
+                
+                // Check consistency
+                let avg_duration = pop_durations.iter().sum::<Duration>() / pop_durations.len() as u32;
+                for duration in &pop_durations {
+                    assert!(duration.as_millis() <= avg_duration.as_millis() * 3, 
+                        "pop_lfu performance should be consistent: {:?} vs avg {:?}", duration, avg_duration);
+                }
+                
+                // Test 7: pop_lfu on empty cache
+                let mut empty_test_cache = LFUCache::<String, i32>::new(10);
+                
+                let start = Instant::now();
+                let result = empty_test_cache.pop_lfu();
+                let empty_pop_duration = start.elapsed();
+                
+                assert!(result.is_none());
+                assert!(empty_pop_duration < Duration::from_millis(1), 
+                    "pop_lfu on empty cache should be instant: {:?}", empty_pop_duration);
+                
+                println!("pop_lfu performance:");
+                println!("  Basic pop operations: {:?}", pop_duration);
+                println!("  Size scaling: {:?}", pop_times);
+                println!("  Uniform frequency: {:?}", uniform_pop_duration);
+                println!("  Pop until empty: {:?}", empty_duration);
+                println!("  Skewed distribution: {:?}", skewed_pop_duration);
+                println!("  Consistency check: {:?}", pop_durations);
+                println!("  Empty cache: {:?}", empty_pop_duration);
             }
 
             #[test]
             fn test_eviction_with_many_same_frequency() {
-                // TODO: Test eviction performance when many items have same frequency
+                // Test 1: All items have same frequency (frequency = 1)
+                let mut cache = LFUCache::new(1000);
+                
+                // Fill cache where all items have frequency 1
+                for i in 0..1000 {
+                    cache.insert(format!("same_freq_{}", i), i as i32);
+                }
+                
+                // All items should have frequency 1
+                for i in (0..100).step_by(10) {
+                    assert_eq!(cache.frequency(&format!("same_freq_{}", i)), Some(1));
+                }
+                
+                // Test eviction performance with same frequency items
+                let start = Instant::now();
+                for i in 1000..1500 {
+                    cache.insert(format!("new_same_{}", i), i as i32);
+                }
+                let same_freq_duration = start.elapsed();
+                
+                assert_eq!(cache.len(), 1000);
+                assert!(same_freq_duration < Duration::from_millis(500), 
+                    "Same frequency eviction should be reasonable: {:?}", same_freq_duration);
+                
+                // Test 2: Multiple groups with same frequencies
+                let mut grouped_cache = LFUCache::new(1200);
+                
+                // Group 1: frequency 1 (400 items)
+                for i in 0..400 {
+                    grouped_cache.insert(format!("group1_{}", i), i as i32);
+                }
+                
+                // Group 2: frequency 3 (400 items)
+                for i in 400..800 {
+                    grouped_cache.insert(format!("group2_{}", i), i as i32);
+                    grouped_cache.get(&format!("group2_{}", i));
+                    grouped_cache.get(&format!("group2_{}", i));
+                }
+                
+                // Group 3: frequency 5 (400 items)
+                for i in 800..1200 {
+                    grouped_cache.insert(format!("group3_{}", i), i as i32);
+                    for _ in 0..4 {
+                        grouped_cache.get(&format!("group3_{}", i));
+                    }
+                }
+                
+                // Force eviction of group 1 (frequency 1)
+                let start = Instant::now();
+                for i in 1200..1600 {
+                    grouped_cache.insert(format!("new_group_{}", i), i as i32);
+                }
+                let grouped_eviction_duration = start.elapsed();
+                
+                assert_eq!(grouped_cache.len(), 1200);
+                assert!(grouped_eviction_duration < Duration::from_millis(400), 
+                    "Grouped frequency eviction should be efficient: {:?}", grouped_eviction_duration);
+                
+                // Verify that most Group 1 items (frequency 1) were evicted
+                // and Group 2/3 items (higher frequency) were preserved
+                let mut group1_remaining = 0;
+                let mut group2_remaining = 0;
+                let mut group3_remaining = 0;
+                
+                for i in 0..400 {
+                    if grouped_cache.contains(&format!("group1_{}", i)) {
+                        group1_remaining += 1;
+                    }
+                }
+                for i in 400..800 {
+                    if grouped_cache.contains(&format!("group2_{}", i)) {
+                        group2_remaining += 1;
+                    }
+                }
+                for i in 800..1200 {
+                    if grouped_cache.contains(&format!("group3_{}", i)) {
+                        group3_remaining += 1;
+                    }
+                }
+                
+                // Verify eviction follows frequency preference (lower frequency items evicted more)
+                // Group 1 should have fewer remaining than Group 2/3
+                assert!(group1_remaining < group2_remaining, 
+                    "Group 1 (freq=1) should have fewer remaining than Group 2 (freq=3): {} vs {}", 
+                    group1_remaining, group2_remaining);
+                assert!(group1_remaining < group3_remaining, 
+                    "Group 1 (freq=1) should have fewer remaining than Group 3 (freq=5): {} vs {}", 
+                    group1_remaining, group3_remaining);
+                
+                // Verify cache respects capacity and LFU behavior is working
+                assert_eq!(grouped_cache.len(), 1200, "Cache should maintain its capacity");
+                
+                // The key test: lower frequency items should be evicted more than higher frequency items
+                let total_old_remaining = group1_remaining + group2_remaining + group3_remaining;
+                println!("Group distribution - Group1 (freq=1): {}, Group2 (freq=3): {}, Group3 (freq=5): {}, Total old: {}", 
+                    group1_remaining, group2_remaining, group3_remaining, total_old_remaining);
+                
+                // Test 3: Large number of items with identical frequency
+                let mut identical_cache = LFUCache::new(2000);
+                
+                // Fill cache and make all items have frequency 3
+                for i in 0..2000 {
+                    identical_cache.insert(format!("identical_{}", i), i as i32);
+                    identical_cache.get(&format!("identical_{}", i));
+                    identical_cache.get(&format!("identical_{}", i));
+                }
+                
+                // Verify all have same frequency
+                for i in (0..2000).step_by(100) {
+                    assert_eq!(identical_cache.frequency(&format!("identical_{}", i)), Some(3));
+                }
+                
+                // Test eviction performance with identical frequencies
+                let start = Instant::now();
+                for i in 2000..2500 {
+                    identical_cache.insert(format!("new_identical_{}", i), i as i32);
+                }
+                let identical_duration = start.elapsed();
+                
+                assert_eq!(identical_cache.len(), 2000);
+                assert!(identical_duration < Duration::from_millis(600), 
+                    "Identical frequency eviction should be reasonable: {:?}", identical_duration);
+                
+                // Test 4: Performance scaling with different ratios of same-frequency items
+                let ratios = [0.1, 0.3, 0.5, 0.8, 1.0]; // Fraction of items with same frequency
+                let mut ratio_times = Vec::new();
+                
+                for &ratio in &ratios {
+                    let mut ratio_cache = LFUCache::new(500);
+                    let same_freq_count = (500.0 * ratio) as usize;
+                    
+                    // Fill cache
+                    for i in 0..500 {
+                        ratio_cache.insert(format!("ratio_{}", i), i as i32);
+                    }
+                    
+                    // Make some items have frequency 2, others keep frequency 1
+                    for i in 0..same_freq_count {
+                        ratio_cache.get(&format!("ratio_{}", i));
+                    }
+                    
+                    // Make remaining items have higher frequencies
+                    for i in same_freq_count..500 {
+                        for _ in 0..(i % 10 + 3) {
+                            ratio_cache.get(&format!("ratio_{}", i));
+                        }
+                    }
+                    
+                    // Test eviction performance
+                    let start = Instant::now();
+                    for i in 500..600 {
+                        ratio_cache.insert(format!("new_ratio_{}", i), i as i32);
+                    }
+                    let duration = start.elapsed();
+                    ratio_times.push(duration);
+                }
+                
+                // Performance should be reasonable across all ratios
+                for (i, &duration) in ratio_times.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(100), 
+                        "Ratio {} eviction should be efficient: {:?}", ratios[i], duration);
+                }
+                
+                // Test 5: Eviction pattern with same frequency items
+                let mut pattern_cache = LFUCache::new(300);
+                
+                // Create alternating frequency pattern
+                for i in 0..300 {
+                    pattern_cache.insert(format!("pattern_{}", i), i as i32);
+                    if i % 2 == 0 {
+                        pattern_cache.get(&format!("pattern_{}", i)); // Even indices: freq 2
+                    }
+                    // Odd indices: freq 1
+                }
+                
+                // Count items of each frequency
+                let mut freq1_count = 0;
+                let mut freq2_count = 0;
+                for i in 0..300 {
+                    if let Some(freq) = pattern_cache.frequency(&format!("pattern_{}", i)) {
+                        if freq == 1 { freq1_count += 1; }
+                        else if freq == 2 { freq2_count += 1; }
+                    }
+                }
+                
+                assert_eq!(freq1_count, 150); // Odd indices
+                assert_eq!(freq2_count, 150); // Even indices
+                
+                // Force eviction of freq 1 items
+                let start = Instant::now();
+                for i in 300..450 {
+                    pattern_cache.insert(format!("new_pattern_{}", i), i as i32);
+                }
+                let pattern_duration = start.elapsed();
+                
+                assert_eq!(pattern_cache.len(), 300);
+                assert!(pattern_duration < Duration::from_millis(150), 
+                    "Pattern eviction should be efficient: {:?}", pattern_duration);
+                
+                // Most freq 1 items should be evicted, freq 2 items preserved
+                let mut remaining_freq1 = 0;
+                let mut remaining_freq2 = 0;
+                for i in 0..300 {
+                    if pattern_cache.contains(&format!("pattern_{}", i)) {
+                        if let Some(freq) = pattern_cache.frequency(&format!("pattern_{}", i)) {
+                            if freq == 1 { remaining_freq1 += 1; }
+                            else if freq == 2 { remaining_freq2 += 1; }
+                        }
+                    }
+                }
+                
+                assert!(remaining_freq2 > remaining_freq1, 
+                    "More freq 2 items should remain: {} vs {}", remaining_freq2, remaining_freq1);
+                
+                // Test 6: Worst case scenario - all items same frequency after access
+                let mut worst_case_cache = LFUCache::new(500);
+                
+                // Fill and access all items once to make them frequency 2
+                for i in 0..500 {
+                    worst_case_cache.insert(format!("worst_{}", i), i as i32);
+                    worst_case_cache.get(&format!("worst_{}", i));
+                }
+                
+                // Verify all have same frequency
+                for i in (0..500).step_by(50) {
+                    assert_eq!(worst_case_cache.frequency(&format!("worst_{}", i)), Some(2));
+                }
+                
+                let start = Instant::now();
+                for i in 500..750 {
+                    worst_case_cache.insert(format!("worst_new_{}", i), i as i32);
+                }
+                let worst_case_duration = start.elapsed();
+                
+                assert_eq!(worst_case_cache.len(), 500);
+                assert!(worst_case_duration < Duration::from_millis(300), 
+                    "Worst case same frequency eviction should be acceptable: {:?}", worst_case_duration);
+                
+                println!("Same frequency eviction performance:");
+                println!("  All same frequency: {:?}", same_freq_duration);
+                println!("  Grouped frequencies: {:?}", grouped_eviction_duration);
+                println!("  Identical frequencies: {:?}", identical_duration);
+                println!("  Ratio scaling: {:?}", ratio_times);
+                println!("  Pattern eviction: {:?}", pattern_duration);
+                println!("  Worst case scenario: {:?}", worst_case_duration);
             }
 
             #[test]
             fn test_frequency_distribution_impact() {
-                // TODO: Test how frequency distribution affects eviction performance
+                // Test 1: Uniform distribution impact
+                let mut uniform_cache = LFUCache::new(1000);
+                
+                // Create uniform frequency distribution (all items frequency 3)
+                for i in 0..1000 {
+                    uniform_cache.insert(format!("uniform_{}", i), i as i32);
+                    uniform_cache.get(&format!("uniform_{}", i));
+                    uniform_cache.get(&format!("uniform_{}", i));
+                }
+                
+                // Verify uniform distribution
+                for i in (0..1000).step_by(100) {
+                    assert_eq!(uniform_cache.frequency(&format!("uniform_{}", i)), Some(3));
+                }
+                
+                let start = Instant::now();
+                for i in 1000..1200 {
+                    uniform_cache.insert(format!("new_uniform_{}", i), i as i32);
+                }
+                let uniform_duration = start.elapsed();
+                
+                assert_eq!(uniform_cache.len(), 1000);
+                assert!(uniform_duration < Duration::from_millis(200), 
+                    "Uniform distribution eviction should be reasonable: {:?}", uniform_duration);
+                
+                // Test 2: Normal (bell curve) distribution impact
+                let mut normal_cache = LFUCache::new(1000);
+                
+                // Create normal distribution of frequencies (center items higher frequency)
+                for i in 0..1000 {
+                    normal_cache.insert(format!("normal_{}", i), i as i32);
+                }
+                
+                // Create bell curve frequency pattern
+                for i in 0..1000 {
+                    let distance_from_center = ((i as f64 - 500.0).abs() / 500.0 * 10.0) as usize;
+                    let access_count = 10 - distance_from_center.min(9);
+                    for _ in 0..access_count {
+                        normal_cache.get(&format!("normal_{}", i));
+                    }
+                }
+                
+                let start = Instant::now();
+                for i in 1000..1200 {
+                    normal_cache.insert(format!("new_normal_{}", i), i as i32);
+                }
+                let normal_duration = start.elapsed();
+                
+                assert_eq!(normal_cache.len(), 1000);
+                assert!(normal_duration < Duration::from_millis(200), 
+                    "Normal distribution eviction should be efficient: {:?}", normal_duration);
+                
+                // Center items should be preserved due to higher frequency
+                assert!(normal_cache.contains(&"normal_500".to_string()));
+                assert!(normal_cache.contains(&"normal_450".to_string()));
+                assert!(normal_cache.contains(&"normal_550".to_string()));
+                
+                // Test 3: Exponential distribution impact
+                let mut exponential_cache = LFUCache::new(1000);
+                
+                // Create exponential frequency distribution
+                for i in 0..1000 {
+                    exponential_cache.insert(format!("exp_{}", i), i as i32);
+                }
+                
+                // Create exponential decay pattern
+                for i in 0..1000 {
+                    let access_count = std::cmp::max(1, 20 - (i / 50));
+                    for _ in 0..access_count {
+                        exponential_cache.get(&format!("exp_{}", i));
+                    }
+                }
+                
+                let start = Instant::now();
+                for i in 1000..1300 {
+                    exponential_cache.insert(format!("new_exp_{}", i), i as i32);
+                }
+                let exponential_duration = start.elapsed();
+                
+                assert_eq!(exponential_cache.len(), 1000);
+                assert!(exponential_duration < Duration::from_millis(300), 
+                    "Exponential distribution eviction should be reasonable: {:?}", exponential_duration);
+                
+                // Early items should be preserved due to higher frequency
+                assert!(exponential_cache.contains(&"exp_0".to_string()));
+                assert!(exponential_cache.contains(&"exp_10".to_string()));
+                assert!(exponential_cache.contains(&"exp_50".to_string()));
+                
+                // Test 4: Power law (Zipf) distribution impact
+                let mut zipf_cache = LFUCache::new(1000);
+                
+                // Create Zipf distribution (80/20 rule)
+                for i in 0..1000 {
+                    zipf_cache.insert(format!("zipf_{}", i), i as i32);
+                }
+                
+                // Top 20% get 80% of accesses
+                let hot_items = 200;
+                let hot_accesses = 40;
+                let cold_accesses = 1;
+                
+                for i in 0..hot_items {
+                    for _ in 0..hot_accesses {
+                        zipf_cache.get(&format!("zipf_{}", i));
+                    }
+                }
+                
+                for i in hot_items..1000 {
+                    for _ in 0..cold_accesses {
+                        zipf_cache.get(&format!("zipf_{}", i));
+                    }
+                }
+                
+                let start = Instant::now();
+                for i in 1000..1400 {
+                    zipf_cache.insert(format!("new_zipf_{}", i), i as i32);
+                }
+                let zipf_duration = start.elapsed();
+                
+                assert_eq!(zipf_cache.len(), 1000);
+                assert!(zipf_duration < Duration::from_millis(400), 
+                    "Zipf distribution eviction should be efficient: {:?}", zipf_duration);
+                
+                // Hot items should be preserved
+                assert!(zipf_cache.contains(&"zipf_0".to_string()));
+                assert!(zipf_cache.contains(&"zipf_50".to_string()));
+                assert!(zipf_cache.contains(&"zipf_100".to_string()));
+                
+                // Test 5: Bimodal distribution impact
+                let mut bimodal_cache = LFUCache::new(1000);
+                
+                // Create bimodal distribution (two peaks)
+                for i in 0..1000 {
+                    bimodal_cache.insert(format!("bimodal_{}", i), i as i32);
+                }
+                
+                // Peak 1: items 200-300 (high frequency)
+                for i in 200..300 {
+                    for _ in 0..15 {
+                        bimodal_cache.get(&format!("bimodal_{}", i));
+                    }
+                }
+                
+                // Peak 2: items 700-800 (high frequency)
+                for i in 700..800 {
+                    for _ in 0..15 {
+                        bimodal_cache.get(&format!("bimodal_{}", i));
+                    }
+                }
+                
+                // Valley: other items (low frequency)
+                for i in 0..200 {
+                    bimodal_cache.get(&format!("bimodal_{}", i));
+                }
+                for i in 300..700 {
+                    bimodal_cache.get(&format!("bimodal_{}", i));
+                }
+                for i in 800..1000 {
+                    bimodal_cache.get(&format!("bimodal_{}", i));
+                }
+                
+                let start = Instant::now();
+                for i in 1000..1300 {
+                    bimodal_cache.insert(format!("new_bimodal_{}", i), i as i32);
+                }
+                let bimodal_duration = start.elapsed();
+                
+                assert_eq!(bimodal_cache.len(), 1000);
+                assert!(bimodal_duration < Duration::from_millis(300), 
+                    "Bimodal distribution eviction should be efficient: {:?}", bimodal_duration);
+                
+                // Peak items should be preserved
+                assert!(bimodal_cache.contains(&"bimodal_250".to_string()));
+                assert!(bimodal_cache.contains(&"bimodal_750".to_string()));
+                
+                // Test 6: Comparative performance across distributions
+                let distributions = ["uniform", "normal", "exponential", "zipf", "bimodal"];
+                let durations = [uniform_duration, normal_duration, exponential_duration, zipf_duration, bimodal_duration];
+                
+                // All distributions should complete within reasonable time
+                for (i, &duration) in durations.iter().enumerate() {
+                    assert!(duration < Duration::from_millis(500), 
+                        "{} distribution took too long: {:?}", distributions[i], duration);
+                }
+                
+                // Test 7: Dynamic distribution change impact
+                let mut dynamic_cache = LFUCache::new(500);
+                
+                // Fill cache initially
+                for i in 0..500 {
+                    dynamic_cache.insert(format!("dynamic_{}", i), i as i32);
+                }
+                
+                // Phase 1: Create initial distribution (linear)
+                for i in 0..500 {
+                    for _ in 0..(i / 50 + 1) {
+                        dynamic_cache.get(&format!("dynamic_{}", i));
+                    }
+                }
+                
+                // Phase 2: Shift access pattern (reverse linear)
+                for i in 0..500 {
+                    for _ in 0..((499 - i) / 50 + 1) {
+                        dynamic_cache.get(&format!("dynamic_{}", i));
+                    }
+                }
+                
+                let start = Instant::now();
+                for i in 500..650 {
+                    dynamic_cache.insert(format!("new_dynamic_{}", i), i as i32);
+                }
+                let dynamic_duration = start.elapsed();
+                
+                assert_eq!(dynamic_cache.len(), 500);
+                assert!(dynamic_duration < Duration::from_millis(150), 
+                    "Dynamic distribution eviction should adapt efficiently: {:?}", dynamic_duration);
+                
+                // Test 8: Sparse vs dense frequency ranges
+                let mut sparse_cache = LFUCache::new(400);
+                let mut dense_cache = LFUCache::new(400);
+                
+                // Sparse: frequencies 1, 10, 20, 30 (big gaps)
+                for i in 0..400 {
+                    sparse_cache.insert(format!("sparse_{}", i), i as i32);
+                    let freq_group = i / 100;
+                    let target_freq = match freq_group {
+                        0 => 1,
+                        1 => 10,
+                        2 => 20,
+                        _ => 30,
+                    };
+                    for _ in 1..target_freq {
+                        sparse_cache.get(&format!("sparse_{}", i));
+                    }
+                }
+                
+                // Dense: frequencies 1, 2, 3, 4 (small gaps)
+                for i in 0..400 {
+                    dense_cache.insert(format!("dense_{}", i), i as i32);
+                    let freq_group = i / 100;
+                    let target_freq = freq_group + 1;
+                    for _ in 1..target_freq {
+                        dense_cache.get(&format!("dense_{}", i));
+                    }
+                }
+                
+                let start = Instant::now();
+                for i in 400..500 {
+                    sparse_cache.insert(format!("new_sparse_{}", i), i as i32);
+                }
+                let sparse_eviction_duration = start.elapsed();
+                
+                let start = Instant::now();
+                for i in 400..500 {
+                    dense_cache.insert(format!("new_dense_{}", i), i as i32);
+                }
+                let dense_eviction_duration = start.elapsed();
+                
+                assert!(sparse_eviction_duration < Duration::from_millis(100), 
+                    "Sparse frequency eviction should be efficient: {:?}", sparse_eviction_duration);
+                assert!(dense_eviction_duration < Duration::from_millis(100), 
+                    "Dense frequency eviction should be efficient: {:?}", dense_eviction_duration);
+                
+                println!("Frequency distribution impact on eviction performance:");
+                println!("  Uniform distribution: {:?}", uniform_duration);
+                println!("  Normal distribution: {:?}", normal_duration);
+                println!("  Exponential distribution: {:?}", exponential_duration);
+                println!("  Zipf distribution: {:?}", zipf_duration);
+                println!("  Bimodal distribution: {:?}", bimodal_duration);
+                println!("  Dynamic distribution: {:?}", dynamic_duration);
+                println!("  Sparse frequencies: {:?}", sparse_eviction_duration);
+                println!("  Dense frequencies: {:?}", dense_eviction_duration);
             }
         }
 
@@ -3243,8 +4103,10 @@ mod tests {
     mod concurrency {
         use super::*;
         use std::sync::{Arc, Mutex};
-        use std::thread;
-        use std::time::Duration;
+
+         // Helper type for thread-safe testing
+        type ThreadSafeLFUCache<K, V> = Arc<Mutex<LFUCache<K, V>>>;
+
 
         // Thread Safety Tests
         mod thread_safety {
@@ -3292,8 +4154,6 @@ mod tests {
             use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
             use std::time::{Duration, Instant};
 
-            // Helper type for thread-safe testing
-            type ThreadSafeLFUCache<K, V> = Arc<Mutex<LFUCache<K, V>>>;
 
             #[test]
             fn test_high_contention_scenario() {
