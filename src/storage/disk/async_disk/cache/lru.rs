@@ -1,17 +1,42 @@
+use crate::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LRUCacheTrait, MutableCache,
+};
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::collections::VecDeque;
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUCacheTrait, MutableCache};
+use std::marker::PhantomData;
+use std::ptr::NonNull;
 
-/// LRU (Least Recently Used) Cache implementation.
-pub struct LRUCache<K, V> 
-where 
+/// Node in the doubly-linked list for LRU tracking
+struct Node<K, V> {
+    key: K,
+    value: V,
+    prev: Option<NonNull<Node<K, V>>>,
+    next: Option<NonNull<Node<K, V>>>,
+}
+
+impl<K, V> Node<K, V> {
+    fn new(key: K, value: V) -> Self {
+        Node {
+            key,
+            value,
+            prev: None,
+            next: None,
+        }
+    }
+}
+
+/// High-performance LRU Cache using HashMap + Doubly-Linked List
+/// All operations are O(1): insert, get, remove, eviction
+pub struct LRUCache<K, V>
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
     capacity: usize,
-    cache: HashMap<K, V>,
-    usage_list: VecDeque<K>,
+    map: HashMap<K, NonNull<Node<K, V>>>,
+    head: Option<NonNull<Node<K, V>>>, // Most recently used
+    tail: Option<NonNull<Node<K, V>>>, // Least recently used
+    _phantom: PhantomData<(K, V)>,
 }
 
 impl<K, V> LRUCache<K, V>
@@ -23,53 +48,159 @@ where
     pub fn new(capacity: usize) -> Self {
         LRUCache {
             capacity,
-            cache: HashMap::with_capacity(capacity),
-            usage_list: VecDeque::with_capacity(capacity),
+            map: HashMap::with_capacity(capacity),
+            head: None,
+            tail: None,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Move node to head (mark as most recently used) - O(1)
+    unsafe fn move_to_head(&mut self, node: NonNull<Node<K, V>>) {
+        unsafe {
+            self.remove_from_list(node);
+            self.add_to_head(node);
+        }
+    }
+
+    /// Add node to head of list - O(1)
+    unsafe fn add_to_head(&mut self, node: NonNull<Node<K, V>>) {
+        unsafe {
+            match self.head {
+                Some(old_head) => {
+                    (*node.as_ptr()).next = Some(old_head);
+                    (*node.as_ptr()).prev = None;
+                    (*old_head.as_ptr()).prev = Some(node);
+                    self.head = Some(node);
+                }
+                None => {
+                    // Empty list
+                    (*node.as_ptr()).next = None;
+                    (*node.as_ptr()).prev = None;
+                    self.head = Some(node);
+                    self.tail = Some(node);
+                }
+            }
+        }
+    }
+
+    /// Remove node from doubly-linked list - O(1)
+    unsafe fn remove_from_list(&mut self, node: NonNull<Node<K, V>>) {
+        unsafe {
+            let node_ref = &*node.as_ptr();
+
+            match (node_ref.prev, node_ref.next) {
+                (Some(prev), Some(next)) => {
+                    // Middle node
+                    (*prev.as_ptr()).next = Some(next);
+                    (*next.as_ptr()).prev = Some(prev);
+                }
+                (Some(prev), None) => {
+                    // Tail node
+                    (*prev.as_ptr()).next = None;
+                    self.tail = Some(prev);
+                }
+                (None, Some(next)) => {
+                    // Head node
+                    (*next.as_ptr()).prev = None;
+                    self.head = Some(next);
+                }
+                (None, None) => {
+                    // Only node
+                    self.head = None;
+                    self.tail = None;
+                }
+            }
+        }
+    }
+
+    /// Remove tail node (least recently used) and return it - O(1)
+    unsafe fn remove_tail(&mut self) -> Option<NonNull<Node<K, V>>> {
+        self.tail.map(|tail_node| {
+            unsafe {
+                self.remove_from_list(tail_node);
+            }
+            tail_node
+        })
+    }
+
+    /// Allocate a new node on the heap
+    fn allocate_node(&self, key: K, value: V) -> NonNull<Node<K, V>> {
+        let boxed = Box::new(Node::new(key, value));
+        NonNull::from(Box::leak(boxed))
+    }
+
+    /// Deallocate a node from the heap
+    unsafe fn deallocate_node(&self, node: NonNull<Node<K, V>>) {
+        unsafe {
+            let _ = Box::from_raw(node.as_ptr());
         }
     }
 }
 
 // Implementation of specialized traits
 impl<K, V> CoreCache<K, V> for LRUCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
     fn insert(&mut self, key: K, value: V) -> Option<V> {
-        // Update usage list
-        if self.cache.contains_key(&key) {
-            if let Some(pos) = self.usage_list.iter().position(|k| k == &key) {
-                self.usage_list.remove(pos);
-            }
-        } else if self.cache.len() >= self.capacity && !self.cache.is_empty() {
-            // Evict least recently used item
-            if let Some(lru_key) = self.usage_list.pop_front() {
-                self.cache.remove(&lru_key);
-            }
-        }
+        if let Some(&existing_node) = self.map.get(&key) {
+            // Update existing node - O(1)
+            let old_value = unsafe {
+                let node_ref = &mut *existing_node.as_ptr();
+                std::mem::replace(&mut node_ref.value, value)
+            };
 
-        self.usage_list.push_back(key.clone());
-        self.cache.insert(key, value)
+            // Move to head (mark as most recently used) - O(1)
+            unsafe {
+                self.move_to_head(existing_node);
+            }
+
+            Some(old_value)
+        } else {
+            // Insert new node
+            if self.map.len() >= self.capacity && self.capacity > 0 {
+                // Evict LRU item - O(1)
+                if let Some(tail_node) = unsafe { self.remove_tail() } {
+                    let tail_key = unsafe { (*tail_node.as_ptr()).key.clone() };
+                    self.map.remove(&tail_key);
+                    unsafe {
+                        self.deallocate_node(tail_node);
+                    }
+                }
+            }
+
+            // Allocate and insert new node - O(1)
+            let new_node = self.allocate_node(key.clone(), value);
+            self.map.insert(key, new_node);
+
+            unsafe {
+                self.add_to_head(new_node);
+            }
+
+            None
+        }
     }
 
     fn get(&mut self, key: &K) -> Option<&V> {
-        if self.cache.contains_key(key) {
-            // Update usage
-            if let Some(pos) = self.usage_list.iter().position(|k| k == key) {
-                self.usage_list.remove(pos);
+        if let Some(&node) = self.map.get(key) {
+            // Move to head (mark as most recently used) - O(1)
+            unsafe {
+                self.move_to_head(node);
+                Some(&(*node.as_ptr()).value)
             }
-            self.usage_list.push_back(key.clone());
-            return self.cache.get(key);
+        } else {
+            None
         }
-        None
     }
 
     fn contains(&self, key: &K) -> bool {
-        self.cache.contains_key(key)
+        self.map.contains_key(key)
     }
 
     fn len(&self) -> usize {
-        self.cache.len()
+        self.map.len()
     }
 
     fn capacity(&self) -> usize {
@@ -77,71 +208,104 @@ where
     }
 
     fn clear(&mut self) {
-        self.cache.clear();
-        self.usage_list.clear();
+        // Collect all nodes first to avoid borrow checker issues
+        let nodes: Vec<_> = self.map.drain().map(|(_, node)| node).collect();
+
+        // Now deallocate all nodes
+        for node in nodes {
+            unsafe {
+                self.deallocate_node(node);
+            }
+        }
+
+        self.head = None;
+        self.tail = None;
     }
 }
 
 impl<K, V> MutableCache<K, V> for LRUCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
     fn remove(&mut self, key: &K) -> Option<V> {
-        if let Some(pos) = self.usage_list.iter().position(|k| k == key) {
-            self.usage_list.remove(pos);
+        if let Some(node) = self.map.remove(key) {
+            unsafe {
+                let value = (*node.as_ptr()).value.clone();
+                self.remove_from_list(node);
+                self.deallocate_node(node);
+                Some(value)
+            }
+        } else {
+            None
         }
-        self.cache.remove(key)
     }
 }
 
 impl<K, V> LRUCacheTrait<K, V> for LRUCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
     fn pop_lru(&mut self) -> Option<(K, V)> {
-        if let Some(lru_key) = self.usage_list.front().cloned() {
-            if let Some(pos) = self.usage_list.iter().position(|k| k == &lru_key) {
-                self.usage_list.remove(pos);
-            }
-            if let Some(value) = self.cache.remove(&lru_key) {
-                return Some((lru_key, value));
-            }
-        }
-        None
+        self.tail.map(|tail_node| unsafe {
+            let key = (*tail_node.as_ptr()).key.clone();
+            let value = (*tail_node.as_ptr()).value.clone();
+
+            self.map.remove(&key);
+            self.remove_from_list(tail_node);
+            self.deallocate_node(tail_node);
+
+            (key, value)
+        })
     }
 
     fn peek_lru(&self) -> Option<(&K, &V)> {
-        if let Some(lru_key) = self.usage_list.front() {
-            if let Some(value) = self.cache.get(lru_key) {
-                return Some((lru_key, value));
-            }
-        }
-        None
+        self.tail.map(|tail_node| unsafe {
+            let node_ref = &*tail_node.as_ptr();
+            (&node_ref.key, &node_ref.value)
+        })
     }
 
     fn touch(&mut self, key: &K) -> bool {
-        if self.cache.contains_key(key) {
-            // Remove from current position and add to back
-            if let Some(pos) = self.usage_list.iter().position(|k| k == key) {
-                self.usage_list.remove(pos);
-                self.usage_list.push_back(key.clone());
-                return true;
+        if let Some(&node) = self.map.get(key) {
+            unsafe {
+                self.move_to_head(node);
             }
+            true
+        } else {
+            false
         }
-        false
     }
 
     fn recency_rank(&self, key: &K) -> Option<usize> {
-        if self.cache.contains_key(key) {
-            // Find position in usage list (0 = most recent from back)
-            // Since we add to back, we need to reverse the index
-            if let Some(pos) = self.usage_list.iter().position(|k| k == key) {
-                return Some(self.usage_list.len() - 1 - pos);
+        if let Some(&target_node) = self.map.get(key) {
+            let mut rank = 0;
+            let mut current = self.head;
+
+            // Walk from head (most recent) to find the target node
+            while let Some(node) = current {
+                unsafe {
+                    if node == target_node {
+                        return Some(rank);
+                    }
+                    current = (*node.as_ptr()).next;
+                    rank += 1;
+                }
             }
         }
         None
+    }
+}
+
+// Proper cleanup when cache is dropped
+impl<K, V> Drop for LRUCache<K, V>
+where
+    K: Eq + Hash + Clone,
+    V: Clone,
+{
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 
@@ -149,26 +313,55 @@ where
 mod tests {
     use super::*;
     use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUCacheTrait};
-    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
 
     // ==============================================
     // CORRECTNESS TESTS MODULE
     // ==============================================
     mod correctness {
-        use super::*;
-
         // Basic LRU Behavior Tests
         mod basic_behavior {
-            use super::*;
+            use super::super::*;
 
             #[test]
             fn test_basic_lru_insertion_and_retrieval() {
-                // TODO: Test basic insertion and retrieval
+                let mut cache = LRUCache::new(3);
+
+                // Test insertions
+                assert_eq!(cache.insert(1, "one"), None);
+                assert_eq!(cache.insert(2, "two"), None);
+                assert_eq!(cache.insert(3, "three"), None);
+                assert_eq!(cache.len(), 3);
+
+                // Test retrievals
+                assert_eq!(cache.get(&1), Some(&"one"));
+                assert_eq!(cache.get(&2), Some(&"two"));
+                assert_eq!(cache.get(&3), Some(&"three"));
+                assert_eq!(cache.get(&4), None);
+
+                // Test capacity enforcement
+                assert_eq!(cache.insert(4, "four"), None); // Should evict least recently used
+                assert_eq!(cache.len(), 3);
+                assert_eq!(cache.get(&1), None); // 1 should be evicted (was LRU before insertion)
             }
 
             #[test]
             fn test_lru_eviction_order() {
-                // TODO: Test that least recently used items are evicted first
+                let mut cache = LRUCache::new(2);
+
+                // Insert two items
+                cache.insert(1, "one");
+                cache.insert(2, "two");
+
+                // Access first item to make it more recently used
+                cache.get(&1);
+
+                // Insert third item - should evict 2 (least recently used)
+                cache.insert(3, "three");
+
+                assert_eq!(cache.get(&1), Some(&"one")); // Should still be there
+                assert_eq!(cache.get(&2), None); // Should be evicted
+                assert_eq!(cache.get(&3), Some(&"three")); // Should be there
             }
 
             #[test]
@@ -199,8 +392,6 @@ mod tests {
 
         // Edge Cases Tests
         mod edge_cases {
-            use super::*;
-
             #[test]
             fn test_empty_cache_operations() {
                 // TODO: Test operations on empty cache
@@ -244,8 +435,6 @@ mod tests {
 
         // LRU-Specific Operations Tests
         mod lru_operations {
-            use super::*;
-
             #[test]
             fn test_pop_lru_basic() {
                 // TODO: Test basic pop_lru functionality
@@ -299,8 +488,6 @@ mod tests {
 
         // State Consistency Tests
         mod state_consistency {
-            use super::*;
-
             #[test]
             fn test_cache_usage_list_consistency() {
                 // TODO: Test that cache and usage list stay in sync
@@ -353,12 +540,9 @@ mod tests {
     // ==============================================
     mod performance {
         use super::*;
-        use std::time::{Duration, Instant};
 
         // Lookup Performance Tests
         mod lookup_performance {
-            use super::*;
-
             #[test]
             fn test_get_performance_with_recency_updates() {
                 // TODO: Test get() performance with recency tracking overhead
@@ -392,8 +576,6 @@ mod tests {
 
         // Insertion Performance Tests
         mod insertion_performance {
-            use super::*;
-
             #[test]
             fn test_insertion_performance_with_eviction() {
                 // TODO: Test insertion performance when eviction is triggered
@@ -422,8 +604,6 @@ mod tests {
 
         // Eviction Performance Tests
         mod eviction_performance {
-            use super::*;
-
             #[test]
             fn test_lru_eviction_performance() {
                 // TODO: Test performance of finding and evicting LRU item
@@ -447,8 +627,6 @@ mod tests {
 
         // Memory Efficiency Tests
         mod memory_efficiency {
-            use super::*;
-
             #[test]
             fn test_memory_overhead_of_usage_tracking() {
                 // TODO: Test memory overhead of maintaining usage information
@@ -482,13 +660,9 @@ mod tests {
     mod concurrency {
         use super::*;
         use std::sync::{Arc, Mutex};
-        use std::thread;
-        use std::time::Duration;
 
         // Thread Safety Tests
         mod thread_safety {
-            use super::*;
-
             #[test]
             fn test_concurrent_insertions() {
                 // TODO: Test multiple threads inserting concurrently
@@ -533,8 +707,6 @@ mod tests {
         // Stress Testing
         mod stress_testing {
             use super::*;
-            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-            use std::time::{Duration, Instant};
 
             // Helper type for thread-safe testing
             type ThreadSafeLRUCache<K, V> = Arc<Mutex<LRUCache<K, V>>>;
