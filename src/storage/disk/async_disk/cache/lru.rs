@@ -697,7 +697,7 @@ mod tests {
                 }
             }
 
-            #[test]
+        #[test]
             fn test_get_existing_item() {
                 // Test getting an item that exists in cache
                 let mut cache = LRUCore::new(5);
@@ -910,8 +910,8 @@ mod tests {
             #[test]
             fn test_lru_eviction_basic() {
                 // Test that LRU item is evicted when capacity exceeded
-                let mut cache = LRUCore::new(2);
-                
+            let mut cache = LRUCore::new(2);
+
                 cache.insert(1, Arc::new(100));
                 cache.insert(2, Arc::new(200));
                 assert_eq!(cache.len(), 2);
@@ -1231,11 +1231,11 @@ mod tests {
                 assert!(cache.recency_rank(&1).is_none());
                 
                 // Clear should work
-                cache.clear();
+            cache.clear();
                 assert_eq!(cache.len(), 0);
             }
 
-            #[test]
+        #[test]
             fn test_single_capacity_eviction_patterns() {
                 // Test eviction behavior with capacity = 1
                 let mut cache: LRUCore<i32, i32> = LRUCore::new(1);
@@ -1270,7 +1270,7 @@ mod tests {
                 let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
                 
                 // Insert same key multiple times
-                for i in 1..=10 {
+            for i in 1..=10 {
                     let old_value = cache.insert(1, Arc::new(i * 100));
                     if i == 1 {
                         assert!(old_value.is_none());
@@ -1321,7 +1321,7 @@ mod tests {
                 // Test inserting and immediately removing items
                 let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
                 
-                for i in 1..=10 {
+            for i in 1..=10 {
                     cache.insert(i, Arc::new(i * 100));
                     let removed = cache.remove(&i);
                     assert!(removed.is_some());
@@ -1365,8 +1365,8 @@ mod tests {
             fn test_clear_on_empty_cache() {
                 // Test clearing an already empty cache
                 let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
-                
-                assert_eq!(cache.len(), 0);
+
+            assert_eq!(cache.len(), 0);
                 cache.clear();
                 assert_eq!(cache.len(), 0);
                 
@@ -1376,7 +1376,7 @@ mod tests {
                 assert!(cache.contains(&1));
             }
 
-            #[test]
+        #[test]
             fn test_clear_then_operations() {
                 // Test operations after clearing a populated cache
                 let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
@@ -1433,7 +1433,7 @@ mod tests {
                 let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
                 
                 // Fill cache
-                for i in 1..=5 {
+            for i in 1..=5 {
                     cache.insert(i, Arc::new(i * 100));
                 }
                 assert_eq!(cache.len(), 5);
@@ -1447,7 +1447,7 @@ mod tests {
                 
                 // Should have popped in LRU order (1, 2, 3, 4, 5)
                 assert_eq!(popped_keys, vec![1, 2, 3, 4, 5]);
-                assert_eq!(cache.len(), 0);
+            assert_eq!(cache.len(), 0);
                 
                 // Further pops should return None
                 assert!(cache.pop_lru().is_none());
@@ -2299,275 +2299,2259 @@ mod tests {
         }
 
         mod lru_operations {
+            use super::*;
 
             #[test]
             fn test_lru_insertion_order_tracking() {
                 // Test that insertion order is correctly tracked in LRU list
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Insert items in sequence
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Check that most recent insertion is at rank 0 (head)
+                assert_eq!(cache.recency_rank(&5), Some(0));
+                assert_eq!(cache.recency_rank(&4), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(3));
+                assert_eq!(cache.recency_rank(&1), Some(4));
+                
+                // LRU (tail) should be first inserted item
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
             }
 
             #[test]
             fn test_lru_access_order_updates() {
                 // Test that access operations correctly update LRU order
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Initial order: 3(0), 2(1), 1(2)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Access item 1 - should move to head
+                cache.get(&1);
+                // New order: 1(0), 3(1), 2(2)
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                
+                // Access item 2 - should move to head
+                cache.get(&2);
+                // New order: 2(0), 1(1), 3(2)
+                assert_eq!(cache.recency_rank(&2), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2));
             }
 
             #[test]
             fn test_lru_eviction_policy() {
                 // Test that least recently used items are evicted first
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Fill cache
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Access item 1 and 3 to make them more recent
+                cache.get(&1);
+                cache.get(&3);
+                // Order: 3(0), 1(1), 2(2) - item 2 is LRU
+                
+                // Insert new item - should evict item 2 (LRU)
+                cache.insert(4, Arc::new(400));
+                
+                assert!(cache.contains(&1));
+                assert!(!cache.contains(&2)); // Evicted
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_lru_head_tail_positioning() {
                 // Test that head is most recent and tail is least recent
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                cache.insert(4, Arc::new(400));
+                
+                // Head should be most recently inserted (4)
+                assert_eq!(cache.recency_rank(&4), Some(0));
+                
+                // Tail should be least recently used (1)
+                let (lru_key, lru_value) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
+                assert_eq!(**lru_value, 100);
+                
+                // Access tail item - should move to head
+                cache.get(&1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                // New tail should be item 2
+                let (new_lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*new_lru_key, 2);
             }
 
             #[test]
             fn test_move_to_head_operation() {
                 // Test internal move_to_head functionality
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Access middle item (3) - should move to head
+                cache.get(&3);
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                
+                // Other items should maintain relative order
+                assert_eq!(cache.recency_rank(&5), Some(1));
+                assert_eq!(cache.recency_rank(&4), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(3));
+                assert_eq!(cache.recency_rank(&1), Some(4));
+                
+                // Touch operation should also move to head
+                cache.touch(&1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&3), Some(1));
             }
 
             #[test]
             fn test_lru_chain_integrity() {
                 // Test that doubly-linked list maintains proper forward/backward links
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Build up cache
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                    
+                    // After each insertion, verify chain integrity
+                    // by checking all items have consistent ranks
+                    for j in 1..=i {
+                        assert!(cache.recency_rank(&j).is_some());
+                    }
+                }
+                
+                // Perform various operations and verify integrity
+                cache.get(&2); // Move 2 to head
+                cache.remove(&3); // Remove middle item
+                cache.insert(5, Arc::new(500)); // Insert new item
+                
+                // Verify remaining items have valid ranks
+                assert!(cache.recency_rank(&5).is_some());
+                assert!(cache.recency_rank(&2).is_some());
+                assert!(cache.recency_rank(&4).is_some());
+                assert!(cache.recency_rank(&1).is_some());
+                assert!(cache.recency_rank(&3).is_none()); // Removed
+                
+                // All ranks should be unique and within bounds
+                let mut ranks = vec![];
+                for &key in &[5, 2, 4, 1] {
+                    if cache.contains(&key) {
+                        let rank = cache.recency_rank(&key).unwrap();
+                        assert!(!ranks.contains(&rank));
+                        assert!(rank < cache.len());
+                        ranks.push(rank);
+                    }
+                }
             }
 
             #[test]
             fn test_lru_ordering_after_get() {
                 // Test LRU order changes after get operations
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Record initial ordering
+                let initial_ranks: Vec<_> = (1..=4)
+                    .map(|i| (i, cache.recency_rank(&i).unwrap()))
+                    .collect();
+                
+                // Get item 1 (currently LRU)
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(**value.unwrap(), 100);
+                
+                // Item 1 should now be MRU (rank 0)
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                // Other items should be shifted
+                assert_eq!(cache.recency_rank(&4), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(3));
+                
+                // Get item from middle
+                cache.get(&3);
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                assert_eq!(cache.recency_rank(&4), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(3));
             }
 
             #[test]
             fn test_lru_ordering_after_touch() {
                 // Test LRU order changes after touch operations
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Initial order: 3(0), 2(1), 1(2)
+                
+                // Touch LRU item
+                assert!(cache.touch(&1));
+                // New order: 1(0), 3(1), 2(2)
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                
+                // Touch middle item
+                assert!(cache.touch(&3));
+                // New order: 3(0), 1(1), 2(2)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                
+                // Touch non-existent item
+                assert!(!cache.touch(&99));
+                
+                // Order should remain unchanged
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
             }
 
             #[test]
             fn test_lru_ordering_preservation_on_peek() {
                 // Test that peek operations don't change LRU order
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Record initial ordering
+                let initial_ranks: Vec<_> = (1..=4)
+                    .map(|i| (i, cache.recency_rank(&i).unwrap()))
+                    .collect();
+                
+                // Peek at various items
+                assert_eq!(*cache.peek(&1).unwrap(), 100);
+                assert_eq!(*cache.peek(&4).unwrap(), 400);
+                assert_eq!(*cache.peek(&2).unwrap(), 200);
+                assert_eq!(*cache.peek(&3).unwrap(), 300);
+                
+                // Ordering should be unchanged
+                for (key, expected_rank) in initial_ranks {
+                    assert_eq!(cache.recency_rank(&key), Some(expected_rank));
+                }
+                
+                // Peek at LRU
+                let (lru_key, lru_value) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
+                assert_eq!(**lru_value, 100);
+                
+                // LRU should still be LRU after peek
+                assert_eq!(cache.recency_rank(&1), Some(3));
             }
 
             #[test]
             fn test_pop_lru_removes_tail() {
                 // Test that pop_lru always removes the tail (LRU) item
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Fill cache
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Access some items to change LRU order
+                cache.get(&3);
+                cache.get(&1);
+                // Order: 1(0), 3(1), 5(2), 4(3), 2(4)
+                
+                // Pop LRU should remove item 2
+                let (popped_key, popped_value) = cache.pop_lru().unwrap();
+                assert_eq!(popped_key, 2);
+                assert_eq!(*popped_value, 200);
+                assert!(!cache.contains(&2));
+                assert_eq!(cache.len(), 4);
+                
+                // Next LRU should be item 4
+                let (next_lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*next_lru_key, 4);
+                
+                // Pop again
+                let (popped_key2, popped_value2) = cache.pop_lru().unwrap();
+                assert_eq!(popped_key2, 4);
+                assert_eq!(*popped_value2, 400);
+                assert_eq!(cache.len(), 3);
             }
 
             #[test]
             fn test_pop_lru_updates_tail_pointer() {
                 // Test that pop_lru correctly updates tail pointer
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Verify initial tail
+                let (initial_tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*initial_tail_key, 1);
+                
+                // Pop tail
+                let (popped_key, _) = cache.pop_lru().unwrap();
+                assert_eq!(popped_key, 1);
+                
+                // Verify new tail
+                let (new_tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*new_tail_key, 2);
+                
+                // Pop again
+                cache.pop_lru();
+                let (final_tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*final_tail_key, 3);
+                
+                // Pop last item
+                cache.pop_lru();
+                assert!(cache.peek_lru().is_none());
+                assert_eq!(cache.len(), 0);
             }
 
             #[test]
             fn test_peek_lru_returns_tail() {
                 // Test that peek_lru returns tail item without removal
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Access some items to change order
+                cache.get(&3);
+                cache.get(&1);
+                // Current order: 1(0), 3(1), 4(2), 2(3)
+                
+                // Peek LRU should return item 2 without removing it
+                let (lru_key, lru_value) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 2);
+                assert_eq!(**lru_value, 200);
+                
+                // Item should still be in cache
+                assert!(cache.contains(&2));
+                assert_eq!(cache.len(), 4);
+                
+                // Multiple peeks should return same item
+                for _ in 0..5 {
+                    let (peek_key, peek_value) = cache.peek_lru().unwrap();
+                    assert_eq!(*peek_key, 2);
+                    assert_eq!(**peek_value, 200);
+                }
+                
+                // Order should be unchanged
+                assert_eq!(cache.recency_rank(&2), Some(3));
             }
 
             #[test]
             fn test_lru_recency_rank_calculation() {
                 // Test recency rank calculation from head to tail
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(6);
+                
+                // Insert items
+                for i in 1..=6 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Verify ranks match insertion order (reversed)
+                for i in 1..=6 {
+                    let expected_rank = (6 - i) as usize; // Most recent has rank 0
+                    assert_eq!(cache.recency_rank(&i), Some(expected_rank));
+                }
+                
+                // Access middle item
+                cache.get(&3);
+                // New order: 3(0), 6(1), 5(2), 4(3), 2(4), 1(5)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&6), Some(1));
+                assert_eq!(cache.recency_rank(&5), Some(2));
+                assert_eq!(cache.recency_rank(&4), Some(3));
+                assert_eq!(cache.recency_rank(&2), Some(4));
+                assert_eq!(cache.recency_rank(&1), Some(5));
+                
+                // All ranks should be unique and consecutive
+                let mut ranks: Vec<usize> = (1..=6)
+                    .map(|i| cache.recency_rank(&i).unwrap())
+                    .collect();
+                ranks.sort();
+                assert_eq!(ranks, vec![0, 1, 2, 3, 4, 5]);
             }
 
             #[test]
             fn test_lru_rank_after_reordering() {
                 // Test recency ranks after LRU order changes
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Perform sequence of operations and verify ranks
+                cache.touch(&1); // Move 1 to head
+                // Order: 1(0), 4(1), 3(2), 2(3)
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&4), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(3));
+                
+                cache.get(&2); // Move 2 to head
+                // Order: 2(0), 1(1), 4(2), 3(3)
+                assert_eq!(cache.recency_rank(&2), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                assert_eq!(cache.recency_rank(&4), Some(2));
+                assert_eq!(cache.recency_rank(&3), Some(3));
+                
+                cache.touch(&4); // Move 4 to head
+                // Order: 4(0), 2(1), 1(2), 3(3)
+                assert_eq!(cache.recency_rank(&4), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                assert_eq!(cache.recency_rank(&3), Some(3));
             }
 
             #[test]
             fn test_multiple_access_lru_stability() {
                 // Test LRU order with multiple accesses to same items
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Multiple accesses to same item should maintain it at head
+                for _ in 0..10 {
+                    cache.get(&2);
+                    assert_eq!(cache.recency_rank(&2), Some(0));
+                }
+                
+                // Other items should maintain relative order
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Multiple touches to same item
+                for _ in 0..5 {
+                    cache.touch(&1);
+                    assert_eq!(cache.recency_rank(&1), Some(0));
+                }
+                
+                // Final order should be: 1(0), 2(1), 3(2)
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2));
             }
 
             #[test]
             fn test_lru_eviction_sequence() {
                 // Test sequence of evictions follows LRU order
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Fill cache
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Access items to establish order
+                cache.get(&2); // Order: 2(0), 3(1), 1(2)
+                
+                // Insert new items and verify eviction order
+                cache.insert(4, Arc::new(400)); // Should evict 1 (LRU)
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                
+                cache.insert(5, Arc::new(500)); // Should evict 3 (now LRU)
+                assert!(!cache.contains(&3));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
+                
+                cache.insert(6, Arc::new(600)); // Should evict 2 (now LRU)
+                assert!(!cache.contains(&2));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
+                assert!(cache.contains(&6));
             }
 
             #[test]
             fn test_lru_invariants_after_insert() {
                 // Test LRU invariants are maintained after insertions
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Insert first item
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
+                
+                // Insert second item
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.recency_rank(&2), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&1), Some(1)); // Less recent
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
+                
+                // Insert third item (reach capacity)
+                cache.insert(3, Arc::new(300));
+                assert_eq!(cache.len(), 3);
+                assert_eq!(cache.recency_rank(&3), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Least recent
+                
+                // Insert fourth item (should evict)
+                cache.insert(4, Arc::new(400));
+                assert_eq!(cache.len(), 3);
+                assert!(!cache.contains(&1)); // Evicted
+                assert_eq!(cache.recency_rank(&4), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2)); // Now least recent
             }
 
             #[test]
             fn test_lru_invariants_after_remove() {
                 // Test LRU invariants are maintained after removals
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Remove head item
+                cache.remove(&4);
+                assert_eq!(cache.len(), 3);
+                // Verify remaining items have valid consecutive ranks
+                assert_eq!(cache.recency_rank(&3), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Still tail
+                
+                // Remove tail item
+                cache.remove(&1);
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1)); // New tail
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 2);
+                
+                // Remove middle item (only one left to remove)
+                cache.remove(&2);
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.recency_rank(&3), Some(0)); // Only item
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 3);
+                
+                // Remove last item
+                cache.remove(&3);
+            assert_eq!(cache.len(), 0);
+                assert!(cache.peek_lru().is_none());
             }
 
             #[test]
             fn test_lru_invariants_after_clear() {
                 // Test LRU invariants after clearing cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Fill cache
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                assert_eq!(cache.len(), 5);
+                
+                // Clear cache
+                cache.clear();
+                
+                // Verify empty state invariants
+                assert_eq!(cache.len(), 0);
+                assert_eq!(cache.capacity(), 5);
+                assert!(cache.peek_lru().is_none());
+                
+                // All rank queries should return None
+                for i in 1..=5 {
+                    assert!(cache.recency_rank(&i).is_none());
+                    assert!(!cache.contains(&i));
+                }
+                
+                // Should be able to insert again and maintain invariants
+                cache.insert(10, Arc::new(1000));
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.recency_rank(&10), Some(0));
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 10);
+                
+                // Fill again to verify complete functionality restoration
+                for i in 11..=14 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                assert_eq!(cache.len(), 5);
+                assert_eq!(cache.recency_rank(&14), Some(0));
+                assert_eq!(cache.recency_rank(&10), Some(4));
             }
 
             #[test]
             fn test_lru_order_with_duplicate_keys() {
                 // Test LRU order when same key is accessed multiple times
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Initial order: 3(0), 2(1), 1(2)
+                
+                // Re-insert existing key with new value
+                cache.insert(1, Arc::new(999));
+                // Should move to head with new value
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(**cache.get(&1).unwrap(), 999);
+                
+                // Other items shift down
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                
+                // Multiple gets of same key
+                for _ in 0..3 {
+                    cache.get(&2);
+                }
+                // Item 2 should be at head
+                assert_eq!(cache.recency_rank(&2), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2));
+                
+                // Re-insert head item
+                cache.insert(2, Arc::new(777));
+                // Should stay at head with new value
+                assert_eq!(cache.recency_rank(&2), Some(0));
+                assert_eq!(**cache.get(&2).unwrap(), 777);
             }
 
             #[test]
             fn test_lru_traversal_forward() {
                 // Test forward traversal from head to tail
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Verify we can traverse from head (most recent) to tail (least recent)
+                let expected_order = vec![5, 4, 3, 2, 1]; // Most recent to least recent
+                for (idx, &expected_key) in expected_order.iter().enumerate() {
+                    assert_eq!(cache.recency_rank(&expected_key), Some(idx));
+                }
+                
+                // Access middle item and verify new order
+                cache.get(&3);
+                let new_expected_order = vec![3, 5, 4, 2, 1];
+                for (idx, &expected_key) in new_expected_order.iter().enumerate() {
+                    assert_eq!(cache.recency_rank(&expected_key), Some(idx));
+                }
+                
+                // Verify LRU is still correct
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
             }
 
             #[test]
             fn test_lru_traversal_backward() {
                 // Test backward traversal from tail to head
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Access some items to create interesting order
+                cache.get(&2);
+                cache.get(&4);
+                // Order: 4(0), 2(1), 3(2), 1(3)
+                
+                // Verify we can identify least recent (tail) correctly
+                let (tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*tail_key, 1);
+                assert_eq!(cache.recency_rank(&1), Some(3));
+                
+                // Work backwards verifying ranks
+                assert_eq!(cache.recency_rank(&3), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&4), Some(0)); // Head
+                
+                // Pop items in LRU order and verify sequence
+                let mut popped_sequence = vec![];
+                while let Some((key, _)) = cache.pop_lru() {
+                    popped_sequence.push(key);
+                }
+                assert_eq!(popped_sequence, vec![1, 3, 2, 4]);
             }
 
             #[test]
             fn test_lru_middle_node_removal() {
                 // Test removing nodes from middle of LRU chain
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Initial order: 5(0), 4(1), 3(2), 2(3), 1(4)
+                
+                // Remove middle node (3)
+                let removed = cache.remove(&3);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 300);
+                assert_eq!(cache.len(), 4);
+                
+                // Verify remaining nodes have correct ranks
+                assert_eq!(cache.recency_rank(&5), Some(0));
+                assert_eq!(cache.recency_rank(&4), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                assert_eq!(cache.recency_rank(&1), Some(3));
+                assert!(cache.recency_rank(&3).is_none());
+                
+                // Remove another middle node (2)
+                cache.remove(&2);
+                assert_eq!(cache.len(), 3);
+                assert_eq!(cache.recency_rank(&5), Some(0));
+                assert_eq!(cache.recency_rank(&4), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Verify LRU is updated correctly
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
             }
 
             #[test]
             fn test_lru_head_node_removal() {
                 // Test removing head node and updating LRU chain
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Initial order: 4(0), 3(1), 2(2), 1(3)
+                // Head is 4, tail is 1
+                
+                // Remove head node
+                let removed = cache.remove(&4);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 400);
+                assert_eq!(cache.len(), 3);
+                
+                // Verify new head is correct
+                assert_eq!(cache.recency_rank(&3), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Still tail
+                
+                // Remove new head
+                cache.remove(&3);
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.recency_rank(&2), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&1), Some(1)); // Still tail
+                
+                // Remove final head
+                cache.remove(&2);
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.recency_rank(&1), Some(0)); // Only item, both head and tail
+                
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
             }
 
             #[test]
             fn test_lru_tail_node_removal() {
                 // Test removing tail node and updating LRU chain
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Initial order: 4(0), 3(1), 2(2), 1(3)
+                // Head is 4, tail is 1
+                
+                // Remove tail node
+                let removed = cache.remove(&1);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 100);
+                assert_eq!(cache.len(), 3);
+                
+                // Verify new tail is correct
+                let (new_tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*new_tail_key, 2); // New tail
+                assert_eq!(cache.recency_rank(&4), Some(0)); // Still head
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2)); // New tail
+                
+                // Remove new tail
+                cache.remove(&2);
+                assert_eq!(cache.len(), 2);
+                let (newer_tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*newer_tail_key, 3); // Newer tail
+                
+                // Remove final tail
+                cache.remove(&3);
+                assert_eq!(cache.len(), 1);
+                let (final_tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*final_tail_key, 4); // Only item left
             }
 
             #[test]
             fn test_lru_single_node_operations() {
                 // Test LRU operations when cache has only one node
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Insert single item
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                
+                // Single item should be both head and tail
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                let (lru_key, lru_value) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
+                assert_eq!(**lru_value, 100);
+                
+                // Get operation should maintain position
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(**value.unwrap(), 100);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                // Touch operation should work
+                assert!(cache.touch(&1));
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                // Peek operations should work
+                assert_eq!(*cache.peek(&1).unwrap(), 100);
+                let (peek_key, peek_value) = cache.peek_lru().unwrap();
+                assert_eq!(*peek_key, 1);
+                assert_eq!(**peek_value, 100);
+                
+                // Re-insert should update value but maintain position
+                cache.insert(1, Arc::new(999));
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(**cache.get(&1).unwrap(), 999);
+                
+                // Pop should work and empty cache
+                let (popped_key, popped_value) = cache.pop_lru().unwrap();
+                assert_eq!(popped_key, 1);
+                assert_eq!(*popped_value, 999);
+                assert_eq!(cache.len(), 0);
+                assert!(cache.peek_lru().is_none());
             }
 
             #[test]
             fn test_lru_two_node_operations() {
                 // Test LRU operations with exactly two nodes
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                
+                // Verify initial state
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.recency_rank(&2), Some(0)); // Head
+                assert_eq!(cache.recency_rank(&1), Some(1)); // Tail
+                
+                let (tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*tail_key, 1);
+                
+                // Swap positions by accessing tail
+                cache.get(&1);
+                assert_eq!(cache.recency_rank(&1), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&2), Some(1)); // New tail
+                
+                let (new_tail_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*new_tail_key, 2);
+                
+                // Touch operations
+                assert!(cache.touch(&2));
+                assert_eq!(cache.recency_rank(&2), Some(0)); // Back to head
+                assert_eq!(cache.recency_rank(&1), Some(1)); // Back to tail
+                
+                // Remove head
+                cache.remove(&2);
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.recency_rank(&1), Some(0)); // Only item
+                
+                // Add back second item
+                cache.insert(3, Arc::new(300));
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.recency_rank(&3), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&1), Some(1)); // Old item is tail
+                
+                // Test insertion with available capacity (cache capacity is 3, we have 2 items)
+                cache.insert(4, Arc::new(400));
+                assert_eq!(cache.len(), 3); // Should be 3 items now (1, 3, 4)
+                assert!(cache.contains(&1)); // Should still be present
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert_eq!(cache.recency_rank(&4), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&3), Some(1)); // Previous head
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Least recent (tail)
+                
+                // Now test eviction by inserting another item (5th item, exceeds capacity)
+                cache.insert(5, Arc::new(500));
+                assert_eq!(cache.len(), 3); // Should maintain capacity
+                assert!(!cache.contains(&1)); // LRU evicted
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
+                assert_eq!(cache.recency_rank(&5), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&4), Some(1)); 
+                assert_eq!(cache.recency_rank(&3), Some(2)); // Now least recent
             }
 
             #[test]
             fn test_lru_aging_pattern() {
                 // Test items aging from head to tail over time
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Insert items with delays to simulate aging
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.recency_rank(&2), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&1), Some(1)); // Aged one position
+                
+                cache.insert(3, Arc::new(300));
+                assert_eq!(cache.recency_rank(&3), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&2), Some(1)); // Aged one position
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Aged another position
+                
+                cache.insert(4, Arc::new(400));
+                assert_eq!(cache.recency_rank(&4), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&3), Some(1)); // Aged one position
+                assert_eq!(cache.recency_rank(&2), Some(2)); // Aged one position
+                assert_eq!(cache.recency_rank(&1), Some(3)); // Now at tail
+                
+                // Insert one more item to trigger eviction of oldest
+                cache.insert(5, Arc::new(500));
+                assert!(!cache.contains(&1)); // Evicted (was oldest)
+                assert_eq!(cache.recency_rank(&5), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&4), Some(1)); // Aged
+                assert_eq!(cache.recency_rank(&3), Some(2)); // Aged
+                assert_eq!(cache.recency_rank(&2), Some(3)); // Now oldest
             }
 
             #[test]
             fn test_lru_promotion_to_head() {
                 // Test promoting items from various positions to head
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Initial order: 5(0), 4(1), 3(2), 2(3), 1(4)
+                
+                // Promote tail to head
+                cache.get(&1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                // New order: 1(0), 5(1), 4(2), 3(3), 2(4)
+                
+                // Promote middle item to head
+                cache.touch(&3);
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                // New order: 3(0), 1(1), 5(2), 4(3), 2(4)
+                
+                // Promote item near head
+                cache.get(&5);
+                assert_eq!(cache.recency_rank(&5), Some(0));
+                // New order: 5(0), 3(1), 1(2), 4(3), 2(4)
+                
+                // Promote current head (should stay at head)
+                cache.touch(&5);
+                assert_eq!(cache.recency_rank(&5), Some(0));
+                // Order unchanged: 5(0), 3(1), 1(2), 4(3), 2(4)
+                
+                // Verify final state
+                assert_eq!(cache.recency_rank(&5), Some(0));
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                assert_eq!(cache.recency_rank(&4), Some(3));
+                assert_eq!(cache.recency_rank(&2), Some(4)); // Still tail
             }
 
             #[test]
             fn test_lru_demotion_patterns() {
                 // Test how items move down in LRU order
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                cache.insert(4, Arc::new(400));
+                
+                // Initial order: 4(0), 3(1), 2(2), 1(3)
+                
+                // Track how item 4 demotes as other items are accessed
+                assert_eq!(cache.recency_rank(&4), Some(0)); // Currently head
+                
+                // Access item 3 - item 4 should demote to rank 1
+                cache.get(&3);
+                assert_eq!(cache.recency_rank(&4), Some(1)); // Demoted
+                assert_eq!(cache.recency_rank(&3), Some(0)); // New head
+                
+                // Access item 2 - item 4 should demote to rank 2
+                cache.get(&2);
+                assert_eq!(cache.recency_rank(&4), Some(2)); // Further demoted
+                assert_eq!(cache.recency_rank(&2), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&3), Some(1)); // Demoted
+                
+                // Access item 1 - item 4 should demote to tail (rank 3)
+                cache.get(&1);
+                assert_eq!(cache.recency_rank(&4), Some(3)); // Now at tail
+                assert_eq!(cache.recency_rank(&1), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&2), Some(1)); // Demoted
+                assert_eq!(cache.recency_rank(&3), Some(2)); // Demoted
+                
+                // Verify item 4 is now LRU
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 4);
+                
+                // One more access should evict item 4
+                cache.insert(5, Arc::new(500));
+                assert!(!cache.contains(&4)); // Evicted
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&5));
             }
 
             #[test]
             fn test_lru_circular_access_pattern() {
                 // Test LRU behavior with circular access patterns
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Fill cache
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Perform circular access pattern: 1 -> 2 -> 3 -> 1 -> 2 -> 3...
+                for round in 0..5 {
+                    for key in [1, 2, 3] {
+                        cache.get(&key);
+                        assert_eq!(cache.recency_rank(&key), Some(0)); // Should be at head
+                    }
+                    
+                    // After each full round, all items should still be present
+                    for key in [1, 2, 3] {
+                        assert!(cache.contains(&key));
+                    }
+                }
+                
+                // Final state should have 3 at head (last accessed)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Try to evict by inserting new item - should evict 1 (LRU)
+                cache.insert(4, Arc::new(400));
+                assert!(!cache.contains(&1)); // Evicted
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_lru_working_set_behavior() {
                 // Test LRU behavior with working set larger than cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Working set of 5 items, but cache capacity is only 3
+                let working_set = [1, 2, 3, 4, 5];
+                
+                // Fill cache with subset of working set
+                for &key in &working_set[0..3] {
+                    cache.insert(key, Arc::new(key * 100));
+                }
+                
+                // Simulate working set access pattern
+                for round in 0..3 {
+                    for &key in &working_set {
+                        // Try to access all items in working set
+                        if cache.contains(&key) {
+                            cache.get(&key);
+                        } else {
+                            // Item not in cache, need to insert it (causes eviction)
+                            cache.insert(key, Arc::new(key * 100));
+                        }
+                    }
+                }
+                
+                // Cache should only contain last 3 accessed items from working set
+                assert_eq!(cache.len(), 3);
+                
+                // Most recent items from working set should be present
+                assert!(cache.contains(&5));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&3));
+                
+                // Verify LRU order matches access pattern
+                assert_eq!(cache.recency_rank(&5), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&4), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2)); // Least recent in cache
             }
 
             #[test]
             fn test_lru_temporal_locality() {
                 // Test LRU behavior with high temporal locality
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Fill cache
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Simulate high temporal locality - repeatedly access same few items
+                let hot_items = [2, 3];
+                
+                // Access hot items repeatedly
+                for _ in 0..10 {
+                    for &item in &hot_items {
+                        cache.get(&item);
+                    }
+                }
+                
+                // Hot items should be at the head of LRU list
+                assert_eq!(cache.recency_rank(&3), Some(0)); // Last accessed
+                assert_eq!(cache.recency_rank(&2), Some(1)); // Second to last
+                
+                // Cold items should be further down
+                assert_eq!(cache.recency_rank(&4), Some(2));
+                assert_eq!(cache.recency_rank(&1), Some(3)); // Least recent
+                
+                // Insert new items - cold items should be evicted first
+                cache.insert(5, Arc::new(500));
+                assert!(!cache.contains(&1)); // Evicted (coldest)
+                
+                cache.insert(6, Arc::new(600));
+                assert!(!cache.contains(&4)); // Evicted (next coldest)
+                
+                // Hot items should still be present
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
             }
 
             #[test]
             fn test_lru_no_temporal_locality() {
                 // Test LRU behavior with no temporal locality (sequential access)
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Sequential access pattern with no repetition
+                let mut access_sequence = 1;
+                
+                // First, fill the cache
+                for i in 1..=3 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Continue sequential access, causing evictions
+                for _ in 0..10 {
+                    access_sequence += 1;
+                    cache.insert(access_sequence, Arc::new(access_sequence * 100));
+                }
+                
+                // Cache should contain only the most recent 3 items
+                let expected_items = [access_sequence - 2, access_sequence - 1, access_sequence];
+                
+                for &item in &expected_items {
+                    assert!(cache.contains(&item));
+                }
+                
+                // Verify LRU order matches insertion order
+                assert_eq!(cache.recency_rank(&access_sequence), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&(access_sequence - 1)), Some(1));
+                assert_eq!(cache.recency_rank(&(access_sequence - 2)), Some(2)); // Least recent
+                
+                // Earlier items should have been evicted
+                for i in 1..=(access_sequence - 3) {
+                    assert!(!cache.contains(&i));
+                }
             }
 
             #[test]
             fn test_lru_mixed_access_patterns() {
                 // Test LRU with mixed random and sequential access
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Phase 1: Sequential insertion
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Phase 2: Random access pattern
+                let random_pattern = [2, 4, 1, 3, 2, 1];
+                for &key in &random_pattern {
+                    cache.get(&key);
+                }
+                
+                // Phase 3: Sequential insertion of new items
+                for i in 5..=7 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Cache should maintain LRU properties throughout
+                assert_eq!(cache.len(), 4);
+                
+                // Most recently inserted items should be present
+                assert!(cache.contains(&7));
+                assert!(cache.contains(&6));
+                assert!(cache.contains(&5));
+                
+                // One item from random access phase might survive depending on pattern
+                // Verify at least the most recently accessed items are handled correctly
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert!(cache.recency_rank(&lru_key).unwrap() == 3);
+                
+                // Phase 4: Mix of new insertions and accesses to existing items
+                cache.get(&7); // Access most recent
+                cache.insert(8, Arc::new(800)); // Insert new
+                cache.get(&6); // Access existing
+                
+                // Verify final state maintains LRU ordering
+                assert_eq!(cache.recency_rank(&6), Some(0)); // Last accessed
+                assert_eq!(cache.recency_rank(&8), Some(1)); // Last inserted
+                assert_eq!(cache.recency_rank(&7), Some(2)); // Accessed before 8 was inserted
             }
 
             #[test]
             fn test_lru_hotspot_behavior() {
                 // Test LRU behavior when few items are accessed frequently
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Fill cache with items
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Designate items 2 and 4 as "hotspots" (frequently accessed)
+                let hotspots = [2, 4];
+                let cold_items = [1, 3, 5];
+                
+                // Simulate workload with hotspots
+                for round in 0..20 {
+                    // Access hotspots frequently
+                    for _ in 0..5 {
+                        for &hot_item in &hotspots {
+                            cache.get(&hot_item);
+                        }
+                    }
+                    
+                    // Occasionally access cold items
+                    if round % 4 == 0 && !cold_items.is_empty() {
+                        let cold_idx = round / 4 % cold_items.len();
+                        if cache.contains(&cold_items[cold_idx]) {
+                            cache.get(&cold_items[cold_idx]);
+                        }
+                    }
+                }
+                
+                // Hotspots should be at or near the head
+                assert!(cache.recency_rank(&2).unwrap() <= 1);
+                assert!(cache.recency_rank(&4).unwrap() <= 1);
+                
+                // When inserting new items, cold items should be evicted first
+                cache.insert(6, Arc::new(600));
+                cache.insert(7, Arc::new(700));
+                
+                // Hotspots should still be present
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&4));
+                
+                // At least some cold items should have been evicted
+                let cold_evicted = cold_items.iter()
+                    .filter(|&&item| !cache.contains(&item))
+                    .count();
+                assert!(cold_evicted > 0);
             }
 
             #[test]
             fn test_lru_coldspot_eviction() {
                 // Test that rarely accessed items are evicted appropriately
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Insert items
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Make item 1 a "coldspot" by not accessing it
+                // Access other items to make them more recent
+                for _ in 0..5 {
+                    cache.get(&2);
+                    cache.get(&3);
+                    cache.get(&4);
+                }
+                
+                // Item 1 should be the coldest (LRU)
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
+                assert_eq!(cache.recency_rank(&1), Some(3));
+                
+                // Insert new item - should evict cold item 1
+                cache.insert(5, Arc::new(500));
+                assert!(!cache.contains(&1)); // Cold item evicted
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
+                
+                // Create another coldspot
+                for _ in 0..3 {
+                    cache.get(&3);
+                    cache.get(&4);
+                    cache.get(&5);
+                }
+                
+                // Item 2 should now be coldest
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 2);
+                
+                // Insert another item
+                cache.insert(6, Arc::new(600));
+                assert!(!cache.contains(&2)); // Next cold item evicted
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
+                assert!(cache.contains(&6));
             }
 
             #[test]
             fn test_lru_rank_consistency() {
                 // Test that recency ranks are consistent with actual order
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Function to verify rank consistency
+                let verify_ranks = |cache: &LRUCore<i32, i32>| {
+                    let mut ranks = vec![];
+                    // Check all possible keys that might be in cache (including newly inserted ones)
+                    for i in 1..=10 {
+                        if let Some(rank) = cache.recency_rank(&i) {
+                            ranks.push((i, rank));
+                        }
+                    }
+                    
+                    // Should have exactly cache.len() items with ranks
+                    assert_eq!(ranks.len(), cache.len());
+                    
+                    // Ranks should be unique
+                    let mut rank_values: Vec<_> = ranks.iter().map(|(_, rank)| *rank).collect();
+                    rank_values.sort();
+                    rank_values.dedup();
+                    assert_eq!(rank_values.len(), ranks.len());
+                    
+                    // Ranks should be consecutive starting from 0
+                    for (idx, &rank) in rank_values.iter().enumerate() {
+                        assert_eq!(rank, idx, 
+                            "Rank at index {} should be {}, but was {}. Current items: {:?}", 
+                            idx, idx, rank, ranks);
+                    }
+                    
+                    // LRU item should have highest rank
+                    if let Some((lru_key, _)) = cache.peek_lru() {
+                        let lru_rank = cache.recency_rank(lru_key).unwrap();
+                        assert_eq!(lru_rank, cache.len() - 1);
+                    }
+                };
+                
+                // Verify initial state
+                verify_ranks(&cache);
+                
+                // Perform operations and verify consistency
+                cache.get(&3);
+                verify_ranks(&cache);
+                
+                cache.touch(&1);
+                verify_ranks(&cache);
+                
+                cache.remove(&4);
+                verify_ranks(&cache);
+                
+                cache.insert(6, Arc::new(600));
+                verify_ranks(&cache);
+                
+                cache.pop_lru();
+                verify_ranks(&cache);
             }
 
             #[test]
             fn test_lru_rank_updates_after_access() {
                 // Test recency rank changes after accessing items
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Record initial ranks
+                let initial_ranks: Vec<_> = (1..=4)
+                    .map(|i| (i, cache.recency_rank(&i).unwrap()))
+                    .collect();
+                
+                // Access item 2 and verify rank changes
+                let old_rank_2 = cache.recency_rank(&2).unwrap();
+                cache.get(&2);
+                let new_rank_2 = cache.recency_rank(&2).unwrap();
+                
+                assert_eq!(new_rank_2, 0); // Should be at head
+                assert_ne!(old_rank_2, new_rank_2);
+                
+                // Other items should have shifted accordingly
+                for i in [1, 3, 4] {
+                    let old_rank = initial_ranks.iter()
+                        .find(|(key, _)| *key == i)
+                        .unwrap().1;
+                    let new_rank = cache.recency_rank(&i);
+                    
+                    if new_rank.is_some() {
+                        // Item that was more recent than 2 should shift down by 1
+                        // Item that was less recent than 2 should maintain relative position
+                        if old_rank < old_rank_2 {
+                            assert_eq!(new_rank.unwrap(), old_rank + 1);
+                        }
+                    }
+                }
+                
+                // Touch operation should also update ranks
+                let old_rank_1 = cache.recency_rank(&1).unwrap();
+                cache.touch(&1);
+                assert_eq!(cache.recency_rank(&1).unwrap(), 0);
+                assert_eq!(cache.recency_rank(&2).unwrap(), 1); // 2 demoted
             }
 
             #[test]
             fn test_lru_batch_operations() {
                 // Test LRU behavior with batches of operations
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(6);
+                
+                // Batch 1: Insert multiple items
+                let batch1_keys = [1, 2, 3, 4];
+                for &key in &batch1_keys {
+                    cache.insert(key, Arc::new(key * 100));
+                }
+                assert_eq!(cache.len(), 4);
+                
+                // Batch 2: Access subset of items
+                let batch2_access = [2, 4];
+                for &key in &batch2_access {
+                    cache.get(&key);
+                }
+                
+                // Verify batch access affected ordering
+                assert!(cache.recency_rank(&4).unwrap() < cache.recency_rank(&1).unwrap());
+                assert!(cache.recency_rank(&2).unwrap() < cache.recency_rank(&3).unwrap());
+                
+                // Batch 3: Insert more items (will reach capacity)
+                let batch3_keys = [5, 6];
+                for &key in &batch3_keys {
+                    cache.insert(key, Arc::new(key * 100));
+                }
+                assert_eq!(cache.len(), 6);
+                
+                // Batch 4: Remove multiple items
+                let batch4_remove = [1, 3];
+                for &key in &batch4_remove {
+                    cache.remove(&key);
+                }
+                assert_eq!(cache.len(), 4);
+                
+                // Verify removed items are gone
+                for &key in &batch4_remove {
+                    assert!(!cache.contains(&key));
+                }
+                
+                // Batch 5: Mix of operations
+                cache.get(&2);      // Access
+                cache.insert(7, Arc::new(700)); // Insert
+                cache.touch(&6);    // Touch
+                cache.insert(8, Arc::new(800)); // Insert
+                
+                assert_eq!(cache.len(), 6); // Should be at capacity
+                
+                // Verify final state has correct ordering
+                assert_eq!(cache.recency_rank(&8), Some(0)); // Most recent insert
+                assert_eq!(cache.recency_rank(&6), Some(1)); // Last touch
+                assert_eq!(cache.recency_rank(&7), Some(2)); // Previous insert
+                assert_eq!(cache.recency_rank(&2), Some(3)); // Previous get
+                
+                // Remaining items should be present with appropriate ranks
+                let remaining_keys = vec![2, 4, 5, 6, 7, 8];
+                for &key in &remaining_keys {
+                    assert!(cache.contains(&key));
+                    assert!(cache.recency_rank(&key).is_some());
+                }
             }
 
             #[test]
             fn test_lru_interleaved_insert_access() {
                 // Test interleaved insert and access operations on LRU order
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Interleave insertions and accesses
+                cache.insert(1, Arc::new(100));           // Cache: [1]
+                cache.insert(2, Arc::new(200));           // Cache: [2, 1]
+                cache.get(&1);                            // Cache: [1, 2]
+                cache.insert(3, Arc::new(300));           // Cache: [3, 1, 2]
+                cache.get(&2);                            // Cache: [2, 3, 1]
+                cache.insert(4, Arc::new(400));           // Cache: [4, 2, 3, 1]
+                cache.get(&3);                            // Cache: [3, 4, 2, 1]
+                
+                // Verify final ordering
+                assert_eq!(cache.recency_rank(&3), Some(0)); // Most recent access
+                assert_eq!(cache.recency_rank(&4), Some(1)); // Most recent insert
+                assert_eq!(cache.recency_rank(&2), Some(2)); // Previous access
+                assert_eq!(cache.recency_rank(&1), Some(3)); // Least recent
+                
+                // Insert new item causing eviction
+                cache.insert(5, Arc::new(500));           // Should evict 1 (LRU)
+                assert!(!cache.contains(&1)); // Evicted
+                assert_eq!(cache.recency_rank(&5), Some(0)); // New head
+                assert_eq!(cache.recency_rank(&3), Some(1)); // Demoted
+                assert_eq!(cache.recency_rank(&4), Some(2)); // Demoted
+                assert_eq!(cache.recency_rank(&2), Some(3)); // New tail
             }
 
             #[test]
             fn test_lru_frequency_vs_recency() {
                 // Test LRU prioritizes recency over frequency
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Make item 1 very frequently accessed
+                for _ in 0..100 {
+                    cache.get(&1);
+                }
+                
+                // Access item 2 once (more recent than 1's last access)
+                cache.get(&2);
+                
+                // Access item 3 once (most recent)
+                cache.get(&3);
+                
+                // Despite item 1 being accessed 100 times, recency should matter
+                // Current order should be: 3(0), 2(1), 1(2)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Least recent despite high frequency
+                
+                // Insert new item - item 1 should be evicted despite high frequency
+                cache.insert(4, Arc::new(400));
+                assert!(!cache.contains(&1)); // Evicted due to being LRU, not frequency
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_lru_cache_warming() {
                 // Test LRU behavior during cache warming phase
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Phase 1: Empty cache
+                assert_eq!(cache.len(), 0);
+                assert!(cache.peek_lru().is_none());
+                
+                // Phase 2: Partial warming (50% capacity)
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.recency_rank(&2), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                
+                // Access during warming
+                cache.get(&1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                // Phase 3: Continue warming (80% capacity)
+                cache.insert(3, Arc::new(300));
+                cache.insert(4, Arc::new(400));
+                assert_eq!(cache.len(), 4);
+                
+                // Verify ordering during warming maintains LRU properties
+                assert_eq!(cache.recency_rank(&4), Some(0)); // Most recent insert
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Last accessed
+                assert_eq!(cache.recency_rank(&2), Some(3)); // Least recent
+                
+                // Phase 4: Complete warming (100% capacity)
+                cache.insert(5, Arc::new(500));
+                assert_eq!(cache.len(), 5);
+                
+                // Phase 5: Post-warming (evictions start)
+                cache.insert(6, Arc::new(600));
+                assert_eq!(cache.len(), 5); // Still at capacity
+                assert!(!cache.contains(&2)); // LRU evicted
             }
 
             #[test]
             fn test_lru_cache_cooling() {
                 // Test LRU behavior when cache activity decreases
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Fill cache with high activity
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // High activity phase - lots of accesses
+                for _ in 0..20 {
+                    for i in 1..=4 {
+                        cache.get(&i);
+                    }
+                }
+                
+                // Verify all items present during high activity
+                for i in 1..=4 {
+                    assert!(cache.contains(&i));
+                }
+                
+                // Cooling phase - reduced activity, only access subset
+                let active_items = [2, 4];
+                for _ in 0..5 {
+                    for &item in &active_items {
+                        cache.get(&item);
+                    }
+                }
+                
+                // Items 1 and 3 should now be colder (less recent)
+                assert!(cache.recency_rank(&2).unwrap() < cache.recency_rank(&1).unwrap());
+                assert!(cache.recency_rank(&4).unwrap() < cache.recency_rank(&3).unwrap());
+                
+                // Further cooling - access only one item
+                for _ in 0..3 {
+                    cache.get(&4);
+                }
+                
+                // Item 4 should be hottest, others cooler
+                assert_eq!(cache.recency_rank(&4), Some(0));
+                
+                // Insert new items during cooling - cold items should be evicted
+                cache.insert(5, Arc::new(500));
+                cache.insert(6, Arc::new(600));
+                
+                // Item 4 should survive (hot), others may be evicted based on cooling pattern
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
+                assert!(cache.contains(&6));
             }
 
             #[test]
             fn test_lru_steady_state_behavior() {
                 // Test LRU behavior in steady state (full cache)
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Reach steady state (full capacity)
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                assert_eq!(cache.len(), 4);
+                
+                // Steady state operations - every insert causes eviction
+                let steady_state_items = [5, 6, 7, 8, 9, 10];
+                for &item in &steady_state_items {
+                    let old_lru = cache.peek_lru().unwrap().0.clone();
+                    cache.insert(item, Arc::new(item * 100));
+                    
+                    // Should maintain capacity
+                    assert_eq!(cache.len(), 4);
+                    
+                    // Previous LRU should be evicted
+                    assert!(!cache.contains(&old_lru));
+                    
+                    // New item should be at head
+                    assert_eq!(cache.recency_rank(&item), Some(0));
+                }
+                
+                // In steady state, access patterns should still affect ordering
+                cache.get(&8); // Access existing item
+                assert_eq!(cache.recency_rank(&8), Some(0));
+                
+                cache.insert(11, Arc::new(1100)); // Insert new
+                assert_eq!(cache.recency_rank(&11), Some(0));
+                assert_eq!(cache.recency_rank(&8), Some(1)); // Demoted but still present
+                
+                // Verify steady state maintains LRU invariants
+                for i in 0..cache.len() {
+                    let mut found_rank = false;
+                    for j in 7..=11 { // Recent items range
+                        if cache.contains(&j) && cache.recency_rank(&j) == Some(i) {
+                            found_rank = true;
+                            break;
+                        }
+                    }
+                    if !found_rank && i < cache.len() {
+                        // This should not happen in correct LRU implementation
+                        panic!("Missing rank {} in steady state", i);
+                    }
+                }
             }
 
             #[test]
             fn test_lru_transition_states() {
                 // Test LRU behavior during capacity transitions
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Transition 1: Empty -> Partial (25%)
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                // Transition 2: Partial -> Half (50%)
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.len(), 2);
+                assert_eq!(cache.recency_rank(&2), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                
+                // Transition 3: Half -> Near Full (75%)
+                cache.insert(3, Arc::new(300));
+                assert_eq!(cache.len(), 3);
+                
+                // Transition 4: Near Full -> Full (100%)
+                cache.insert(4, Arc::new(400));
+                assert_eq!(cache.len(), 4);
+                
+                // Verify full state
+                for i in 1..=4 {
+                    assert!(cache.contains(&i));
+                }
+                
+                // Transition 5: Full -> Full with eviction
+                cache.insert(5, Arc::new(500));
+                assert_eq!(cache.len(), 4); // Still full
+                assert!(!cache.contains(&1)); // LRU evicted
+                
+                // Verify each transition maintains LRU properties
+                // Access pattern to test transitions in different states
+                
+                // Remove items to transition back down
+                cache.remove(&2);
+                assert_eq!(cache.len(), 3); // Back to 75%
+                
+                cache.remove(&3);
+                assert_eq!(cache.len(), 2); // Back to 50%
+                
+                cache.remove(&4);
+                assert_eq!(cache.len(), 1); // Back to 25%
+                
+                // Verify remaining item is still accessible
+                assert!(cache.contains(&5));
+                assert_eq!(cache.recency_rank(&5), Some(0));
+                
+                // Final transition back to empty
+                cache.remove(&5);
+                assert_eq!(cache.len(), 0);
+                assert!(cache.peek_lru().is_none());
             }
 
             #[test]
             fn test_lru_pointer_integrity() {
                 // Test that all prev/next pointers are correctly maintained
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Build cache and verify pointer integrity through operations
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                    
+                    // After each insertion, verify we can traverse from head to tail
+                    // by checking all items have valid ranks
+                    for j in 1..=i {
+                        assert!(cache.recency_rank(&j).is_some());
+                    }
+                    
+                    // Verify peek_lru works (requires valid tail pointer)
+                    assert!(cache.peek_lru().is_some());
+                }
+                
+                // Test pointer integrity through various operations
+                
+                // Move head to different position
+                cache.get(&1); // Move tail to head
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                // Move middle item
+                cache.get(&3); // Move middle to head
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                
+                // Remove head
+                cache.remove(&3);
+                assert_eq!(cache.len(), 4);
+                
+                // Remove tail
+                let tail_key = {
+                    let (key, _) = cache.peek_lru().unwrap();
+                    *key
+                };
+                cache.remove(&tail_key);
+                assert_eq!(cache.len(), 3);
+                
+                // Remove middle
+                let middle_key = cache.recency_rank(&1).unwrap() == 1;
+                if middle_key {
+                    cache.remove(&1);
+                } else {
+                    // Find an item that's not head or tail
+                    for i in [2, 4, 5] {
+                        if cache.contains(&i) {
+                            let rank = cache.recency_rank(&i).unwrap();
+                            if rank != 0 && rank != cache.len() - 1 {
+                                cache.remove(&i);
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // After all operations, verify remaining items still have valid traversal
+                let remaining_count = cache.len();
+                for i in 0..remaining_count {
+                    let mut found = false;
+                    for j in 1..=5 {
+                        if cache.contains(&j) && cache.recency_rank(&j) == Some(i) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    assert!(found, "Rank {} not found after pointer operations", i);
+                }
             }
 
             #[test]
             fn test_lru_list_node_count() {
                 // Test that linked list node count matches HashMap size
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Initially empty
+                assert_eq!(cache.len(), 0);
+                
+                // Add items and verify count consistency
+                for i in 1..=4 {
+                    cache.insert(i, Arc::new(i * 100));
+                    assert_eq!(cache.len(), i as usize);
+                    
+                    // Verify we can find exactly i items with valid ranks
+                    let mut found_count = 0;
+                    for j in 1..=i {
+                        if cache.recency_rank(&j).is_some() {
+                            found_count += 1;
+                        }
+                    }
+                    assert_eq!(found_count, i);
+                }
+                
+                // Remove items and verify count consistency
+                cache.remove(&2);
+                assert_eq!(cache.len(), 3);
+                
+                // Verify exactly 3 items have valid ranks
+                let mut valid_ranks = 0;
+                for i in 1..=4 {
+                    if cache.recency_rank(&i).is_some() {
+                        valid_ranks += 1;
+                    }
+                }
+                assert_eq!(valid_ranks, 3);
+                
+                // Evict through insertion
+                cache.insert(5, Arc::new(500));
+                assert_eq!(cache.len(), 4); // Back to capacity
+                
+                // Clear and verify
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                
+                // No items should have valid ranks
+                for i in 1..=5 {
+                    assert!(cache.recency_rank(&i).is_none());
+                }
             }
 
             #[test]
             fn test_lru_bidirectional_consistency() {
                 // Test that forward and backward traversals are consistent
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Function to verify bidirectional consistency
+                let verify_bidirectional = |cache: &LRUCore<i32, i32>| {
+                    // Forward traversal: collect items by rank from 0 to len-1
+                    let mut forward_items = vec![];
+                    for rank in 0..cache.len() {
+                        for i in 1..=5 {
+                            if cache.contains(&i) && cache.recency_rank(&i) == Some(rank) {
+                                forward_items.push(i);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Backward traversal: start from LRU and work backwards
+                    let mut backward_items = vec![];
+                    let mut current_items: Vec<_> = (1..=5).filter(|i| cache.contains(i)).collect();
+                    current_items.sort_by_key(|i| cache.recency_rank(i).unwrap());
+                    current_items.reverse();
+                    
+                    for &item in &current_items {
+                        backward_items.push(item);
+                    }
+                    
+                    // Forward and backward should be exact opposites
+                    forward_items.reverse();
+                    assert_eq!(forward_items, backward_items);
+                    
+                    // LRU should match the last item in forward traversal
+                    if let Some((lru_key, _)) = cache.peek_lru() {
+                        let lru_key = *lru_key;
+                        forward_items.reverse(); // Restore original order
+                        assert_eq!(forward_items.last(), Some(&lru_key));
+                    }
+                };
+                
+                // Verify initial state
+                verify_bidirectional(&cache);
+                
+                // Perform operations and verify after each
+                cache.get(&3);
+                verify_bidirectional(&cache);
+                
+                cache.touch(&1);
+                verify_bidirectional(&cache);
+                
+                cache.remove(&4);
+                verify_bidirectional(&cache);
+                
+                cache.insert(6, Arc::new(600));
+                verify_bidirectional(&cache);
             }
 
             #[test]
             fn test_lru_eviction_callback_order() {
                 // Test that eviction happens in proper LRU order
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Fill cache
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Track eviction order by recording LRU before each eviction
+                let mut eviction_order = vec![];
+                
+                // Perform operations that cause evictions
+                for new_item in 4..=8 {
+                    // Record what should be evicted (current LRU)
+                    let (lru_key, _) = cache.peek_lru().unwrap();
+                    eviction_order.push(*lru_key);
+                    
+                    // Insert new item (causes eviction)
+                    cache.insert(new_item, Arc::new(new_item * 100));
+                }
+                
+                // Verify evictions happened in LRU order
+                // Items should have been evicted in order: 1, 2, 3, 4, 5
+                assert_eq!(eviction_order, vec![1, 2, 3, 4, 5]);
+                
+                // Final cache should contain most recent items
+                assert!(cache.contains(&6));
+                assert!(cache.contains(&7));
+                assert!(cache.contains(&8));
+                assert_eq!(cache.len(), 3);
+                
+                // Test eviction order with intermixed accesses
+                cache.clear();
+                cache.insert(10, Arc::new(1000));
+                cache.insert(11, Arc::new(1100));
+                cache.insert(12, Arc::new(1200));
+                
+                // Access middle item to change LRU order
+                cache.get(&11);
+                // Order: 11(0), 12(1), 10(2) - 10 is LRU
+                
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 10);
+                
+                // Insert new item - should evict 10
+                cache.insert(13, Arc::new(1300));
+                assert!(!cache.contains(&10));
+                assert!(cache.contains(&11));
+                assert!(cache.contains(&12));
+                assert!(cache.contains(&13));
             }
 
             #[test]
             fn test_lru_memory_layout_efficiency() {
                 // Test memory layout and access patterns for efficiency
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(1000);
+                
+                // Fill with many items to test memory efficiency
+                for i in 1..=1000 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                assert_eq!(cache.len(), 1000);
+                
+                // Test that all operations are still efficient with large cache
+                // Access pattern that exercises the full range
+                for i in (1..=1000).step_by(7) {
+                    cache.get(&i);
+                }
+                
+                // Verify operations still work correctly
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                assert!(cache.recency_rank(&lru_key).is_some());
+                
+                // Test efficiency of evictions with large cache
+                let start_len = cache.len();
+                for i in 1001..=1100 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Should still be at capacity
+                assert_eq!(cache.len(), start_len);
+                
+                // Verify some original items were evicted
+                let mut evicted_count = 0;
+                for i in 1..=1000 {
+                    if !cache.contains(&i) {
+                        evicted_count += 1;
+                    }
+                }
+                assert_eq!(evicted_count, 100); // 100 new items, 100 evictions
+                
+                // All ranks should still be valid and unique
+                let mut found_ranks = std::collections::HashSet::new();
+                for i in 1..=1100 {
+                    if let Some(rank) = cache.recency_rank(&i) {
+                        assert!(rank < cache.len());
+                        assert!(found_ranks.insert(rank)); // Should be unique
+                    }
+                }
+                assert_eq!(found_ranks.len(), cache.len());
             }
 
             #[test]
             fn test_lru_algorithmic_complexity() {
                 // Test that LRU operations maintain O(1) complexity
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(100);
+                
+                // Fill cache
+                for i in 1..=100 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Test that operations don't degrade with cache size
+                // All these operations should be O(1) regardless of cache size
+                
+                // Insert (with eviction)
+                cache.insert(101, Arc::new(10100));
+                assert!(cache.contains(&101));
+                assert_eq!(cache.len(), 100);
+                
+                // Get
+                let value = cache.get(&50);
+                assert!(value.is_some());
+                assert_eq!(cache.recency_rank(&50), Some(0));
+                
+                // Contains
+                assert!(cache.contains(&75));
+                assert!(!cache.contains(&1)); // Should be evicted
+                
+                // Remove
+                let removed = cache.remove(&75);
+                assert!(removed.is_some());
+                assert!(!cache.contains(&75));
+                
+                // Touch
+                assert!(cache.touch(&60));
+                assert_eq!(cache.recency_rank(&60), Some(0));
+                
+                // Peek
+                let peeked = cache.peek(&80);
+                assert!(peeked.is_some());
+                // Peek shouldn't change ordering
+                assert_ne!(cache.recency_rank(&80), Some(0));
+                
+                // Recency rank
+                let rank = cache.recency_rank(&90);
+                assert!(rank.is_some());
+                assert!(rank.unwrap() < cache.len());
+                
+                // Peek LRU
+                let (lru_key, _) = cache.peek_lru().unwrap();
+                let lru_rank = cache.recency_rank(&lru_key).unwrap();
+                assert_eq!(lru_rank, cache.len() - 1);
+                
+                // Copy key before pop to avoid borrow issues
+                let expected_lru_key = *lru_key;
+                
+                // Pop LRU
+                let (popped_key, _) = cache.pop_lru().unwrap();
+                assert_eq!(popped_key, expected_lru_key);
+                assert!(!cache.contains(&popped_key));
+                
+                // All operations should have completed in constant time
+                // regardless of the cache size (100 items)
             }
 
             #[test]
             fn test_lru_concurrent_ordering() {
                 // Test LRU ordering behavior in concurrent scenarios
+                use std::sync::Arc;
+                let cache = super::super::ConcurrentLRUCache::new(4);
+                
+                // Fill cache
+                for i in 1..=4 {
+                    cache.insert(i, i * 100);
+                }
+                
+                // Test that concurrent accesses work
+                cache.get(&1);
+                cache.get(&3);
+                
+                // Test basic operations work
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&2));
+                
+                // Test eviction in concurrent cache
+                cache.insert(5, 500);
+                assert!(cache.contains(&5));
+                assert_eq!(cache.len(), 4); // Should maintain capacity
+                
+                // Test that Arc operations work correctly
+                let value_arc = Arc::new(999);
+                cache.insert_arc(6, Arc::clone(&value_arc));
+                assert_eq!(Arc::strong_count(&value_arc), 2); // Original + cache
+                
+                let retrieved = cache.get(&6);
+                assert!(retrieved.is_some());
+                assert_eq!(Arc::strong_count(&value_arc), 3); // Original + cache + retrieved
+                
+                drop(retrieved);
+                assert_eq!(Arc::strong_count(&value_arc), 2); // Back to original + cache
+                
+                // Test concurrent operations maintain basic functionality
+                assert!(cache.contains(&6));
+                assert_eq!(cache.len(), 4); // Should still be at capacity
             }
 
             #[test]
             fn test_lru_deterministic_behavior() {
                 // Test that LRU behavior is deterministic given same operations
+                let mut cache1: LRUCore<i32, i32> = LRUCore::new(4);
+                let mut cache2: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Perform identical sequence of operations on both caches
+                let operations = [
+                    ("insert", 1, 100),
+                    ("insert", 2, 200),
+                    ("insert", 3, 300),
+                    ("get", 1, 0),      // value ignored for get
+                    ("insert", 4, 400),
+                    ("get", 2, 0),
+                    ("touch", 4, 0),
+                    ("insert", 5, 500),
+                    ("remove", 3, 0),
+                    ("insert", 6, 600),
+                ];
+                
+                for (op, key, value) in operations {
+                    match op {
+                        "insert" => {
+                            cache1.insert(key, Arc::new(value));
+                            cache2.insert(key, Arc::new(value));
+                        }
+                        "get" => {
+                            cache1.get(&key);
+                            cache2.get(&key);
+                        }
+                        "touch" => {
+                            cache1.touch(&key);
+                            cache2.touch(&key);
+                        }
+                        "remove" => {
+                            cache1.remove(&key);
+                            cache2.remove(&key);
+                        }
+                        _ => panic!("Unknown operation"),
+                    }
+                    
+                    // After each operation, both caches should have identical state
+                    assert_eq!(cache1.len(), cache2.len());
+                    
+                    // Check that same items are present
+                    for i in 1..=6 {
+                        assert_eq!(cache1.contains(&i), cache2.contains(&i));
+                    }
+                    
+                    // Check that rankings are identical
+                    for i in 1..=6 {
+                        assert_eq!(cache1.recency_rank(&i), cache2.recency_rank(&i));
+                    }
+                    
+                    // Check that LRU is identical
+                    match (cache1.peek_lru(), cache2.peek_lru()) {
+                        (Some((key1, _)), Some((key2, _))) => assert_eq!(key1, key2),
+                        (None, None) => {}, // Both empty
+                        _ => panic!("LRU mismatch between caches"),
+                    }
+                }
+                
+                // Final verification - perform additional identical operations
+                for i in 7..=10 {
+                    cache1.insert(i, Arc::new(i * 100));
+                    cache2.insert(i, Arc::new(i * 100));
+                }
+                
+                // Final states should be identical
+                assert_eq!(cache1.len(), cache2.len());
+                for i in 1..=10 {
+                    assert_eq!(cache1.contains(&i), cache2.contains(&i));
+                    assert_eq!(cache1.recency_rank(&i), cache2.recency_rank(&i));
+                }
             }
         }
 
