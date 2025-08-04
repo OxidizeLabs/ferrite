@@ -488,7 +488,6 @@ use super::*;
 
         // Test performance comparison between standard LFU and HeapLFU
         let cache_size = 100;
-        let num_operations = 1000;
 
         // Test standard LFU cache
         let mut std_cache = LFUCache::new(cache_size);
