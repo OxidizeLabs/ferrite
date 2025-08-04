@@ -657,176 +657,536 @@ mod tests {
             #[test]
             fn test_new_cache_creation() {
                 // Test creating new LRU cache with various capacities
+                let cache1: LRUCore<i32, i32> = LRUCore::new(0);
+                assert_eq!(cache1.capacity(), 0);
+                assert_eq!(cache1.len(), 0);
+
+                let cache2: LRUCore<i32, i32> = LRUCore::new(10);
+                assert_eq!(cache2.capacity(), 10);
+                assert_eq!(cache2.len(), 0);
+
+                let cache3: LRUCore<i32, i32> = LRUCore::new(1000);
+                assert_eq!(cache3.capacity(), 1000);
+                assert_eq!(cache3.len(), 0);
             }
 
             #[test]
             fn test_insert_single_item() {
                 // Test inserting a single item into empty cache
+                let mut cache = LRUCore::new(5);
+                
+                let result = cache.insert(1, Arc::new(100));
+                assert!(result.is_none()); // No previous value
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
             }
 
             #[test]
             fn test_insert_multiple_items() {
                 // Test inserting multiple items within capacity
+                let mut cache = LRUCore::new(5);
+                
+                for i in 1..=3 {
+                    let result = cache.insert(i, Arc::new(i * 10));
+                    assert!(result.is_none());
+                }
+                
+                assert_eq!(cache.len(), 3);
+                for i in 1..=3 {
+                    assert!(cache.contains(&i));
+                }
             }
 
             #[test]
             fn test_get_existing_item() {
                 // Test getting an item that exists in cache
+                let mut cache = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(**value.unwrap(), 100);
             }
 
             #[test]
             fn test_get_nonexistent_item() {
                 // Test getting an item that doesn't exist in cache
+                let mut cache = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                let value = cache.get(&2);
+                assert!(value.is_none());
             }
 
             #[test]
             fn test_peek_existing_item() {
                 // Test peeking at an item that exists (no LRU update)
+                let mut cache = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                let value = cache.peek(&1);
+                assert!(value.is_some());
+                assert_eq!(*value.unwrap(), 100);
             }
 
             #[test]
             fn test_peek_nonexistent_item() {
                 // Test peeking at an item that doesn't exist
+                let cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                let value = cache.peek(&1);
+                assert!(value.is_none());
             }
 
             #[test]
             fn test_contains_existing_item() {
                 // Test contains check for existing item
+                let mut cache = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                assert!(cache.contains(&1));
             }
 
             #[test]
             fn test_contains_nonexistent_item() {
                 // Test contains check for non-existing item
+                let cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                assert!(!cache.contains(&1));
             }
 
             #[test]
             fn test_remove_existing_item() {
                 // Test removing an item that exists in cache
+                let mut cache = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                let removed = cache.remove(&1);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 100);
+                assert_eq!(cache.len(), 0);
+                assert!(!cache.contains(&1));
             }
 
             #[test]
             fn test_remove_nonexistent_item() {
                 // Test removing an item that doesn't exist in cache
+                let mut cache = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                let removed = cache.remove(&2);
+                assert!(removed.is_none());
+                assert_eq!(cache.len(), 1);
             }
 
             #[test]
             fn test_insert_duplicate_key() {
                 // Test inserting with same key twice (should update value)
+                let mut cache = LRUCore::new(5);
+                
+                let old_value = cache.insert(1, Arc::new(100));
+                assert!(old_value.is_none());
+                
+                let old_value = cache.insert(1, Arc::new(200));
+                assert!(old_value.is_some());
+                assert_eq!(*old_value.unwrap(), 100);
+                
+                assert_eq!(cache.len(), 1);
+                let current_value = cache.get(&1);
+                assert_eq!(**current_value.unwrap(), 200);
             }
 
             #[test]
             fn test_cache_length_updates() {
                 // Test that cache length is updated correctly on operations
+                let mut cache = LRUCore::new(3);
+                assert_eq!(cache.len(), 0);
+                
+                cache.insert(1, Arc::new(10));
+                assert_eq!(cache.len(), 1);
+                
+                cache.insert(2, Arc::new(20));
+                assert_eq!(cache.len(), 2);
+                
+                cache.remove(&1);
+                assert_eq!(cache.len(), 1);
+                
+                cache.clear();
+                assert_eq!(cache.len(), 0);
             }
 
             #[test]
             fn test_cache_capacity() {
                 // Test that cache reports correct capacity
+                let cache1: LRUCore<i32, i32> = LRUCore::new(0);
+                assert_eq!(cache1.capacity(), 0);
+                
+                let cache2: LRUCore<i32, i32> = LRUCore::new(10);
+                assert_eq!(cache2.capacity(), 10);
+                
+                let cache3: LRUCore<i32, i32> = LRUCore::new(1000);
+                assert_eq!(cache3.capacity(), 1000);
             }
 
             #[test]
             fn test_cache_clear() {
                 // Test clearing all items from cache
+                let mut cache = LRUCore::new(5);
+                
+                for i in 1..=3 {
+                    cache.insert(i, Arc::new(i * 10));
+                }
+                assert_eq!(cache.len(), 3);
+                
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                for i in 1..=3 {
+                    assert!(!cache.contains(&i));
+                }
             }
 
             #[test]
             fn test_empty_cache_behavior() {
                 // Test operations on empty cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                assert_eq!(cache.len(), 0);
+                assert!(cache.get(&1).is_none());
+                assert!(cache.peek(&1).is_none());
+                assert!(!cache.contains(&1));
+                assert!(cache.remove(&1).is_none());
+                assert!(cache.pop_lru().is_none());
+                assert!(cache.peek_lru().is_none());
+                assert!(!cache.touch(&1));
+                assert!(cache.recency_rank(&1).is_none());
             }
 
             #[test]
             fn test_single_item_cache() {
                 // Test cache with capacity of 1
+                let mut cache = LRUCore::new(1);
+                
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
+                
+                // Insert second item should evict first
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.len(), 1);
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
             }
 
             #[test]
             fn test_zero_capacity_cache() {
                 // Test cache with capacity of 0
+                let mut cache = LRUCore::new(0);
+                
+                let result = cache.insert(1, Arc::new(100));
+                assert!(result.is_none());
+                assert_eq!(cache.len(), 0);
+                assert!(!cache.contains(&1));
             }
 
             #[test]
             fn test_is_empty() {
                 // Test is_empty method on various cache states
+                let mut cache = LRUCore::new(5);
+                
+                // For LRUCore, we need to check len() == 0
+                assert_eq!(cache.len(), 0);
+                
+                cache.insert(1, Arc::new(100));
+                assert_ne!(cache.len(), 0);
+                
+                cache.remove(&1);
+                assert_eq!(cache.len(), 0);
+                
+                cache.insert(1, Arc::new(100));
+                cache.clear();
+                assert_eq!(cache.len(), 0);
             }
 
             #[test]
             fn test_lru_eviction_basic() {
                 // Test that LRU item is evicted when capacity exceeded
+                let mut cache = LRUCore::new(2);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.len(), 2);
+                
+                // Insert third item should evict first (LRU)
+                cache.insert(3, Arc::new(300));
+                assert_eq!(cache.len(), 2);
+                assert!(!cache.contains(&1)); // First inserted, first evicted
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
             }
 
             #[test]
             fn test_lru_order_preservation() {
                 // Test that LRU order is maintained correctly
+                let mut cache = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // All should be present
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                
+                // Insert fourth should evict 1 (LRU)
+                cache.insert(4, Arc::new(400));
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_access_updates_lru_order() {
                 // Test that accessing an item moves it to most recent
+                let mut cache = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Access first item to make it most recent
+                cache.get(&1);
+                
+                // Insert fourth should evict 2 (now LRU), not 1
+                cache.insert(4, Arc::new(400));
+                assert!(cache.contains(&1));  // Should still be present
+                assert!(!cache.contains(&2)); // Should be evicted
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_peek_does_not_update_lru() {
                 // Test that peek doesn't change LRU order
+                let mut cache = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Peek at first item (should not affect LRU order)
+                cache.peek(&1);
+                
+                // Insert fourth should still evict 1 (LRU)
+                cache.insert(4, Arc::new(400));
+                assert!(!cache.contains(&1)); // Should be evicted
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_touch_updates_lru_order() {
                 // Test that touch operation updates LRU order
+                let mut cache = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Touch first item to make it most recent
+                let touched = cache.touch(&1);
+                assert!(touched);
+                
+                // Insert fourth should evict 2 (now LRU), not 1
+                cache.insert(4, Arc::new(400));
+                assert!(cache.contains(&1));  // Should still be present
+                assert!(!cache.contains(&2)); // Should be evicted
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_touch_nonexistent_item() {
                 // Test touch on item that doesn't exist
+                let mut cache = LRUCore::new(3);
+                cache.insert(1, Arc::new(100));
+                
+                let touched = cache.touch(&2);
+                assert!(!touched);
             }
 
             #[test]
             fn test_pop_lru_basic() {
                 // Test popping least recently used item
+                let mut cache = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                let popped = cache.pop_lru();
+                assert!(popped.is_some());
+                let (key, value) = popped.unwrap();
+                assert_eq!(key, 1);
+                assert_eq!(*value, 100);
+                assert_eq!(cache.len(), 2);
+                assert!(!cache.contains(&1));
             }
 
             #[test]
             fn test_pop_lru_empty_cache() {
                 // Test popping from empty cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                let popped = cache.pop_lru();
+                assert!(popped.is_none());
             }
 
             #[test]
             fn test_peek_lru_basic() {
                 // Test peeking at least recently used item
+                let cache = LRUCore::new(3);
+                let mut cache = cache;
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                let peeked = cache.peek_lru();
+                assert!(peeked.is_some());
+                let (key, value) = peeked.unwrap();
+                assert_eq!(*key, 1);
+                assert_eq!(**value, 100);
+                assert_eq!(cache.len(), 3); // Should not remove
+                assert!(cache.contains(&1)); // Should still be present
             }
 
             #[test]
             fn test_peek_lru_empty_cache() {
                 // Test peeking LRU from empty cache
+                let cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                let peeked = cache.peek_lru();
+                assert!(peeked.is_none());
             }
 
             #[test]
             fn test_recency_rank_basic() {
                 // Test getting recency rank of items
+                let mut cache = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Most recent should be rank 0, least recent rank 2
+                assert_eq!(cache.recency_rank(&3), Some(0)); // Most recent
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2)); // Least recent
             }
 
             #[test]
             fn test_recency_rank_nonexistent() {
                 // Test recency rank for non-existing item
+                let mut cache = LRUCore::new(3);
+                cache.insert(1, Arc::new(100));
+                
+                assert!(cache.recency_rank(&2).is_none());
             }
 
             #[test]
             fn test_concurrent_cache_basic() {
                 // Test basic operations on ConcurrentLRUCache
+                let cache = ConcurrentLRUCache::new(5);
+                
+                assert_eq!(cache.capacity(), 5);
+                assert_eq!(cache.len(), 0);
+                assert!(cache.is_empty());
+                
+                let old_value = cache.insert(1, 100);
+                assert!(old_value.is_none());
+                assert_eq!(cache.len(), 1);
+                assert!(!cache.is_empty());
+                assert!(cache.contains(&1));
+                
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(*value.unwrap(), 100);
+                
+                let peeked = cache.peek(&1);
+                assert!(peeked.is_some());
+                assert_eq!(*peeked.unwrap(), 100);
+                
+                let removed = cache.remove(&1);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 100);
+                assert_eq!(cache.len(), 0);
             }
 
             #[test]
             fn test_concurrent_insert_arc() {
                 // Test inserting Arc<V> directly into concurrent cache
+                let cache = ConcurrentLRUCache::new(5);
+                let value = Arc::new(100);
+                let value_clone = Arc::clone(&value);
+                
+                let old_value = cache.insert_arc(1, value);
+                assert!(old_value.is_none());
+                
+                let retrieved = cache.get(&1);
+                assert!(retrieved.is_some());
+                let retrieved_val = retrieved.unwrap();
+                assert_eq!(*retrieved_val, 100);
+                
+                // Should be same Arc instance
+                assert!(Arc::ptr_eq(&retrieved_val, &value_clone));
             }
 
             #[test]
             fn test_arc_value_sharing() {
                 // Test that Arc<V> values are properly shared (zero-copy)
+                let cache = ConcurrentLRUCache::new(5);
+                cache.insert(1, 100);
+                
+                let value1 = cache.get(&1);
+                let value2 = cache.get(&1);
+                let value3 = cache.peek(&1);
+                
+                assert!(value1.is_some());
+                assert!(value2.is_some());
+                assert!(value3.is_some());
+                
+                // All should point to the same Arc instance
+                let v1 = value1.unwrap();
+                let v2 = value2.unwrap();
+                let v3 = value3.unwrap();
+                
+                assert!(Arc::ptr_eq(&v1, &v2));
+                assert!(Arc::ptr_eq(&v2, &v3));
             }
 
             #[test]
             fn test_key_copy_semantics() {
                 // Test that keys use Copy semantics efficiently
+                let cache = ConcurrentLRUCache::new(5);
+                
+                let key1 = 42u32;
+                let key2 = key1; // Copy, not move
+                
+                cache.insert(key1, 100);
+                
+                // Both key1 and key2 should work (both are copies of the same value)
+                assert!(cache.contains(&key1));
+                assert!(cache.contains(&key2));
+                
+                let value1 = cache.get(&key1);
+                let value2 = cache.get(&key2);
+                
+                assert!(value1.is_some());
+                assert!(value2.is_some());
+                assert_eq!(*value1.unwrap(), *value2.unwrap());
             }
         }
 
@@ -836,206 +1196,1109 @@ mod tests {
             #[test]
             fn test_maximum_capacity_cache() {
                 // Test cache with very large capacity (usize::MAX or close to it)
+                // Use a reasonable large number to avoid memory issues
+                let large_capacity = 1_000_000_usize;
+                let cache: LRUCore<i32, i32> = LRUCore::new(large_capacity);
+                
+                assert_eq!(cache.capacity(), large_capacity);
+                assert_eq!(cache.len(), 0);
+                
+                // Should still work normally with large capacity
+                let mut cache = cache;
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
             }
 
             #[test]
             fn test_zero_capacity_operations() {
                 // Test all operations on zero-capacity cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(0);
+                
+                // All insertions should fail/be ignored
+                let result = cache.insert(1, Arc::new(100));
+                assert!(result.is_none());
+                assert_eq!(cache.len(), 0);
+                assert!(!cache.contains(&1));
+                
+                // All other operations should handle gracefully
+                assert!(cache.get(&1).is_none());
+                assert!(cache.peek(&1).is_none());
+                assert!(cache.remove(&1).is_none());
+                assert!(cache.pop_lru().is_none());
+                assert!(cache.peek_lru().is_none());
+                assert!(!cache.touch(&1));
+                assert!(cache.recency_rank(&1).is_none());
+                
+                // Clear should work
+                cache.clear();
+                assert_eq!(cache.len(), 0);
             }
 
             #[test]
             fn test_single_capacity_eviction_patterns() {
                 // Test eviction behavior with capacity = 1
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(1);
+                
+                // Insert first item
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
+                
+                // Insert second item should evict first
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.len(), 1);
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                
+                // Insert third item should evict second
+                cache.insert(3, Arc::new(300));
+                assert_eq!(cache.len(), 1);
+                assert!(!cache.contains(&1));
+                assert!(!cache.contains(&2));
+                assert!(cache.contains(&3));
+                
+                // Access should not change anything (still only one item)
+                cache.get(&3);
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&3));
             }
 
             #[test]
             fn test_repeated_insert_same_key() {
                 // Test inserting same key many times with different values
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Insert same key multiple times
+                for i in 1..=10 {
+                    let old_value = cache.insert(1, Arc::new(i * 100));
+                    if i == 1 {
+                        assert!(old_value.is_none());
+                    } else {
+                        assert!(old_value.is_some());
+                        assert_eq!(*old_value.unwrap(), (i - 1) * 100);
+                    }
+                }
+                
+                // Should still only have one entry
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
+                
+                // Should have the latest value
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(**value.unwrap(), 1000);
             }
 
             #[test]
             fn test_alternating_access_pattern() {
                 // Test alternating access to two items in capacity-2 cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(2);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                
+                // Alternate access pattern
+                for _ in 0..10 {
+                    cache.get(&1);
+                    cache.get(&2);
+                }
+                
+                // Both should still be present
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert_eq!(cache.len(), 2);
+                
+                // Insert third item, should evict the LRU (which is 1 due to access order)
+                cache.insert(3, Arc::new(300));
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
             }
 
             #[test]
             fn test_insert_then_immediate_remove() {
                 // Test inserting and immediately removing items
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                for i in 1..=10 {
+                    cache.insert(i, Arc::new(i * 100));
+                    let removed = cache.remove(&i);
+                    assert!(removed.is_some());
+                    assert_eq!(*removed.unwrap(), i * 100);
+                    assert!(!cache.contains(&i));
+                    assert_eq!(cache.len(), 0);
+                }
             }
 
             #[test]
             fn test_remove_during_eviction() {
                 // Test removing items while eviction is happening
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Fill cache to capacity
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Remove an item, then insert a new one
+                let removed = cache.remove(&2);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 200);
+                assert_eq!(cache.len(), 2);
+                
+                // Insert new item - should not cause eviction since we're under capacity
+                cache.insert(4, Arc::new(400));
+                assert_eq!(cache.len(), 3);
+                assert!(cache.contains(&1));
+                assert!(!cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                
+                // Insert another item - should cause eviction (LRU is 1)
+                cache.insert(5, Arc::new(500));
+                assert_eq!(cache.len(), 3);
+                assert!(!cache.contains(&1));
             }
 
             #[test]
             fn test_clear_on_empty_cache() {
                 // Test clearing an already empty cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                assert_eq!(cache.len(), 0);
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                
+                // Should still work normally after clear
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
             }
 
             #[test]
             fn test_clear_then_operations() {
                 // Test operations after clearing a populated cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Populate cache
+                for i in 1..=3 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                assert_eq!(cache.len(), 3);
+                
+                // Clear cache
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                
+                // All items should be gone
+                for i in 1..=3 {
+                    assert!(!cache.contains(&i));
+                    assert!(cache.get(&i).is_none());
+                }
+                
+                // Should work normally after clear
+                cache.insert(10, Arc::new(1000));
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&10));
+                
+                let value = cache.get(&10);
+                assert!(value.is_some());
+                assert_eq!(**value.unwrap(), 1000);
             }
 
             #[test]
             fn test_multiple_clear_operations() {
                 // Test calling clear multiple times in succession
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                
+                // Multiple clears
+                for _ in 0..5 {
+                    cache.clear();
+                    assert_eq!(cache.len(), 0);
+                }
+                
+                // Should still work after multiple clears
+                cache.insert(2, Arc::new(200));
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&2));
             }
 
             #[test]
             fn test_pop_lru_until_empty() {
                 // Test repeatedly calling pop_lru until cache is empty
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Fill cache
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                assert_eq!(cache.len(), 5);
+                
+                // Pop all items in LRU order
+                let mut popped_keys = Vec::new();
+                while let Some((key, value)) = cache.pop_lru() {
+                    popped_keys.push(key);
+                    assert_eq!(*value, key * 100);
+                }
+                
+                // Should have popped in LRU order (1, 2, 3, 4, 5)
+                assert_eq!(popped_keys, vec![1, 2, 3, 4, 5]);
+                assert_eq!(cache.len(), 0);
+                
+                // Further pops should return None
+                assert!(cache.pop_lru().is_none());
             }
 
             #[test]
             fn test_peek_after_eviction() {
                 // Test peeking at items that should have been evicted
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(2);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                
+                // Peek should work
+                assert!(cache.peek(&1).is_some());
+                assert!(cache.peek(&2).is_some());
+                
+                // Insert third item, evicting first
+                cache.insert(3, Arc::new(300));
+                
+                // Peek at evicted item should return None
+                assert!(cache.peek(&1).is_none());
+                // Peek at remaining items should work
+                assert!(cache.peek(&2).is_some());
+                assert!(cache.peek(&3).is_some());
             }
 
             #[test]
             fn test_touch_evicted_items() {
                 // Test touching items that have been evicted
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(2);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                
+                // Touch item 1 to make it most recent (2 becomes LRU)
+                assert!(cache.touch(&1));
+                
+                // Insert third item, evicting item 2 (LRU)
+                cache.insert(3, Arc::new(300));
+                
+                // Touch evicted item should return false
+                assert!(!cache.touch(&2));
+                // Touch remaining items should work
+                assert!(cache.touch(&1));
+                assert!(cache.touch(&3));
             }
 
             #[test]
             fn test_recency_rank_after_operations() {
                 // Test recency ranks after complex operation sequences
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(4);
+                
+                // Insert in order
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                cache.insert(4, Arc::new(400));
+                
+                // Initial ranks: 4(0), 3(1), 2(2), 1(3)
+                assert_eq!(cache.recency_rank(&4), Some(0));
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                assert_eq!(cache.recency_rank(&1), Some(3));
+                
+                // Access item 1, making it most recent
+                cache.get(&1);
+                // New ranks: 1(0), 4(1), 3(2), 2(3)
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&4), Some(1));
+                assert_eq!(cache.recency_rank(&3), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(3));
+                
+                // Touch item 3
+                cache.touch(&3);
+                // New ranks: 3(0), 1(1), 4(2), 2(3)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&1), Some(1));
+                assert_eq!(cache.recency_rank(&4), Some(2));
+                assert_eq!(cache.recency_rank(&2), Some(3));
             }
 
             #[test]
             fn test_cache_with_identical_values() {
                 // Test cache behavior when multiple keys map to identical values
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                let shared_value = Arc::new(999);
+                
+                // Insert different keys with same Arc value
+                cache.insert(1, Arc::clone(&shared_value));
+                cache.insert(2, Arc::clone(&shared_value));
+                cache.insert(3, Arc::clone(&shared_value));
+                
+                // All should be present and point to same value
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                
+                // Get values one at a time (get() requires mutable borrow)
+                let val1 = cache.get(&1);
+                assert!(val1.is_some());
+                assert!(Arc::ptr_eq(&val1.unwrap(), &shared_value));
+                
+                let val2 = cache.get(&2);
+                assert!(val2.is_some());
+                assert!(Arc::ptr_eq(&val2.unwrap(), &shared_value));
+                
+                let val3 = cache.get(&3);
+                assert!(val3.is_some());
+                assert!(Arc::ptr_eq(&val3.unwrap(), &shared_value));
             }
 
             #[test]
             fn test_interleaved_operations() {
                 // Test complex interleaving of insert/get/remove/touch operations
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                assert!(cache.get(&1).is_some());
+                cache.insert(2, Arc::new(200));
+                assert!(cache.touch(&1));
+                cache.insert(3, Arc::new(300));
+                assert!(cache.peek(&2).is_some());
+                cache.insert(4, Arc::new(400)); // Should evict 2 (LRU)
+                
+                assert!(cache.contains(&1));
+                assert!(!cache.contains(&2)); // Evicted
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                
+                let removed = cache.remove(&1);
+                assert!(removed.is_some());
+                cache.insert(5, Arc::new(500));
+                assert!(cache.touch(&3));
+                
+                // Final state should have 3, 4, 5
+                assert!(!cache.contains(&1));
+                assert!(!cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
             }
 
             #[test]
             fn test_capacity_reduction_simulation() {
                 // Test behavior as if capacity was reduced (by manual eviction)
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Fill to capacity
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                assert_eq!(cache.len(), 5);
+                
+                // Simulate capacity reduction to 3 by removing 2 LRU items
+                cache.pop_lru(); // Remove 1
+                cache.pop_lru(); // Remove 2
+                assert_eq!(cache.len(), 3);
+                
+                // Remaining items should be 3, 4, 5
+                assert!(!cache.contains(&1));
+                assert!(!cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert!(cache.contains(&5));
+                
+                // Should behave as if it has effective capacity of 3
+                cache.insert(6, Arc::new(600));
+                cache.insert(7, Arc::new(700));
+                assert_eq!(cache.len(), 5); // Original capacity still enforced
             }
 
             #[test]
             fn test_duplicate_key_with_same_value() {
                 // Test inserting same key-value pair multiple times
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                let value = Arc::new(100);
+                
+                // Insert same key-value multiple times
+                let result1 = cache.insert(1, Arc::clone(&value));
+                assert!(result1.is_none());
+                
+                let result2 = cache.insert(1, Arc::clone(&value));
+                assert!(result2.is_some());
+                assert!(Arc::ptr_eq(&result2.unwrap(), &value));
+                
+                // Should still only have one entry
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
+                
+                // Value should be the same Arc instance
+                let retrieved = cache.get(&1);
+                assert!(Arc::ptr_eq(&retrieved.unwrap(), &value));
             }
 
             #[test]
             fn test_lru_order_with_duplicate_inserts() {
                 // Test LRU order when same key is inserted repeatedly
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Ranks: 3(0), 2(1), 1(2)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Re-insert key 1 with new value (should move to head)
+                cache.insert(1, Arc::new(999));
+                
+                // New ranks: 1(0), 3(1), 2(2)
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                
+                // Insert new item, should evict 2 (LRU)
+                cache.insert(4, Arc::new(400));
+                assert!(cache.contains(&1));
+                assert!(!cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_peek_vs_get_ordering_difference() {
                 // Test that peek and get produce different LRU ordering
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Initial order: 3(0), 2(1), 1(2)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Peek at item 1 (should not change order)
+                cache.peek(&1);
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(1));
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Get item 1 (should change order)
+                cache.get(&1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&3), Some(1));
+                assert_eq!(cache.recency_rank(&2), Some(2));
+                
+                // Insert new item - should evict 2 (LRU)
+                cache.insert(4, Arc::new(400));
+                assert!(cache.contains(&1));
+                assert!(!cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_concurrent_cache_edge_cases() {
                 // Test edge cases specific to ConcurrentLRUCache
+                let cache = ConcurrentLRUCache::new(2);
+                
+                // Empty cache operations
+                assert!(cache.is_empty());
+                assert_eq!(cache.len(), 0);
+                assert!(cache.get(&1).is_none());
+                assert!(cache.peek(&1).is_none());
+                assert!(!cache.contains(&1));
+                assert!(cache.remove(&1).is_none());
+                
+                // Single item operations
+                cache.insert(1, 100);
+                assert!(!cache.is_empty());
+                assert_eq!(cache.len(), 1);
+                
+                // Capacity testing
+                cache.insert(2, 200);
+                assert_eq!(cache.len(), 2);
+                
+                // Eviction
+                cache.insert(3, 300); // Should evict 1
+                assert_eq!(cache.len(), 2);
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                
+                // Clear
+                cache.clear();
+                assert!(cache.is_empty());
+                assert_eq!(cache.len(), 0);
             }
 
             #[test]
             fn test_arc_reference_counting_edge_cases() {
                 // Test Arc reference counting in edge scenarios
+                let cache = ConcurrentLRUCache::new(3);
+                let value = Arc::new(vec![1, 2, 3, 4, 5]); // Non-trivial value
+                
+                // Initial ref count should be 1
+                assert_eq!(Arc::strong_count(&value), 1);
+                
+                // Insert Arc directly
+                let old_value = cache.insert_arc(1, Arc::clone(&value));
+                assert!(old_value.is_none());
+                assert_eq!(Arc::strong_count(&value), 2); // Cache holds a reference
+                
+                // Get value (creates another temporary reference)
+                let retrieved = cache.get(&1);
+                assert!(retrieved.is_some());
+                assert_eq!(Arc::strong_count(&value), 3); // Original + cache + retrieved
+                
+                // Drop retrieved reference
+                drop(retrieved);
+                assert_eq!(Arc::strong_count(&value), 2); // Back to original + cache
+                
+                // Remove from cache
+                let removed = cache.remove(&1);
+                assert!(removed.is_some());
+                assert_eq!(Arc::strong_count(&value), 2); // Original + removed
+                
+                // Drop removed reference
+                drop(removed);
+                assert_eq!(Arc::strong_count(&value), 1); // Back to original only
             }
 
             #[test]
             fn test_insert_arc_vs_insert_value() {
                 // Test difference between insert_arc and regular insert
+                let cache = ConcurrentLRUCache::new(3);
+                let value = Arc::new(100);
+                
+                // insert_arc uses provided Arc directly
+                let old1 = cache.insert_arc(1, Arc::clone(&value));
+                assert!(old1.is_none());
+                
+                let retrieved1 = cache.get(&1);
+                assert!(Arc::ptr_eq(&retrieved1.unwrap(), &value));
+                
+                // insert creates new Arc
+                let old2 = cache.insert(2, 200);
+                assert!(old2.is_none());
+                
+                let retrieved2 = cache.get(&2);
+                assert!(retrieved2.is_some());
+                let retrieved2_arc = retrieved2.unwrap();
+                assert!(!Arc::ptr_eq(&retrieved2_arc, &value));
+                assert_eq!(*retrieved2_arc, 200);
+                
+                // Both methods should work correctly
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert_eq!(cache.len(), 2);
             }
 
             #[test]
             fn test_large_key_values() {
                 // Test with unusually large key values (if applicable)
+                let mut cache: LRUCore<i64, i32> = LRUCore::new(3);
+                
+                // Test with max and min key values
+                cache.insert(i64::MAX, Arc::new(1));
+                cache.insert(i64::MIN, Arc::new(2));
+                cache.insert(0, Arc::new(3));
+                
+                assert!(cache.contains(&i64::MAX));
+                assert!(cache.contains(&i64::MIN));
+                assert!(cache.contains(&0));
+                
+                assert_eq!(**cache.get(&i64::MAX).unwrap(), 1);
+                assert_eq!(**cache.get(&i64::MIN).unwrap(), 2);
+                assert_eq!(**cache.get(&0).unwrap(), 3);
             }
 
             #[test]
             fn test_key_collision_scenarios() {
                 // Test scenarios that might cause hash collisions
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(10);
+                
+                // Use keys that might have similar hash values
+                let keys = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+                
+                // Insert all keys
+                for &key in &keys {
+                    cache.insert(key, Arc::new(key * 100));
+                }
+                
+                // All should be present
+                for &key in &keys {
+                    assert!(cache.contains(&key));
+                    let value = cache.get(&key);
+                    assert!(value.is_some());
+                    assert_eq!(**value.unwrap(), key * 100);
+                }
+                
+                // Remove and re-insert to test collision handling
+                cache.remove(&5);
+                assert!(!cache.contains(&5));
+                
+                cache.insert(5, Arc::new(999));
+                assert!(cache.contains(&5));
+                assert_eq!(**cache.get(&5).unwrap(), 999);
             }
 
             #[test]
             fn test_memory_pressure_simulation() {
                 // Test cache behavior under simulated memory pressure
+                let mut cache: LRUCore<i32, String> = LRUCore::new(75);
+                
+                // Create large values to simulate memory pressure
+                for i in 0..50 {
+                    let large_string = "x".repeat(1000); // 1KB string
+                    cache.insert(i, Arc::new(large_string));
+                }
+                
+                assert_eq!(cache.len(), 50);
+                
+                // Access pattern that might stress memory (access first 25 items)
+                for _ in 0..10 {
+                    for i in 0..25 {
+                        cache.get(&i);
+                    }
+                }
+                
+                // Insert more items, causing evictions
+                for i in 50..100 {
+                    let large_string = "y".repeat(1000);
+                    cache.insert(i, Arc::new(large_string));
+                }
+                
+                assert_eq!(cache.len(), 75);
+                
+                // Some original items should be evicted (the unaccessed ones: 25-49)
+                let mut evicted_count = 0;
+                for i in 0..50 {
+                    if !cache.contains(&i) {
+                        evicted_count += 1;
+                    }
+                }
+                
+                // Should have evicted 25 items (those not recently accessed)
+                assert_eq!(evicted_count, 25);
             }
 
             #[test]
             fn test_rapid_capacity_fill_and_drain() {
                 // Test rapidly filling to capacity then draining cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(50);
+                
+                // Rapid fill
+                for i in 0..50 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                assert_eq!(cache.len(), 50);
+                
+                // Rapid drain via pop_lru
+                for i in 0..25 {
+                    let popped = cache.pop_lru();
+                    assert!(popped.is_some());
+                    let (key, value) = popped.unwrap();
+                    assert_eq!(key, i);
+                    assert_eq!(*value, i * 100);
+                }
+                assert_eq!(cache.len(), 25);
+                
+                // Rapid refill with more items than remaining capacity
+                for i in 50..100 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                assert_eq!(cache.len(), 50);
+                
+                // All middle items (25-49) should be evicted due to new insertions
+                for i in 25..50 {
+                    assert!(!cache.contains(&i));
+                }
+                
+                // New items should be present
+                for i in 75..100 {
+                    assert!(cache.contains(&i));
+                }
             }
 
             #[test]
             fn test_operation_sequence_corner_cases() {
                 // Test specific sequences that might break invariants
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Sequence 1: Insert, remove, insert same key
+                cache.insert(1, Arc::new(100));
+                let removed = cache.remove(&1);
+                assert!(removed.is_some());
+                cache.insert(1, Arc::new(200));
+                assert_eq!(**cache.get(&1).unwrap(), 200);
+                
+                // Sequence 2: Fill, clear, fill again
+                cache.insert(2, Arc::new(300));
+                cache.insert(3, Arc::new(400));
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                
+                cache.insert(4, Arc::new(500));
+                cache.insert(5, Arc::new(600));
+                assert_eq!(cache.len(), 2);
+                
+                // Sequence 3: Touch non-existent, then insert
+                assert!(!cache.touch(&6));
+                cache.insert(6, Arc::new(700));
+                assert!(cache.touch(&6));
+                
+                // Sequence 4: Peek, get, peek same item
+                cache.peek(&6);
+                cache.get(&6);
+                cache.peek(&6);
+                assert!(cache.contains(&6));
             }
 
             #[test]
             fn test_boundary_value_keys() {
                 // Test with boundary values for key type (min/max values)
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                let boundary_keys = vec![
+                    i32::MIN,
+                    i32::MIN + 1,
+                    -1,
+                    0,
+                    1,
+                    i32::MAX - 1,
+                    i32::MAX,
+                ];
+                
+                // Insert all boundary values
+                for (i, &key) in boundary_keys.iter().enumerate() {
+                    cache.insert(key, Arc::new(i as i32));
+                }
+                
+                // Verify all are present (some may be evicted due to capacity)
+                let mut present_count = 0;
+                for &key in &boundary_keys {
+                    if cache.contains(&key) {
+                        present_count += 1;
+                        let value = cache.get(&key);
+                        assert!(value.is_some());
+                    }
+                }
+                
+                assert_eq!(present_count, cache.capacity().min(boundary_keys.len()));
             }
 
             #[test]
             fn test_remove_head_and_tail_items() {
                 // Test removing items at head and tail positions specifically
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Fill cache
+                for i in 1..=5 {
+                    cache.insert(i, Arc::new(i * 100));
+                }
+                
+                // Remove tail (LRU) item
+                let tail_removed = cache.remove(&1);
+                assert!(tail_removed.is_some());
+                assert_eq!(*tail_removed.unwrap(), 100);
+                
+                // Remove head (MRU) item
+                let head_removed = cache.remove(&5);
+                assert!(head_removed.is_some());
+                assert_eq!(*head_removed.unwrap(), 500);
+                
+                // Remove middle item
+                let middle_removed = cache.remove(&3);
+                assert!(middle_removed.is_some());
+                assert_eq!(*middle_removed.unwrap(), 300);
+                
+                // Only items 2 and 4 should remain
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(!cache.contains(&3));
+                assert!(cache.contains(&4));
+                assert!(!cache.contains(&5));
+                assert_eq!(cache.len(), 2);
             }
 
             #[test]
             fn test_get_after_remove() {
                 // Test getting items immediately after they've been removed
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                
+                // Remove item 1
+                let removed = cache.remove(&1);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 100);
+                
+                // Immediate get should return None
+                let value = cache.get(&1);
+                assert!(value.is_none());
+                
+                // Other operations should also return None/false
+                assert!(!cache.contains(&1));
+                assert!(cache.peek(&1).is_none());
+                assert!(!cache.touch(&1));
+                assert!(cache.recency_rank(&1).is_none());
             }
 
             #[test]
             fn test_contains_after_eviction() {
                 // Test contains check for items that were evicted
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(2);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&2));
+                
+                // Insert third item, evicting first
+                cache.insert(3, Arc::new(300));
+                
+                // Contains check for evicted item should return false
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                
+                // Other operations on evicted item should fail
+                assert!(cache.get(&1).is_none());
+                assert!(cache.peek(&1).is_none());
+                assert!(!cache.touch(&1));
+                assert!(cache.remove(&1).is_none());
             }
 
             #[test]
             fn test_empty_cache_all_operations() {
                 // Test all possible operations on empty cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                
+                // Verify empty state
+                assert_eq!(cache.len(), 0);
+                assert_eq!(cache.capacity(), 5);
+                
+                // All read operations should return None/false
+                assert!(cache.get(&1).is_none());
+                assert!(cache.peek(&1).is_none());
+                assert!(!cache.contains(&1));
+                assert!(cache.remove(&1).is_none());
+                assert!(cache.pop_lru().is_none());
+                assert!(cache.peek_lru().is_none());
+                assert!(!cache.touch(&1));
+                assert!(cache.recency_rank(&1).is_none());
+                
+                // Clear should work on empty cache
+                cache.clear();
+                assert_eq!(cache.len(), 0);
+                
+                // Insert should work normally
+                cache.insert(1, Arc::new(100));
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
             }
 
             #[test]
             fn test_single_item_all_operations() {
                 // Test all operations when cache contains exactly one item
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                // Verify single item state
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
+                
+                // All operations on existing item should work
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(**value.unwrap(), 100);
+                
+                let peeked = cache.peek(&1);
+                assert!(peeked.is_some());
+                assert_eq!(*peeked.unwrap(), 100);
+                
+                assert!(cache.touch(&1));
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                let (lru_key, lru_value) = cache.peek_lru().unwrap();
+                assert_eq!(*lru_key, 1);
+                assert_eq!(**lru_value, 100);
+                
+                // Operations on non-existing items should fail
+                assert!(cache.get(&2).is_none());
+                assert!(!cache.contains(&2));
+                assert!(!cache.touch(&2));
             }
 
             #[test]
             fn test_full_cache_all_operations() {
                 // Test all operations when cache is at full capacity
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                // Fill to capacity
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                assert_eq!(cache.len(), 3);
+                
+                // Test operations without changing LRU order too much
+                assert!(cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                
+                assert!(cache.peek(&1).is_some());
+                assert!(cache.peek(&2).is_some());
+                assert!(cache.peek(&3).is_some());
+                
+                assert!(cache.recency_rank(&1).is_some());
+                assert!(cache.recency_rank(&2).is_some());
+                assert!(cache.recency_rank(&3).is_some());
+                
+                // Insert new item should cause eviction
+                cache.insert(4, Arc::new(400));
+                assert_eq!(cache.len(), 3); // Still at capacity
+                
+                // LRU item (1) should be evicted 
+                assert!(!cache.contains(&1));
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
             }
 
             #[test]
             fn test_lru_rank_boundary_conditions() {
                 // Test recency rank at boundaries (0, capacity-1)
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                
+                cache.insert(1, Arc::new(100));
+                cache.insert(2, Arc::new(200));
+                cache.insert(3, Arc::new(300));
+                
+                // Rank 0 (most recent)
+                assert_eq!(cache.recency_rank(&3), Some(0));
+                
+                // Rank capacity-1 (least recent)
+                assert_eq!(cache.recency_rank(&1), Some(2));
+                
+                // Access item at rank 2 to move it to rank 0
+                cache.get(&1);
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                assert_eq!(cache.recency_rank(&2), Some(2)); // Now least recent
+                
+                // Non-existing item should return None
+                assert!(cache.recency_rank(&4).is_none());
             }
 
             #[test]
             fn test_peek_lru_on_single_item() {
                 // Test peek_lru when cache has exactly one item
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                let peeked = cache.peek_lru();
+                assert!(peeked.is_some());
+                
+                let (key, value) = peeked.unwrap();
+                assert_eq!(*key, 1);
+                assert_eq!(**value, 100);
+                
+                // Cache should still have the item
+                assert_eq!(cache.len(), 1);
+                assert!(cache.contains(&1));
             }
 
             #[test]
             fn test_touch_only_item() {
                 // Test touching the only item in a single-item cache
+                let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                cache.insert(1, Arc::new(100));
+                
+                // Touch should succeed
+                assert!(cache.touch(&1));
+                
+                // Item should still be present and accessible
+                assert!(cache.contains(&1));
+                assert_eq!(cache.recency_rank(&1), Some(0));
+                
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(**value.unwrap(), 100);
             }
 
             #[test]
             fn test_concurrent_read_write_edge_cases() {
                 // Test edge cases in concurrent read/write scenarios
+                let cache = ConcurrentLRUCache::new(2);
+                
+                // Concurrent insert and read of same key
+                cache.insert(1, 100);
+                let value = cache.get(&1);
+                assert!(value.is_some());
+                assert_eq!(*value.unwrap(), 100);
+                
+                // Concurrent insert and remove of same key
+                cache.insert(2, 200);
+                let removed = cache.remove(&2);
+                assert!(removed.is_some());
+                assert_eq!(*removed.unwrap(), 200);
+                assert!(!cache.contains(&2));
+                
+                // Concurrent operations on different keys
+                cache.insert(3, 300);
+                cache.insert(4, 400);
+                assert!(cache.contains(&3));
+                assert!(cache.contains(&4));
+                
+                // Clear should work with concurrent operations
+                cache.clear();
+                assert!(cache.is_empty());
             }
 
             #[test]
             fn test_drop_behavior_edge_cases() {
                 // Test cache dropping behavior in various states
+                {
+                    // Empty cache drop
+                    let cache: LRUCore<i32, i32> = LRUCore::new(5);
+                    assert_eq!(cache.len(), 0);
+                    // Cache drops here
+                }
+                
+                {
+                    // Single item cache drop
+                    let mut cache: LRUCore<i32, i32> = LRUCore::new(5);
+                    cache.insert(1, Arc::new(100));
+                    assert_eq!(cache.len(), 1);
+                    // Cache drops here
+                }
+                
+                {
+                    // Full cache drop
+                    let mut cache: LRUCore<i32, i32> = LRUCore::new(3);
+                    for i in 1..=3 {
+                        cache.insert(i, Arc::new(i * 100));
+                    }
+                    assert_eq!(cache.len(), 3);
+                    // Cache drops here
+                }
+                
+                // All drops should be handled gracefully without panics or leaks
             }
         }
 
         mod lru_operations {
-            use super::*;
 
             #[test]
             fn test_lru_insertion_order_tracking() {
@@ -1309,7 +2572,6 @@ mod tests {
         }
 
         mod state_consistency {
-            use super::*;
 
             #[test]
             fn test_hashmap_linkedlist_size_consistency() {
@@ -1608,7 +2870,6 @@ mod tests {
     // MEMORY SAFETY TESTS MODULE
     // ==============================================
     mod memory_safety {
-        use super::*;
 
         #[test]
         fn test_no_memory_leaks_on_eviction() {
@@ -1945,13 +3206,8 @@ mod tests {
     // CONCURRENCY TESTS MODULE
     // ==============================================
     mod concurrency {
-        use super::*;
 
         mod thread_safety {
-            use super::*;
-            use std::sync::{Arc, Barrier, Condvar, Mutex};
-            use std::thread;
-            use std::time::Duration;
 
             #[test]
             fn test_concurrent_insert_operations() {
@@ -2355,10 +3611,6 @@ mod tests {
         }
 
         mod stress_testing {
-            use super::*;
-            use std::sync::{Arc, Barrier};
-            use std::thread;
-            use std::time::{Duration, Instant};
 
             #[test]
             fn test_high_throughput_operations() {
@@ -2636,13 +3888,8 @@ mod tests {
     // PERFORMANCE TESTS MODULE
     // ==============================================
     mod performance_tests {
-        use super::*;
-        use std::time::Instant;
 
         mod lookup_performance {
-            use super::*;
-            use std::time::{Duration, Instant};
-            use std::collections::HashMap;
 
             #[test]
             fn test_get_operation_latency() {
@@ -3011,8 +4258,6 @@ mod tests {
         }
 
         mod insertion_performance {
-            use super::*;
-            use std::time::{Duration, Instant};
 
             #[test]
             fn test_insert_operation_latency() {
@@ -3231,8 +4476,6 @@ mod tests {
         }
 
         mod eviction_performance {
-            use super::*;
-            use std::time::{Duration, Instant};
 
             #[test]
             fn test_pop_lru_operation_latency() {
@@ -3596,8 +4839,6 @@ mod tests {
         }
 
         mod memory_efficiency {
-            use super::*;
-            use std::mem::{size_of, align_of};
 
             #[test]
             fn test_cache_memory_footprint() {
@@ -4026,8 +5267,6 @@ mod tests {
         }
 
         mod complexity {
-            use super::*;
-            use std::time::{Duration, Instant};
 
             #[test]
             fn test_insert_time_complexity() {
