@@ -697,6 +697,16 @@ impl ExpressionParser {
                 let parsed_expr = Arc::new(self.parse_expression(expr, schema)?);
                 let parsed_pattern = Arc::new(self.parse_expression(pattern, schema)?);
 
+                // Convert Option<Value> to Option<String>
+                let escape_string = escape_char.as_ref().and_then(|val| {
+                    match val {
+                        sqlparser::ast::Value::SingleQuotedString(s) => Some(s.clone()),
+                        sqlparser::ast::Value::DoubleQuotedString(s) => Some(s.clone()),
+                        sqlparser::ast::Value::EscapedStringLiteral(s) => Some(s.clone()),
+                        _ => None,
+                    }
+                });
+
                 Ok(Expression::Regex(RegexExpression::new(
                     parsed_expr,
                     parsed_pattern,
@@ -705,7 +715,7 @@ impl ExpressionParser {
                     } else {
                         RegexOperator::SimilarTo
                     },
-                    escape_char.clone(),
+                    escape_string,
                     Column::new("similar_to", TypeId::Boolean),
                 )))
             }
@@ -1206,7 +1216,7 @@ impl ExpressionParser {
             } => {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 // The subquery parameter is a Query, which is what parse_subquery expects
-                let subquery_expr = Arc::new(self.parse_setexpr(subquery, schema)?);
+                let subquery_expr = Arc::new(self.parse_subquery(subquery, schema)?);
                 Ok(Expression::In(InExpression::new_subquery(
                     expr,
                     subquery_expr,
@@ -1237,7 +1247,14 @@ impl ExpressionParser {
                 pattern,
                 escape_char,
             } => {
-                let escape_char = escape_char.as_ref().and_then(|s| s.chars().next());
+                let escape_char = escape_char.as_ref().and_then(|val| {
+                    match val {
+                        sqlparser::ast::Value::SingleQuotedString(s) => s.chars().next(),
+                        sqlparser::ast::Value::DoubleQuotedString(s) => s.chars().next(),
+                        sqlparser::ast::Value::EscapedStringLiteral(s) => s.chars().next(),
+                        _ => None,
+                    }
+                });
                 Ok(Expression::Like(LikeExpression::new(
                     Arc::new(self.parse_expression(expr, schema)?),
                     Arc::new(self.parse_expression(pattern, schema)?),
@@ -1255,7 +1272,14 @@ impl ExpressionParser {
                 pattern,
                 escape_char,
             } => {
-                let escape_char = escape_char.as_ref().and_then(|s| s.chars().next());
+                let escape_char = escape_char.as_ref().and_then(|val| {
+                    match val {
+                        sqlparser::ast::Value::SingleQuotedString(s) => s.chars().next(),
+                        sqlparser::ast::Value::DoubleQuotedString(s) => s.chars().next(),
+                        sqlparser::ast::Value::EscapedStringLiteral(s) => s.chars().next(),
+                        _ => None,
+                    }
+                });
                 Ok(Expression::Like(LikeExpression::new(
                     Arc::new(self.parse_expression(expr, schema)?),
                     Arc::new(self.parse_expression(pattern, schema)?),
@@ -1502,6 +1526,8 @@ impl ExpressionParser {
                             DataType::AnyType => TypeId::Invalid,
                             DataType::GeometricType(_) => TypeId::Invalid,
                             DataType::NamedTable { .. } => TypeId::Invalid,
+                            DataType::TsVector => TypeId::Invalid,
+                            DataType::TsQuery => TypeId::Invalid,
                         },
                     ),
                 )))
@@ -2202,6 +2228,7 @@ impl ExpressionParser {
                 for ident in columns {
                     let column_name = match &ident.0[0] {
                         ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                        ObjectNamePart::Function(func) => func.name.value.clone(),
                     };
 
                     // Find the column in both schemas
@@ -2345,6 +2372,7 @@ impl ExpressionParser {
         match table_name {
             ObjectName(parts) if parts.len() == 1 => match &parts[0] {
                 ObjectNamePart::Identifier(ident) => Ok(ident.value.clone()),
+                ObjectNamePart::Function(func) => Ok(func.name.value.clone()),
             },
             _ => Err("Only single table INSERT statements are supported".to_string()),
         }
@@ -2808,7 +2836,7 @@ impl ExpressionParser {
             if let SelectItem::UnnamedExpr(Expr::Identifier(ident)) = &select.projection[0] {
                 let column_name = ident.value.to_string();
                 if column_name == "id" {
-                    // Check if we have a WHERE clause with budget < 250000
+                    // Check if we have a WHERE clause with budget < 250,000
                     if let Some(where_clause) = &select.selection {
                         if let Expr::BinaryOp { left, op, right } = where_clause {
                             if let Expr::Identifier(budget_ident) = left.as_ref() {

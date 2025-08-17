@@ -62,15 +62,14 @@ impl QueryPlanner {
                 transaction,
                 modifier,
                 statements,
-                exception_statements,
-                has_end_keyword,
+                exception, has_end_keyword,
             } => self.plan_builder.build_start_transaction_plan(
                 modes,
                 begin,
                 transaction,
                 modifier,
                 statements,
-                exception_statements,
+                exception,
                 has_end_keyword,
             ),
             Statement::Commit {

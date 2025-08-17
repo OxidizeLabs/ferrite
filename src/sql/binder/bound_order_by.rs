@@ -1,7 +1,7 @@
 use crate::sql::binder::bound_expression::BoundExpression;
-use mockall::Any;
 use std::fmt;
 use std::fmt::{Display, Formatter};
+
 
 /// All types of order-bys in binder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,8 +26,8 @@ impl Display for BoundOrderBy {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "BoundOrderBy {{ type={}, expr={} }}",
-            self.order_type.type_name(),
+            "BoundOrderBy {{ type={:?}, expr={} }}",
+            self.order_type,
             self.expr
         )
     }

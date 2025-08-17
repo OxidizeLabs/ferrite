@@ -1223,7 +1223,7 @@ impl LogicalPlanBuilder {
         transaction: &Option<BeginTransactionKind>,
         modifier: &Option<TransactionModifier>,
         statements: &Vec<Statement>,
-        exception_statements: &Option<Vec<Statement>>,
+        exception_statements: &Option<Vec<ExceptionWhen>>,
         has_end_keyword: &bool,
     ) -> Result<Box<LogicalPlan>, String> {
         // Initialize default transaction properties
@@ -1404,6 +1404,7 @@ impl LogicalPlanBuilder {
         // Extract the string value from the object name structure
         let db_name_str = match &db_name.0[0] {
             ObjectNamePart::Identifier(ident) => ident.value.clone(),
+            ObjectNamePart::Function(func) => func.name.value.clone(),
         };
 
         // Currently, location and managed_location parameters are not used in our logical plan
@@ -1435,6 +1436,7 @@ impl LogicalPlanBuilder {
 
         let table_name = match &name.0[0] {
             ObjectNamePart::Identifier(ident) => ident.value.clone(),
+            ObjectNamePart::Function(func) => func.name.value.clone(),
         };
 
         // Handle if_exists condition - if table doesn't exist and if_exists is false, it's an error
@@ -1471,15 +1473,24 @@ impl LogicalPlanBuilder {
                     )
                 }
                 AlterTableOperation::DropColumn {
-                    column_name,
+                    has_column_keyword,
+                    column_names,
                     if_exists,
-                    ..
+                    drop_behavior,
                 } => {
-                    format!(
-                        "DROP COLUMN {}{}",
-                        if *if_exists { "IF EXISTS " } else { "" },
-                        column_name.value
-                    )
+                    let column_kw = if *has_column_keyword { "COLUMN " } else { "" };
+                    let if_exists_kw = if *if_exists { "IF EXISTS " } else { "" };
+                    let cols = column_names
+                        .iter()
+                        .map(|id| id.value.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let behavior_suffix = match drop_behavior {
+                        Some(DropBehavior::Cascade) => " CASCADE",
+                        Some(DropBehavior::Restrict) => " RESTRICT",
+                        None => "",
+                    };
+                    format!("DROP {}{}{}{}", column_kw, if_exists_kw, cols, behavior_suffix)
                 }
                 AlterTableOperation::RenameColumn {
                     old_column_name,
@@ -1495,6 +1506,7 @@ impl LogicalPlanBuilder {
                 } => {
                     let new_name = match &new_table.0[0] {
                         ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                        ObjectNamePart::Function(func) => func.name.value.clone(),
                     };
                     format!("RENAME TO {}", new_name)
                 }
@@ -1556,6 +1568,7 @@ impl LogicalPlanBuilder {
 
         let view_name = match &name.0[0] {
             ObjectNamePart::Identifier(ident) => ident.value.clone(),
+            ObjectNamePart::Function(func) => func.name.value.clone(),
         };
 
         // Check if view already exists
@@ -1636,6 +1649,7 @@ impl LogicalPlanBuilder {
 
         let view_name = match &name.0[0] {
             ObjectNamePart::Identifier(ident) => ident.value.clone(),
+            ObjectNamePart::Function(func) => func.name.value.clone(),
         };
 
         // Check if view exists
@@ -2042,6 +2056,7 @@ impl LogicalPlanBuilder {
                         // Get the table name from the object name
                         let table_name = match &obj_name.0[0] {
                             ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                            ObjectNamePart::Function(func) => func.name.value.clone(),
                         };
                         table_name
                     }
@@ -2178,6 +2193,7 @@ impl LogicalPlanBuilder {
 
                 match &obj_name.0[0] {
                     ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                    ObjectNamePart::Function(func) => func.name.value.clone(),
                 }
             }
             Use::Catalog(obj_name) => {
@@ -2187,6 +2203,7 @@ impl LogicalPlanBuilder {
 
                 match &obj_name.0[0] {
                     ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                    ObjectNamePart::Function(func) => func.name.value.clone(),
                 }
             }
             Use::Warehouse(_obj_name) => {
