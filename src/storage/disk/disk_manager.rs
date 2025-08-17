@@ -3,7 +3,6 @@ use crate::common::logger::initialize_logger;
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
 use crate::storage::disk::direct_io::{DirectIOConfig, open_direct_io};
 use log::{debug, error, info, trace, warn};
-use mockall::automock;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::future::Future;
@@ -15,8 +14,12 @@ use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
+
 use parking_lot::{Mutex, RwLock};
 use tokio::task::JoinHandle;
+
+#[cfg(any(test, feature = "mocking"))]
+use mockall::automock;
 
 // PERFORMANCE OPTIMIZATION: Constants for optimized operations
 const WRITE_BUFFER_SIZE: usize = 1024 * 1024; // 1MB write buffer
@@ -84,7 +87,7 @@ impl ReadAheadCache {
 
 /// The `DiskIO` trait defines the basic operations for interacting with disk storage.
 /// Implementers of this trait must provide methods to write and read pages.
-#[automock]
+#[cfg_attr(any(test, feature = "mocking"), automock)]
 pub trait DiskIO: Send + Sync {
     fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()>;
     fn read_page(
@@ -233,7 +236,7 @@ impl DiskIO for RealDiskIO {
     }
 }
 
-#[automock]
+#[cfg_attr(any(test, feature = "mocking"), automock)]
 impl FileDiskManager {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY_MS: u64 = 100;

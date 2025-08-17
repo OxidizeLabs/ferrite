@@ -596,6 +596,8 @@ impl SchemaManager {
             DataType::GeometricType(_) => Ok(TypeId::Point),
             DataType::Table(_) => Err(format!("Unsupported SQL type: {:?}", sql_type)),
             DataType::NamedTable { .. } => Err(format!("Unsupported SQL type: {:?}", sql_type)),
+            DataType::TsVector => Err(format!("Unsupported SQL type: {:?}", sql_type)),
+            DataType::TsQuery => Err(format!("Unsupported SQL type: {:?}", sql_type)),
         }
     }
 
