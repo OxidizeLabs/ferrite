@@ -617,19 +617,10 @@ impl PlanNode {
                 context,
                 Arc::new(node.clone()),
             ))),
-            PlanNode::IndexScan(node) => {
-                let child_plan = node
-                    .get_children()
-                    .first()
-                    .ok_or_else(|| "Filter node must have a child".to_string())?;
-                let child_executor = child_plan.create_executor(context.clone())?;
-
-                Ok(Box::new(IndexScanExecutor::new(
-                    child_executor,
-                    context,
-                    Arc::new(node.clone()),
-                )))
-            }
+            PlanNode::IndexScan(node) => Ok(Box::new(IndexScanExecutor::new(
+                context,
+                Arc::new(node.clone()),
+            ))),
             PlanNode::Values(node) => Ok(Box::new(ValuesExecutor::new(
                 context,
                 Arc::new(node.clone()),
