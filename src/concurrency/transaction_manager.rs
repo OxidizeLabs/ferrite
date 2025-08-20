@@ -172,6 +172,53 @@ impl TransactionManager {
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
 
+        // Mark all tuples written by this transaction as committed by setting their commit timestamps
+        // We do this BEFORE flushing so the metadata updates are persisted with the batch.
+        for (table_oid, rid) in txn.get_write_set() {
+            // Locate the transactional table heap for this table
+            if let Some(table_heap) = self.get_table_heap(table_oid) {
+                // Fetch the page directly to allow updating metadata even for deleted tuples
+                if let Some(page_guard) = table_heap
+                    .get_table_heap()
+                    .get_bpm()
+                    .fetch_page::<TablePage>(rid.get_page_id())
+                {
+                    let mut page = page_guard.write();
+                    // Allow reading deleted tuples so we can mark them committed as well
+                    if let Ok((mut meta, _)) = page.get_tuple(&rid, true) {
+                        // Only mark tuples created/modified by this transaction
+                        if meta.get_creator_txn_id() == txn.get_transaction_id() {
+                            meta.set_commit_timestamp(txn.commit_ts());
+                            if let Err(e) = page.update_tuple_meta(&meta, &rid) {
+                                log::error!(
+                                    "Failed to update commit timestamp for RID {:?} in table {}: {}",
+                                    rid, table_oid, e
+                                );
+                            }
+                        }
+                    } else {
+                        log::warn!(
+                            "Could not read tuple for RID {:?} during commit of txn {}",
+                            rid,
+                            txn.get_transaction_id()
+                        );
+                    }
+                } else {
+                    log::error!(
+                        "Failed to fetch page {} for RID {:?} during commit",
+                        rid.get_page_id(),
+                        rid
+                    );
+                }
+            } else {
+                log::warn!(
+                    "No registered table heap found for table_oid {} while committing txn {}",
+                    table_oid,
+                    txn.get_transaction_id()
+                );
+            }
+        }
+
         // Flush dirty pages written by this transaction
         for (table_oid, rid) in txn.get_write_set() {
             log::debug!(
