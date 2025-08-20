@@ -16,6 +16,7 @@ pub struct MLPrefetcher {
     min_pattern_length: usize,
     max_pattern_length: usize,
     prefetch_distance: usize,
+    last_predictions: Option<Vec<PageId>>,
 }
 
 impl MLPrefetcher {
@@ -28,6 +29,7 @@ impl MLPrefetcher {
             min_pattern_length: 2,
             max_pattern_length: 8,
             prefetch_distance: 4,
+            last_predictions: None,
         }
     }
 
@@ -35,6 +37,14 @@ impl MLPrefetcher {
     pub fn record_access(&mut self, page_id: PageId) {
         let now = Instant::now();
         self.access_history.push_back((page_id, now));
+
+        // Update prediction accuracy based on last predictions
+        if let Some(preds) = &self.last_predictions {
+            let hit = preds.contains(&page_id);
+            let correctness = if hit { 1.0 } else { 0.0 };
+            self.prediction_accuracy =
+                self.prediction_accuracy * (1.0 - self.learning_rate) + correctness * self.learning_rate;
+        }
 
         // Maintain history size
         while self.access_history.len() > 1000 {
@@ -64,11 +74,12 @@ impl MLPrefetcher {
         }
 
         // Remove duplicates and limit predictions
-        predictions.sort_unstable();
-        predictions.dedup();
-        predictions.truncate(8); // Limit prefetch size
+        let mut unique = predictions;
+        unique.sort_unstable();
+        unique.dedup();
+        unique.truncate(8); // Limit prefetch size
 
-        predictions
+        unique
     }
 
     /// Updates pattern weights based on recent access history
@@ -77,12 +88,14 @@ impl MLPrefetcher {
             return;
         }
 
-        let recent_accesses: Vec<PageId> = self.access_history
+        // Build recent access list in chronological order (oldest -> newest)
+        let mut recent_accesses: Vec<PageId> = self.access_history
             .iter()
             .rev()
             .take(20)
             .map(|(page_id, _)| *page_id)
             .collect();
+        recent_accesses.reverse();
 
         // Extract patterns of different lengths
         for pattern_len in self.min_pattern_length..=self.max_pattern_length {
@@ -129,6 +142,11 @@ impl MLPrefetcher {
     /// Returns the current prediction accuracy
     pub fn get_accuracy(&self) -> f64 {
         self.prediction_accuracy
+    }
+
+    /// Stores last predictions to evaluate on subsequent accesses
+    pub fn set_last_predictions(&mut self, predictions: Vec<PageId>) {
+        self.last_predictions = Some(predictions);
     }
 }
 
@@ -216,5 +234,59 @@ mod tests {
         
         // Sequential prefetching should predict at least 11
         assert!(predictions.contains(&11));
+    }
+
+    #[test]
+    fn test_ml_prefetcher_no_predictions_with_short_history() {
+        let mut prefetcher = MLPrefetcher::new();
+
+        // With less than min_pattern_length accesses, there should be no patterns
+        prefetcher.record_access(42);
+        let predictions = prefetcher.predict_prefetch(42);
+        assert!(predictions.is_empty());
+    }
+
+    #[test]
+    fn test_ml_prefetcher_decay_reduces_old_patterns() {
+        let mut prefetcher = MLPrefetcher::new();
+
+        // Train with a predictable pattern to establish weights
+        for _ in 0..20 {
+            for i in 1..=5 {
+                prefetcher.record_access(i);
+            }
+        }
+
+        // Verify we initially get a sensible prediction for page 3
+        let initial_predictions = prefetcher.predict_prefetch(3);
+        assert!(initial_predictions.contains(&4));
+
+        // Now add many unrelated accesses to trigger decay and pattern eviction
+        // Use values far away from the trained pattern so they don't reinforce it
+        for x in 1000u64..=2600u64 {
+            prefetcher.record_access(x);
+        }
+
+        // Old patterns should have decayed below threshold and been pruned
+        let decayed_predictions = prefetcher.predict_prefetch(3);
+        assert!(decayed_predictions.is_empty());
+    }
+
+    #[test]
+    fn test_prefetch_engine_sequential_only_predictions_respect_distance() {
+        let engine = PrefetchEngine::new(3);
+        let predictions = engine.predict_pages_to_prefetch(100);
+        assert_eq!(predictions, vec![101, 102, 103]);
+    }
+
+    #[test]
+    fn test_prefetch_engine_predictions_truncated_to_reasonable_limit() {
+        let engine = PrefetchEngine::new(100);
+        let predictions = engine.predict_pages_to_prefetch(1);
+        // Truncated to 16 even if prefetch_distance is very large
+        assert_eq!(predictions.len(), 16);
+        // Should be the first 16 sequential pages starting after current page
+        let expected: Vec<u64> = (2u64..=17u64).collect();
+        assert_eq!(predictions, expected);
     }
 }
