@@ -77,7 +77,7 @@ impl LogicalPlanBuilder {
         if !matches!(&*query.body, SetExpr::Select(_)) {
             if let Some(order_by) = &query.order_by {
                 let Some(schema) = current_plan.get_schema() else {
-                    todo!()
+                    return Err("Internal error: missing schema while applying ORDER BY".to_string());
                 };
 
                 // Build sort specifications with ASC/DESC support
@@ -99,7 +99,7 @@ impl LogicalPlanBuilder {
         // Handle LIMIT and OFFSET if present
         if let Some(limit_clause) = &query.limit_clause {
             let Some(schema) = current_plan.get_schema() else {
-                todo!()
+                return Err("Internal error: missing schema while applying LIMIT/OFFSET".to_string());
             };
 
             // Extract the limit expression based on the LimitClause variant
@@ -133,7 +133,7 @@ impl LogicalPlanBuilder {
         // Handle FETCH if present (similar to LIMIT)
         if let Some(fetch) = &query.fetch {
             let Some(schema) = current_plan.get_schema() else {
-                todo!()
+                return Err("Internal error: missing schema while applying FETCH".to_string());
             };
             // In sqlparser 0.56.0, fetch.quantity is an Option<Expr>
             if let Some(quantity_expr) = &fetch.quantity {
@@ -185,7 +185,7 @@ impl LogicalPlanBuilder {
         if let Some(where_clause) = &select.selection {
             debug!("Processing WHERE clause");
             let Some(parsing_schema) = current_plan.get_schema().clone() else {
-                todo!()
+                return Err("Internal error: missing schema while applying WHERE".to_string());
             };
             debug!("Schema has {} columns", parsing_schema.get_column_count());
             let filter_expr = self
@@ -206,7 +206,7 @@ impl LogicalPlanBuilder {
             GroupByExpr::Expressions(exprs, _) => !exprs.is_empty(),
         };
         let Some(original_schema) = current_plan.get_schema() else {
-            todo!()
+            return Err("Internal error: missing schema before SELECT projection".to_string());
         };
 
         // Parse all expressions in the projection to identify aggregates
@@ -343,10 +343,18 @@ impl LogicalPlanBuilder {
             }
         }
 
+        // Apply DISTINCT if requested
+        if select.distinct.is_some() {
+            let Some(projection_schema) = current_plan.get_schema() else {
+                return Err("Internal error: missing schema while applying DISTINCT".to_string());
+            };
+            current_plan = LogicalPlan::distinct(projection_schema, current_plan);
+        }
+
         // Handle ORDER BY if present (either from SELECT or passed down from Query)
         if let Some(order_by) = order_by {
             let Some(projection_schema) = current_plan.get_schema() else {
-                todo!()
+                return Err("Internal error: missing schema while applying ORDER BY".to_string());
             };
 
             // Build sort specifications with ASC/DESC support using fallback parsing
@@ -392,7 +400,7 @@ impl LogicalPlanBuilder {
         // Apply SORT BY if it exists (Hive-specific)
         if !select.sort_by.is_empty() {
             let Some(projection_schema) = current_plan.get_schema() else {
-                todo!()
+                return Err("Internal error: missing schema while applying SORT BY".to_string());
             };
             let sort_specifications = select
                 .sort_by
