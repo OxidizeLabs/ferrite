@@ -23,12 +23,10 @@ pub struct IndexScanExecutor {
     table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     iterator: Option<IndexIterator>,
-    child_executor: Box<dyn AbstractExecutor>,
 }
 
 impl IndexScanExecutor {
     pub fn new(
-        child_executor: Box<dyn AbstractExecutor>,
         context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<IndexScanNode>,
     ) -> Self {
@@ -84,7 +82,6 @@ impl IndexScanExecutor {
             table_heap,
             iterator: None,
             initialized: false,
-            child_executor,
         }
     }
 
@@ -341,17 +338,7 @@ impl AbstractExecutor for IndexScanExecutor {
             self.init();
         }
 
-        // Get child result first
-        // Handle the Result from child_executor.next()
-        match self.child_executor.next()? {
-            Some(child_result) => {
-                debug!("Using result from child executor");
-                return Ok(Some(child_result));
-            }
-            None => {
-                debug!("Child executor exhausted, proceeding with index scan");
-            }
-        }
+        // Proceed directly with index scan
 
         // Get schema upfront
         let output_schema = self.get_output_schema().clone();
@@ -647,30 +634,7 @@ mod index_scan_executor_tests {
         values
     }
 
-    // Add this new struct for testing
-    struct DummyExecutor {
-        initialized: bool,
-        schema: Schema,
-        context: Arc<RwLock<ExecutionContext>>,
-    }
 
-    impl AbstractExecutor for DummyExecutor {
-        fn init(&mut self) {
-            self.initialized = true;
-        }
-
-        fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
-            Ok(None)
-        }
-
-        fn get_output_schema(&self) -> &Schema {
-            &self.schema
-        }
-
-        fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
-            self.context.clone()
-        }
-    }
 
     #[tokio::test]
     async fn test_index_scan_full() {
@@ -679,13 +643,6 @@ mod index_scan_executor_tests {
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
-
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: context.clone(),
-        });
 
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
@@ -696,7 +653,7 @@ mod index_scan_executor_tests {
             vec![], // no predicates
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
         let mut count = 0;
         while let Ok(Some((tuple, _))) = executor.next() {
@@ -714,13 +671,6 @@ mod index_scan_executor_tests {
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
 
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: context.clone(),
-        });
-
         // id = 5
         let predicate = create_predicate_expression(ComparisonType::Equal, 5);
 
@@ -733,7 +683,7 @@ mod index_scan_executor_tests {
             vec![predicate],
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
         let mut count = 0;
         while let Ok(Some((tuple, _))) = executor.next() {
@@ -754,13 +704,6 @@ mod index_scan_executor_tests {
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
 
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: context.clone(),
-        });
-
         // 3 <= id <= 7
         let pred_low = create_predicate_expression(ComparisonType::GreaterThanOrEqual, 3);
         let pred_high = create_predicate_expression(ComparisonType::LessThanOrEqual, 7);
@@ -774,7 +717,7 @@ mod index_scan_executor_tests {
             vec![pred_low, pred_high],
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
         let mut count = 0;
         while let Ok(Some((tuple, _))) = executor.next() {
@@ -840,13 +783,6 @@ mod index_scan_executor_tests {
             scan_txn_ctx.clone(),
         )));
 
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: scan_context.clone(),
-        });
-
         // Create and execute scan with new context
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
@@ -857,7 +793,7 @@ mod index_scan_executor_tests {
             vec![], // no predicates
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, scan_context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(scan_context.clone(), plan);
 
         let mut count = 0;
         let mut seen_ids = Vec::new();
