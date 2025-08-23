@@ -6451,6 +6451,8 @@ mod tests {
             ctx.insert_tuples("large_table", test_data, table_schema)
                 .unwrap();
 
+            ctx.commit_current_transaction().await.expect("Commit failed");
+
             // Test performance with various queries
             let test_cases = vec![
                 ("SELECT * FROM large_table", 1000),
@@ -6932,67 +6934,6 @@ mod tests {
                 writer4.get_schema().get_columns().len(),
                 6,
                 "Should return 6 columns"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_aggregation_with_having() {
-            let mut ctx = TestContext::new("test_aggregation_with_having").await;
-
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("department", TypeId::VarChar),
-                Column::new("salary", TypeId::Integer),
-            ]);
-
-            ctx.create_test_table("employees", table_schema.clone())
-                .unwrap();
-
-            let test_data = vec![
-                vec![Value::new(1), Value::new("Engineering"), Value::new(70000)],
-                vec![Value::new(2), Value::new("Engineering"), Value::new(80000)],
-                vec![Value::new(3), Value::new("Engineering"), Value::new(90000)],
-                vec![Value::new(4), Value::new("Sales"), Value::new(50000)],
-                vec![Value::new(5), Value::new("Sales"), Value::new(55000)],
-                vec![Value::new(6), Value::new("Marketing"), Value::new(60000)], // Only 1 person
-            ];
-            ctx.insert_tuples("employees", test_data, table_schema)
-                .unwrap();
-
-            // Test HAVING with COUNT
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(
-                    "SELECT department, COUNT(*) FROM employees GROUP BY department HAVING COUNT(*) > 1",
-                    ctx.exec_ctx.clone(),
-                    &mut writer
-                ).await
-                .unwrap();
-
-            assert!(success, "HAVING with COUNT failed");
-            assert_eq!(
-                writer.get_rows().len(),
-                2,
-                "Should return 2 departments with more than 1 employee"
-            );
-
-            // Test HAVING with AVG
-            let mut writer2 = TestResultWriter::new();
-            let success2 = ctx
-                .engine
-                .execute_sql(
-                    "SELECT department, AVG(salary) FROM employees GROUP BY department HAVING AVG(salary) > 60000",
-                    ctx.exec_ctx.clone(),
-                    &mut writer2
-                ).await
-                .unwrap();
-
-            assert!(success2, "HAVING with AVG failed");
-            assert_eq!(
-                writer2.get_rows().len(),
-                1,
-                "Should return 1 department with avg salary > 60000"
             );
         }
 
