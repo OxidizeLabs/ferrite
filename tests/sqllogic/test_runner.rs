@@ -480,7 +480,7 @@ mod tests {
     async fn run_ddl_tests() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let mut stats = TestSuiteStats::new("DDL Tests");
-        let result = run_test_directory(Path::new("tests/sql/ddl"), &mut stats).await;
+        let result = run_test_directory(Path::new("tests/sqllogic/ddl"), &mut stats).await;
         stats.finish();
         cleanup_temp_directory();
         result
@@ -490,7 +490,7 @@ mod tests {
     async fn run_dml_tests() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let mut stats = TestSuiteStats::new("DML Tests");
-        let result = run_test_directory(Path::new("tests/sql/dml"), &mut stats).await;
+        let result = run_test_directory(Path::new("tests/sqllogic/dml"), &mut stats).await;
         stats.finish();
         cleanup_temp_directory();
         result
@@ -500,7 +500,7 @@ mod tests {
     async fn run_query_tests() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
         let mut stats = TestSuiteStats::new("Query Tests");
-        let result = run_test_directory(Path::new("tests/sql/queries"), &mut stats).await;
+        let result = run_test_directory(Path::new("tests/sqllogic/queries"), &mut stats).await;
         stats.finish();
         cleanup_temp_directory();
         result
@@ -523,7 +523,7 @@ mod tests {
         let start_time = Instant::now();
 
         for category in test_categories.iter() {
-            let dir = PathBuf::from("tests/sql").join(category);
+            let dir = PathBuf::from("tests/sqllogic").join(category);
             if dir.exists() {
                 let mut suite_stats = TestSuiteStats::new(&format!("{} Tests", category));
                 println!("\n{}Running {} tests...{}", BLUE, category, RESET);
@@ -554,7 +554,7 @@ mod tests {
     }
 
     async fn run_test_suite(suite_name: &str) -> Result<TestStats, Box<dyn Error>> {
-        let dir = PathBuf::from("tests/sql").join(suite_name);
+        let dir = PathBuf::from("tests/sqllogic").join(suite_name);
         if !dir.exists() {
             return Err(format!("Test suite '{}' not found", suite_name).into());
         }
