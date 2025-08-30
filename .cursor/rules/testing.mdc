@@ -1,9 +1,6 @@
 ---
-description: Testing strategies and guidelines for TKDB components
-globs: []
-alwaysApply: false
+alwaysApply: true
 ---
-
 # Testing Guidelines
 
 Comprehensive testing strategy for database components requiring both correctness and performance validation.
