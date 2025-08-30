@@ -5,5 +5,10 @@ pub mod plan_builder_insert;
 pub mod plan_builder_update;
 pub mod plan_builder_aggregation;
 pub mod plan_builder_join;
+pub mod plan_builder_order_by;
+pub mod plan_builder_subquery;
+pub mod plan_builder_txn;
+pub mod plan_builder_savepoint_drop;
+pub mod plan_builder_create_index;
 
 
