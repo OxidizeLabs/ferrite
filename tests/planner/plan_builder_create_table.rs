@@ -302,4 +302,92 @@ async fn create_table_no_columns() {
     assert!(result.is_err());
 }
 
+#[tokio::test]
+async fn test_create_table_with_complex_constraints() {
+    let mut fixture = TestContext::new("create_table_complex_constraints").await;
 
+    fixture
+        .create_table(
+            "orders",
+            "id INTEGER PRIMARY KEY AUTO_INCREMENT, \
+             customer_id INTEGER NOT NULL, \
+             order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, \
+             total DECIMAL(10,2) NOT NULL CHECK (total > 0), \
+             status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'cancelled')), \
+             UNIQUE (customer_id, order_date)",
+            false,
+        )
+        .unwrap();
+
+    fixture.assert_table_exists("orders");
+}
+
+#[tokio::test]
+async fn test_create_table_with_index_hints() {
+    let mut fixture = TestContext::new("create_table_with_index_hints").await;
+
+    fixture
+        .create_table(
+            "indexed_table",
+            "id INTEGER PRIMARY KEY, \
+             name VARCHAR(255), \
+             email VARCHAR(255), \
+             INDEX idx_name (name), \
+             INDEX idx_email (email)",
+            false,
+        )
+        .unwrap();
+
+    fixture.assert_table_exists("indexed_table");
+}
+
+#[tokio::test]
+async fn test_create_table_with_computed_columns() {
+    let mut fixture = TestContext::new("create_table_computed").await;
+
+    // Test computed/generated columns
+    fixture
+        .create_table(
+            "rectangle",
+            "width DECIMAL(10,2), height DECIMAL(10,2), \
+             area DECIMAL(10,2) AS (width * height) STORED",
+            false,
+        )
+        .unwrap();
+
+    fixture.assert_table_exists("rectangle");
+}
+
+#[tokio::test]
+async fn test_create_table_with_collation() {
+    let mut fixture = TestContext::new("create_table_collation").await;
+
+    fixture
+        .create_table(
+            "text_table",
+            "id INTEGER, \
+             name VARCHAR(255) COLLATE utf8_general_ci, \
+             description TEXT COLLATE utf8_unicode_ci",
+            false,
+        )
+        .unwrap();
+
+    fixture.assert_table_exists("text_table");
+}
+
+#[tokio::test]
+async fn test_create_table_with_engine_options() {
+    let mut fixture = TestContext::new("create_table_engine").await;
+
+    // Test MySQL-style engine options
+    let create_sql =
+        "CREATE TABLE test_table (id INTEGER) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+    let plan = fixture.planner.create_logical_plan(create_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::CreateTable { table_name, .. } => {
+            assert_eq!(table_name, "test_table");
+        }
+        _ => panic!("Expected CreateTable plan node"),
+    }
+}
