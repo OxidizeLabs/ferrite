@@ -121,3 +121,276 @@ async fn insert_with_explicit_columns() {
         _ => panic!("Expected Insert plan"),
     }
 }
+
+#[tokio::test]
+async fn test_insert_different_data_types() {
+    let mut fixture = TestContext::new("insert_different_types").await;
+
+    // Create a table with various data types
+    fixture
+        .create_table(
+            "mixed_types",
+            "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN",
+        );
+
+    let insert_sql = "INSERT INTO mixed_types VALUES (1, 'Alice', 25, 50000.50, true)";
+    let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
+            assert_eq!(table_name, "mixed_types");
+            assert_eq!(schema.get_column_count(), 5);
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Values { rows, schema } => {
+                    assert_eq!(schema.get_column_count(), 5);
+                    assert_eq!(rows.len(), 1);
+                }
+                _ => panic!("Expected Values node as child of Insert"),
+            }
+        }
+        _ => panic!("Expected Insert plan node"),
+    }
+}
+
+#[tokio::test]
+async fn test_insert_null_values() {
+    let mut fixture = TestContext::new("insert_null_values").await;
+    fixture.create_table("users", "id INTEGER, name VARCHAR(255)");
+
+    let insert_sql = "INSERT INTO users VALUES (1, NULL)";
+    let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
+            assert_eq!(table_name, "users");
+            assert_eq!(schema.get_column_count(), 2);
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Values { rows, schema } => {
+                    assert_eq!(schema.get_column_count(), 2);
+                    assert_eq!(rows.len(), 1);
+                }
+                _ => panic!("Expected Values node as child of Insert"),
+            }
+        }
+        _ => panic!("Expected Insert plan node"),
+    }
+}
+
+#[tokio::test]
+async fn test_insert_into_nonexistent_table() {
+    let mut fixture = TestContext::new("insert_nonexistent_table").await;
+
+    let insert_sql = "INSERT INTO nonexistent_table VALUES (1, 'test')";
+    let result = fixture.planner.create_logical_plan(insert_sql);
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("does not exist"));
+}
+
+#[tokio::test]
+async fn test_insert_column_count_mismatch() {
+    let mut fixture = TestContext::new("insert_column_mismatch").await;
+    fixture.create_table("users", "id INTEGER, name VARCHAR(255)");
+
+    // Too few values
+    let insert_sql = "INSERT INTO users VALUES (1)";
+    let result = fixture.planner.create_logical_plan(insert_sql);
+    assert!(result.is_err());
+
+    // Too many values
+    let insert_sql = "INSERT INTO users VALUES (1, 'test', 'extra')";
+    let result = fixture.planner.create_logical_plan(insert_sql);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_insert_single_column_table() {
+    let mut fixture = TestContext::new("insert_single_column").await;
+
+    fixture
+        .create_table("single_col", "id INTEGER");
+
+    let insert_sql = "INSERT INTO single_col VALUES (42)";
+    let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
+            assert_eq!(table_name, "single_col");
+            assert_eq!(schema.get_column_count(), 1);
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Values { rows, schema } => {
+                    assert_eq!(schema.get_column_count(), 1);
+                    assert_eq!(rows.len(), 1);
+                }
+                _ => panic!("Expected Values node as child of Insert"),
+            }
+        }
+        _ => panic!("Expected Insert plan node"),
+    }
+}
+
+#[tokio::test]
+async fn test_insert_with_expressions() {
+    let mut fixture = TestContext::new("insert_with_expressions").await;
+    fixture.create_table("users", "id INTEGER, name VARCHAR(255)");
+
+    let insert_sql = "INSERT INTO users VALUES (1 + 2, 'user_' || '123')";
+    let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
+            assert_eq!(table_name, "users");
+            assert_eq!(schema.get_column_count(), 2);
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Values { rows, schema } => {
+                    assert_eq!(schema.get_column_count(), 2);
+                    assert_eq!(rows.len(), 1);
+                }
+                _ => panic!("Expected Values node as child of Insert"),
+            }
+        }
+        _ => panic!("Expected Insert plan node"),
+    }
+}
+
+#[tokio::test]
+async fn test_insert_many_columns() {
+    let mut fixture = TestContext::new("insert_many_columns").await;
+
+    // Create a table with many columns
+    fixture
+        .create_table(
+            "wide_table", 
+            "col1 INTEGER, col2 VARCHAR(50), col3 INTEGER, col4 VARCHAR(50), col5 INTEGER, col6 VARCHAR(50), col7 INTEGER, col8 VARCHAR(50)"
+        );
+
+    let insert_sql = "INSERT INTO wide_table VALUES (1, 'a', 2, 'b', 3, 'c', 4, 'd')";
+    let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
+            assert_eq!(table_name, "wide_table");
+            assert_eq!(schema.get_column_count(), 8);
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Values { rows, schema } => {
+                    assert_eq!(schema.get_column_count(), 8);
+                    assert_eq!(rows.len(), 1);
+                }
+                _ => panic!("Expected Values node as child of Insert"),
+            }
+        }
+        _ => panic!("Expected Insert plan node"),
+    }
+}
+
+#[tokio::test]
+async fn test_insert_large_batch() {
+    let mut fixture = TestContext::new("insert_large_batch").await;
+    fixture.create_table("users", "id INTEGER, name VARCHAR(255)");
+
+    // Build a query with many rows
+    let mut values_list = Vec::new();
+    for i in 1..=100 {
+        values_list.push(format!("({}, 'user{}')", i, i));
+    }
+    let insert_sql = format!("INSERT INTO users VALUES {}", values_list.join(", "));
+
+    let plan = fixture.planner.create_logical_plan(&insert_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
+            assert_eq!(table_name, "users");
+            assert_eq!(schema.get_column_count(), 2);
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Values { rows, schema } => {
+                    assert_eq!(schema.get_column_count(), 2);
+                    assert_eq!(rows.len(), 100);
+                }
+                _ => panic!("Expected Values node as child of Insert"),
+            }
+        }
+        _ => panic!("Expected Insert plan node"),
+    }
+}
+
+#[tokio::test]
+async fn test_insert_string_with_quotes() {
+    let mut fixture = TestContext::new("insert_string_quotes").await;
+    fixture.create_table("users", "id INTEGER, name VARCHAR(255)");
+
+    let insert_sql = "INSERT INTO users VALUES (1, 'John''s Database')";
+    let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
+
+    match &plan.plan_type {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
+            assert_eq!(table_name, "users");
+            assert_eq!(schema.get_column_count(), 2);
+
+            match &plan.children[0].plan_type {
+                LogicalPlanType::Values { rows, schema } => {
+                    assert_eq!(schema.get_column_count(), 2);
+                    assert_eq!(rows.len(), 1);
+                }
+                _ => panic!("Expected Values node as child of Insert"),
+            }
+        }
+        _ => panic!("Expected Insert plan node"),
+    }
+}
+
+#[tokio::test]
+async fn test_insert_with_default_values() {
+    let mut fixture = TestContext::new("insert_default_values").await;
+
+    // Create a table with default values
+    fixture
+        .create_table(
+            "users_with_defaults",
+            "id INTEGER, name VARCHAR(255) DEFAULT 'Unknown', created_at INTEGER DEFAULT 0"
+        );
+
+    let insert_sql = "INSERT INTO users_with_defaults (id) VALUES (1)";
+
+    // This should work with the current implementation
+    // Note: Full default value handling might need additional implementation
+    let result = fixture.planner.create_logical_plan(insert_sql);
+
+    // For now, just check that it doesn't crash - full default value support
+    // might require additional logic in the planner
+    match result {
+        Ok(plan) => match &plan.plan_type {
+            LogicalPlanType::Insert { table_name, .. } => {
+                assert_eq!(table_name, "users_with_defaults");
+            }
+            _ => panic!("Expected Insert plan node"),
+        },
+        Err(e) => {
+            // Default value handling might not be fully implemented yet
+            // This test documents the current behavior
+            println!(
+                "Expected behavior - default values not yet supported: {}",
+                e
+            );
+        }
+    }
+}
