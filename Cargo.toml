@@ -71,6 +71,7 @@ tokio = { version = "1.47", features = ["full", "test-util"] }
 mockall = "0.13"
 tempfile = "3.20"
 sqllogictest = "0.28"
+test-tag = "0.1"
 
 # Benchmarking
 criterion = { version = "0.7", features = ["html_reports"] }
