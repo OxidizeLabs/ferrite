@@ -2457,7 +2457,8 @@ impl LogicalPlanBuilder {
     }
 }
 
-#[cfg(test)]
+// Inline planner tests moved to tests/planner/*.rs
+#[cfg(test_disabled)]
 mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
