@@ -8,4 +8,5 @@ pub mod engine_update;
 pub mod engine_select;
 pub mod engine_agg;
 pub mod engine_join;
+pub mod engine_group_by;
 
