@@ -274,3 +274,173 @@ async fn create_table_foreign_key_constraint() {
 		.unwrap();
 	assert!(ok);
 }
+
+#[tokio::test]
+async fn create_table_with_boolean_operations() {
+	init_test_logger();
+	let db = new_temp_db().await.unwrap();
+	let mut w = CliResultWriter::new();
+
+	let ok = db
+		.execute_sql(
+			"CREATE TABLE feature_flags (
+				id INTEGER,
+				feature_name VARCHAR(100),
+				is_enabled BOOLEAN,
+				is_experimental BOOLEAN,
+				is_deprecated BOOLEAN
+			);",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"INSERT INTO feature_flags VALUES 
+				(1, 'dark_mode', true, false, false),
+				(2, 'beta_search', true, true, false),
+				(3, 'old_ui', false, false, true),
+				(4, 'new_algorithm', false, true, false);",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"SELECT feature_name FROM feature_flags WHERE is_enabled = true;",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"SELECT feature_name FROM feature_flags WHERE is_experimental = true AND is_deprecated = false;",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+}
+
+#[tokio::test]
+async fn create_table_and_complex_queries() {
+	init_test_logger();
+	let db = new_temp_db().await.unwrap();
+	let mut w = CliResultWriter::new();
+
+	let ok = db
+		.execute_sql(
+			"CREATE TABLE sales_data (
+				id INTEGER,
+				product_name VARCHAR(100),
+				category VARCHAR(50),
+				price DECIMAL,
+				quantity INTEGER,
+				sale_date DATE,
+				is_online BOOLEAN
+			);",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"INSERT INTO sales_data VALUES 
+				(1, 'Laptop', 'Electronics', 999.99, 2, '2023-01-15', true),
+				(2, 'Book', 'Education', 29.99, 5, '2023-01-16', false),
+				(3, 'Headphones', 'Electronics', 199.99, 1, '2023-01-17', true),
+				(4, 'Desk', 'Furniture', 299.99, 1, '2023-01-18', false),
+				(5, 'Mouse', 'Electronics', 49.99, 3, '2023-01-19', true);",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"SELECT category, COUNT(*), AVG(price) FROM sales_data GROUP BY category;",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"SELECT product_name, price FROM sales_data WHERE category = 'Electronics' AND price > 100 ORDER BY price DESC;",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"SELECT product_name, price, quantity, price * quantity as total_value FROM sales_data ORDER BY total_value DESC;",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+}
+
+#[tokio::test]
+async fn create_table_transaction_safety() {
+	init_test_logger();
+	let db = new_temp_db().await.unwrap();
+	let mut w = CliResultWriter::new();
+
+	let ok = db.execute_sql("BEGIN", IsolationLevel::ReadCommitted, &mut w).await.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"CREATE TABLE transaction_test (id INTEGER, data VARCHAR(100));",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"INSERT INTO transaction_test VALUES (1, 'test data');",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+
+	let ok = db.execute_sql("COMMIT", IsolationLevel::ReadCommitted, &mut w).await.unwrap();
+	assert!(ok);
+
+	let ok = db
+		.execute_sql(
+			"SELECT * FROM transaction_test;",
+			IsolationLevel::ReadCommitted,
+			&mut w,
+		)
+		.await
+		.unwrap();
+	assert!(ok);
+}
