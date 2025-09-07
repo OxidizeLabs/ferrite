@@ -303,7 +303,7 @@ where
 
         let mut items_with_distances: Vec<(bool, u64)> = Vec::new();
         
-        for (_k, (_, history)) in &self.cache {
+        for (_, history) in self.cache.values() {
             let num_accesses = history.len();
             
             if num_accesses < self.k {

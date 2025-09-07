@@ -95,7 +95,7 @@ impl LikeExpression {
                             let matches = if self.case_sensitive {
                                 value_ch == pattern_ch
                             } else {
-                                value_ch.to_ascii_lowercase() == pattern_ch.to_ascii_lowercase()
+                                value_ch.eq_ignore_ascii_case(&pattern_ch)
                             };
                             if !matches {
                                 return false;

@@ -316,7 +316,7 @@ pub fn analyze_buffer_pool_performance() -> f64 {
     
     // Score based on hit ratio and eviction pressure
     let score = hit_ratio * (1.0 - eviction_pressure.min(0.5));
-    score.max(0.0).min(1.0)
+    score.clamp(0.0, 1.0)
 }
 
 /// Analyzes disk I/O performance
@@ -377,7 +377,7 @@ pub fn analyze_lock_manager_performance() -> f64 {
     let conflict_penalty = conflict_ratio * 0.5;
     let wait_penalty = (avg_wait_time_ms / 100.0).min(0.5); // Penalize >100ms waits
     
-    (grant_score - conflict_penalty - wait_penalty).max(0.0).min(1.0)
+    (grant_score - conflict_penalty - wait_penalty).clamp(0.0, 1.0)
 }
 
 /// Analyzes MVCC performance

@@ -466,7 +466,7 @@ impl MetricsCollector {
         }
 
         // Ensure score is between 0 and 100
-        score = score.max(0).min(100);
+        score = score.min(100);
 
         // Update the health score
         self.live_metrics.health_score.store(score, Ordering::Relaxed);

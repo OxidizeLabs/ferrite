@@ -148,7 +148,7 @@ impl AbstractExecutor for WindowExecutor {
             for (partition_keys, sort_keys, tuple, rid) in all_tuples {
                 partitions_map
                     .entry(partition_keys)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push((sort_keys, tuple, rid));
             }
 

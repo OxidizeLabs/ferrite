@@ -167,7 +167,7 @@ impl ExpressionOps for UnaryOpExpression {
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         Arc::new(Expression::UnaryOp(UnaryOpExpression {
             expr: children[0].clone(),
-            op: self.op.clone(),
+            op: self.op,
             return_type: self.return_type.clone(),
             children,
         }))

@@ -80,6 +80,12 @@ pub struct DeduplicationEngine {
     pub total_pages_processed: AtomicUsize,
 }
 
+impl Default for DeduplicationEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeduplicationEngine {
     pub fn new() -> Self {
         Self {
@@ -96,13 +102,12 @@ impl DeduplicationEngine {
 
         self.total_pages_processed.fetch_add(1, Ordering::Relaxed);
 
-        if let Some(&existing_page_id) = self.page_hashes.get(&hash) {
-            if existing_page_id != page_id {
+        if let Some(&existing_page_id) = self.page_hashes.get(&hash)
+            && existing_page_id != page_id {
                 // Found a duplicate page
                 self.dedup_savings_bytes.fetch_add(data.len(), Ordering::Relaxed);
                 return Some(existing_page_id);
             }
-        }
 
         // No duplicate found, add to hash map
         self.page_hashes.insert(hash, page_id);
@@ -522,23 +527,20 @@ impl CacheManager {
             }
 
             // Pattern-based prefetching (only if accuracy is reasonable)
-            if current_accuracy > 0.2 {
-                if let Some(patterns) = prefetch_engine.access_patterns.get(&current_page) {
-                    if patterns.len() >= prefetch_engine.sequential_threshold {
+            if current_accuracy > 0.2
+                && let Some(patterns) = prefetch_engine.access_patterns.get(&current_page)
+                    && patterns.len() >= prefetch_engine.sequential_threshold {
                         // Find the most common next page
                         let mut next_page_counts = HashMap::new();
                         for &page in patterns {
                             *next_page_counts.entry(page + 1).or_insert(0) += 1;
                         }
                         
-                        if let Some((most_common_next, count)) = next_page_counts.iter().max_by_key(|(_, count)| *count) {
-                            if *count >= 2 {
+                        if let Some((most_common_next, count)) = next_page_counts.iter().max_by_key(|(_, count)| *count)
+                            && *count >= 2 {
                                 predicted_pages.push(*most_common_next);
                             }
-                        }
                     }
-                }
-            }
         }
 
         // Remove duplicates and limit the number of prefetch pages based on accuracy
@@ -807,28 +809,25 @@ impl CacheManager {
     /// Demonstrate specialized cache operations for maintenance
     pub fn perform_specialized_maintenance(&self) {
         // Use FIFO-specific operations for cold cache
-        if let Ok(cold_cache) = self.cold_cache.try_read() {
-            if let Some((oldest_key, _)) = <FIFOCache<PageId, PageData> as FIFOCacheTrait<PageId, PageData>>::peek_oldest(&cold_cache) {
+        if let Ok(cold_cache) = self.cold_cache.try_read()
+            && let Some((oldest_key, _)) = <FIFOCache<PageId, PageData> as FIFOCacheTrait<PageId, PageData>>::peek_oldest(&cold_cache) {
                 // Log the oldest page for monitoring
                 log::trace!("Oldest page in cold cache: {}", oldest_key);
             }
-        }
 
         // Use LFU-specific operations for warm cache  
-        if let Ok(warm_cache) = self.warm_cache.try_read() {
-            if let Some((lfu_key, _)) = <LFUCache<PageId, PageData> as LFUCacheTrait<PageId, PageData>>::peek_lfu(&warm_cache) {
+        if let Ok(warm_cache) = self.warm_cache.try_read()
+            && let Some((lfu_key, _)) = <LFUCache<PageId, PageData> as LFUCacheTrait<PageId, PageData>>::peek_lfu(&warm_cache) {
                 // Log the least frequently used page
                 log::trace!("Least frequently used page in warm cache: {}", lfu_key);
             }
-        }
 
         // Use LRU-K specific operations for hot cache
-        if let Ok(hot_cache) = self.hot_cache.try_read() {
-            if let Some((lru_k_key, _)) = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::peek_lru_k(&hot_cache) {
+        if let Ok(hot_cache) = self.hot_cache.try_read()
+            && let Some((lru_k_key, _)) = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::peek_lru_k(&hot_cache) {
                 // Log the LRU-K candidate for eviction
                 log::trace!("LRU-K eviction candidate in hot cache: {}", lru_k_key);
             }
-        }
 
         // Perform standard maintenance
         self.perform_maintenance();

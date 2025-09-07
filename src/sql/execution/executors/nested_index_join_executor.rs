@@ -88,7 +88,7 @@ impl NestedIndexJoinExecutor {
         // Create tuple with combined values and a placeholder RID
         Arc::new(Tuple::new(
             &joined_values,
-            &self.get_output_schema(),
+            self.get_output_schema(),
             RID::new(0, 0), // Use a placeholder RID for joined tuples
         ))
     }
@@ -202,8 +202,8 @@ impl NestedIndexJoinExecutor {
             _ => return None, // Return None if we can't get table name
         };
 
-        let table_info = catalog_guard.get_table(&table_name).unwrap();
-        let table_indexes = catalog_guard.get_table_indexes(&table_name);
+        let table_info = catalog_guard.get_table(table_name).unwrap();
+        let table_indexes = catalog_guard.get_table_indexes(table_name);
 
         // Find suitable index
         let index_info = match table_indexes.iter().find(|idx| {

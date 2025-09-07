@@ -24,6 +24,12 @@ pub struct PageVersionInfo {
     prev_link: RwLock<HashMap<RID, UndoLink>>,
 }
 
+impl Default for PageVersionInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageVersionInfo {
     pub fn new() -> Self {
         Self {
@@ -62,6 +68,12 @@ struct TransactionManagerState {
 pub struct TransactionManager {
     next_txn_id: Arc<AtomicU64>,
     state: Arc<TransactionManagerState>,
+}
+
+impl Default for TransactionManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TransactionManager {

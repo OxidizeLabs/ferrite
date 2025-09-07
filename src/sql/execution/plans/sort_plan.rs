@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 /// Represents the sort order direction for ORDER BY clauses
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum OrderDirection {
+    #[default]
     Asc,
     Desc,
 }
@@ -24,11 +26,6 @@ impl OrderDirection {
     }
 }
 
-impl Default for OrderDirection {
-    fn default() -> Self {
-        OrderDirection::Asc
-    }
-}
 
 impl Display for OrderDirection {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

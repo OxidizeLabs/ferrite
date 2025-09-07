@@ -137,7 +137,7 @@ impl ExpressionOps for QualifiedWildcardExpression {
 
 impl Display for QualifiedWildcardExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.qualifier.join("."), "*")
+        write!(f, "{}.*", self.qualifier.join("."))
     }
 }
 

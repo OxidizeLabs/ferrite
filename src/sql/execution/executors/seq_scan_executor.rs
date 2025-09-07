@@ -140,7 +140,7 @@ impl AbstractExecutor for SeqScanExecutor {
         };
 
         // Keep trying until we find a valid tuple or reach the end
-        while let Some((meta, tuple)) = iter.next() {
+        for (meta, tuple) in iter.by_ref() {
             let rid = tuple.get_rid();
             trace!("Found tuple with RID {:?}", rid);
 

@@ -12,6 +12,12 @@ pub struct GenericKey<T, const N: usize> {
     _marker: PhantomData<T>,
 }
 
+impl<T, const N: usize> Default for GenericKey<T, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T, const N: usize> GenericKey<T, N> {
     /// Creates a new `GenericKey` with zeroed data.
     pub fn new() -> Self {
@@ -75,6 +81,12 @@ impl<T, const N: usize> GenericKey<T, N> {
 /// Comparator for `GenericKey`.
 pub struct GenericKeyComparator<T, const N: usize> {
     _marker: PhantomData<T>,
+}
+
+impl<T, const N: usize> Default for GenericKeyComparator<T, N> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T, const N: usize> GenericKeyComparator<T, N> {

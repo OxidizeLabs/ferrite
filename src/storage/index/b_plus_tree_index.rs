@@ -173,7 +173,7 @@ where
         let header_page = self
             .buffer_pool_manager
             .new_page::<BPlusTreeHeaderPage>()
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         // Set initial values for the header
         {
@@ -262,7 +262,7 @@ where
                 .new_page_with_options(|page_id| {
                     BPlusTreeLeafPage::<K, V, C>::new_with_options(page_id, leaf_max_size, comparator)
                 })
-                .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+                .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
             let new_page_id = new_leaf_page.get_page_id();
 
@@ -374,7 +374,7 @@ where
         // Check if key exists in the leaf
         if key_index < leaf_page_read.get_size() {
             let key_at_index = leaf_page_read.get_key_at(key_index).unwrap();
-            if (self.comparator)(key, &key_at_index) == Ordering::Equal {
+            if (self.comparator)(key, key_at_index) == Ordering::Equal {
                 // Key found, return the value
                 return match leaf_page_read.get_value_at(key_index) {
                     Some(value) => Ok(Some(value.clone())),
@@ -529,7 +529,7 @@ where
             current_leaf_guard = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(next_page_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(next_page_id))?;
         }
 
         Ok(result)
@@ -573,7 +573,7 @@ where
             let leaf_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
             return Ok(leaf_page);
         }
 
@@ -584,7 +584,7 @@ where
             let internal_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
 
             // Find the child page id for the key
             let child_page_id;
@@ -617,7 +617,7 @@ where
         // If we get here without finding a leaf, try one more time
         self.buffer_pool_manager
             .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-            .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))
+            .ok_or(BPlusTreeError::PageNotFound(current_page_id))
     }
 
     /// Split a leaf page when it becomes full
@@ -640,7 +640,7 @@ where
             .new_page_with_options(|page_id| {
                 BPlusTreeLeafPage::<K, V, C>::new_with_options(page_id, leaf_max_size, comparator)
             })
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         let new_page_id = new_page.get_page_id();
 
@@ -656,7 +656,7 @@ where
             new_leaf_write.set_next_page_id(None);
 
             // Determine split point - ceiling(max_size/2)
-            let split_point = (leaf_max_size + 1) / 2;
+            let split_point = leaf_max_size.div_ceil(2);
             let current_size = leaf_write.get_size();
 
             // Copy keys/values after split point to the new page
@@ -758,7 +758,7 @@ where
             .new_page_with_options(|page_id| {
                 BPlusTreeInternalPage::<K, C>::new_with_options(page_id, internal_max_size, comparator)
             })
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         let new_page_id = new_page.get_page_id();
 
@@ -778,14 +778,14 @@ where
             // The middle key (at split_point) will be promoted to the parent
             middle_key = internal_write
                 .get_key_at(split_point)
-                .ok_or_else(|| BPlusTreeError::InvalidPageType)?
+                .ok_or(BPlusTreeError::InvalidPageType)?
                 .clone();
 
             // Get the child that will be the leftmost pointer in the new page
             // (This is the child pointer that goes immediately after the middle key)
             let child_after_middle = internal_write
                 .get_value_at(split_point + 1)
-                .ok_or_else(|| BPlusTreeError::InvalidPageType)?;
+                .ok_or(BPlusTreeError::InvalidPageType)?;
 
             // First insert the leftmost child pointer in the new page
             // For an internal page, we need to setup the first child before any keys
@@ -1037,8 +1037,8 @@ where
             // Move keys from the beginning of right page to end of left page
             for i in 0..keys_to_move {
                 // Retrieve key and value first to avoid borrowing issues
-                let key_to_move = right_write.get_key_at(i).map(|k| k.clone());
-                let value_to_move = right_write.get_value_at(i).map(|v| v.clone());
+                let key_to_move = right_write.get_key_at(i).cloned();
+                let value_to_move = right_write.get_value_at(i).cloned();
 
                 if let (Some(key), Some(value)) = (key_to_move, value_to_move) {
                     left_write.insert_key_value(key, value);
@@ -1051,7 +1051,7 @@ where
             }
 
             // Update the separator key in parent to the first key in right page
-            let new_separator = right_write.get_key_at(0).map(|k| k.clone());
+            let new_separator = right_write.get_key_at(0).cloned();
             if let Some(new_sep) = new_separator {
                 // Fix: Replace set_key_at with proper method to update a key
                 if parent_write.get_key_at(parent_key_index).is_some() {
@@ -1071,8 +1071,8 @@ where
             // Create a temporary vector to store the keys/values to move
             let mut keys_values = Vec::with_capacity(keys_to_move);
             for i in start_index..left_size {
-                let key_to_move = left_write.get_key_at(i).map(|k| k.clone());
-                let value_to_move = left_write.get_value_at(i).map(|v| v.clone());
+                let key_to_move = left_write.get_key_at(i).cloned();
+                let value_to_move = left_write.get_value_at(i).cloned();
 
                 if let (Some(key), Some(value)) = (key_to_move, value_to_move) {
                     keys_values.push((key, value));
@@ -1087,8 +1087,8 @@ where
                 let mut right_keys_values = Vec::with_capacity(right_size);
 
                 for j in 0..right_size {
-                    let k = right_write.get_key_at(j).map(|key| key.clone());
-                    let v = right_write.get_value_at(j).map(|val| val.clone());
+                    let k = right_write.get_key_at(j).cloned();
+                    let v = right_write.get_value_at(j).cloned();
                     if let (Some(key), Some(val)) = (k, v) {
                         right_keys_values.push((key, val));
                     }
@@ -1116,7 +1116,7 @@ where
             }
 
             // Update the separator key in parent to the first key in right page
-            let new_separator = right_write.get_key_at(0).map(|k| k.clone());
+            let new_separator = right_write.get_key_at(0).cloned();
             if let Some(new_sep) = new_separator {
                 // Fix: Replace set_key_at with proper method to update a key
                 if parent_write.get_key_at(parent_key_index).is_some() {
@@ -1321,8 +1321,8 @@ where
 
             // Move additional keys and children from right to left
             for i in 0..additional_keys_to_move {
-                let key_to_move = right_write.get_key_at(i).map(|k| k.clone());
-                let child_id_to_move = right_write.get_value_at(i + 1).map(|v| v.clone());
+                let key_to_move = right_write.get_key_at(i);
+                let child_id_to_move = right_write.get_value_at(i + 1);
 
                 if let (Some(key), Some(child_id)) = (key_to_move, child_id_to_move) {
                     left_write.insert_key_value(key, child_id);
@@ -1382,8 +1382,8 @@ where
             let mut right_kv_pairs = Vec::with_capacity(right_size);
 
             for i in 0..right_size {
-                let key = right_write.get_key_at(i).map(|k| k.clone());
-                let child_id = right_write.get_value_at(i + 1).map(|v| v.clone());
+                let key = right_write.get_key_at(i);
+                let child_id = right_write.get_value_at(i + 1);
 
                 if let (Some(k), Some(v)) = (key, child_id) {
                     right_kv_pairs.push((k, v));
@@ -1405,8 +1405,8 @@ where
             // Create a temporary vector of keys to move
             let mut keys_to_move_vec = Vec::with_capacity(keys_to_move);
             for i in start_idx..end_idx {
-                let key = left_write.get_key_at(i).map(|k| k.clone());
-                let child_id = left_write.get_value_at(i + 1).map(|v| v.clone());
+                let key = left_write.get_key_at(i);
+                let child_id = left_write.get_value_at(i + 1);
 
                 if let (Some(k), Some(v)) = (key, child_id) {
                     keys_to_move_vec.push((k, v));
@@ -1454,7 +1454,7 @@ where
             .new_page_with_options(|page_id| {
                 BPlusTreeInternalPage::<K, C>::new_with_options(page_id, internal_max_size, comparator)
             })
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         let new_root_id = new_page.get_page_id();
 
@@ -2232,7 +2232,7 @@ where
             let next_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(next_page_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(next_page_id))?;
 
             // Update current leaf
             current_leaf = next_page;
@@ -2288,7 +2288,7 @@ where
                 let leftmost_child_id = internal_page
                     .read()
                     .get_value_at(0)
-                    .ok_or_else(|| BPlusTreeError::InvalidPageType)?;
+                    .ok_or(BPlusTreeError::InvalidPageType)?;
 
                 // Continue with this child
                 current_page_id = leftmost_child_id;
@@ -2668,7 +2668,7 @@ where
             current_leaf = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(next_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(next_id))?;
         }
 
         Ok(())
@@ -2729,7 +2729,7 @@ impl ValidationStats {
 
     /// Check if the tree is balanced (all leaves at same level)
     pub fn is_balanced(&self) -> bool {
-        self.leaf_level.map_or(true, |level| level == self.max_depth)
+        self.leaf_level.is_none_or(|level| level == self.max_depth)
     }
 }
 

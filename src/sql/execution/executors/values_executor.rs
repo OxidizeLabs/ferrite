@@ -61,7 +61,7 @@ impl AbstractExecutor for ValuesExecutor {
         match row_clone.evaluate(schema) {
             Ok(values) => {
                 // Create tuple with evaluated values
-                let tuple = Arc::new(Tuple::new(values, &schema, RID::default()));
+                let tuple = Arc::new(Tuple::new(values, schema, RID::default()));
 
                 // Advance to next row
                 self.current_row += 1;

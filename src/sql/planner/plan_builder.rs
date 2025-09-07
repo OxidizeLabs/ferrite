@@ -40,7 +40,7 @@ impl LogicalPlanBuilder {
                 let schema = self.schema_manager.create_values_schema(&values.rows)?;
                 self.build_values_plan(&values.rows, &schema)?
             }
-            SetExpr::Update(update_stmt) => match &*update_stmt {
+            SetExpr::Update(update_stmt) => match update_stmt {
                 Statement::Update {
                     table,
                     assignments,
@@ -156,13 +156,13 @@ impl LogicalPlanBuilder {
         Ok(current_plan)
     }
 
-    pub fn build_select_plan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
+    pub fn build_select_plan(&self, select: &Select) -> Result<Box<LogicalPlan>, String> {
         self.build_select_plan_with_order_by(select, None)
     }
 
     pub fn build_select_plan_with_order_by(
         &self,
-        select: &Box<Select>,
+        select: &Select,
         order_by: Option<&OrderBy>,
     ) -> Result<Box<LogicalPlan>, String> {
         let mut current_plan = {
@@ -189,7 +189,7 @@ impl LogicalPlanBuilder {
             debug!("Schema has {} columns", parsing_schema.get_column_count());
             let filter_expr = self
                 .expression_parser
-                .parse_expression(&where_clause, &parsing_schema)?;
+                .parse_expression(where_clause, &parsing_schema)?;
             current_plan = LogicalPlan::filter(
                 parsing_schema,
                 String::new(),
@@ -283,7 +283,7 @@ impl LogicalPlanBuilder {
             let agg_exprs_for_having = agg_exprs.clone();
 
             current_plan = LogicalPlan::aggregate(
-                group_by_exprs.into_iter().map(|e| Arc::new(e)).collect(),
+                group_by_exprs.into_iter().map(Arc::new).collect(),
                 agg_exprs,
                 agg_schema,
                 current_plan,
@@ -429,7 +429,7 @@ impl LogicalPlanBuilder {
     /// Validates that all non-aggregate columns in SELECT are included in GROUP BY
     fn validate_group_by_clause(
         &self,
-        select: &Box<Select>,
+        select: &Select,
         group_by_exprs: &[Expression],
         schema: &Schema,
     ) -> Result<(), String> {
@@ -552,7 +552,7 @@ impl LogicalPlanBuilder {
                                 .position(|col| {
                                     let col_name = col.get_name();
                                     // Match exact name or function pattern
-                                    col_name == &expected_col_name
+                                    col_name == expected_col_name
                                         || col_name
                                             .starts_with(&format!("{}(", agg.get_function_name()))
                                         || col_name
@@ -623,7 +623,7 @@ impl LogicalPlanBuilder {
                                 .position(|col| {
                                     let col_name = col.get_name();
                                     // Match exact name or function pattern
-                                    col_name == &expected_col_name
+                                    col_name == expected_col_name
                                         || col_name
                                             .starts_with(&format!("{}(", agg.get_function_name()))
                                         || col_name
@@ -944,7 +944,7 @@ impl LogicalPlanBuilder {
         }
     }
 
-    pub fn prepare_join_scan(&self, select: &Box<Select>) -> Result<Box<LogicalPlan>, String> {
+    pub fn prepare_join_scan(&self, select: &Select) -> Result<Box<LogicalPlan>, String> {
         if select.from.is_empty() {
             return Err("FROM clause is required".to_string());
         }
@@ -1228,7 +1228,7 @@ impl LogicalPlanBuilder {
         begin: &bool,
         transaction: &Option<BeginTransactionKind>,
         modifier: &Option<TransactionModifier>,
-        statements: &Vec<Statement>,
+        statements: &[Statement],
         exception_statements: &Option<Vec<ExceptionWhen>>,
         has_end_keyword: &bool,
     ) -> Result<Box<LogicalPlan>, String> {
@@ -1260,7 +1260,7 @@ impl LogicalPlanBuilder {
         );
 
         // Handle transaction modifiers
-        let transaction_modifier = modifier.clone();
+        let transaction_modifier = *modifier;
 
         // Determine if the transaction is read-only based on the access mode
         let read_only = matches!(access_mode, TransactionAccessMode::ReadOnly);
@@ -1280,7 +1280,7 @@ impl LogicalPlanBuilder {
             Some(internal_isolation_level),
             read_only,
             transaction_modifier,
-            statements.clone(),
+            statements.to_owned(),
             exception_statements.clone(),
             *has_end_keyword,
         );
@@ -1304,7 +1304,7 @@ impl LogicalPlanBuilder {
         debug!("Creating commit plan: chain={}, end={}", chain, end);
 
         // Create a commit transaction plan
-        let commit_plan = LogicalPlan::commit_transaction(*chain, *end, modifier.clone());
+        let commit_plan = LogicalPlan::commit_transaction(*chain, *end, *modifier);
 
         Ok(commit_plan)
     }
@@ -1431,7 +1431,7 @@ impl LogicalPlanBuilder {
         name: &ObjectName,
         _if_exists: &bool,
         only: &bool,
-        operations: &Vec<AlterTableOperation>,
+        operations: &[AlterTableOperation],
         location: &Option<HiveSetLocation>,
         on_cluster: &Option<Ident>,
     ) -> Result<Box<LogicalPlan>, String> {
@@ -1556,10 +1556,10 @@ impl LogicalPlanBuilder {
         _or_replace: &bool,
         materialized: &bool,
         name: &ObjectName,
-        columns: &Vec<ViewColumnDef>,
-        query: &Box<Query>,
+        columns: &[ViewColumnDef],
+        query: &Query,
         _options: &CreateTableOptions,
-        _cluster_by: &Vec<Ident>,
+        _cluster_by: &[Ident],
         _comment: &Option<String>,
         _with_no_schema_binding: &bool,
         if_not_exists: &bool,
@@ -1644,9 +1644,9 @@ impl LogicalPlanBuilder {
     pub fn build_alter_view_plan(
         &self,
         name: &ObjectName,
-        columns: &Vec<Ident>,
-        query: &Box<Query>,
-        with_options: &Vec<SqlOption>,
+        columns: &[Ident],
+        query: &Query,
+        with_options: &[SqlOption],
     ) -> Result<Box<LogicalPlan>, String> {
         // Extract view name from ObjectName
         if name.0.is_empty() {
@@ -1690,7 +1690,7 @@ impl LogicalPlanBuilder {
 
         // Add the column list if specified
         if !columns.is_empty() {
-            operation.push_str("(");
+            operation.push('(');
             for (i, col) in columns.iter().enumerate() {
                 if i > 0 {
                     operation.push_str(", ");
@@ -1797,7 +1797,7 @@ impl LogicalPlanBuilder {
                                 }
                                 operation.push_str(&col.value);
                             }
-                            operation.push_str(")");
+                            operation.push(')');
                         }
                         TableOptionsClustered::Index(indexes) => {
                             operation.push_str("INDEX (");
@@ -1810,7 +1810,7 @@ impl LogicalPlanBuilder {
                                     operation.push_str(if asc { " ASC" } else { " DESC" });
                                 }
                             }
-                            operation.push_str(")");
+                            operation.push(')');
                         }
                     },
                     SqlOption::Ident(ident) => {
@@ -1844,7 +1844,7 @@ impl LogicalPlanBuilder {
                     SqlOption::NamedParenthesizedList(_) => {}
                 }
             }
-            operation.push_str(")");
+            operation.push(')');
         }
 
         // Create the logical plan
@@ -2059,11 +2059,11 @@ impl LogicalPlanBuilder {
                             return Err("Table name cannot be empty".to_string());
                         }
                         // Get the table name from the object name
-                        let table_name = match &obj_name.0[0] {
+
+                        match &obj_name.0[0] {
                             ObjectNamePart::Identifier(ident) => ident.value.clone(),
                             ObjectNamePart::Function(func) => func.name.value.clone(),
-                        };
-                        table_name
+                        }
                     }
                     None => return Err("Table name is required for SHOW COLUMNS".to_string()),
                 };
@@ -2443,7 +2443,7 @@ impl LogicalPlanBuilder {
             }
 
             let mut value_exprs = Vec::new();
-            for (_, expr) in row.iter().enumerate() {
+            for expr in row.iter() {
                 let value_expr = Arc::new(self.expression_parser.parse_expression(expr, schema)?);
                 value_exprs.push(value_expr);
             }

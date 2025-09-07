@@ -221,12 +221,11 @@ where
     /// - `Some(node)` if cache is not empty
     /// - `None` if cache is empty
     unsafe fn remove_tail(&mut self) -> Option<NonNull<Node<K, V>>> {
-        self.tail.map(|tail_node| {
+        self.tail.inspect(|&tail_node| {
             unsafe {
                 // SAFETY: tail_node is valid (our tail pointer)
                 self.remove_from_list(tail_node);
             }
-            tail_node
         })
     }
 
@@ -564,7 +563,7 @@ where
     /// Returns Arc<V> for zero-copy sharing
     pub fn get(&self, key: &K) -> Option<Arc<V>> {
         let mut cache = self.inner.write().unwrap();
-        cache.get(key).map(|arc_ref| Arc::clone(arc_ref))
+        cache.get(key).map(Arc::clone)
     }
 
     /// Peek without LRU update (allows concurrent reads)

@@ -7,6 +7,12 @@ use std::fmt::Display;
 #[derive(Clone, Debug)]
 pub struct BoundStar;
 
+impl Default for BoundStar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BoundStar {
     /// Creates a new BoundStar.
     pub fn new() -> Self {

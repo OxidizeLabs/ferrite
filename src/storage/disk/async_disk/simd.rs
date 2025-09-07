@@ -34,7 +34,7 @@ impl SimdProcessor {
         let remainder = len % 8;
         if remainder > 0 {
             let start = chunks * 8;
-            return &a[start..] == &b[start..];
+            return a[start..] == b[start..];
         }
 
         true

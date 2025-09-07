@@ -220,7 +220,7 @@ where
 
     pub fn get_min_size(&self) -> usize {
         // B+ tree common practice is to keep at least half full
-        (self.max_size + 1) / 2
+        self.max_size.div_ceil(2)
     }
 
     pub fn serialize(&self, buffer: &mut [u8]) {
@@ -241,7 +241,7 @@ where
 
         // Write next_page_id
         let next_page_id_bytes = bincode::encode_to_vec(
-            &self.next_page_id, 
+            self.next_page_id,
             bincode::config::standard()
         ).expect("Failed to serialize next_page_id");
         let next_page_id_len = next_page_id_bytes.len() as u32;

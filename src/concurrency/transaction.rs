@@ -27,8 +27,10 @@ pub enum TransactionState {
 
 /// Transaction isolation level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
+#[derive(Default)]
 pub enum IsolationLevel {
     ReadUncommitted,
+    #[default]
     ReadCommitted,
     RepeatableRead,
     Serializable,
@@ -276,7 +278,7 @@ impl Transaction {
         let undo_logs = self.undo_logs.lock().unwrap();
         undo_logs
             .get(log_id)
-            .expect(&format!("Undo log at index {} not found", log_id))
+            .unwrap_or_else(|| panic!("Undo log at index {} not found", log_id))
             .clone()
     }
 
@@ -301,7 +303,7 @@ impl Transaction {
         let mut write_set = self.write_set.lock().unwrap();
         write_set
             .entry(table_oid)
-            .or_insert_with(HashSet::new)
+            .or_default()
             .insert(rid);
     }
 
@@ -323,7 +325,7 @@ impl Transaction {
         let mut scan_predicates = self.scan_predicates.lock().unwrap();
         scan_predicates
             .entry(t)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(predicate);
     }
 
@@ -411,11 +413,6 @@ impl Transaction {
     }
 }
 
-impl Default for IsolationLevel {
-    fn default() -> Self {
-        IsolationLevel::ReadCommitted
-    }
-}
 
 /// Formatter implementation for `IsolationLevel`.
 impl fmt::Display for IsolationLevel {

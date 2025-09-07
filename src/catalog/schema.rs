@@ -44,7 +44,7 @@ impl Schema {
         }
     }
 
-    pub fn copy_schema(from: &Schema, attrs: &Vec<usize>) -> Schema {
+    pub fn copy_schema(from: &Schema, attrs: &[usize]) -> Schema {
         let columns: Vec<Column> = attrs.iter().map(|&i| from.columns[i].clone()).collect();
         Schema {
             columns,

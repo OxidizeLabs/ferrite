@@ -583,7 +583,7 @@ impl ExtendableHTableDirectoryPage {
         }
 
         // Return the page ID of the bucket being removed
-        Some(self.get_bucket_page_id(bucket_index)?)
+        self.get_bucket_page_id(bucket_index)
     }
 
     // Helper method to find the correct bucket index for a given page ID

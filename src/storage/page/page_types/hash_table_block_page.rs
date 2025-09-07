@@ -23,6 +23,17 @@ pub struct HashTableBlockPage<KeyType, ValueType, KeyComparator> {
     _marker: PhantomData<KeyComparator>,
 }
 
+impl<KeyType, ValueType, KeyComparator> Default for HashTableBlockPage<KeyType, ValueType, KeyComparator>
+where
+    KeyComparator: Fn(&KeyType, &KeyType) -> bool,
+    KeyType: Clone + Default,
+    ValueType: Clone + Default + PartialEq,
+ {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<KeyType, ValueType, KeyComparator> HashTableBlockPage<KeyType, ValueType, KeyComparator>
 where
     KeyComparator: Fn(&KeyType, &KeyType) -> bool,
