@@ -75,7 +75,7 @@ impl CompressionEngine {
     }
     
     /// Zstd compression for high compression ratios
-    fn compress_zstd(&self, data: &[u8], level: u32) -> Vec<u8> {
+    fn compress_zstd(&self, data: &[u8], _level: u32) -> Vec<u8> {
         // Phase 5: Use Zstd for high compression ratios
         // Note: In a real implementation, we would use the zstd crate
         // For this refactoring, we'll use a simplified placeholder

@@ -401,7 +401,7 @@ mod tests {
         }
     }
 
-    /// Tests for internal helper methods
+    // Tests for internal helper methods
     /*
     mod helper_method_tests {
         use super::*;
@@ -1022,7 +1022,7 @@ mod tests {
             let commit_lsn = ctx.log_manager.append_log_record(commit_record);
 
             // Persistent LSN should be updated immediately after commit
-            let _persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            let persistent_lsn = ctx.log_manager.get_persistent_lsn();
             assert!(
                 persistent_lsn >= commit_lsn,
                 "Persistent LSN {} should be >= commit LSN {}",
@@ -1063,7 +1063,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
 
             // Check that persistent LSN has been updated
-            let _persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            let persistent_lsn = ctx.log_manager.get_persistent_lsn();
             assert_ne!(persistent_lsn, INVALID_LSN, "Persistent LSN should be updated after buffer fills up");
 
             ctx.log_manager.shut_down();
@@ -1266,7 +1266,7 @@ mod tests {
             let commit_lsn = ctx.log_manager.append_log_record(commit_record);
 
             // Persistent LSN should include the commit
-            let _persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            let persistent_lsn = ctx.log_manager.get_persistent_lsn();
             assert!(
                 persistent_lsn >= commit_lsn,
                 "Persistent LSN {} should be >= commit LSN {}",

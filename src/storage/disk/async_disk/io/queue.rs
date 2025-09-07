@@ -1,7 +1,7 @@
-/// I/O Queue Management Module
-/// 
-/// This module handles the priority queue for I/O operations,
-/// including enqueueing, dequeuing, and queue management operations.
+// I/O Queue Management Module
+//
+// This module handles the priority queue for I/O operations,
+// including enqueueing, dequeuing, and queue management operations.
 
 use super::operations::{IOOperation, IOOperationType};
 use std::collections::BinaryHeap;

@@ -62,7 +62,7 @@ impl Type for BooleanType {
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::CmpTrue, // false <= true or true <= true (always true)
+            Val::Boolean(_r) => CmpBool::CmpTrue, // false <= true or true <= true (always true)
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -78,7 +78,7 @@ impl Type for BooleanType {
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::CmpTrue, // true >= false or true >= true (always true)
+            Val::Boolean(_r) => CmpBool::CmpTrue, // true >= false or true >= true (always true)
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -113,7 +113,7 @@ impl Type for BooleanType {
 
     fn max(&self, other: &Value) -> Value {
         match other.get_val() {
-            Val::Boolean(r) => Value::new(true), // Logical OR for max (always true)
+            Val::Boolean(_r) => Value::new(true), // Logical OR for max (always true)
             _ => Value::new(Val::Null),
         }
     }

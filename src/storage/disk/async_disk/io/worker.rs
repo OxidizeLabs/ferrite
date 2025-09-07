@@ -1,7 +1,7 @@
-/// I/O Worker Management Module
-/// 
-/// This module handles the worker thread lifecycle and operation processing,
-/// including worker spawning, shutdown, and operation execution coordination.
+// I/O Worker Management Module
+//
+// This module handles the worker thread lifecycle and operation processing,
+// including worker spawning, shutdown, and operation execution coordination.
 
 use super::operations::IOOperation;
 use super::queue::IOQueueManager;

@@ -344,18 +344,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait};
-    use std::collections::HashSet;
 
     // ==============================================
     // CORRECTNESS TESTS MODULE
     // ==============================================
     mod correctness {
-        use super::*;
-
         // Basic LRU-K Behavior Tests
         mod basic_behavior {
-            use super::*;
 
             #[test]
             fn test_basic_lru_k_insertion_and_retrieval() {
@@ -400,7 +395,6 @@ mod tests {
 
         // Edge Cases Tests
         mod edge_cases {
-            use super::*;
 
             #[test]
             fn test_empty_cache_operations() {
@@ -450,7 +444,6 @@ mod tests {
 
         // LRU-K-Specific Operations Tests
         mod lru_k_operations {
-            use super::*;
 
             #[test]
             fn test_pop_lru_k_basic() {
@@ -520,7 +513,6 @@ mod tests {
 
         // State Consistency Tests
         mod state_consistency {
-            use super::*;
 
             #[test]
             fn test_cache_access_history_consistency() {
@@ -578,12 +570,9 @@ mod tests {
     // PERFORMANCE TESTS MODULE
     // ==============================================
     mod performance {
-        use super::*;
-        use std::time::{Duration, Instant};
 
         // Lookup Performance Tests
         mod lookup_performance {
-            use super::*;
 
             #[test]
             fn test_get_performance_with_history_updates() {
@@ -628,7 +617,6 @@ mod tests {
 
         // Insertion Performance Tests
         mod insertion_performance {
-            use super::*;
 
             #[test]
             fn test_insertion_performance_with_eviction() {
@@ -663,7 +651,6 @@ mod tests {
 
         // Eviction Performance Tests
         mod eviction_performance {
-            use super::*;
 
             #[test]
             fn test_lru_k_eviction_performance() {
@@ -693,7 +680,6 @@ mod tests {
 
         // Memory Efficiency Tests
         mod memory_efficiency {
-            use super::*;
 
             #[test]
             fn test_memory_overhead_of_history_tracking() {
@@ -731,14 +717,9 @@ mod tests {
     // CONCURRENCY TESTS MODULE
     // ==============================================
     mod concurrency {
-        use super::*;
-        use std::sync::{Arc, Mutex};
-        use std::thread;
-        use std::time::Duration;
 
         // Thread Safety Tests
         mod thread_safety {
-            use super::*;
 
             #[test]
             fn test_concurrent_insertions() {
@@ -788,12 +769,6 @@ mod tests {
 
         // Stress Testing
         mod stress_testing {
-            use super::*;
-            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-            use std::time::{Duration, Instant};
-
-            // Helper type for thread-safe testing
-            type ThreadSafeLRUKCache<K, V> = Arc<Mutex<LRUKCache<K, V>>>;
 
             #[test]
             fn test_high_contention_scenario() {

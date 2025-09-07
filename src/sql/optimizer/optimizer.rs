@@ -253,7 +253,7 @@ impl Optimizer {
         }
         
         // Check if UNIQUE indexes exist
-        for (col_idx, column) in schema.get_columns().iter().enumerate() {
+        for (_col_idx, column) in schema.get_columns().iter().enumerate() {
             if column.is_unique() && !column.is_primary_key() {
                 let unique_index_name = format!("{}_{}_unique_idx", table_name, column.get_name());
                 let has_unique_index = existing_indexes.iter()
@@ -265,7 +265,7 @@ impl Optimizer {
         }
         
         // Check if FOREIGN KEY indexes exist
-        for (col_idx, column) in schema.get_columns().iter().enumerate() {
+        for (_col_idx, column) in schema.get_columns().iter().enumerate() {
             if column.get_foreign_key().is_some() {
                 let fk_index_name = format!("{}_{}_fk_idx", table_name, column.get_name());
                 let has_fk_index = existing_indexes.iter()
@@ -715,7 +715,7 @@ impl Optimizer {
         }
     }
 
-    fn should_use_hash_join(&self, predicate: &Expression) -> bool {
+    fn should_use_hash_join(&self, _predicate: &Expression) -> bool {
         // TODO: Implement logic to determine if hash join would be beneficial
         // Consider factors like:
         // - Is the join predicate an equality comparison?

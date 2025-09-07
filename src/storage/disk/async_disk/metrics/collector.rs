@@ -675,7 +675,7 @@ impl MetricsCollector {
     }
 
     /// Updates aggregated metrics
-    pub fn update_aggregated_metrics(store: &mut MetricsStore, snapshot: &MetricsSnapshot) {
+    pub fn update_aggregated_metrics(_store: &mut MetricsStore, _snapshot: &MetricsSnapshot) {
         // This is a simplified implementation
         // In a real system, we would aggregate metrics over different time periods
         // and store them for trend analysis
