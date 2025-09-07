@@ -1,7 +1,7 @@
-/// I/O Operation Executor Module
-/// 
-/// This module handles the actual execution of I/O operations,
-/// including file operations for both database and log files.
+// I/O Operation Executor Module
+//
+// This module handles the actual execution of I/O operations,
+// including file operations for both database and log files.
 
 use super::operations::{IOOperation, IOOperationType};
 use crate::common::config::{PageId, DB_PAGE_SIZE};

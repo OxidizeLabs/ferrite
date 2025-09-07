@@ -65,7 +65,7 @@ impl ExecutionEngine {
     fn prepare_sql(
         &mut self,
         sql: &str,
-        context: Arc<RwLock<ExecutionContext>>,
+        _context: Arc<RwLock<ExecutionContext>>,
     ) -> Result<PlanNode, DBError> {
         info!("Preparing SQL statement: {}", sql);
 

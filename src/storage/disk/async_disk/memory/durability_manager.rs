@@ -132,7 +132,7 @@ impl DurabilityManager {
     }
 
     /// Writes WAL entries for the pages
-    fn write_wal_entries(&self, pages: &[(PageId, Vec<u8>)]) -> IoResult<()> {
+    fn write_wal_entries(&self, _pages: &[(PageId, Vec<u8>)]) -> IoResult<()> {
         if !self.wal_enabled {
             return Ok(());
         }

@@ -163,7 +163,7 @@ impl LogRecoveryManager {
     /// - `start_redo_lsn`: The LSN to start redo from
     fn redo_log(
         &self,
-        txn_table: &mut TxnTable,
+        _txn_table: &mut TxnTable,
         dirty_page_table: &mut DirtyPageTable,
         start_redo_lsn: Lsn,
     ) -> Result<(), String> {
@@ -369,7 +369,7 @@ impl LogRecoveryManager {
     fn redo_record(&self, record: &LogRecord) -> Result<(), String> {
         match record.get_log_record_type() {
             LogRecordType::Insert => {
-                if let (Some(rid), Some(tuple)) =
+                if let (Some(rid), Some(_tuple)) =
                     (record.get_insert_rid(), record.get_insert_tuple())
                 {
                     debug!("Redoing INSERT for RID {:?}", rid);
@@ -377,7 +377,7 @@ impl LogRecoveryManager {
                 }
             }
             LogRecordType::Update => {
-                if let (Some(rid), Some(tuple)) =
+                if let (Some(rid), Some(_tuple)) =
                     (record.get_update_rid(), record.get_update_tuple())
                 {
                     debug!("Redoing UPDATE for RID {:?}", rid);
@@ -424,7 +424,7 @@ impl LogRecoveryManager {
     /// # Parameters
     /// - `record`: The update log record to undo
     fn undo_update(&self, record: &LogRecord) -> Result<(), String> {
-        if let (Some(rid), Some(old_tuple)) = (record.get_update_rid(), record.get_original_tuple())
+        if let (Some(rid), Some(_old_tuple)) = (record.get_update_rid(), record.get_original_tuple())
         {
             debug!("Undoing UPDATE for RID {:?}", rid);
             // In a real implementation, we would restore the original tuple
@@ -437,7 +437,7 @@ impl LogRecoveryManager {
     /// # Parameters
     /// - `record`: The delete log record to undo
     fn undo_delete(&self, record: &LogRecord) -> Result<(), String> {
-        if let (Some(rid), Some(tuple)) = (record.get_delete_rid(), record.get_delete_tuple()) {
+        if let (Some(rid), Some(_tuple)) = (record.get_delete_rid(), record.get_delete_tuple()) {
             debug!("Undoing DELETE for RID {:?}", rid);
             // In a real implementation, we would restore the deleted tuple
         }

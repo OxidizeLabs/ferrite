@@ -488,8 +488,8 @@ impl TransactionManager {
     pub fn update_tuple(
         &self,
         table_heap: &TableHeap,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
+        _meta: &TupleMeta,
+        _tuple: &mut Tuple,
         rid: RID,
         txn_ctx: Option<Arc<TransactionContext>>,
     ) -> Result<(), String> {
@@ -3589,7 +3589,7 @@ mod tests {
             let txn2 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let _txn2_id = txn2.get_transaction_id();
+            let txn2_id = txn2.get_transaction_id();
 
             // Do some work (insert a tuple)
             match ctx.insert_tuple_from_values(
@@ -3694,7 +3694,7 @@ mod tests {
             let txn1 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let _txn1_id = txn1.get_transaction_id();
+            let txn1_id = txn1.get_transaction_id();
 
             // Insert a tuple
             let rid1 = match ctx.insert_tuple_from_values(
@@ -3725,7 +3725,7 @@ mod tests {
             let txn2 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let _txn2_id = txn2.get_transaction_id();
+            let txn2_id = txn2.get_transaction_id();
 
             let rid2 = match ctx.insert_tuple_from_values(
                 &table_heap,
