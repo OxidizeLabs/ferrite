@@ -108,15 +108,14 @@ impl TypedStringExpression {
         }
 
         // If that fails, try parsing with the T separator format without timezone
-        if timestamp_str.contains('T') {
-            if let Ok(dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S") {
+        if timestamp_str.contains('T')
+            && let Ok(dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S") {
                 let utc_dt = dt.and_utc();
                 return Ok(Value::new_with_type(
                     Val::Timestamp(utc_dt.timestamp() as u64),
                     TypeId::Timestamp,
                 ));
             }
-        }
 
         // Finally try the default format
         let format = if timestamp_str.contains('.') {
@@ -264,11 +263,10 @@ impl ExpressionOps for TypedStringExpression {
                 }
 
                 // Try with T separator
-                if self.value.contains('T') {
-                    if NaiveDateTime::parse_from_str(&self.value, "%Y-%m-%dT%H:%M:%S").is_ok() {
+                if self.value.contains('T')
+                    && NaiveDateTime::parse_from_str(&self.value, "%Y-%m-%dT%H:%M:%S").is_ok() {
                         return Ok(());
                     }
-                }
 
                 // Try standard format
                 let format = if self.value.contains('.') {

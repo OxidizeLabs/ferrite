@@ -117,12 +117,11 @@ impl ExpressionOps for QualifiedWildcardExpression {
         // Check if there's at least one column in the schema that matches this qualifier
         let mut found_match = false;
         for i in 0..schema.get_column_count() {
-            if let Some(column) = schema.get_column(i as usize) {
-                if column.get_name().starts_with(&prefix) {
+            if let Some(column) = schema.get_column(i as usize)
+                && column.get_name().starts_with(&prefix) {
                     found_match = true;
                     break;
                 }
-            }
         }
 
         if !found_match {

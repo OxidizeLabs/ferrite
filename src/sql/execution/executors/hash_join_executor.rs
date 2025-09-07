@@ -77,12 +77,11 @@ impl HashJoinExecutor {
                         }
                     };
 
-                    if let Some(ref mut ht) = self.hash_table {
-                        if !ht.insert(key, rid) {
+                    if let Some(ref mut ht) = self.hash_table
+                        && !ht.insert(key, rid) {
                             debug!("Failed to insert into hash table");
                             return false;
                         }
-                    }
 
                     self.right_tuples.push((rid, tuple));
                 }
@@ -146,17 +145,13 @@ impl AbstractExecutor for HashJoinExecutor {
                 }
             };
 
-            if let Some(ref ht) = self.hash_table {
-                if let Some(right_rid) = ht.get_value(&key) {
-                    if let Some((_, right_tuple)) =
-                        self.right_tuples.iter().find(|(rid, _)| *rid == right_rid)
-                    {
+            if let Some(ref ht) = self.hash_table
+                && let Some(right_rid) = ht.get_value(&key)
+                && let Some((_, right_tuple)) = self.right_tuples.iter().find(|(rid, _)| *rid == right_rid) {
                         let combined_tuple = Arc::new(left_tuple.combine(right_tuple));
                         self.current_left_tuple = None;
                         return Ok(Some((combined_tuple, left_rid)));
                     }
-                }
-            }
 
             self.current_left_tuple = None;
         }

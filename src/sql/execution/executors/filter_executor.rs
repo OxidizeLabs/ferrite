@@ -153,8 +153,8 @@ impl FilterExecutor {
                         let mut count = 0;
 
                         for t in &self.group_tuples {
-                            if let Ok(val) = col_expr.evaluate(t, schema) {
-                                if !val.is_null() {
+                            if let Ok(val) = col_expr.evaluate(t, schema)
+                                && !val.is_null() {
                                     if let Some(ref mut sum) = sum_val {
                                         *sum = sum.add(&val).unwrap_or_else(|_| sum.clone());
                                     } else {
@@ -162,7 +162,6 @@ impl FilterExecutor {
                                     }
                                     count += 1;
                                 }
-                            }
                         }
 
                         if let Some(sum) = sum_val {
@@ -203,8 +202,8 @@ impl FilterExecutor {
                         let mut min_val: Option<Value> = None;
 
                         for t in &self.group_tuples {
-                            if let Ok(val) = col_expr.evaluate(t, schema) {
-                                if !val.is_null() {
+                            if let Ok(val) = col_expr.evaluate(t, schema)
+                                && !val.is_null() {
                                     if let Some(ref min) = min_val {
                                         if matches!(val.compare_less_than(min), CmpBool::CmpTrue) {
                                             min_val = Some(val);
@@ -213,7 +212,6 @@ impl FilterExecutor {
                                         min_val = Some(val);
                                     }
                                 }
-                            }
                         }
 
                         min_val.unwrap_or_else(|| Value::new(Val::Null))
@@ -223,8 +221,8 @@ impl FilterExecutor {
                         let mut max_val: Option<Value> = None;
 
                         for t in &self.group_tuples {
-                            if let Ok(val) = col_expr.evaluate(t, schema) {
-                                if !val.is_null() {
+                            if let Ok(val) = col_expr.evaluate(t, schema)
+                                && !val.is_null() {
                                     if let Some(ref max) = max_val {
                                         if matches!(val.compare_greater_than(max), CmpBool::CmpTrue)
                                         {
@@ -234,7 +232,6 @@ impl FilterExecutor {
                                         max_val = Some(val);
                                     }
                                 }
-                            }
                         }
 
                         max_val.unwrap_or_else(|| Value::new(Val::Null))

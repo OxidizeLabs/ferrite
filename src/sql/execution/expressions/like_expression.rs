@@ -52,13 +52,12 @@ impl LikeExpression {
             let pattern_char = pattern_chars.peek();
 
             // Handle escape character
-            if let Some(esc) = escape {
-                if !escaping && pattern_char == Some(&esc) {
+            if let Some(esc) = escape
+                && !escaping && pattern_char == Some(&esc) {
                     pattern_chars.next(); // Consume escape character
                     escaping = true;
                     continue;
                 }
-            }
 
             match pattern_char {
                 None => return value_chars.peek().is_none(), // Pattern exhausted
