@@ -21,6 +21,12 @@ pub struct HashTableDirectoryPage {
     bucket_page_ids: Mutex<[PageIdT; DIRECTORY_ARRAY_SIZE]>,
 }
 
+impl Default for HashTableDirectoryPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HashTableDirectoryPage {
     /// Creates a new `HashTableDirectoryPage`.
     pub fn new() -> Self {

@@ -184,10 +184,7 @@ impl AsyncDiskManager {
         debug!("Submitting read task for page {} to scheduler", page_id);
         if let Err(e) = self.scheduler.submit_task(task) {
             error!("Failed to submit read task for page {}: {:?}", page_id, e);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to submit read task: {:?}", e)
-            ));
+            return Err(std::io::Error::other(format!("Failed to submit read task: {:?}", e)));
         }
         
         // Wait for completion
@@ -217,10 +214,7 @@ impl AsyncDiskManager {
             },
             Err(_) => {
                 error!("Read task was cancelled for page {}", page_id);
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Read task was cancelled"
-                ))
+                Err(std::io::Error::other("Read task was cancelled"))
             }
         }
     }
@@ -352,10 +346,7 @@ impl AsyncDiskManager {
         debug!("Submitting batch write task for {} pages to scheduler", pages.len());
         if let Err(e) = self.scheduler.submit_task(task) {
             error!("Failed to submit batch write task: {:?}", e);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to submit batch write task: {:?}", e)
-            ));
+            return Err(std::io::Error::other(format!("Failed to submit batch write task: {:?}", e)));
         }
         
         // Wait for completion
@@ -370,10 +361,7 @@ impl AsyncDiskManager {
             },
             Err(_) => {
                 error!("Batch write task was cancelled");
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Batch write task was cancelled"
-                ))
+                Err(std::io::Error::other("Batch write task was cancelled"))
             }
         }
     }
@@ -456,10 +444,7 @@ impl AsyncDiskManager {
         debug!("Submitting batch read task for {} pages to scheduler", page_ids.len());
         if let Err(e) = self.scheduler.submit_task(task) {
             error!("Failed to submit batch read task: {:?}", e);
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to submit batch read task: {:?}", e)
-            ));
+            return Err(std::io::Error::other(format!("Failed to submit batch read task: {:?}", e)));
         }
         
         // Wait for completion
@@ -490,10 +475,7 @@ impl AsyncDiskManager {
             },
             Err(_) => {
                 error!("Batch read task was cancelled");
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Batch read task was cancelled"
-                ))
+                Err(std::io::Error::other("Batch read task was cancelled"))
             }
         }
     }

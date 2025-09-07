@@ -156,7 +156,7 @@ struct RealDiskIO {
 impl DiskIO for RealDiskIO {
     fn write_page(&self, page_id: PageId, page_data: &[u8; DB_PAGE_SIZE as usize]) -> IoResult<()> {
         // Use checked multiplication to prevent overflow
-        let offset = match (page_id as u64).checked_mul(DB_PAGE_SIZE) {
+        let offset = match page_id.checked_mul(DB_PAGE_SIZE) {
             Some(off) => off,
             None => {
                 warn!(
@@ -184,7 +184,7 @@ impl DiskIO for RealDiskIO {
         page_data: &mut [u8; DB_PAGE_SIZE as usize],
     ) -> IoResult<()> {
         // Use checked multiplication to prevent overflow
-        let offset = match (page_id as u64).checked_mul(DB_PAGE_SIZE) {
+        let offset = match page_id.checked_mul(DB_PAGE_SIZE) {
             Some(off) => off,
             None => {
                 warn!(
@@ -594,7 +594,7 @@ impl FileDiskManager {
             let writer = db_io.get_mut();
 
             for (page_id, page_data) in pages {
-                let offset = *page_id as u64 * DB_PAGE_SIZE;
+                let offset = *page_id * DB_PAGE_SIZE;
                 trace!("Writing page {} at offset {}", page_id, offset);
 
                 if let Err(e) = writer.seek(SeekFrom::Start(offset)) {
@@ -648,7 +648,7 @@ impl FileDiskManager {
 
         for &page_id in page_ids {
             let mut page_data = [0u8; DB_PAGE_SIZE as usize];
-            let offset = page_id as u64 * DB_PAGE_SIZE;
+            let offset = page_id * DB_PAGE_SIZE;
             reader.seek(SeekFrom::Start(offset))?;
 
             match reader.read_exact(&mut page_data) {
@@ -672,7 +672,7 @@ impl FileDiskManager {
         debug!(target: "tkdb::storage", "Starting async write for page {}", page_id);
 
         let result = {
-            let offset = page_id as u64 * DB_PAGE_SIZE;
+            let offset = page_id * DB_PAGE_SIZE;
             let mut db_io = self.db_io.write();
             let writer = db_io.get_mut();
 
@@ -711,7 +711,7 @@ impl FileDiskManager {
 
         let result = {
             // Use checked multiplication to prevent overflow
-            let offset = match (page_id as u64).checked_mul(DB_PAGE_SIZE) {
+            let offset = match page_id.checked_mul(DB_PAGE_SIZE) {
                 Some(off) => off,
                 None => {
                     warn!(
