@@ -237,12 +237,11 @@ impl DiskScheduler {
         }
 
         // Wait for the worker thread to finish
-        if let Some(handle) = self.worker_thread.take() {
-            if let Err(e) = handle.join() {
+        if let Some(handle) = self.worker_thread.take()
+            && let Err(e) = handle.join() {
                 // Handle potential panics from the worker thread
                 error!("Worker thread panicked during shutdown: {:?}", e);
             }
-        }
     }
 
     pub fn get_request_queue_length(&self) -> usize {

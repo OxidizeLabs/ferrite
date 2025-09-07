@@ -300,14 +300,13 @@ where
             let key_index = leaf_write.find_key_index(&key);
             if key_index < leaf_write.get_size() {
                 // Check if key at this position matches our key
-                if let Some(existing_key) = leaf_write.get_key_at(key_index) {
-                    if (self.comparator)(&key, existing_key) == Ordering::Equal {
+                if let Some(existing_key) = leaf_write.get_key_at(key_index)
+                    && (self.comparator)(&key, existing_key) == Ordering::Equal {
                         // Update existing value
                         leaf_write.set_value_at(key_index, value.clone());
                         inserted = true;
                         // No new key added, just updated existing value
                     }
-                }
             }
 
             // If key doesn't exist yet
@@ -579,8 +578,9 @@ where
         }
 
         // Traverse down to leaf
-        while tree_height > 1 {
-            // First try as an internal page (since we know height > 1 and we're not at leaf level yet)
+        if tree_height > 1 {
+            loop {
+                // First try as an internal page (since we know height > 1 and we're not at leaf level yet)
             let internal_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
@@ -611,6 +611,7 @@ where
 
             // Continue with this child (it's another internal page)
             current_page_id = next_page_id;
+            }
         }
 
         // If we get here without finding a leaf, try one more time
@@ -794,11 +795,10 @@ where
 
             // Now move the remaining keys and values
             for i in (split_point + 1)..current_size {
-                if let Some(key) = internal_write.get_key_at(i) {
-                    if let Some(child_id) = internal_write.get_value_at(i + 1) {
+                if let Some(key) = internal_write.get_key_at(i)
+                    && let Some(child_id) = internal_write.get_value_at(i + 1) {
                         new_internal_write.insert_key_value(key.clone(), child_id);
                     }
-                }
             }
 
             // Now remove keys from original page: remove the middle key and all keys after it
@@ -1185,11 +1185,10 @@ where
         // 4. Copy all keys and child pointers from right page to left page
         // Skip the first child pointer of right page as it's already handled with the separator key
         for i in 0..right_write.get_size() {
-            if let Some(key) = right_write.get_key_at(i) {
-                if let Some(child_id) = right_write.get_value_at(i + 1) {
+            if let Some(key) = right_write.get_key_at(i)
+                && let Some(child_id) = right_write.get_value_at(i + 1) {
                     left_write.insert_key_value(key.clone(), child_id);
                 }
-            }
         }
 
         // 5. Remove the separator key and right child pointer from parent
@@ -2470,14 +2469,13 @@ where
         }
 
         // Validate that all leaves are at the same level
-        if let Some(leaf_level) = stats.leaf_level {
-            if leaf_level != stats.max_depth {
+        if let Some(leaf_level) = stats.leaf_level
+            && leaf_level != stats.max_depth {
                 return Err(BPlusTreeError::ConversionError(format!(
                     "Leaves not at same level: found leaves at level {} but max depth is {}",
                     leaf_level, stats.max_depth
                 )));
             }
-        }
 
         Ok(stats)
     }
@@ -2552,8 +2550,7 @@ where
         for i in 1..size {
             if let (Some(prev_key), Some(curr_key)) =
                 (leaf_read.get_key_at(i - 1), leaf_read.get_key_at(i))
-            {
-                if (self.comparator)(prev_key, curr_key) != Ordering::Less {
+                && (self.comparator)(prev_key, curr_key) != Ordering::Less {
                     return Err(BPlusTreeError::ConversionError(format!(
                         "Keys not in order in leaf page {}: {} >= {}",
                         leaf_page.get_page_id(),
@@ -2561,7 +2558,6 @@ where
                         curr_key
                     )));
                 }
-            }
         }
 
         // Check that each key has a corresponding value
@@ -2614,14 +2610,12 @@ where
         for i in 1..size {
             if let (Some(prev_key), Some(curr_key)) =
                 (internal_read.get_key_at(i - 1), internal_read.get_key_at(i))
-            {
-                if (self.comparator)(&prev_key, &curr_key) != Ordering::Less {
+                && (self.comparator)(&prev_key, &curr_key) != Ordering::Less {
                     return Err(BPlusTreeError::ConversionError(format!(
                         "Keys not in order in internal page {}: {} >= {}",
                         page_id, prev_key, curr_key
                     )));
                 }
-            }
         }
 
         // Recursively validate all children

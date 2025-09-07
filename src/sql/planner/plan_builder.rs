@@ -74,8 +74,8 @@ impl LogicalPlanBuilder {
         };
 
         // For non-SELECT queries, handle ORDER BY here if present
-        if !matches!(&*query.body, SetExpr::Select(_)) {
-            if let Some(order_by) = &query.order_by {
+        if !matches!(&*query.body, SetExpr::Select(_))
+            && let Some(order_by) = &query.order_by {
                 let Some(schema) = current_plan.get_schema() else {
                     return Err("Internal error: missing schema while applying ORDER BY".to_string());
                 };
@@ -94,7 +94,6 @@ impl LogicalPlanBuilder {
 
                 current_plan = LogicalPlan::sort(sort_specifications, schema.clone(), current_plan);
             }
-        }
 
         // Handle LIMIT and OFFSET if present
         if let Some(limit_clause) = &query.limit_clause {
@@ -328,8 +327,8 @@ impl LogicalPlanBuilder {
 
         // Apply HAVING clause if it exists and we don't have aggregates
         // This is a bit unusual but SQL allows it
-        if !has_aggregates && !has_group_by {
-            if let Some(having) = &select.having {
+        if !has_aggregates && !has_group_by
+            && let Some(having) = &select.having {
                 let having_expr = self
                     .expression_parser
                     .parse_expression(having, &original_schema)?;
@@ -341,7 +340,6 @@ impl LogicalPlanBuilder {
                     current_plan,
                 );
             }
-        }
 
         // Apply DISTINCT if requested
         if select.distinct.is_some() {
@@ -1678,15 +1676,14 @@ impl LogicalPlanBuilder {
             .ok_or_else(|| "Failed to determine schema for altered view".to_string())?;
 
         // Handle custom column names if provided
-        if !columns.is_empty() {
-            if columns.len() != schema.get_column_count() as usize {
+        if !columns.is_empty()
+            && columns.len() != schema.get_column_count() as usize {
                 return Err(format!(
                     "Number of column names ({}) does not match number of columns in result set ({})",
                     columns.len(),
                     schema.get_column_count()
                 ));
             }
-        }
 
         // Construct the operation string
         let mut operation = "AS ".to_string();

@@ -363,13 +363,12 @@ impl Optimizer {
                     for index_info in indexes {
                         let key_attrs = index_info.get_key_attrs();
 
-                        if !key_attrs.is_empty() {
-                            if let Some(table_info) = catalog.get_table(table_name) {
+                        if !key_attrs.is_empty()
+                            && let Some(table_info) = catalog.get_table(table_name) {
                                 let table_schema = table_info.get_table_schema();
                                 if let Some(col_idx) =
-                                    table_schema.get_column_index(&first_col.get_name())
-                                {
-                                    if key_attrs[0] == col_idx {
+                                    table_schema.get_column_index(first_col.get_name())
+                                    && key_attrs[0] == col_idx {
                                         info!(
                                             "Converting table scan to index scan using index {} on table {}",
                                             index_info.get_index_name(),
@@ -388,9 +387,7 @@ impl Optimizer {
                                             vec![],
                                         )));
                                     }
-                                }
                             }
-                        }
                     }
                     debug!("No suitable index found for the first column");
                 }
