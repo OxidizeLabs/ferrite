@@ -2433,7 +2433,7 @@ impl ExpressionParser {
 
     pub fn determine_group_by_expressions(
         &self,
-        select: &Box<Select>,
+        select: &Select,
         schema: &Schema,
         has_group_by: bool,
     ) -> Result<Vec<Expression>, String> {
