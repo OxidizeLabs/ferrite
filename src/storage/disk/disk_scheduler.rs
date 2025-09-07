@@ -196,7 +196,7 @@ impl DiskScheduler {
                         let _ = disk_manager.write_page(request.page_id, &data);
                     } else {
                         info!("Reading from disk: page_id={}", request.page_id);
-                        let _ = disk_manager.read_page(request.page_id, &mut *data);
+                        let _ = disk_manager.read_page(request.page_id, &mut data);
                     }
                     let _ = request.sender.send(());
                     info!(
@@ -214,7 +214,7 @@ impl DiskScheduler {
                     let _ = disk_manager.write_page(request.page_id, &data);
                 } else {
                     info!("Reading from disk: page_id={}", request.page_id);
-                    let _ = disk_manager.read_page(request.page_id, &mut *data);
+                    let _ = disk_manager.read_page(request.page_id, &mut data);
                 }
                 let _ = request.sender.send(());
                 info!("Request processed and response sent");

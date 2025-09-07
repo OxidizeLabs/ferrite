@@ -238,14 +238,14 @@ impl Value {
         use crate::types_db::type_id::TypeId::*;
         match column_type {
             Boolean => {
-                if data.len() >= 1 {
+                if !data.is_empty() {
                     Value::new(data[0] != 0)
                 } else {
                     Value::new(Val::Null)
                 }
             }
             TinyInt => {
-                if data.len() >= 1 {
+                if !data.is_empty() {
                     let arr: [u8; 1] = data[0..1].try_into().expect("slice with incorrect length");
                     Value::new(i8::from_le_bytes(arr))
                 } else {

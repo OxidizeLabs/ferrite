@@ -117,7 +117,7 @@ impl ConstraintValidator {
         let unique_map = self
             .unique_values
             .entry(table_unique_key)
-            .or_insert_with(HashMap::new);
+            .or_default();
 
         let value_str = ToString::to_string(&value);
         if unique_map.contains_key(&value_str) {

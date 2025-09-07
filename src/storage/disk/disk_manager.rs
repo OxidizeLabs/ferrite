@@ -859,7 +859,7 @@ impl FileDiskManager {
         for page_id in page_ids {
             let mut page_data = [0u8; DB_PAGE_SIZE as usize];
 
-            if let Ok(_) = self.disk_io.read().read_page(page_id, &mut page_data) {
+            if self.disk_io.read().read_page(page_id, &mut page_data).is_ok() {
                 // Cache the prefetched page
                 let mut cache = self.read_cache.write();
                 if cache.cache.len() < 256 {

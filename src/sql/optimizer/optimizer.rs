@@ -165,7 +165,7 @@ impl Optimizer {
         for (col_idx, column) in schema.get_columns().iter().enumerate() {
             if column.is_unique() && !column.is_primary_key() {
                 let unique_index_name = format!("{}_{}_unique_idx", table_name, column.get_name());
-                let unique_key_schema = Schema::copy_schema(schema, &vec![col_idx]);
+                let unique_key_schema = Schema::copy_schema(schema, &[col_idx]);
                 let unique_key_size = column.get_storage_size();
 
                 match catalog.create_index(
@@ -193,7 +193,7 @@ impl Optimizer {
         for (col_idx, column) in schema.get_columns().iter().enumerate() {
             if let Some(fk_constraint) = column.get_foreign_key() {
                 let fk_index_name = format!("{}_{}_fk_idx", table_name, column.get_name());
-                let fk_key_schema = Schema::copy_schema(schema, &vec![col_idx]);
+                let fk_key_schema = Schema::copy_schema(schema, &[col_idx]);
                 let fk_key_size = column.get_storage_size();
 
                 match catalog.create_index(
@@ -298,7 +298,7 @@ impl Optimizer {
                     .any(|idx| idx.get_index_name() == &index_name);
                 
                 if !index_exists {
-                    let index_key_schema = Schema::copy_schema(&referenced_table_schema, &vec![column_index]);
+                    let index_key_schema = Schema::copy_schema(&referenced_table_schema, &[column_index]);
                     let index_key_size = column.get_storage_size();
 
                     match catalog.create_index(
