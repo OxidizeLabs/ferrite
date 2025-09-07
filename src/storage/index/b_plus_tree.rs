@@ -94,7 +94,7 @@ impl BPlusTree {
 
             // Now insert into the split root
             let mut root_guard = self.root.write();
-            self.insert_non_full(&mut *root_guard, key, rid)
+            self.insert_non_full(&mut root_guard, key, rid)
         } else {
             let mut root_guard = self.root.write();
             self.insert_non_full(&mut root_guard, key, rid)

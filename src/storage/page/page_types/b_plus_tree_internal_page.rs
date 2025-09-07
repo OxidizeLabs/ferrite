@@ -765,7 +765,7 @@ impl<
             // Skip the first pointer of the right sibling (p1') because it should be
             // the same as the last pointer of the left node
             for i in right_sibling_values.iter().skip(1) {
-                self.values.push(right_sibling_values[i]);
+                self.values.push(*i);
             }
         }
 

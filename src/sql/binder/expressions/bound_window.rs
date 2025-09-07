@@ -103,7 +103,7 @@ impl BoundExpression for BoundWindow {
                 .iter()
                 .map(|expr| expr.clone_box())
                 .collect(),
-            order_bys: self.order_bys.iter().cloned().collect(),
+            order_bys: self.order_bys.to_vec(),
             start_offset: self.start_offset.as_ref().map(|expr| expr.clone_box()),
             end_offset: self.end_offset.as_ref().map(|expr| expr.clone_box()),
             start: self.start,

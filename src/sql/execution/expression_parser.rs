@@ -475,7 +475,7 @@ impl ExpressionParser {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::UnaryOp(UnaryOpExpression::new(
                     inner_expr,
-                    op.clone(),
+                    *op,
                 )?))
             }
 
@@ -782,7 +782,7 @@ impl ExpressionParser {
                 target_before_value: _,
                 styles,
             } => {
-                let inner_expr = Arc::new(self.parse_expression(&expr, schema)?);
+                let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
 
                 // Parse the target type if specified
                 let target_type = match data_type {
@@ -1806,7 +1806,7 @@ impl ExpressionParser {
                                 SQLSubscript::Index { index } => {
                                     // Parse the index expression
                                     let index_expr =
-                                        Arc::new(self.parse_expression(&index, schema)?);
+                                        Arc::new(self.parse_expression(index, schema)?);
                                     let curr_type = expr.get_return_type().get_type();
 
                                     if curr_type == TypeId::Vector || curr_type == TypeId::Array {
@@ -1956,7 +1956,7 @@ impl ExpressionParser {
 
     pub fn prepare_table_scan(
         &self,
-        select: &Box<Select>,
+        select: &Select,
     ) -> Result<(String, Schema, u64), String> {
         debug!("Preparing table scan for select: {:?}", select);
         if select.from.len() != 1 {
@@ -1983,7 +1983,7 @@ impl ExpressionParser {
 
     pub fn parse_select_statements(
         &self,
-        select: &Box<Select>,
+        select: &Select,
         schema: &Schema,
     ) -> Result<Expression, String> {
         debug!("Parsing select statements: {:?}", select);
@@ -2707,7 +2707,7 @@ impl ExpressionParser {
             }) => {
                 debug!("Processing timezone string literal: {:?}", tz_value);
                 // Extract the string value from the sqlparser Value
-                let tz_str = Value::from_sqlparser_value(&tz_value)
+                let tz_str = Value::from_sqlparser_value(tz_value)
                     .map_err(|e| format!("Failed to extract timezone string: {}", e))?;
 
                 // Create a constant expression for the timezone string
@@ -2826,7 +2826,7 @@ impl ExpressionParser {
     // Helper method to determine the subquery type and return type
     fn determine_subquery_type_and_return_type(
         &self,
-        select: &Box<Select>,
+        select: &Select,
         schema: &Schema,
     ) -> Result<(SubqueryType, Column), String> {
         // Check if this is a subquery used in an IN clause

@@ -19,6 +19,12 @@ pub struct MLPrefetcher {
     last_predictions: Option<Vec<PageId>>,
 }
 
+impl Default for MLPrefetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MLPrefetcher {
     pub fn new() -> Self {
         Self {
@@ -61,8 +67,8 @@ impl MLPrefetcher {
 
         // Find patterns ending with current page
         for (pattern, weight) in &self.pattern_weights {
-            if let Some(&last_page) = pattern.last() {
-                if last_page == current_page && *weight > 0.5 {
+            if let Some(&last_page) = pattern.last()
+                && last_page == current_page && *weight > 0.5 {
                     // Predict next pages based on this pattern
                     for i in 1..=self.prefetch_distance {
                         if let Some(history_entry) = self.find_pattern_continuation(pattern, i) {
@@ -70,7 +76,6 @@ impl MLPrefetcher {
                         }
                     }
                 }
-            }
         }
 
         // Remove duplicates and limit predictions
@@ -129,11 +134,10 @@ impl MLPrefetcher {
             .collect();
 
         for i in 0..=access_vec.len().saturating_sub(pattern_len + offset) {
-            if &access_vec[i..i + pattern_len] == pattern {
-                if let Some(&next_page) = access_vec.get(i + pattern_len + offset - 1) {
+            if &access_vec[i..i + pattern_len] == pattern
+                && let Some(&next_page) = access_vec.get(i + pattern_len + offset - 1) {
                     return Some(next_page);
                 }
-            }
         }
 
         None

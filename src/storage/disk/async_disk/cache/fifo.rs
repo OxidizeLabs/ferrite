@@ -435,7 +435,7 @@ where
         let value_arc = Arc::new(value);
 
         // If key already exists, update the value
-        if let std::collections::hash_map::Entry::Occupied(mut e) = self.cache.entry(key_arc) {
+        if let std::collections::hash_map::Entry::Occupied(mut e) = self.cache.entry(key_arc.clone()) {
             return Some(e.insert(value_arc))
                 .map(|old_value_arc| {
                     // Try to unwrap the Arc to get the original value

@@ -911,13 +911,13 @@ impl TransactionalTableHeap {
 
         // PERFORMANCE OPTIMIZATION: Use async buffer pool operations
         // Convert to async and run in tokio context
-        let result = tokio::task::block_in_place(|| {
+
+
+        tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 self.bulk_insert_tuples_from_values_async(values_batch, schema, txn_context).await
             })
-        });
-
-        result
+        })
     }
 
     /// PERFORMANCE OPTIMIZATION: Async bulk insert with native async buffer pool operations

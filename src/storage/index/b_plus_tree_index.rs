@@ -502,7 +502,7 @@ where
                 while key_index < size {
                     if let Some(key) = leaf_page.get_key_at(key_index) {
                         // Check if we've exceeded the end of the range
-                        if (self.comparator)(&key, end) == Ordering::Greater {
+                        if (self.comparator)(key, end) == Ordering::Greater {
                             return Ok(result); // Done with range scan
                         }
 

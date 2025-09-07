@@ -240,11 +240,10 @@ impl CoalescingEngine {
             }
             
             // Check next pages (with overflow protection)
-            if let Some(next_page) = page_id.checked_add(offset) {
-                if self.pending_writes.contains_key(&next_page) {
+            if let Some(next_page) = page_id.checked_add(offset)
+                && self.pending_writes.contains_key(&next_page) {
                     adjacent.push(next_page);
                 }
-            }
         }
         
         // Sort by page_id for consistent ordering

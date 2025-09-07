@@ -339,20 +339,12 @@ impl LogRecoveryManager {
         match record.get_log_record_type() {
             LogRecordType::Insert | LogRecordType::Update => {
                 // Get RID from record and extract page ID
-                if let Some(rid) = record.get_insert_rid().or(record.get_update_rid()) {
-                    Some(rid.get_page_id())
-                } else {
-                    None
-                }
+                record.get_insert_rid().or(record.get_update_rid()).map(|rid| rid.get_page_id())
             }
             LogRecordType::MarkDelete
             | LogRecordType::ApplyDelete
             | LogRecordType::RollbackDelete => {
-                if let Some(rid) = record.get_delete_rid() {
-                    Some(rid.get_page_id())
-                } else {
-                    None
-                }
+                record.get_delete_rid().map(|rid| rid.get_page_id())
             }
             LogRecordType::NewPage => {
                 // For new page records, the page ID is directly accessible

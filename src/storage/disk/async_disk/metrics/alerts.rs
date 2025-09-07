@@ -100,6 +100,12 @@ pub struct AlertSummary {
     pub acknowledged: bool,
 }
 
+impl Default for AlertingSystem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AlertingSystem {
     /// Creates a new AlertingSystem with default values
     pub fn new() -> Self {

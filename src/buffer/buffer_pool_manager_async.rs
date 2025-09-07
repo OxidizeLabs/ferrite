@@ -317,7 +317,7 @@ impl BufferPoolManager {
         // This avoids duplication since AsyncDiskManager handles cache levels internally
         futures::executor::block_on(async {
             self.disk_manager.read_page(page_id).await
-        }).map_err(|e| std::io::Error::other(e))
+        }).map_err(std::io::Error::other)
     }
 
     /// Load page bypassing AsyncDiskManager cache (BPM as sole cache)
@@ -329,7 +329,7 @@ impl BufferPoolManager {
         // For now, we'll use the regular read_page but this could be optimized
         futures::executor::block_on(async {
             self.disk_manager.read_page(page_id).await
-        }).map_err(|e| std::io::Error::other(e))
+        }).map_err(std::io::Error::other)
     }
 
     /// Creates a page from raw data with proper type checking
@@ -1301,7 +1301,7 @@ impl BufferPoolManager {
         
         // Shutdown the disk manager
         let disk_manager = Arc::clone(&self.disk_manager);
-        if let Some(mut dm) = Arc::try_unwrap(disk_manager).ok() {
+        if let Ok(mut dm) = Arc::try_unwrap(disk_manager) {
             dm.shutdown().await
                 .map_err(|e| format!("Failed to shutdown disk manager: {}", e))?;
         }

@@ -429,7 +429,7 @@ impl ExecutionEngine {
         // Convert to physical plan and map any String errors to DBError
         optimized_plan
             .to_physical_plan()
-            .map_err(|e| DBError::OptimizeError(e))
+            .map_err(DBError::OptimizeError)
     }
 
     /// Prepare a SQL statement and validate syntax
