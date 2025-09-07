@@ -853,7 +853,7 @@ impl TableHeap {
         let page_guard = self.get_page(last_page_id)?;
 
         // Create a temporary tuple to check size (with dummy RID)
-        let temp_tuple = Tuple::new(&expanded_values, &schema, RID::default());
+        let temp_tuple = Tuple::new(&expanded_values, schema, RID::default());
 
         {
             let mut page = page_guard.write();
@@ -864,7 +864,7 @@ impl TableHeap {
                 let next_rid = page.get_next_rid();
 
                 // Create the tuple with the correct RID
-                let tuple = Tuple::new(&expanded_values, &schema, next_rid);
+                let tuple = Tuple::new(&expanded_values, schema, next_rid);
 
                 // Insert the tuple
                 match page.insert_tuple_with_rid(&meta, &tuple, next_rid) {
@@ -977,7 +977,7 @@ impl TableHeap {
         meta: &TupleMeta,
     ) -> Result<RID, String> {
         // First check if tuple is too large for any page
-        let temp_tuple = Tuple::new(&values, &schema, RID::default());
+        let temp_tuple = Tuple::new(&values, schema, RID::default());
         let temp_page = TablePage::new(0);
         if temp_page.is_tuple_too_large(&temp_tuple) {
             return Err("Tuple is too large to fit in a page".to_string());
@@ -1023,7 +1023,7 @@ impl TableHeap {
 
         // Create the tuple with the correct RID for the new page
         let new_rid = RID::new(new_page_id, 0);
-        let tuple = Tuple::new(&values, &schema, new_rid);
+        let tuple = Tuple::new(&values, schema, new_rid);
 
         // Now insert the tuple into the new page
         let mut new_page = new_page_guard.write();

@@ -799,7 +799,7 @@ impl TransactionalTableHeap {
 
                 // Validate that the foreign key value exists in the referenced table
                 if !self.validate_foreign_key_reference(
-                    &value, 
+                    value, 
                     &foreign_key_constraint.referenced_table, 
                     &foreign_key_constraint.referenced_column, 
                     txn_ctx,

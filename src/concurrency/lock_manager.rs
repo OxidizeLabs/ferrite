@@ -435,8 +435,8 @@ impl DeadlockDetector {
         let mut on_path = HashSet::new();
 
         for &txn_id in waits_for.keys() {
-            if !visited.contains(&txn_id) {
-                if Self::dfs_cycle(
+            if !visited.contains(&txn_id)
+                && Self::dfs_cycle(
                     txn_id,
                     waits_for,
                     &mut visited,
@@ -446,7 +446,6 @@ impl DeadlockDetector {
                 ) {
                     return true;
                 }
-            }
         }
         false
     }
@@ -474,11 +473,10 @@ impl DeadlockDetector {
                         .unwrap_or(&next);
                     return true;
                 }
-                if !visited.contains(&next) {
-                    if Self::dfs_cycle(next, waits_for, visited, path, on_path, abort_txn) {
+                if !visited.contains(&next)
+                    && Self::dfs_cycle(next, waits_for, visited, path, on_path, abort_txn) {
                         return true;
                     }
-                }
             }
         }
 

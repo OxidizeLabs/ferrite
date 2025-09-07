@@ -134,19 +134,16 @@ impl ConstraintValidator {
         if let Some(constraint) = column.get_check_constraint() {
             // For now, implement basic numeric constraints
             // In a full implementation, you'd parse and evaluate the constraint expression
-            if constraint.contains("price > 0")
+            if (constraint.contains("price > 0")
                 || constraint.contains("budget > 0")
-                || constraint.contains("salary > 0")
-            {
-                if let Ok(price) = value.as_decimal() {
-                    if price <= 0.0 {
+                || constraint.contains("salary > 0"))
+                && let Ok(price) = value.as_decimal()
+                && price <= 0.0 {
                         return Err(ConstraintViolation::Check {
                             column: column.get_name().to_string(),
                             constraint: constraint.clone(),
                         });
                     }
-                }
-            }
             // Add more constraint patterns as needed
         }
         Ok(())
@@ -200,8 +197,8 @@ impl ConstraintValidator {
         value: &Value,
         _referenced_table_data: &HashMap<String, Vec<Value>>, // Mock referenced table data
     ) -> Result<(), ConstraintViolation> {
-        if let Some(fk) = column.get_foreign_key() {
-            if !value.is_null() {
+        if let Some(fk) = column.get_foreign_key()
+            && !value.is_null() {
                 // In a real implementation, you'd check if the value exists in the referenced table
                 // For now, just demonstrate the structure
                 if !_referenced_table_data.contains_key(&ToString::to_string(&value)) {
@@ -212,7 +209,6 @@ impl ConstraintValidator {
                     });
                 }
             }
-        }
         Ok(())
     }
 
@@ -220,8 +216,8 @@ impl ConstraintValidator {
     pub fn apply_defaults(&self, tuple: &mut Tuple, schema: &Schema) {
         for (i, column) in schema.get_columns().iter().enumerate() {
             let value = tuple.get_value(i);
-            if value.is_null() {
-                if let Some(default_value) = column.get_default_value() {
+            if value.is_null()
+                && let Some(default_value) = column.get_default_value() {
                     // In a real implementation, you'd set the default value in the tuple
                     // This requires modifying the Tuple struct to support value updates
                     println!(
@@ -230,7 +226,6 @@ impl ConstraintValidator {
                         default_value
                     );
                 }
-            }
         }
     }
 }
