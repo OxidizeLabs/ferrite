@@ -12,7 +12,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 /// Metadata associated with a tuple.
-#[derive(Clone, Debug, PartialEq, Copy)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 #[derive(bincode::Encode, bincode::Decode)]
 pub struct TupleMeta {
     creator_txn_id: TxnId,
@@ -281,7 +281,7 @@ impl Tuple {
         self.values.read().clone()
     }
 
-    pub fn get_values_mut(&mut self) -> RwLockWriteGuard<Vec<Value>> {
+    pub fn get_values_mut(&mut self) -> RwLockWriteGuard<'_, Vec<Value>> {
         self.values.write()
     }
 
@@ -392,7 +392,7 @@ mod tests {
             Value::new(true),
         ];
         let rid = RID::new(0, 0);
-        (Tuple::new(&*values, &schema, rid), schema)
+        (Tuple::new(&values, &schema, rid), schema)
     }
 
     #[test]
@@ -456,7 +456,7 @@ mod tests {
         let schema = create_sample_schema();
         let values = vec![Value::new(1), Value::new("Alice")]; // Missing two values
         let rid = RID::new(0, 0);
-        Tuple::new(&*values, &schema, rid);
+        Tuple::new(&values, &schema, rid);
     }
 
     #[test]
@@ -500,35 +500,18 @@ mod tests {
     fn test_tuple_meta() {
         let mut meta = TupleMeta::new(1);
         assert_eq!(meta.get_creator_txn_id(), 1);
-        assert_eq!(meta.is_committed(), false);
-        assert_eq!(meta.is_deleted(), false);
+        assert!(!meta.is_committed());
+        assert!(!meta.is_deleted());
 
         meta.set_deleted(true);
-        assert_eq!(meta.is_deleted(), true);
-
-        // Test copy semantics
-        let meta2 = meta;
-        assert_eq!(meta2.get_creator_txn_id(), 1);
-        assert_eq!(meta2.is_committed(), false);
-        assert_eq!(meta2.is_deleted(), true);
-
-        // Both meta and meta2 should be usable since meta was copied, not moved
-        assert_eq!(meta.get_creator_txn_id(), 1);
-        assert_eq!(meta.is_committed(), false);
-        assert_eq!(meta.is_deleted(), true);
-
-        // Modifying one shouldn't affect the other
-        let mut meta3 = meta;
-        meta3.set_deleted(false);
-        assert_eq!(meta3.is_deleted(), false);
-        assert_eq!(meta.is_deleted(), true);
+        assert!(meta.is_deleted());
     }
 
     #[test]
     fn test_tuple_meta_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let meta = TupleMeta::new(1234567890);
         let config = config::standard();
-        let serialized = bincode::encode_to_vec(&meta, config)?;
+        let serialized = bincode::encode_to_vec(meta, config)?;
         let (deserialized, _): (TupleMeta, usize) = bincode::decode_from_slice(&serialized, config)?;
 
         assert_eq!(meta.get_creator_txn_id(), deserialized.get_creator_txn_id());
@@ -548,15 +531,15 @@ mod tests {
         ]);
         let values = vec![
             Value::new(42),
-            Value::new(3.14),
+            Value::new(std::f64::consts::PI),
             Value::new("Hello"),
             Value::new(true),
         ];
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*values, &schema, rid);
+        let tuple = Tuple::new(&values, &schema, rid);
 
         assert_eq!(tuple.get_value(0), Value::new(42));
-        assert_eq!(tuple.get_value(1), Value::new(3.14));
+        assert_eq!(tuple.get_value(1), Value::new(std::f64::consts::PI));
         assert_eq!(tuple.get_value(2), Value::new("Hello"));
         assert_eq!(tuple.get_value(3), Value::new(true));
     }

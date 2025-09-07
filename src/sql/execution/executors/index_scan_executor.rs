@@ -151,7 +151,7 @@ impl IndexScanExecutor {
                             match child.as_ref() {
                                 Expression::Comparison(comp_expr) => {
                                     if let Ok(value) = comp_expr.get_right().evaluate(
-                                        &Tuple::new(&vec![], &Schema::new(vec![]), RID::new(0, 0)),
+                                        &Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0)),
                                         &Schema::new(vec![]),
                                     ) {
                                         match comp_expr.get_comp_type() {
@@ -201,7 +201,7 @@ impl IndexScanExecutor {
             }
             Expression::Comparison(comp_expr) => {
                 if let Ok(value) = comp_expr.get_right().evaluate(
-                    &Tuple::new(&vec![], &Schema::new(vec![]), RID::new(0, 0)),
+                    &Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0)),
                     &Schema::new(vec![]),
                 ) {
                     match comp_expr.get_comp_type() {
@@ -295,11 +295,11 @@ impl IndexScanExecutor {
 
         let start_tuple = final_start
             .clone()
-            .map(|v| Arc::new(Tuple::new(&vec![v], &key_schema, RID::new(0, 0))));
+            .map(|v| Arc::new(Tuple::new(&[v], &key_schema, RID::new(0, 0))));
 
         let end_tuple = final_end
             .clone()
-            .map(|v| Arc::new(Tuple::new(&vec![v], &key_schema, RID::new(0, 0))));
+            .map(|v| Arc::new(Tuple::new(&[v], &key_schema, RID::new(0, 0))));
 
         debug!(
             "Scan bounds: start={:?} (incl={}), end={:?} (incl={})",

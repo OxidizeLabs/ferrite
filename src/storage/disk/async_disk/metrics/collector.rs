@@ -962,7 +962,7 @@ mod tests {
         
         // Health score should still be calculable
         let health_score = collector.calculate_health_score();
-        assert!(health_score >= 0 && health_score <= 100, "Health score should be valid even with no operations");
+        assert!(health_score <= 100, "Health score should be valid even with no operations");
     }
     
     #[tokio::test]

@@ -6,7 +6,6 @@ use crate::storage::page::page::{
     PageTrait, PageType, PageTypeId, PAGE_ID_OFFSET, PAGE_TYPE_OFFSET,
 };
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use log;
 use log::{debug, error};
 use std::any::Any;
 use std::mem::size_of;
@@ -29,7 +28,7 @@ use bincode::{Decode, Encode};
 ///
 /// Tuple format:
 /// | meta | data |
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TablePage {
     data: Box<[u8; DB_PAGE_SIZE as usize]>,
     header: TablePageHeader,
@@ -38,7 +37,7 @@ pub struct TablePage {
     pin_count: i32,
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Encode, Decode)]
 struct TablePageHeader {
     page_id: PageId,
     next_page_id: PageId,
@@ -217,7 +216,7 @@ impl TablePage {
 
     pub fn update_tuple(
         &mut self,
-        meta: &TupleMeta,
+        meta: TupleMeta,
         tuple: &Tuple,
         rid: RID,
     ) -> Result<(), PageError> {
@@ -236,8 +235,8 @@ impl TablePage {
 
         // Try to update in place if the new tuple size is smaller than or equal to current size
         if new_size <= current_size {
-            // Update the tuple metadata
-            self.tuple_info[tuple_id].2 = meta.clone();
+            // Update metadata in tuple_info
+            self.tuple_info[tuple_id].2 = meta;
 
             // Update the size to reflect the actual new size
             self.tuple_info[tuple_id].1 = new_size;
@@ -289,7 +288,7 @@ impl TablePage {
             }
 
             // Update tuple info with new location
-            self.tuple_info[tuple_id] = (new_offset, new_size, meta.clone());
+            self.tuple_info[tuple_id] = (new_offset, new_size, meta);
 
             // Write new tuple data
             let start = new_offset as usize;
@@ -305,7 +304,7 @@ impl TablePage {
     }
 
     /// Updates the metadata of a tuple.
-    pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) -> Result<(), String> {
+    pub fn update_tuple_meta(&mut self, meta: TupleMeta, rid: &RID) -> Result<(), String> {
         debug!(
             "Updating tuple meta for RID {:?}, current num_tuples: {}",
             rid, self.header.num_tuples
@@ -332,7 +331,7 @@ impl TablePage {
             self.tuple_info.len()
         );
 
-        let old_meta = &mut self.tuple_info[tuple_id].2;
+        let old_meta = &self.tuple_info[tuple_id].2;
         debug!(
             "Old meta - creator_txn: {}, commit_ts: {}, deleted: {}",
             old_meta.get_creator_txn_id(),
@@ -355,12 +354,13 @@ impl TablePage {
         } else if old_meta.is_deleted() && !meta.is_deleted() {
             self.header.num_deleted_tuples = self.header.num_deleted_tuples.saturating_sub(1);
             debug!(
-                "Decrementing num_deleted_tuples to {}",
+                "Decrimenting num_deleted_tuples to {}",
                 self.header.num_deleted_tuples
             );
         }
 
-        *old_meta = meta.clone();
+        // Simple copy since TupleMeta is now Copy
+        self.tuple_info[tuple_id].2 = meta;
         self.is_dirty = true;
 
         debug!(
@@ -413,7 +413,13 @@ impl TablePage {
 
         // Deserialize tuple data
         match bincode::decode_from_slice(&self.data[start..end], bincode::config::standard()) {
-            Ok((tuple, _)) => Ok((meta.clone(), tuple)),
+            Ok((tuple, _)) => {
+                // Create owned TupleMeta by copying fields instead of cloning
+                let mut owned_meta = TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
+                owned_meta.set_commit_timestamp(meta.get_commit_timestamp());
+                owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
+                Ok((owned_meta, tuple))
+            },
             Err(e) => Err(format!("Failed to deserialize tuple: {}", e)),
         }
     }
@@ -428,7 +434,12 @@ impl TablePage {
             ));
         }
 
-        Ok(self.tuple_info[tuple_id].2.clone())
+        // Create owned TupleMeta by copying fields instead of cloning
+        let meta = &self.tuple_info[tuple_id].2;
+        let mut owned_meta = TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
+        owned_meta.set_commit_timestamp(meta.get_commit_timestamp());
+        owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
+        Ok(owned_meta)
     }
 
     pub fn get_num_tuples(&self) -> u16 {
@@ -709,7 +720,7 @@ impl TablePage {
     /// - `rid`: RID of the tuple to update
     pub unsafe fn update_tuple_in_place_unsafe(
         &mut self,
-        meta: &TupleMeta,
+        meta: TupleMeta,
         tuple: &Tuple,
         rid: RID,
     ) -> Result<(), String> {
@@ -728,8 +739,8 @@ impl TablePage {
         // Get current tuple info
         let (offset, size, _) = self.tuple_info[tuple_id];
 
-        // Update the tuple metadata
-        self.tuple_info[tuple_id].2 = meta.clone();
+        // Update the tuple metadata (simple copy since TupleMeta is Copy)
+        self.tuple_info[tuple_id].2 = meta;
 
         // Write the new tuple data
         let start = offset as usize;
@@ -877,8 +888,9 @@ impl TablePage {
             tuple_data.len(),
             meta.get_creator_txn_id()
         );
+        // Simple copy since TupleMeta is Copy  
         self.tuple_info
-            .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
+            .push((tuple_offset, tuple_data.len() as u16, *meta));
 
         // Write tuple data to page
         let start = tuple_offset as usize;
@@ -961,8 +973,9 @@ impl TablePage {
             tuple_data.len(),
             meta.get_creator_txn_id()
         );
+        // Simple copy since TupleMeta is Copy  
         self.tuple_info
-            .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
+            .push((tuple_offset, tuple_data.len() as u16, *meta));
 
         // Write tuple data to page
         let start = tuple_offset as usize;
@@ -1145,7 +1158,7 @@ mod unit_tests {
         let mut new_meta = TupleMeta::new(456);
         new_meta.set_deleted(true);
 
-        page.update_tuple_meta(&new_meta, &tuple_rid_id).unwrap();
+        page.update_tuple_meta(new_meta, &tuple_rid_id).unwrap();
         let retrieved_meta = page.get_tuple_meta(&tuple_rid_id).unwrap();
 
         assert_eq!(
@@ -1211,7 +1224,7 @@ mod unit_tests {
         // Test with invalid RID
         let invalid_rid = RID::new(1, 999);
         unsafe {
-            match page.update_tuple_in_place_unsafe(&meta, &tuple, invalid_rid) {
+            match page.update_tuple_in_place_unsafe(meta, &tuple, invalid_rid) {
                 Ok(_) => panic!("Expected error for invalid RID"),
                 Err(err) => {
                     assert!(
@@ -1228,7 +1241,7 @@ mod unit_tests {
         let new_tuple = create_test_tuple(2).1;
 
         unsafe {
-            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, rid)
+            page.update_tuple_in_place_unsafe(new_meta, &new_tuple, rid)
                 .unwrap();
         }
 
@@ -1312,7 +1325,7 @@ mod unit_tests {
         let meta = TupleMeta::new(123);
 
         // Test updating invalid tuple metadata
-        match page.update_tuple_meta(&meta, &invalid_rid) {
+        match page.update_tuple_meta(meta, &invalid_rid) {
             Ok(_) => panic!("Expected error for invalid tuple meta update"),
             Err(err) => {
                 assert!(
@@ -1384,7 +1397,7 @@ mod tuple_operation_tests {
         let mut new_meta = TupleMeta::new(456);
         new_meta.set_deleted(true);
 
-        page.update_tuple_meta(&new_meta, &rid).unwrap();
+        page.update_tuple_meta(new_meta, &rid).unwrap();
         let retrieved_meta = page.get_tuple_meta(&rid).unwrap();
 
         assert_eq!(
@@ -1405,7 +1418,7 @@ mod tuple_operation_tests {
         let new_tuple = create_test_tuple(2).1;
 
         unsafe {
-            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, rid)
+            page.update_tuple_in_place_unsafe(new_meta, &new_tuple, rid)
                 .unwrap();
         }
 
@@ -1502,7 +1515,7 @@ mod error_handling_tests {
         let invalid_rid = RID::new(1, 100);
         let meta = TupleMeta::new(123);
         assert!(matches!(
-            page.update_tuple_meta(&meta, &invalid_rid),
+            page.update_tuple_meta(meta, &invalid_rid),
             Err(..)
         ));
     }
@@ -1515,7 +1528,7 @@ mod error_handling_tests {
 
         unsafe {
             assert!(matches!(
-                page.update_tuple_in_place_unsafe(&meta, &tuple, invalid_rid),
+                page.update_tuple_in_place_unsafe(meta, &tuple, invalid_rid),
                 Err(..)
             ));
         }
@@ -1826,7 +1839,7 @@ mod serialization_tests {
             let updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
             // Update the tuple - this is where the bug occurred
-            let result = page.update_tuple(&current_meta, &updated_tuple, rid);
+            let result = page.update_tuple(current_meta, &updated_tuple, rid);
             assert!(result.is_ok(), "Failed to update tuple {}: {:?}", i, result);
         }
 
@@ -1889,7 +1902,7 @@ mod serialization_tests {
         let updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
         // This update changes the tuple size significantly
-        let result = page.update_tuple(&meta, &updated_tuple, rid);
+        let result = page.update_tuple(meta, &updated_tuple, rid);
         assert!(
             result.is_ok(),
             "Failed to update tuple with size change: {:?}",
@@ -1951,7 +1964,7 @@ mod serialization_tests {
         let updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
         // This update makes the tuple smaller - this was causing corruption
-        let result = page.update_tuple(&meta, &updated_tuple, rid);
+        let result = page.update_tuple(meta, &updated_tuple, rid);
         assert!(
             result.is_ok(),
             "Failed to update tuple with smaller size: {:?}",
@@ -2062,13 +2075,13 @@ mod page_type_tests {
         // Update tuple with new values
         let new_values = vec![Value::new(1), Value::new("updated")];
         let new_tuple = Tuple::new(&new_values, &schema, rid);
-        page.update_tuple(&meta, &new_tuple, rid).unwrap();
+        page.update_tuple(meta, &new_tuple, rid).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);
 
         // Update tuple meta
         let mut new_meta = meta.clone();
         new_meta.set_deleted(true);
-        page.update_tuple_meta(&new_meta, &rid).unwrap();
+        page.update_tuple_meta(new_meta, &rid).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);
 
         // Verify the page type is still correct after all operations

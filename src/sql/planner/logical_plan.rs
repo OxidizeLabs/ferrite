@@ -3295,7 +3295,7 @@ mod tests {
             modifier: None,
             end: false,
         }];
-        let exception_statements = Some(vec![Statement::Rollback {
+        let _exception_statements = Some(vec![Statement::Rollback {
             chain: false,
             savepoint: None,
         }]);
@@ -3316,7 +3316,7 @@ mod tests {
                 read_only: ro,
                 transaction_modifier: tm,
                 statements: stmts,
-                exception_statements: ex_stmts,
+                exception_statements: _ex_stmts,
                 has_end_keyword: hek,
             } => {
                 assert_eq!(isolation_level, *level);

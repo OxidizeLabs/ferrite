@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use bincode::{Encode, Decode};
 
 // Every possible SQL type ID
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Encode, Decode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Encode, Decode, Default)]
 pub enum TypeId {
     Boolean,
     TinyInt,
@@ -25,15 +25,9 @@ pub enum TypeId {
     Array,
     Enum,
     Point,
+    #[default]
     Invalid,
     Struct,
-}
-
-// Implement the Default trait for TypeId
-impl Default for TypeId {
-    fn default() -> Self {
-        TypeId::Invalid
-    }
 }
 
 impl Hash for TypeId {

@@ -201,7 +201,7 @@ mod tests {
 
         let left_tuple = create_test_tuple();
         let right_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("Engineering")],
+            &[Value::new(1), Value::new("Engineering")],
             &right_schema,
             RID::new(2, 1),
         );

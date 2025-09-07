@@ -203,7 +203,7 @@ mod tests {
 
         // Insert test data
         let table_heap = table_info.get_table_heap();
-        let test_data = vec![(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
+        let test_data = [(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
 
         for (id, name, age) in test_data.iter() {
             let (meta, values) = create_test_values(*id, name, *age);

@@ -5,6 +5,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Debug)]
 pub struct InvalidType;
 
+impl Default for InvalidType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InvalidType {
     pub fn new() -> Self {
         InvalidType

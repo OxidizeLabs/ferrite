@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct UUIDType;
 
+impl Default for UUIDType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UUIDType {
     pub fn new() -> Self {
         UUIDType

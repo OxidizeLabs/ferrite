@@ -207,12 +207,12 @@ mod tests {
         ]);
 
         let left_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("John")],
+            &[Value::new(1), Value::new("John")],
             &left_schema,
             RID::new(0, 0),
         );
         let right_tuple = Tuple::new(
-            &vec![Value::new(25), Value::new("data")],
+            &[Value::new(25), Value::new("data")],
             &right_schema,
             RID::new(0, 0),
         );

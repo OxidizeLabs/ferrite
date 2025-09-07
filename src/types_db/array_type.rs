@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct ArrayType;
 
+impl Default for ArrayType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArrayType {
     pub fn new() -> Self {
         ArrayType

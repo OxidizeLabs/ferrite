@@ -1,9 +1,14 @@
 [package]
 name = "tkdb"
-description = "DBMS inspired by CMU 15-415/445 - Introduction to DBMS Course"
+description = "TokamakDB: a Rust OLTP database with NUMA-aware async execution and first-class observability"
 version = "0.1.0"
 authors = ["Thomas Korrison <thomas_korrison@hotmail.com>"]
 edition = "2024"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/tokamakdb/tokamakdb"
+keywords = ["database", "oltp", "rust", "concurrency", "numa"]
+categories = ["database-implementations", "asynchronous", "concurrency"]
 
 [dependencies]
 # Core runtime dependencies

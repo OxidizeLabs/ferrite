@@ -520,7 +520,7 @@ mod tests {
         let left_tuple_meta = Arc::new(TupleMeta::new(0));
 
         // Insert each tuple separately with proper Value objects
-        for (id, value) in vec![(1, "A"), (2, "B"), (3, "C")] {
+        for (id, value) in [(1, "A"), (2, "B"), (3, "C")] {
             let values = vec![Value::new(id), Value::new(value)];
             left_table
                 .insert_tuple_from_values(values, &left_schema, left_tuple_meta.clone())
@@ -537,7 +537,7 @@ mod tests {
         let right_tuple_meta = Arc::new(TupleMeta::new(0));
 
         // Insert each tuple separately with proper Value objects
-        for (id, data) in vec![(1, "X"), (2, "Y"), (4, "Z")] {
+        for (id, data) in [(1, "X"), (2, "Y"), (4, "Z")] {
             let values = vec![Value::new(id), Value::new(data)];
             right_table
                 .insert_tuple_from_values(values, &right_schema, right_tuple_meta.clone())
@@ -863,12 +863,12 @@ mod tests {
 
         // Create test tuples
         let left_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("A")],
+            &[Value::new(1), Value::new("A")],
             &left_schema,
             RID::new(0, 0),
         );
         let right_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("X")],
+            &[Value::new(1), Value::new("X")],
             &right_schema,
             RID::new(0, 0),
         );
@@ -937,7 +937,7 @@ mod tests {
 
         // Insert data into left table
         let left_tuple_meta = Arc::new(TupleMeta::new(0));
-        for (id, value) in vec![(1, "A"), (2, "B"), (3, "C")] {
+        for (id, value) in [(1, "A"), (2, "B"), (3, "C")] {
             let values = vec![Value::new(id), Value::new(value)];
             let result =
                 left_table.insert_tuple_from_values(values, &left_schema, left_tuple_meta.clone());
@@ -946,7 +946,7 @@ mod tests {
 
         // Insert data into right table
         let right_tuple_meta = Arc::new(TupleMeta::new(0));
-        for (id, data) in vec![(1, "X"), (2, "Y"), (4, "Z")] {
+        for (id, data) in [(1, "X"), (2, "Y"), (4, "Z")] {
             let values = vec![Value::new(id), Value::new(data)];
             let result = right_table.insert_tuple_from_values(
                 values,

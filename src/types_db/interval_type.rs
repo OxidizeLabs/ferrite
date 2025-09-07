@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct IntervalType;
 
+impl Default for IntervalType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IntervalType {
     pub fn new() -> Self {
         IntervalType
@@ -142,24 +148,24 @@ impl Type for IntervalType {
 
     fn multiply(&self, other: &Value) -> Result<Value, String> {
         match other.get_val() {
-            Val::Integer(r) => {
-                // Multiplying interval by a scalar
+            Val::Integer(_r) => {
+                // Multiplying empty interval by a scalar always gives zero interval
                 Ok(Value::new_with_type(
-                    Val::Interval(0 * (*r as i64)),
+                    Val::Interval(0),
                     TypeId::Interval,
                 ))
             }
-            Val::BigInt(r) => {
-                // Multiplying interval by a scalar
+            Val::BigInt(_r) => {
+                // Multiplying empty interval by a scalar always gives zero interval
                 Ok(Value::new_with_type(
-                    Val::Interval(0 * *r),
+                    Val::Interval(0),
                     TypeId::Interval,
                 ))
             }
-            Val::Decimal(r) => {
-                // Multiplying interval by a scalar
+            Val::Decimal(_r) => {
+                // Multiplying empty interval by a scalar always gives zero interval
                 Ok(Value::new_with_type(
-                    Val::Interval((0.0 * *r) as i64),
+                    Val::Interval(0),
                     TypeId::Interval,
                 ))
             }
@@ -173,31 +179,31 @@ impl Type for IntervalType {
             Val::Integer(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::BigInt(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::Decimal(r) if *r == 0.0 => Err("Division by zero".to_string()),
-            Val::Integer(r) => {
-                // Dividing interval by a scalar
+            Val::Integer(_r) => {
+                // Dividing empty interval by a scalar always gives zero interval
                 Ok(Value::new_with_type(
-                    Val::Interval(0 / (*r as i64)),
+                    Val::Interval(0),
                     TypeId::Interval,
                 ))
             }
-            Val::BigInt(r) => {
-                // Dividing interval by a scalar
+            Val::BigInt(_r) => {
+                // Dividing empty interval by a scalar always gives zero interval
                 Ok(Value::new_with_type(
-                    Val::Interval(0 / *r),
+                    Val::Interval(0),
                     TypeId::Interval,
                 ))
             }
-            Val::Decimal(r) => {
-                // Dividing interval by a scalar
+            Val::Decimal(_r) => {
+                // Dividing empty interval by a scalar always gives zero interval
                 Ok(Value::new_with_type(
-                    Val::Interval((0.0 / *r) as i64),
+                    Val::Interval(0),
                     TypeId::Interval,
                 ))
             }
             Val::Interval(r) if *r == 0 => Err("Division by zero".to_string()),
-            Val::Interval(r) => {
-                // Dividing one interval by another (returns a scalar)
-                Ok(Value::new(0 / *r))
+            Val::Interval(_r) => {
+                // Dividing empty interval by another interval gives zero scalar
+                Ok(Value::new(0))
             }
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot divide Interval by non-numeric type".to_string()),
@@ -208,12 +214,13 @@ impl Type for IntervalType {
         match other.get_val() {
             Val::Integer(r) if *r == 0 => Value::new(Val::Null),
             Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
-            Val::Integer(r) => {
-                Value::new_with_type(Val::Interval(0 % (*r as i64)), TypeId::Interval)
+            Val::Integer(_r) => {
+                // Modulo of empty interval always gives zero interval
+                Value::new_with_type(Val::Interval(0), TypeId::Interval)
             }
-            Val::BigInt(r) => Value::new_with_type(Val::Interval(0 % *r), TypeId::Interval),
+            Val::BigInt(_r) => Value::new_with_type(Val::Interval(0), TypeId::Interval),
             Val::Interval(r) if *r == 0 => Value::new(Val::Null),
-            Val::Interval(r) => Value::new_with_type(Val::Interval(0 % *r), TypeId::Interval),
+            Val::Interval(_r) => Value::new_with_type(Val::Interval(0), TypeId::Interval),
             _ => Value::new(Val::Null),
         }
     }

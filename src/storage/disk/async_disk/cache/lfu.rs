@@ -178,7 +178,6 @@
 /// - **Tie Breaking**: Non-deterministic when multiple items have minimum frequency
 /// - **Zero Capacity**: Supported - rejects all insertions
 /// - **Memory Efficiency**: Single HashMap reduces allocations vs. separate frequency tracking
-
 use std::collections::HashMap;
 use std::hash::Hash;
 use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
@@ -582,7 +581,7 @@ mod tests {
                 
                 // Insert items and verify consistency
                 let keys = vec!["key1", "key2", "key3"];
-                let values = vec![100, 200, 300];
+                let values = [100, 200, 300];
                 
                 for (i, (&key, &value)) in keys.iter().zip(values.iter()).enumerate() {
                     cache.insert(key.to_string(), value);

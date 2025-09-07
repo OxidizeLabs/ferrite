@@ -163,7 +163,7 @@ impl PageTrait for BasicPage {
         self.data[offset..offset + new_data.len()].copy_from_slice(new_data);
 
         // Always preserve the page type byte at PAGE_TYPE_OFFSET
-        if offset <= PAGE_TYPE_OFFSET && offset + new_data.len() > PAGE_TYPE_OFFSET {
+        if offset == 0 && !new_data.is_empty() {
             self.data[PAGE_TYPE_OFFSET] = Self::TYPE_ID.to_u8();
         }
 

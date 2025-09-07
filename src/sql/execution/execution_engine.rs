@@ -590,7 +590,7 @@ impl ExecutionEngine {
     }
 }
 
-#[cfg(all(test, feature = "engine_inline_tests"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
@@ -783,7 +783,7 @@ mod tests {
             self.rows.push(values);
         }
 
-        fn write_message(&mut self, message: &str) {
+        fn write_message(&mut self, _message: &str) {
             todo!()
         }
     }

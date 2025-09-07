@@ -87,7 +87,6 @@ use std::{fmt, thread};
 /// If a lock is granted to a transaction, the lock manager should update its lock sets appropriately (check `transaction.rs`).
 ///
 /// Consider which type of lock to directly apply on the table when implementing the executor later.
-
 /// [UNLOCK_NOTE]
 ///
 /// # General Behavior
@@ -1196,7 +1195,7 @@ mod tests {
 
         #[test]
         fn test_lock_compatibility_matrix() {
-            let lock_modes = vec![
+            let lock_modes = [
                 LockMode::IntentionShared,
                 LockMode::IntentionExclusive,
                 LockMode::Shared,

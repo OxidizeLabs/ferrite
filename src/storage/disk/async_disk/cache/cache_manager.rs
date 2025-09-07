@@ -1429,10 +1429,11 @@ mod tests {
         assert_eq!(enhanced_stats.warm_cache_algorithm, "LFU");
         assert_eq!(enhanced_stats.cold_cache_algorithm, "FIFO");
 
-        // Verify basic stats are included
-        assert!(enhanced_stats.basic_stats.hot_cache_used >= 0);
-        assert!(enhanced_stats.basic_stats.warm_cache_used >= 0);
-        assert!(enhanced_stats.basic_stats.cold_cache_used >= 0);
+        // Verify basic stats are included (values are unsigned, so always >= 0)
+        // Just verify they're accessible without panicking
+        let _ = enhanced_stats.basic_stats.hot_cache_used;
+        let _ = enhanced_stats.basic_stats.warm_cache_used;
+        let _ = enhanced_stats.basic_stats.cold_cache_used;
     }
 
     #[test]
@@ -1487,9 +1488,10 @@ mod tests {
 
         // Verify cache is still functional after specialized maintenance
         let stats = cache_manager.get_cache_statistics();
-        assert!(stats.hot_cache_used >= 0);
-        assert!(stats.warm_cache_used >= 0);
-        assert!(stats.cold_cache_used >= 0);
+        // Values are unsigned, so always >= 0 - just verify they're accessible
+        let _ = stats.hot_cache_used;
+        let _ = stats.warm_cache_used;
+        let _ = stats.cold_cache_used;
     }
 
     #[test]
@@ -1543,7 +1545,8 @@ mod tests {
 
         // Memory pressure and admission control
         cache_manager.update_memory_pressure();
-        assert!(cache_manager.get_memory_pressure() >= 0);
+        // Memory pressure is unsigned, so always >= 0 - just verify it's accessible
+        let _ = cache_manager.get_memory_pressure();
         assert!(cache_manager.get_admission_rate() > 0);
 
         // Statistics
