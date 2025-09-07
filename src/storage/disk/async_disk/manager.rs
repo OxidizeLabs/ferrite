@@ -826,7 +826,7 @@ impl AsyncDiskManager {
         output.push_str(&format!("tkdb_config_cache_size_mb {}\n", self.config.cache_size_mb));
         
         // Basic metrics
-        output.push_str(&"# HELP tkdb_read_operations Total number of read operations\n".to_string());
+        output.push_str("# HELP tkdb_read_operations Total number of read operations\n");
         output.push_str("# TYPE tkdb_read_operations counter\n");
         output.push_str(&format!("tkdb_read_operations {}\n", metrics.retry_count));
         
