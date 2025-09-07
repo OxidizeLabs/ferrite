@@ -189,7 +189,7 @@ impl TransactionManager {
                         // Only mark tuples created/modified by this transaction
                         if meta.get_creator_txn_id() == txn.get_transaction_id() {
                             meta.set_commit_timestamp(txn.commit_ts());
-                            if let Err(e) = page.update_tuple_meta(&meta, &rid) {
+                            if let Err(e) = page.update_tuple_meta(meta, &rid) {
                                 log::error!(
                                     "Failed to update commit timestamp for RID {:?} in table {}: {}",
                                     rid, table_oid, e
@@ -327,7 +327,7 @@ impl TransactionManager {
                             // First update the metadata to unmark the deletion
                             {
                                 let mut page = page_guard.write();
-                                if let Err(e) = page.update_tuple_meta(&meta, &original_rid) {
+                                if let Err(e) = page.update_tuple_meta(meta, &original_rid) {
                                     log::error!("Failed to update tuple metadata during restore: {}", e);
                                     continue;
                                 }
@@ -391,7 +391,7 @@ impl TransactionManager {
                     {
                         let mut page = page_guard.write();
                         if let Ok((_, _)) = page.get_tuple(&rid, true) {
-                            if let Err(e) = page.update_tuple_meta(&meta, &rid) {
+                            if let Err(e) = page.update_tuple_meta(meta, &rid) {
                                 log::error!("Failed to mark tuple as deleted: {}", e);
                             }
                         }
@@ -997,7 +997,7 @@ mod tests {
             let verify_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let verify_ctx = Arc::new(TransactionContext::new(
+            let _verify_ctx = Arc::new(TransactionContext::new(
                 verify_txn.clone(),
                 ctx.lock_manager(),
                 ctx.txn_manager(),
@@ -1188,8 +1188,8 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager());
-            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+            let _ = ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await;
+            let _ = ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await;
         }
 
         #[tokio::test]
@@ -1324,8 +1324,8 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager()
-                .commit(reader_txn, ctx.buffer_pool_manager());
+            let _ = ctx.txn_manager()
+                .commit(reader_txn, ctx.buffer_pool_manager()).await;
         }
 
         #[tokio::test]
@@ -1386,7 +1386,7 @@ mod tests {
 
             // Now txn2 should be able to see the tuple
             let read_after_commit = txn_table_heap.get_tuple(rid, txn_ctx2.clone());
-            if let Ok((meta, tuple)) = read_after_commit {
+            if let Ok((_meta, tuple)) = read_after_commit {
                 assert_eq!(tuple.get_values(), values.as_slice());
             } else {
                 log::debug!(
@@ -1468,7 +1468,7 @@ mod tests {
             let setup_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let setup_txn_id = setup_txn.get_transaction_id();
+            let _setup_txn_id = setup_txn.get_transaction_id();
             let setup_ctx = Arc::new(TransactionContext::new(
                 setup_txn.clone(),
                 ctx.lock_manager(),
@@ -1534,7 +1534,7 @@ mod tests {
                 let reader_rids = rids_arc.clone();
                 let reader_barrier = barrier.clone();
 
-                let handle = thread::spawn(move || {
+                let handle = thread::spawn(async move || {
                     // Wait for all threads to be ready
                     reader_barrier.wait();
 
@@ -1573,7 +1573,7 @@ mod tests {
                     }
 
                     // Commit the reader transaction
-                    reader_txn_manager.commit(txn, reader_buffer_pool);
+                    let _ = reader_txn_manager.commit(txn, reader_buffer_pool).await;
 
                     successful_reads
                 });
@@ -1592,7 +1592,7 @@ mod tests {
                 let writer_barrier = barrier.clone();
                 let writer_rid = rids_arc[i];
 
-                let handle = thread::spawn(move || {
+                let handle = thread::spawn(async move || {
                     // Wait for all threads to be ready
                     writer_barrier.wait();
 
@@ -1636,7 +1636,7 @@ mod tests {
                     }
 
                     // Commit the transaction
-                    writer_txn_manager.commit(txn, writer_buffer_pool);
+                    let _ = writer_txn_manager.commit(txn, writer_buffer_pool).await;
 
                     1
                 });
@@ -1680,7 +1680,7 @@ mod tests {
             let setup_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let setup_txn_id = setup_txn.get_transaction_id();
+            let _setup_txn_id = setup_txn.get_transaction_id();
             let setup_ctx = Arc::new(TransactionContext::new(
                 setup_txn.clone(),
                 ctx.lock_manager(),
@@ -1942,7 +1942,7 @@ mod tests {
             let setup_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let setup_txn_id = setup_txn.get_transaction_id();
+            let _setup_txn_id = setup_txn.get_transaction_id();
             let setup_ctx = Arc::new(TransactionContext::new(
                 setup_txn.clone(),
                 ctx.lock_manager(),
@@ -2320,7 +2320,7 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+            let _ = ctx.txn_manager().commit(txn, ctx.buffer_pool_manager()).await;
         }
 
         #[tokio::test]
@@ -2506,7 +2506,7 @@ mod tests {
                     "Skipping part of test_multiple_versions: second update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+                let _ = ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await;
                 return;
             }
 
@@ -2539,7 +2539,7 @@ mod tests {
                     "Skipping part of test_multiple_versions: third update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager());
+                let _ = ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager()).await;
                 return;
             }
 
@@ -2571,8 +2571,8 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager());
-            ctx.txn_manager().commit(txn4, ctx.buffer_pool_manager());
+            let _ = ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager()).await;
+            let _ = ctx.txn_manager().commit(txn4, ctx.buffer_pool_manager()).await;
         }
 
         #[tokio::test]
@@ -3518,7 +3518,7 @@ mod tests {
             let txn1 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn1_id = txn1.get_transaction_id();
+            let _txn1_id = txn1.get_transaction_id();
             let txn1_read_ts = txn1.read_ts();
 
             // The watermark should still be the initial value because only one transaction exists
@@ -3532,7 +3532,7 @@ mod tests {
             let txn2 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn2_id = txn2.get_transaction_id();
+            let _txn2_id = txn2.get_transaction_id();
             let txn2_read_ts = txn2.read_ts();
 
             // The watermark should still be the minimum of all active transaction timestamps
@@ -3589,7 +3589,7 @@ mod tests {
             let txn2 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn2_id = txn2.get_transaction_id();
+            let _txn2_id = txn2.get_transaction_id();
 
             // Do some work (insert a tuple)
             match ctx.insert_tuple_from_values(
@@ -3657,7 +3657,7 @@ mod tests {
             let txn4 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn4_id = txn4.get_transaction_id();
+            let _txn4_id = txn4.get_transaction_id();
 
             // Try to set state to Tainted (might not be supported in all implementations)
             txn4.set_state(TransactionState::Tainted);
@@ -3694,7 +3694,7 @@ mod tests {
             let txn1 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn1_id = txn1.get_transaction_id();
+            let _txn1_id = txn1.get_transaction_id();
 
             // Insert a tuple
             let rid1 = match ctx.insert_tuple_from_values(
@@ -3725,7 +3725,7 @@ mod tests {
             let txn2 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn2_id = txn2.get_transaction_id();
+            let _txn2_id = txn2.get_transaction_id();
 
             let rid2 = match ctx.insert_tuple_from_values(
                 &table_heap,
@@ -3764,12 +3764,12 @@ mod tests {
             // we'll test that after "recovery":
 
             // 1. We can still access committed data from before the "crash"
-            if let Some(rid) = rid1 {
+            if let Some(_rid) = rid1 {
                 // Create a transaction context
                 let new_txn = new_ctx
                     .begin_transaction(IsolationLevel::ReadCommitted)
                     .unwrap();
-                let new_txn_ctx = Arc::new(TransactionContext::new(
+                let _new_txn_ctx = Arc::new(TransactionContext::new(
                     new_txn.clone(),
                     new_ctx.lock_manager(),
                     new_ctx.txn_manager(),
@@ -3789,7 +3789,7 @@ mod tests {
             }
 
             // 2. Uncommitted changes from interrupted transactions should be rolled back
-            if let Some(rid) = rid2 {
+            if let Some(_rid) = rid2 {
                 // In a real recovery scenario, the system would detect txn2 as interrupted
                 // and roll back its changes, making rid2 either invisible or reset to a prior state
                 log::debug!("In a real recovery test: Uncommitted changes would be rolled back");
@@ -3967,7 +3967,7 @@ mod tests {
             // First read
             let first_read_rc = txn_table_heap.get_tuple(rid, txn_ctx_rc.clone());
             assert!(first_read_rc.is_ok(), "First read should succeed");
-            let (_, first_tuple_rc) = first_read_rc.unwrap();
+            let (_, _first_tuple_rc) = first_read_rc.unwrap();
 
             // Start another transaction to modify the tuple
             let modifier_txn = ctx

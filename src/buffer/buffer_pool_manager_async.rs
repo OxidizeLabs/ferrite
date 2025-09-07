@@ -593,7 +593,7 @@ impl BufferPoolManager {
     }
 
     /// Returns a read guard to the replacer.
-    pub fn get_replacer(&self) -> Option<RwLockReadGuard<LRUKReplacer>> {
+    pub fn get_replacer(&self) -> Option<RwLockReadGuard<'_, LRUKReplacer>> {
         Some(self.replacer.read())
     }
 
@@ -1236,7 +1236,7 @@ impl BufferPoolManager {
     /// The result of the operation wrapped in a Result for error handling
     /// 
     /// # Example
-    /// ```rust
+    /// ```rust,no_run
     /// let result = bpm.run_async_operation("flush_specific_page", async {
     ///     bpm.flush_page_async(page_id).await
     /// }).await?;
@@ -1247,7 +1247,7 @@ impl BufferPoolManager {
         operation: F,
     ) -> Result<T, String>
     where
-        F: std::future::Future<Output = Result<T, String>>,
+        F: Future<Output = Result<T, String>>,
     {
         trace!("Starting async operation: {}", operation_name);
         let start_time = std::time::Instant::now();

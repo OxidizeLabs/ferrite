@@ -231,15 +231,14 @@ impl TransactionalTableHeap {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
                 
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>() {
                         if let Ok(val) = value.as_decimal() {
                             return Ok(val >= threshold);
                         } else if let Ok(val) = value.as_integer() {
                             return Ok(val as f64 >= threshold);
                         }
                     }
-                }
             }
         }
 
@@ -249,15 +248,14 @@ impl TransactionalTableHeap {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
                 
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>() {
                         if let Ok(val) = value.as_decimal() {
                             return Ok(val <= threshold);
                         } else if let Ok(val) = value.as_integer() {
                             return Ok(val as f64 <= threshold);
                         }
                     }
-                }
             }
         }
 
@@ -267,15 +265,14 @@ impl TransactionalTableHeap {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
                 
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>() {
                         if let Ok(val) = value.as_decimal() {
                             return Ok(val > threshold);
                         } else if let Ok(val) = value.as_integer() {
                             return Ok(val as f64 > threshold);
                         }
                     }
-                }
             }
         }
 
@@ -285,15 +282,14 @@ impl TransactionalTableHeap {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
                 
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>() {
                         if let Ok(val) = value.as_decimal() {
                             return Ok(val < threshold);
                         } else if let Ok(val) = value.as_integer() {
                             return Ok((val as f64) < threshold);
                         }
                     }
-                }
             }
         }
 
@@ -303,15 +299,14 @@ impl TransactionalTableHeap {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
                 
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>() {
                         if let Ok(val) = value.as_decimal() {
                             return Ok((val - threshold).abs() < f64::EPSILON);
                         } else if let Ok(val) = value.as_integer() {
                             return Ok((val as f64 - threshold).abs() < f64::EPSILON);
                         }
                     }
-                }
             }
         }
 
@@ -360,14 +355,13 @@ impl TransactionalTableHeap {
         }
 
         // Check PRIMARY KEY constraint if there are primary key columns
-        if !primary_key_values.is_empty() {
-            if self.check_primary_key_violation(&primary_key_values, &primary_key_columns, schema, txn_ctx)? {
+        if !primary_key_values.is_empty()
+            && self.check_primary_key_violation(&primary_key_values, &primary_key_columns, schema, txn_ctx)? {
                 return Err(format!(
                     "Primary key violation: duplicate key value for columns ({})",
                     primary_key_columns.join(", ")
                 ));
             }
-        }
 
         // Check UNIQUE constraints for non-primary key columns
         for (column_name, value) in unique_constraints {

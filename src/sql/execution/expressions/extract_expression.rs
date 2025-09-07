@@ -158,7 +158,7 @@ mod tests {
     fn create_test_tuple(timestamp: &str) -> (Tuple, Schema) {
         let schema = Schema::new(vec![Column::new("ts", TypeId::Timestamp)]);
         let tuple = Tuple::new(
-            &vec![Value::new(timestamp)],
+            &[Value::new(timestamp)],
             &schema,
             crate::common::rid::RID::new(0, 0),
         );

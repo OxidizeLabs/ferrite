@@ -293,8 +293,8 @@ mod tests {
         let schema1 = Schema::new(vec![Column::new("left_int", TypeId::Integer)]);
         let schema2 = Schema::new(vec![Column::new("right_str", TypeId::VarChar)]);
 
-        let left_tuple = Tuple::new(&vec![Value::new(123)], &schema1, RID::new(0, 0));
-        let right_tuple = Tuple::new(&vec![Value::new("right value")], &schema2, RID::new(0, 0));
+        let left_tuple = Tuple::new(&[Value::new(123)], &schema1, RID::new(0, 0));
+        let right_tuple = Tuple::new(&[Value::new("right value")], &schema2, RID::new(0, 0));
 
         let left_col = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,

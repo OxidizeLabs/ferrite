@@ -772,7 +772,7 @@ mod unit_tests {
 
     #[test]
     fn test_column_type_transitions() {
-        let types = vec![
+        let types = [
             TypeId::Boolean,
             TypeId::TinyInt,
             TypeId::SmallInt,

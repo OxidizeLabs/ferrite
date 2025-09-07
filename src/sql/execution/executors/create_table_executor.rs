@@ -606,7 +606,7 @@ mod tests {
 
         assert_eq!(table_schema.get_columns().len(), 6);
 
-        let expected_types = vec![
+        let expected_types = [
             TypeId::Integer,
             TypeId::VarChar,
             TypeId::Decimal,

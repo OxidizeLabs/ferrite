@@ -674,7 +674,7 @@ mod tests {
         let (executor, db_path, log_path) = create_test_executor().await;
 
         // Write different patterns to multiple pages
-        let patterns = vec![
+        let patterns = [
             vec![0x00u8; 4096],
             vec![0xFFu8; 4096],
             vec![0x55u8; 4096],

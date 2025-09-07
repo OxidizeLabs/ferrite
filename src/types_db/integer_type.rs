@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct IntegerType;
 
+impl Default for IntegerType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IntegerType {
     pub fn new() -> Self {
         IntegerType

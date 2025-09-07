@@ -991,11 +991,9 @@ mod tests {
             // Flush interval is 10ms
 
             // Check that persistent LSN has been updated
-            let persistent_lsn = ctx.log_manager.get_persistent_lsn();
-            assert!(
-                persistent_lsn >= 0,
-                "Persistent LSN should be updated by periodic flush"
-            );
+            let _persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            // Persistent LSN should be updated by periodic flush
+            // Note: LSN is unsigned, so >= 0 check is not needed
 
             ctx.log_manager.shut_down();
         }
@@ -1024,7 +1022,7 @@ mod tests {
             let commit_lsn = ctx.log_manager.append_log_record(commit_record);
 
             // Persistent LSN should be updated immediately after commit
-            let persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            let _persistent_lsn = ctx.log_manager.get_persistent_lsn();
             assert!(
                 persistent_lsn >= commit_lsn,
                 "Persistent LSN {} should be >= commit LSN {}",
@@ -1065,7 +1063,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
 
             // Check that persistent LSN has been updated
-            let persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            let _persistent_lsn = ctx.log_manager.get_persistent_lsn();
             assert_ne!(persistent_lsn, INVALID_LSN, "Persistent LSN should be updated after buffer fills up");
 
             ctx.log_manager.shut_down();
@@ -1103,7 +1101,7 @@ mod tests {
 
             // Perform several batches of appends with delays between
             for batch in 0..3 {
-                let start_persistent_lsn = ctx.log_manager.get_persistent_lsn();
+                let _start_persistent_lsn = ctx.log_manager.get_persistent_lsn();
 
                 // Append a batch of records
                 let mut last_batch_lsn = INVALID_LSN;
@@ -1268,7 +1266,7 @@ mod tests {
             let commit_lsn = ctx.log_manager.append_log_record(commit_record);
 
             // Persistent LSN should include the commit
-            let persistent_lsn = ctx.log_manager.get_persistent_lsn();
+            let _persistent_lsn = ctx.log_manager.get_persistent_lsn();
             assert!(
                 persistent_lsn >= commit_lsn,
                 "Persistent LSN {} should be >= commit LSN {}",

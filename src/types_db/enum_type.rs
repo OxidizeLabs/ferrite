@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct EnumType;
 
+impl Default for EnumType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnumType {
     pub fn new() -> Self {
         EnumType

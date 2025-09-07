@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct PointType;
 
+impl Default for PointType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PointType {
     pub fn new() -> Self {
         PointType

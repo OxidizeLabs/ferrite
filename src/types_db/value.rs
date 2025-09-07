@@ -1091,12 +1091,11 @@ impl Value {
             if let Val::Vector(field_names) = &struct_data[0].value_ {
                 // Find the index of the field name
                 for (i, name_value) in field_names.iter().enumerate() {
-                    if let Val::VarLen(name) | Val::ConstLen(name) = &name_value.value_ {
-                        if name == field_name {
+                    if let Val::VarLen(name) | Val::ConstLen(name) = &name_value.value_
+                        && name == field_name {
                             // Return the value at the corresponding index (offset by 1)
                             return struct_data.get(i + 1);
                         }
-                    }
                 }
             }
         }
@@ -1110,9 +1109,9 @@ impl Value {
 
     /// Gets all field names of the struct
     pub fn get_struct_field_names(&self) -> Vec<String> {
-        if let Some(struct_data) = &self.struct_data {
-            if let Some(first) = struct_data.first() {
-                if let Val::Vector(field_names) = &first.value_ {
+        if let Some(struct_data) = &self.struct_data
+            && let Some(first) = struct_data.first()
+                && let Val::Vector(field_names) = &first.value_ {
                     return field_names
                         .iter()
                         .filter_map(|v| {
@@ -1124,8 +1123,6 @@ impl Value {
                         })
                         .collect();
                 }
-            }
-        }
         Vec::new()
     }
 
@@ -1207,12 +1204,11 @@ impl Value {
     ) -> String {
         match self.type_id_ {
             TypeId::Decimal => {
-                if let Some(col) = column {
-                    if let (Some(_precision), Some(scale)) = (col.get_precision(), col.get_scale())
+                if let Some(col) = column
+                    && let (Some(_precision), Some(scale)) = (col.get_precision(), col.get_scale())
                     {
                         return self.format_decimal_with_scale(scale);
                     }
-                }
                 // Fall back to default formatting
                 ToString::to_string(self)
             }
@@ -2403,7 +2399,7 @@ mod unit_tests {
     #[test]
     fn test_value_display() {
         let int_value = Value::new(42);
-        let float_value = Value::new(3.14);
+        let float_value = Value::new(std::f64::consts::PI);
         let bool_value = Value::new(true);
         let string_value = Value::new("Hello");
         let vector_value =
@@ -2645,9 +2641,9 @@ mod basic_behavior_tests {
 
     #[test]
     fn test_decimal_comparisons() {
-        let dec1 = Value::new(3.14);
-        let dec2 = Value::new(3.14);
-        let dec3 = Value::new(2.718);
+        let dec1 = Value::new(std::f64::consts::PI);
+        let dec2 = Value::new(std::f64::consts::PI);
+        let dec3 = Value::new(std::f64::consts::E);
 
         assert_eq!(dec1.compare_equals(&dec2), CmpBool::CmpTrue);
         assert_eq!(dec1.compare_not_equals(&dec3), CmpBool::CmpTrue);
@@ -2804,14 +2800,14 @@ mod edge_cases {
             Value::new(1),
             Value::new("string"),
             Value::new(true),
-            Value::new(3.14),
+            Value::new(std::f64::consts::PI),
         ]);
 
         let same_mixed = Value::new_vector(vec![
             Value::new(1),
             Value::new("string"),
             Value::new(true),
-            Value::new(3.14),
+            Value::new(std::f64::consts::PI),
         ]);
 
         assert_eq!(mixed.compare_equals(&same_mixed), CmpBool::CmpTrue);
@@ -2966,7 +2962,7 @@ mod comprehensive_cast_tests {
             &Val::Boolean(true)
         );
         assert_eq!(
-            Value::new(3.14f64)
+            Value::new(std::f64::consts::PI)
                 .cast_to(TypeId::Boolean)
                 .unwrap()
                 .get_val(),
@@ -3035,7 +3031,7 @@ mod comprehensive_cast_tests {
         );
         assert_eq!(
             float_str.cast_to(TypeId::Decimal).unwrap().get_val(),
-            &Val::Decimal(3.14)
+            &Val::Decimal(std::f64::consts::PI)
         );
         assert_eq!(
             bool_str_true.cast_to(TypeId::Boolean).unwrap().get_val(),
@@ -3250,7 +3246,7 @@ mod comprehensive_cast_tests {
 
     #[test]
     fn test_point_casts() {
-        let point_val = Value::new_with_type(Val::Point(3.14, 2.71), TypeId::Point);
+        let point_val = Value::new_with_type(Val::Point(std::f64::consts::PI, 2.71), TypeId::Point);
 
         // Point to string
         assert_eq!(

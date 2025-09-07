@@ -7,7 +7,7 @@ use tkdb::concurrency::transaction::IsolationLevel;
 #[tokio::test]
 async fn recovery_smoke_reopen_triggers_recovery() {
     init_test_logger();
-    let mut cfg: DBConfig = temp_db_config();
+    let cfg: DBConfig = temp_db_config();
 
     {
         let db = DBInstance::new(cfg.clone()).await.unwrap();

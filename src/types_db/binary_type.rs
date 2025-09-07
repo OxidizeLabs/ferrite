@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct BinaryType;
 
+impl Default for BinaryType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BinaryType {
     pub fn new() -> Self {
         BinaryType

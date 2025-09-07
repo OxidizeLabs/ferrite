@@ -5,6 +5,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Debug)]
 pub struct DecimalType;
 
+impl Default for DecimalType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DecimalType {
     pub fn new() -> Self {
         DecimalType

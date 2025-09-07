@@ -5,6 +5,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct TinyIntType;
 
+impl Default for TinyIntType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TinyIntType {
     pub fn new() -> Self {
         TinyIntType

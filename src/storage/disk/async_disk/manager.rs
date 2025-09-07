@@ -1102,8 +1102,8 @@ mod tests {
     async fn test_batch_operations() {
         let (manager, _temp_dir) = create_test_manager().await;
         
-        let page_ids = vec![1, 2, 3, 4, 5];
-        let test_data = vec![
+        let page_ids = [1, 2, 3, 4, 5];
+        let test_data = [
             vec![1, 2, 3, 4],
             vec![5, 6, 7, 8],
             vec![9, 10, 11, 12],
@@ -1189,8 +1189,8 @@ mod tests {
     async fn test_flush_operations() {
         let (mut manager, _temp_dir) = create_test_manager().await;
         
-        let page_ids = vec![1, 2, 3];
-        let test_data = vec![
+        let page_ids = [1, 2, 3];
+        let test_data = [
             vec![1, 2, 3, 4],
             vec![5, 6, 7, 8],
             vec![9, 10, 11, 12],

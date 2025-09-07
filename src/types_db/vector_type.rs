@@ -8,6 +8,12 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorType;
 
+impl Default for VectorType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VectorType {
     /// Creates a new `VectorType` instance.
     pub fn new() -> Self {

@@ -646,7 +646,7 @@ mod tests {
             assert!(result.is_ok(), "Recovery should succeed on empty log");
 
             // Analyze the log directly to check results
-            let (txn_table, dirty_page_table, start_redo_lsn) =
+            let (txn_table, dirty_page_table, _start_redo_lsn) =
                 ctx.recovery_manager.analyze_log().unwrap();
 
             // Verify no active transactions found
@@ -895,7 +895,7 @@ mod tests {
                 .write_update_record(&txn2, rid2, old_tuple2, new_tuple2);
             txn2.set_prev_lsn(update_lsn2);
 
-            let abort_lsn2 = ctx.wal_manager.write_abort_record(&txn2);
+            let _abort_lsn2 = ctx.wal_manager.write_abort_record(&txn2);
 
             // Transaction 3: Incomplete (simulating crash during execution)
             let txn3 = ctx.create_test_transaction(3);

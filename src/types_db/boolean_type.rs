@@ -5,6 +5,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Debug)]
 pub struct BooleanType;
 
+impl Default for BooleanType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BooleanType {
     pub fn new() -> Self {
         BooleanType
@@ -32,7 +38,7 @@ impl Type for BooleanType {
 
     fn compare_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(true == *r),
+            Val::Boolean(r) => CmpBool::from(*r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -48,7 +54,7 @@ impl Type for BooleanType {
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(!true && *r), // false < true
+            Val::Boolean(r) => CmpBool::from(!*r), // false < true
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -56,7 +62,7 @@ impl Type for BooleanType {
 
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(!true || *r), // false <= true or true <= true
+            Val::Boolean(r) => CmpBool::CmpTrue, // false <= true or true <= true (always true)
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -64,7 +70,7 @@ impl Type for BooleanType {
 
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(true && !*r), // true > false
+            Val::Boolean(r) => CmpBool::from(!*r), // true > false
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -72,7 +78,7 @@ impl Type for BooleanType {
 
     fn compare_greater_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(true || !*r), // true >= false or true >= true
+            Val::Boolean(r) => CmpBool::CmpTrue, // true >= false or true >= true (always true)
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -100,14 +106,14 @@ impl Type for BooleanType {
 
     fn min(&self, other: &Value) -> Value {
         match other.get_val() {
-            Val::Boolean(r) => Value::new(*r && true), // Logical AND for min
+            Val::Boolean(r) => Value::new(*r), // Logical AND for min
             _ => Value::new(Val::Null),
         }
     }
 
     fn max(&self, other: &Value) -> Value {
         match other.get_val() {
-            Val::Boolean(r) => Value::new(*r || true), // Logical OR for max
+            Val::Boolean(r) => Value::new(true), // Logical OR for max (always true)
             _ => Value::new(Val::Null),
         }
     }

@@ -103,7 +103,7 @@ impl InExpression {
                 Ok(Value::new(Val::Null))
             },
             // If the subquery returns a scalar value, convert it to a single-item list
-            _ => self.check_value_in_list(value, &vec![subquery_result]),
+            _ => self.check_value_in_list(value, &[subquery_result]),
         }
     }
 

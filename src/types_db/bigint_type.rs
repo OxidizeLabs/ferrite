@@ -4,6 +4,12 @@ use crate::types_db::value::{Val, Value};
 
 pub struct BigIntType;
 
+impl Default for BigIntType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BigIntType {
     pub fn new() -> Self {
         BigIntType

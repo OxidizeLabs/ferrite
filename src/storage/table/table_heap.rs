@@ -231,7 +231,7 @@ impl TableHeap {
             let page_guard = self.get_page(rid.get_page_id())?;
             let mut page = page_guard.write();
             return page
-                .update_tuple(&new_meta_arc, tuple, rid)
+                .update_tuple(*new_meta_arc, tuple, rid)
                 .map(|_| rid)
                 .map_err(|e| format!("Failed to update tuple: {}", e));
         }
@@ -239,7 +239,7 @@ impl TableHeap {
         // For non-transactional updates, get write lock and update
         let page_guard = self.get_page(rid.get_page_id())?;
         let mut page = page_guard.write();
-        page.update_tuple(&meta, tuple, rid)
+        page.update_tuple(*meta, tuple, rid)
             .map(|_| rid)
             .map_err(|e| format!("Failed to update tuple: {}", e))
     }
@@ -273,7 +273,7 @@ impl TableHeap {
         }
 
         // Now perform the update
-        page.update_tuple_meta(&meta, &rid)
+        page.update_tuple_meta(*meta, &rid)
             .map_err(|e| format!("Failed to update tuple meta: {}", e))
     }
 
@@ -749,12 +749,12 @@ impl TableHeap {
     }
 
     /// Acquires a read lock on the entire table
-    pub fn acquire_table_read_lock(&self) -> parking_lot::RwLockReadGuard<()> {
+    pub fn acquire_table_read_lock(&self) -> parking_lot::RwLockReadGuard<'_, ()> {
         self.latch.read()
     }
 
     /// Acquires a write lock on the entire table
-    pub fn acquire_table_write_lock(&self) -> parking_lot::RwLockWriteGuard<()> {
+    pub fn acquire_table_write_lock(&self) -> parking_lot::RwLockWriteGuard<'_, ()> {
         self.latch.write()
     }
 
@@ -814,7 +814,7 @@ impl TableHeap {
         let page_guard = self.get_page(rid.get_page_id())?;
         let mut page = page_guard.write();
 
-        page.update_tuple(&meta, tuple, rid)
+        page.update_tuple(*meta, tuple, rid)
             .map(|_| rid)
             .map_err(|e| format!("Failed to update tuple: {}", e))
     }
@@ -1207,7 +1207,7 @@ impl TupleStorage {
             .ok_or(PageError::NoPageReference)?;
 
         let mut page = page_guard.write();
-        page.update_tuple(meta, tuple, rid)
+        page.update_tuple(*meta, tuple, rid)
     }
 
     pub fn get_page(&self, page_id: PageId) -> Result<PageGuard<TablePage>, String> {

@@ -1,5 +1,5 @@
 use futures::future;
-use parking_lot::{RwLock, Mutex};
+use parking_lot::RwLock;
 use  tokio::sync::Mutex as AsyncMutex;
 use std::sync::Arc;
 use std::time::Duration;

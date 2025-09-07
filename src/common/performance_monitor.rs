@@ -414,7 +414,7 @@ pub fn analyze_bottlenecks() -> BottleneckAnalysis {
     let lock_score = analyze_lock_manager_performance();
     let mvcc_score = analyze_mvcc_performance();
     
-    let scores = vec![
+    let scores = [
         ("Buffer Pool", buffer_score),
         ("Disk I/O", disk_score),
         ("Lock Manager", lock_score),

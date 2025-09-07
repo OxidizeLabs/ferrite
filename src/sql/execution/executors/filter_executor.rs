@@ -257,7 +257,7 @@ impl FilterExecutor {
 
         // Create a tuple with just the aggregate value for evaluation
         let agg_schema = Schema::new(vec![agg_expr.get_return_type().clone()]);
-        let agg_tuple = Tuple::new(&vec![agg_value], &agg_schema, RID::new(0, 0));
+        let agg_tuple = Tuple::new(&[agg_value], &agg_schema, RID::new(0, 0));
 
         // Now evaluate the predicate on this aggregate tuple
         let predicate = filter_expr.get_predicate();

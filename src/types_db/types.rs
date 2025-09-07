@@ -530,7 +530,7 @@ mod type_behavior_tests {
     fn test_invalid_type_behavior() {
         let invalid_type = InvalidType;
         assert_eq!(invalid_type.get_type_id(), TypeId::Invalid);
-        assert_eq!(invalid_type.is_coercible_from(TypeId::Integer), false);
+        assert!(!invalid_type.is_coercible_from(TypeId::Integer));
         assert_eq!(invalid_type.to_string(&Value::from(1)), "INVALID");
         assert_eq!(
             InvalidType::get_min_value(TypeId::Invalid),

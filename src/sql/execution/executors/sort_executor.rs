@@ -297,7 +297,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Create mock data
-        let mock_data = vec![
+        let mock_data = [
             (1, "Alice", 25),
             (3, "Charlie", 35),
             (2, "Bob", 30),
@@ -375,7 +375,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Create mock data
-        let mock_data = vec![
+        let mock_data = [
             (1, "Alice", 25),
             (3, "Charlie", 35),
             (2, "Bob", 30),
@@ -453,7 +453,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Create test data with duplicate ages
-        let mock_data = vec![
+        let mock_data = [
             (1, "Alice", 30), // Should be second due to name ASC, age DESC
             (2, "Bob", 30),   // Should be first due to name ASC, age DESC  
             (3, "Charlie", 25),
@@ -551,7 +551,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Create mock data
-        let mock_data = vec![
+        let mock_data = [
             (1, "Alice", 25),
             (3, "Charlie", 35),
             (2, "Bob", 30),
@@ -631,7 +631,7 @@ mod tests {
         let schema = create_test_schema();
 
         // Create test data with duplicate ages
-        let mock_data = vec![
+        let mock_data = [
             (1, "Alice", 30), 
             (2, "Bob", 30),   
             (3, "Charlie", 25),

@@ -2963,14 +2963,14 @@ mod tests {
                 }
                 
                 // Verify we can traverse from head (most recent) to tail (least recent)
-                let expected_order = vec![5, 4, 3, 2, 1]; // Most recent to least recent
+                let expected_order = [5, 4, 3, 2, 1]; // Most recent to least recent
                 for (idx, &expected_key) in expected_order.iter().enumerate() {
                     assert_eq!(cache.recency_rank(&expected_key), Some(idx));
                 }
                 
                 // Access middle item and verify new order
                 cache.get(&3);
-                let new_expected_order = vec![3, 5, 4, 2, 1];
+                let new_expected_order = [3, 5, 4, 2, 1];
                 for (idx, &expected_key) in new_expected_order.iter().enumerate() {
                     assert_eq!(cache.recency_rank(&expected_key), Some(idx));
                 }
