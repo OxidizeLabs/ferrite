@@ -106,7 +106,7 @@ impl IOOperationExecutor {
     /// # Returns
     /// The page data as a vector of bytes
     async fn execute_read_page(&self, page_id: PageId) -> IoResult<Vec<u8>> {
-        let offset = (page_id as u64) * DB_PAGE_SIZE;
+        let offset = page_id * DB_PAGE_SIZE;
         let mut buffer = vec![0u8; DB_PAGE_SIZE as usize];
 
         let mut file = self.db_file.lock().await;
@@ -121,7 +121,7 @@ impl IOOperationExecutor {
     /// * `page_id` - The page identifier to write to
     /// * `data` - The page data to write
     async fn execute_write_page(&self, page_id: PageId, data: &[u8]) -> IoResult<()> {
-        let offset = (page_id as u64) * DB_PAGE_SIZE;
+        let offset = page_id * DB_PAGE_SIZE;
 
         let mut file = self.db_file.lock().await;
         

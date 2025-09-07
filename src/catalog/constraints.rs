@@ -38,6 +38,12 @@ pub struct ConstraintValidator {
     primary_key_values: HashMap<String, Value>,
 }
 
+impl Default for ConstraintValidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConstraintValidator {
     pub fn new() -> Self {
         Self {

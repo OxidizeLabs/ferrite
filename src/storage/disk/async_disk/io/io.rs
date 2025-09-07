@@ -86,10 +86,7 @@ impl AsyncIOEngine {
 
         match receiver.await {
             Ok(result) => result,
-            Err(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Operation was cancelled or failed to complete",
-            )),
+            Err(_) => Err(std::io::Error::other("Operation was cancelled or failed to complete")),
         }
     }
 
@@ -110,10 +107,7 @@ impl AsyncIOEngine {
 
         match receiver.await {
             Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Operation was cancelled or failed to complete",
-            )),
+            Err(_) => Err(std::io::Error::other("Operation was cancelled or failed to complete")),
         }
     }
 
@@ -131,10 +125,7 @@ impl AsyncIOEngine {
 
         match receiver.await {
             Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Operation was cancelled or failed to complete",
-            )),
+            Err(_) => Err(std::io::Error::other("Operation was cancelled or failed to complete")),
         }
     }
 
@@ -152,10 +143,7 @@ impl AsyncIOEngine {
 
         match receiver.await {
             Ok(result) => result,
-            Err(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Operation was cancelled or failed to complete",
-            )),
+            Err(_) => Err(std::io::Error::other("Operation was cancelled or failed to complete")),
         }
     }
 
@@ -176,10 +164,7 @@ impl AsyncIOEngine {
 
         match receiver.await {
             Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Operation was cancelled or failed to complete",
-            )),
+            Err(_) => Err(std::io::Error::other("Operation was cancelled or failed to complete")),
         }
     }
 
@@ -204,17 +189,11 @@ impl AsyncIOEngine {
                         let offset_bytes: [u8; 8] = bytes[0..8].try_into().unwrap();
                         Ok(u64::from_le_bytes(offset_bytes))
                     } else {
-                        Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "Invalid offset data returned from append operation",
-                        ))
+                        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid offset data returned from append operation"))
                     }
                 })
             }
-            Err(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Operation was cancelled or failed to complete",
-            )),
+            Err(_) => Err(std::io::Error::other("Operation was cancelled or failed to complete")),
         }
     }
 
@@ -232,10 +211,7 @@ impl AsyncIOEngine {
 
         match receiver.await {
             Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Operation was cancelled or failed to complete",
-            )),
+            Err(_) => Err(std::io::Error::other("Operation was cancelled or failed to complete")),
         }
     }
 

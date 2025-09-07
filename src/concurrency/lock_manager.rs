@@ -248,6 +248,12 @@ impl LockRequest {
     }
 }
 
+impl Default for LockRequestQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LockRequestQueue {
     /// Creates a new `LockRequestQueue`.
     pub fn new() -> Self {
@@ -365,6 +371,12 @@ impl LockRequestQueue {
         // Add request to queue but don't grant it yet
         self.request_queue.push_back(request);
         false
+    }
+}
+
+impl Default for DeadlockDetector {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
