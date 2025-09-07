@@ -438,16 +438,14 @@ impl Optimizer {
                 predicate,
             } => {
                 trace!("Examining filter predicate for simplification");
-                if let Expression::Constant(const_expr) = predicate.as_ref() {
-                    if let Val::Boolean(b) = const_expr.get_value().value_ {
-                        if b {
-                            debug!("Removing true filter predicate");
-                            if let Some(child) = plan.children.pop() {
-                                return Ok(child);
-                            }
+                if let Expression::Constant(const_expr) = predicate.as_ref()
+                    && let Val::Boolean(b) = const_expr.get_value().value_
+                    && b {
+                        debug!("Removing true filter predicate");
+                        if let Some(child) = plan.children.pop() {
+                            return Ok(child);
                         }
                     }
-                }
                 self.apply_early_pruning_to_children(plan)
             }
             _ => self.apply_early_pruning_to_children(plan),

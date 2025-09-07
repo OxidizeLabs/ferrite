@@ -129,8 +129,8 @@ impl NestedIndexJoinExecutor {
         }
 
         // Now try to get the first result with the newly created executor
-        if let Some(executor) = &mut self.current_right_executor {
-            if let Ok(Some(tuple_and_rid)) = executor.next() {
+        if let Some(executor) = &mut self.current_right_executor
+            && let Ok(Some(tuple_and_rid)) = executor.next() {
                 let right_rid = tuple_and_rid.1;
 
                 // Check if we've already processed this RID
@@ -151,7 +151,6 @@ impl NestedIndexJoinExecutor {
 
                 return Ok(Some(tuple_and_rid));
             }
-        }
 
         // No results found
         Ok(None)

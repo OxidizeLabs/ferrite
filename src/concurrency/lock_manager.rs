@@ -1087,12 +1087,11 @@ impl LockManager {
     }
 
     pub fn check_deadlock(&self, txn: Arc<Transaction>) -> Result<bool, LockError> {
-        if let Some(abort_txn) = self.deadlock_detector.get_and_clear_abort_txn() {
-            if abort_txn == txn.get_transaction_id() {
+        if let Some(abort_txn) = self.deadlock_detector.get_and_clear_abort_txn()
+            && abort_txn == txn.get_transaction_id() {
                 txn.set_state(TransactionState::Aborted);
                 return Ok(true);
             }
-        }
         Ok(false)
     }
 

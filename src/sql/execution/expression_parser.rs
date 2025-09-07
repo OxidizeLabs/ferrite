@@ -2837,21 +2837,17 @@ impl ExpressionParser {
                 let column_name = ident.value.to_string();
                 if column_name == "id" {
                     // Check if we have a WHERE clause with budget < 250,000
-                    if let Some(where_clause) = &select.selection {
-                        if let Expr::BinaryOp { left, op, right } = where_clause {
-                            if let Expr::Identifier(budget_ident) = left.as_ref() {
-                                if budget_ident.value == "budget" && *op == BinaryOperator::Lt {
-                                    if let Expr::Value(_) = right.as_ref() {
-                                        // This is the special case for our test
-                                        return Ok((
-                                            SubqueryType::InList,
-                                            Column::new("id", TypeId::Integer),
-                                        ));
-                                    }
-                                }
-                            }
+                    if let Some(where_clause) = &select.selection
+                        && let Expr::BinaryOp { left, op, right } = where_clause
+                        && let Expr::Identifier(budget_ident) = left.as_ref()
+                        && budget_ident.value == "budget" && *op == BinaryOperator::Lt
+                        && let Expr::Value(_) = right.as_ref() {
+                            // This is the special case for our test
+                            return Ok((
+                                SubqueryType::InList,
+                                Column::new("id", TypeId::Integer),
+                            ));
                         }
-                    }
                     
                     // Return InList type for ID columns in subqueries
                     return Ok((SubqueryType::InList, Column::new("id", TypeId::Integer)));
@@ -2872,11 +2868,9 @@ impl ExpressionParser {
                     }
                     "SUM" => {
                         // Determine type based on argument
-                        if let FunctionArguments::List(args) = &func.args {
-                            if !args.args.is_empty() {
-                                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) =
-                                    &args.args[0]
-                                {
+                        if let FunctionArguments::List(args) = &func.args
+                            && !args.args.is_empty()
+                            && let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0] {
                                     let arg_expr = self.parse_expression(expr, schema)?;
                                     let arg_type = arg_expr.get_return_type().get_type();
 
@@ -2894,8 +2888,6 @@ impl ExpressionParser {
                                         Column::new("subquery_result", return_type),
                                     ));
                                 }
-                            }
-                        }
 
                         // Default to decimal if we can't determine the type
                         Ok((
@@ -2911,11 +2903,9 @@ impl ExpressionParser {
                     }
                     "MIN" | "MAX" => {
                         // Determine type based on argument
-                        if let FunctionArguments::List(args) = &func.args {
-                            if !args.args.is_empty() {
-                                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) =
-                                    &args.args[0]
-                                {
+                        if let FunctionArguments::List(args) = &func.args
+                            && !args.args.is_empty()
+                            && let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0] {
                                     let arg_expr = self.parse_expression(expr, schema)?;
                                     let arg_type = arg_expr.get_return_type().get_type();
                                     return Ok((
@@ -2923,8 +2913,6 @@ impl ExpressionParser {
                                         Column::new("subquery_result", arg_type),
                                     ));
                                 }
-                            }
-                        }
 
                         // Default to integer if we can't determine the type
                         Ok((

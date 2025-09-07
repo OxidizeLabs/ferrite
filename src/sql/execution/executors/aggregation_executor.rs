@@ -292,8 +292,8 @@ impl AbstractExecutor for AggregationExecutor {
             debug!("Processing group with key: {:?}, values: {:?}", key, value.values);
             // Process Average aggregates: divide sum by count
             for (i, agg_expr) in self.aggregate_exprs.iter().enumerate() {
-                if let Expression::Aggregate(agg) = agg_expr.as_ref() {
-                    if let AggregationType::Avg = agg.get_agg_type() {
+                if let Expression::Aggregate(agg) = agg_expr.as_ref()
+                    && let AggregationType::Avg = agg.get_agg_type() {
                         debug!("Processing AVG aggregate at index {}", i);
                         // Find the count for this average
                         if let Some(&count) = self.avg_counts.get(&(key.clone(), i)) {
@@ -344,7 +344,6 @@ impl AbstractExecutor for AggregationExecutor {
                             value.values[i] = Value::new(Val::Null);
                         }
                     }
-                }
             }
 
             let mut values = Vec::new();
