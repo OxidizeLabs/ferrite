@@ -287,19 +287,18 @@ impl CacheManager {
         self.check_prefetch_hit(page_id);
 
         // Check L1 hot cache first (LRU-K)
-        if let Ok(mut hot_cache) = self.hot_cache.try_write() {
-            if let Some(data_arc) = <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::get(&mut hot_cache, &page_id) {
+        if let Ok(mut hot_cache) = self.hot_cache.try_write()
+            && let Some(data_arc) = <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::get(&mut hot_cache, &page_id) {
                 if let Some(metrics) = metrics_collector {
                     metrics.record_cache_operation("hot", true);
                 }
                 // Only clone the actual data when returning to caller
                 return Some((**data_arc).clone());
             }
-        }
 
         // Check L2 warm cache (LFU)
-        if let Ok(mut warm_cache) = self.warm_cache.try_write() {
-            if let Some(page_data) = <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(&mut warm_cache, &page_id) {
+        if let Ok(mut warm_cache) = self.warm_cache.try_write()
+            && let Some(page_data) = <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(&mut warm_cache, &page_id) {
                 // Promote to hot cache on hit - share the Arc, no data copying
                 self.promotion_count.fetch_add(1, Ordering::Relaxed);
                 let data_arc = Arc::clone(&page_data.data);
@@ -313,11 +312,10 @@ impl CacheManager {
                 // Only clone the actual data when returning to caller
                 return Some((*page_data.data).clone());
             }
-        }
 
         // Check L3 cold cache (FIFO)
-        if let Ok(mut cold_cache) = self.cold_cache.try_write() {
-            if let Some(page_data) = <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(&mut cold_cache, &page_id) {
+        if let Ok(mut cold_cache) = self.cold_cache.try_write()
+            && let Some(page_data) = <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(&mut cold_cache, &page_id) {
                 // Promote to warm cache on hit - clone the PageData (cheap with Arc)
                 self.promotion_count.fetch_add(1, Ordering::Relaxed);
                 if let Ok(mut warm_cache) = self.warm_cache.try_write() {
@@ -330,7 +328,6 @@ impl CacheManager {
                 // Only clone the actual data when returning to caller
                 return Some((*page_data.data).clone());
             }
-        }
 
         // Cache miss - record for metrics
         if let Some(metrics) = metrics_collector {
@@ -394,13 +391,12 @@ impl CacheManager {
 
         // Check for duplicate pages
         let mut should_store = true;
-        if let Ok(mut dedup) = self.dedup_engine.try_write() {
-            if let Some(_existing_page) = dedup.check_duplicate(page_id, &data) {
+        if let Ok(mut dedup) = self.dedup_engine.try_write()
+            && let Some(_existing_page) = dedup.check_duplicate(page_id, &data) {
                 // This is a duplicate page, don't store it
                 should_store = false;
                 self.dedup_savings.fetch_add(1, Ordering::Relaxed);
             }
-        }
 
         if !should_store {
             return;
@@ -459,8 +455,8 @@ impl CacheManager {
         }
 
         // Check if this page is likely to be reused
-        if let Ok(tracker) = self.hot_data_tracker.try_read() {
-            if let Some(metadata) = tracker.get(&page_id) {
+        if let Ok(tracker) = self.hot_data_tracker.try_read()
+            && let Some(metadata) = tracker.get(&page_id) {
                 // If page has been accessed recently, admit it
                 if metadata.last_accessed.elapsed().as_secs() < 60 {
                     return true;
@@ -470,7 +466,6 @@ impl CacheManager {
                     return true;
                 }
             }
-        }
 
         // Check data size - don't admit extremely large pages under pressure
         if memory_pressure > 60 && data.len() > (DB_PAGE_SIZE * 2) as usize {
@@ -483,11 +478,10 @@ impl CacheManager {
 
     /// Determines the temperature of a page based on access patterns
     fn determine_data_temperature(&self, page_id: PageId) -> DataTemperature {
-        if let Ok(tracker) = self.hot_data_tracker.try_read() {
-            if let Some(metadata) = tracker.get(&page_id) {
+        if let Ok(tracker) = self.hot_data_tracker.try_read()
+            && let Some(metadata) = tracker.get(&page_id) {
                 return metadata.temperature.clone();
             }
-        }
 
         // Default to cold for new pages
         DataTemperature::Cold
@@ -730,13 +724,12 @@ impl CacheManager {
 
     /// Check if a page access was a prefetch hit and update accuracy
     fn check_prefetch_hit(&self, page_id: PageId) {
-        if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
-            if predictions.remove(&page_id).is_some() {
+        if let Ok(mut predictions) = self.prefetch_predictions.try_write()
+            && predictions.remove(&page_id).is_some() {
                 // This page was predicted and accessed - it's a hit
                 self.prefetch_hits.fetch_add(1, Ordering::Relaxed);
                 self.update_prefetch_accuracy();
             }
-        }
     }
 
     /// Update prefetch accuracy based on hits vs total predictions

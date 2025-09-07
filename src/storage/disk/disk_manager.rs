@@ -74,12 +74,11 @@ impl ReadAheadCache {
         }
 
         // Simple sequential prediction
-        if let Some(last) = self.last_sequential {
-            if page_id == last + 1 {
+        if let Some(last) = self.last_sequential
+            && page_id == last + 1 {
                 // Sequential access detected
                 return (page_id + 1..=page_id + READ_AHEAD_PAGES as PageId).collect();
             }
-        }
         self.last_sequential = Some(page_id);
         Vec::new()
     }
@@ -275,24 +274,22 @@ impl FileDiskManager {
         );
 
         // Ensure parent directories exist for both files
-        if let Some(db_parent) = Path::new(&db_file).parent() {
-            if let Err(e) = std::fs::create_dir_all(db_parent) {
+        if let Some(db_parent) = Path::new(&db_file).parent()
+            && let Err(e) = std::fs::create_dir_all(db_parent) {
                 error!(
                     target: "tkdb::storage",
                     "Failed to create parent directory for database file: {}", e
                 );
                 panic!("Failed to create database directory: {}", e);
             }
-        }
-        if let Some(log_parent) = Path::new(&log_file).parent() {
-            if let Err(e) = std::fs::create_dir_all(log_parent) {
+        if let Some(log_parent) = Path::new(&log_file).parent()
+            && let Err(e) = std::fs::create_dir_all(log_parent) {
                 error!(
                     target: "tkdb::storage",
                     "Failed to create parent directory for log file: {}", e
                 );
                 panic!("Failed to create log directory: {}", e);
             }
-        }
 
         let db_io = open_direct_io(&db_file, true, true, true, &direct_io_config)
             .unwrap_or_else(|e| {

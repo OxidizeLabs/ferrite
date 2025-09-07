@@ -148,15 +148,14 @@ impl AsyncDiskManager {
         let start_time = Instant::now();
         
         // Try to get page from cache if enabled
-        if self.config.cache_size_mb > 0 {
-            if let Some(data) = self.cache_manager.get_page_with_metrics(page_id, &self.metrics_collector) {
+        if self.config.cache_size_mb > 0
+            && let Some(data) = self.cache_manager.get_page_with_metrics(page_id, &self.metrics_collector) {
                 let elapsed = start_time.elapsed();
                 debug!("Cache hit for page {} (size: {} bytes, elapsed: {:?})", page_id, data.len(), elapsed);
                 let elapsed_ns = elapsed.as_nanos() as u64;
                 self.metrics_collector.record_read(elapsed_ns, data.len() as u64, true);
                 return Ok(data);
             }
-        }
         
         // Page not in cache, schedule read operation
         debug!("Cache miss for page {}, scheduling disk read with priority {:?}", page_id, priority);
