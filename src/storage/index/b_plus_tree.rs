@@ -85,7 +85,7 @@ impl BPlusTree {
             {
                 let mut root_guard = self.root.write();
                 root_guard.children.push(old_root);
-                if !self.split_child(&mut *root_guard, 0) {
+                if !self.split_child(&mut root_guard, 0) {
                     debug!("Root split failed");
                     return false;
                 }
@@ -97,7 +97,7 @@ impl BPlusTree {
             self.insert_non_full(&mut *root_guard, key, rid)
         } else {
             let mut root_guard = self.root.write();
-            self.insert_non_full(&mut *root_guard, key, rid)
+            self.insert_non_full(&mut root_guard, key, rid)
         }
     }
 
@@ -324,7 +324,7 @@ impl BPlusTree {
     /// - Internal nodes with their keys
     /// - Leaf nodes with keys and values
     /// - Leaf node links
-    /// Returns a string representation of the tree
+    ///   Returns a string representation of the tree
     pub fn visualize(&self) -> String {
         let mut result = String::new();
         result.push_str("B+ Tree Visualization:\n");
@@ -363,7 +363,7 @@ impl BPlusTree {
                         index,
                         node.keys
                             .iter()
-                            .map(|k| format_key(k))
+                            .map(format_key)
                             .collect::<Vec<_>>()
                             .join("|")
                     ));
@@ -609,11 +609,11 @@ impl BPlusTree {
 
                         let child_arc = Arc::clone(&node.children[new_child_idx]);
                         let mut child_guard = child_arc.write();
-                        return self.insert_non_full(&mut *child_guard, key, rid);
+                        return self.insert_non_full(&mut child_guard, key, rid);
                     }
 
                     debug!("Recursing into child node");
-                    self.insert_non_full(&mut *child_guard, key, rid)
+                    self.insert_non_full(&mut child_guard, key, rid)
                 }
             }
         }
@@ -701,8 +701,8 @@ impl BPlusTree {
     fn rebalance_after_delete(&self, path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)>) {
         let mut current_path = path;
 
-        while !current_path.is_empty() {
-            let (parent_arc, child_idx) = current_path.pop().unwrap();
+        while let Some((parent_arc, child_idx)) = current_path.pop() {
+
             let mut parent = parent_arc.write();
 
             // Check if child needs rebalancing
@@ -881,8 +881,8 @@ impl BPlusTree {
         match right.node_type {
             NodeType::Leaf => {
                 // Move all entries from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.values.extend(right.values.drain(..));
+                left.keys.append(&mut right.keys);
+                left.values.append(&mut right.values);
                 // Update leaf node links
                 left.next_leaf = right.next_leaf.take();
             }
@@ -892,8 +892,8 @@ impl BPlusTree {
                 left.keys.push(separator);
 
                 // Move all keys and children from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.children.extend(right.children.drain(..));
+                left.keys.append(&mut right.keys);
+                left.children.append(&mut right.children);
             }
         }
 
@@ -919,8 +919,8 @@ impl BPlusTree {
         match left.node_type {
             NodeType::Leaf => {
                 // Move all entries from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.values.extend(right.values.drain(..));
+                left.keys.append(&mut right.keys);
+                left.values.append(&mut right.values);
                 // Update leaf node links
                 left.next_leaf = right.next_leaf.take();
             }
@@ -930,8 +930,8 @@ impl BPlusTree {
                 left.keys.push(separator);
 
                 // Move all keys and children from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.children.extend(right.children.drain(..));
+                left.keys.append(&mut right.keys);
+                left.children.append(&mut right.children);
             }
         }
 
@@ -983,8 +983,8 @@ impl Index for BPlusTree {
 
     fn create_iterator(&self, start_key: Option<Tuple>, end_key: Option<Tuple>) -> IndexIterator {
         // Convert Option<Tuple> to Option<Arc<Tuple>>
-        let start_key_arc = start_key.map(|t| Arc::new(t));
-        let end_key_arc = end_key.map(|t| Arc::new(t));
+        let start_key_arc = start_key.map(Arc::new);
+        let end_key_arc = end_key.map(Arc::new);
         
         // Create an Arc<RwLock<BPlusTree>> from self
         // Since we need to provide an Arc<RwLock<BPlusTree>> but we only have &self,

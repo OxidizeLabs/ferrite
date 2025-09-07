@@ -93,6 +93,12 @@ pub struct PriorityTaskScheduler {
     low_receiver: crossbeam_channel::Receiver<IOTask>,
 }
 
+impl Default for PriorityTaskScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PriorityTaskScheduler {
     pub fn new() -> Self {
         let (high_sender, high_receiver) = crossbeam_channel::unbounded();

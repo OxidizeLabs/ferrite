@@ -3,7 +3,7 @@ use crate::sql::binder::bound_expression::BoundExpression;
 use crate::sql::binder::bound_order_by::BoundOrderBy;
 use crate::sql::binder::bound_statement::BoundStatement;
 use crate::sql::binder::bound_table_ref::BoundTableRef;
-use crate::sql::binder::table_ref::bound_subquery_ref::{BoundSubqueryRef, CTEList};
+use crate::sql::binder::table_ref::bound_subquery_ref::BoundSubqueryRef;
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display};
@@ -18,8 +18,8 @@ pub struct SelectStatement {
     having: Option<Box<dyn BoundExpression>>,
     limit_count: Option<Box<dyn BoundExpression>>,
     limit_offset: Option<Box<dyn BoundExpression>>,
-    sort: Vec<Box<BoundOrderBy>>,
-    ctes: Vec<Box<BoundSubqueryRef>>,
+    sort: Vec<BoundOrderBy>,
+    ctes: Vec<BoundSubqueryRef>,
     distinct: bool,
 }
 
@@ -33,8 +33,8 @@ impl SelectStatement {
         having: Option<Box<dyn BoundExpression>>,
         limit_count: Option<Box<dyn BoundExpression>>,
         limit_offset: Option<Box<dyn BoundExpression>>,
-        sort: Vec<Box<BoundOrderBy>>,
-        ctes: CTEList,
+        sort: Vec<BoundOrderBy>,
+        ctes: Vec<BoundSubqueryRef>,
         distinct: bool,
     ) -> Self {
         Self {
@@ -75,7 +75,7 @@ impl Display for SelectStatement {
             // Remove quotes from column names
             let expr_str = expr.to_string();
             let cleaned_expr = expr_str.trim_matches(|c| c == '"' || c == '`');
-            write!(f, "{}", clean_identifier(&cleaned_expr.to_string()))?;
+            write!(f, "{}", clean_identifier(cleaned_expr))?;
         }
         write!(f, " FROM {}", self.table)?;
         if let Some(where_clause) = &self.where_clause {

@@ -16,6 +16,12 @@ use std::sync::Arc;
 /// 2. Responsible for schema-related operations
 pub struct SchemaManager {}
 
+impl Default for SchemaManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SchemaManager {
     pub fn new() -> Self {
         Self {}
@@ -720,17 +726,16 @@ impl SchemaManager {
             match item {
                 sqlparser::ast::SelectItem::ExprWithAlias { expr, alias } => {
                     // Handle direct aliases like "e.name AS employee"
-                    if let Expr::CompoundIdentifier(idents) = expr {
-                        if idents.len() == 2 {
+                    if let Expr::CompoundIdentifier(idents) = expr
+                        && idents.len() == 2 {
                             let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
                             alias_map.insert(qualified_name, alias.value.clone());
                         }
-                    }
                 }
                 sqlparser::ast::SelectItem::UnnamedExpr(expr) => {
                     // For expressions without explicit aliases, check if they match GROUP BY expressions
-                    if let Expr::CompoundIdentifier(idents) = expr {
-                        if idents.len() == 2 {
+                    if let Expr::CompoundIdentifier(idents) = expr
+                        && idents.len() == 2 {
                             let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
 
                             // Check if this matches any GROUP BY expression
@@ -746,7 +751,6 @@ impl SchemaManager {
                                 }
                             }
                         }
-                    }
                 }
                 _ => {}
             }

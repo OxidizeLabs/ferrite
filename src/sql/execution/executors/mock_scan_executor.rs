@@ -45,7 +45,7 @@ impl MockScanExecutor {
         // Generate 3 mock tuples for testing
         for i in 0..3 {
             let mut values = Vec::new();
-            for (_col_idx, column) in schema.get_columns().iter().enumerate() {
+            for column in schema.get_columns().iter() {
                 // Generate appropriate mock value based on column type
                 let value = match column.get_type() {
                     TypeId::Integer => Value::new(i),

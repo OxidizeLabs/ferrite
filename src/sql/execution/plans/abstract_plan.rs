@@ -127,21 +127,15 @@ pub trait AbstractPlanNode: Display {
 
 impl AbstractPlanNode for PlanNode {
     fn get_output_schema(&self) -> &Schema {
-        match self {
-            _ => self.as_abstract_plan_node().get_output_schema(),
-        }
+        self.as_abstract_plan_node().get_output_schema()
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
-        match self {
-            _ => self.as_abstract_plan_node().get_children(),
-        }
+        self.as_abstract_plan_node().get_children()
     }
 
     fn get_type(&self) -> PlanType {
-        match self {
-            _ => self.as_abstract_plan_node().get_type(),
-        }
+        self.as_abstract_plan_node().get_type()
     }
 }
 

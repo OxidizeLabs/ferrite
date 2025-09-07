@@ -422,9 +422,7 @@ impl From<PageError> for DBError {
 
 impl From<FlushError> for DBError {
     fn from(error: FlushError) -> Self {
-        match error {
-            _ => DBError::Internal(error.to_string()),
-        }
+        DBError::Internal(error.to_string())
     }
 }
 

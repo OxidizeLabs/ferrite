@@ -202,7 +202,7 @@ impl IndexIterator {
             if let Some(end) = &self.end_key {
                 self.current_batch.append(
                     tree_guard
-                        .scan_range(&seek_key, &end, true)
+                        .scan_range(seek_key, end, true)
                         .unwrap()
                         .as_mut(),
                 );

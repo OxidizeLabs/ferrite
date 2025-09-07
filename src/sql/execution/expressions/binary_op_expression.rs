@@ -137,16 +137,16 @@ impl BinaryOpExpression {
         match self.op {
             BinaryOperator::Plus => left_val
                 .add(right_val)
-                .map_err(|e| ExpressionError::InvalidOperation(e)),
+                .map_err(ExpressionError::InvalidOperation),
             BinaryOperator::Minus => left_val
                 .subtract(right_val)
-                .map_err(|e| ExpressionError::InvalidOperation(e)),
+                .map_err(ExpressionError::InvalidOperation),
             BinaryOperator::Multiply => left_val
                 .multiply(right_val)
-                .map_err(|e| ExpressionError::InvalidOperation(e)),
+                .map_err(ExpressionError::InvalidOperation),
             BinaryOperator::Divide => left_val
                 .divide(right_val)
-                .map_err(|e| ExpressionError::InvalidOperation(e)),
+                .map_err(ExpressionError::InvalidOperation),
             BinaryOperator::Modulo => Ok(left_val.modulo(right_val)),
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Invalid arithmetic operator: {:?}",
@@ -323,7 +323,7 @@ impl ExpressionOps for BinaryOpExpression {
             _ => {
                 // For other operators, just verify return type can be inferred
                 Self::infer_return_type(&self.left, &self.right, &self.op)
-                    .map_err(|e| ExpressionError::InvalidOperation(e))?;
+                    .map_err(ExpressionError::InvalidOperation)?;
             }
         }
 

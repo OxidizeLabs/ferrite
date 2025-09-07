@@ -392,7 +392,7 @@ impl DeadlockDetector {
 
     pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
         let mut waits_for = self.waits_for.lock();
-        waits_for.entry(t1).or_insert_with(Vec::new).push(t2);
+        waits_for.entry(t1).or_default().push(t2);
     }
 
     pub fn remove_edge(&self, t1: TxnId) {
@@ -495,6 +495,12 @@ impl DeadlockDetector {
         path.pop();
         on_path.remove(&curr);
         false
+    }
+}
+
+impl Default for LockStateManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -656,7 +662,7 @@ impl LockStateManager {
         let txn_locks = self.txn_lock_sets.lock();
         txn_locks
             .get(&txn_id)
-            .map_or(false, |state| state.table_locks.contains(&oid))
+            .is_some_and(|state| state.table_locks.contains(&oid))
     }
 
     /// Gets all row locks held by a transaction on a table
@@ -712,6 +718,12 @@ impl LockCompatibilityChecker {
             // Handle symmetric cases
             //(a, b) => Self::are_compatible(b, a),
         }
+    }
+}
+
+impl Default for LockValidator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -797,6 +809,12 @@ impl LockValidator {
             txn.set_state(TransactionState::Shrinking);
         }
         Ok(())
+    }
+}
+
+impl Default for LockManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

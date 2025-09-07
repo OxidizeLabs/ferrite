@@ -73,7 +73,7 @@ impl<
     /// In B+ trees, when a root has only one child left, it should be removed
     /// to maintain the height balance property
     pub fn should_collapse_root(&self) -> bool {
-        self.is_root && self.keys.len() == 0
+        self.is_root && self.keys.is_empty()
     }
 
     /// Get the only child of the root (when root should be collapsed)
@@ -495,7 +495,7 @@ impl<
         dot.push_str("|{");
         for i in 0..self.size {
             if i > 0 {
-                dot.push_str("|");
+                dot.push('|');
             }
             if let Some(key) = self.get_key_at(i) {
                 dot.push_str(&format!("<key{}>K:{:?}", i, key));
@@ -523,7 +523,7 @@ impl<
 
         // 2. Check the relationship between keys and values (pointers)
         // In a B+ tree internal node, for n keys there must be n+1 pointers
-        if self.values.len() != self.keys.len() + 1 && self.keys.len() > 0 {
+        if self.values.len() != self.keys.len() + 1 && !self.keys.is_empty() {
             return Err(format!(
                 "Key-value count invariant violated: keys={}, values={}, expected values={}",
                 self.keys.len(),
@@ -559,7 +559,7 @@ impl<
         if !self.is_root {
             // Internal node should have at least min_size keys
             let min_size = self.get_min_size();
-            if self.keys.len() < min_size && self.keys.len() > 0 {
+            if self.keys.len() < min_size && !self.keys.is_empty() {
                 return Err(format!(
                     "Non-root node has too few keys: contains {} keys but min is {}",
                     self.keys.len(),
@@ -570,7 +570,7 @@ impl<
             // Root specific checks
             // - Root can have fewer than min_size keys
             // - But if it has keys, it must follow the key-value relationship rules
-            if self.keys.len() > 0 && self.values.len() != self.keys.len() + 1 {
+            if !self.keys.is_empty() && self.values.len() != self.keys.len() + 1 {
                 return Err(format!(
                     "Root node key-value count invariant violated: keys={}, values={}, expected values={}",
                     self.keys.len(),
@@ -644,7 +644,7 @@ impl<
     /// Determines if this node is underfull (has fewer than min_size keys)
     /// but not empty. Empty nodes are handled separately.
     pub fn is_underfull(&self) -> bool {
-        !self.is_root && self.keys.len() > 0 && self.keys.len() < self.get_min_size()
+        !self.is_root && !self.keys.is_empty() && self.keys.len() < self.get_min_size()
     }
 
     /// Determines if this node can afford to give away a key
@@ -764,13 +764,13 @@ impl<
         if !self.values.is_empty() && !right_sibling_values.is_empty() {
             // Skip the first pointer of the right sibling (p1') because it should be
             // the same as the last pointer of the left node
-            for i in 1..right_sibling_values.len() {
+            for i in right_sibling_values.iter().skip(1) {
                 self.values.push(right_sibling_values[i]);
             }
         }
 
         // Make sure we have n+1 pointers for n keys
-        if self.keys.len() > 0 && self.values.len() != self.keys.len() + 1 {
+        if !self.keys.is_empty() && self.values.len() != self.keys.len() + 1 {
             debug!(
                 "After merge - keys: {}, values: {} - invariant requires {} values",
                 self.keys.len(),

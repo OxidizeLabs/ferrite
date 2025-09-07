@@ -22,7 +22,7 @@ impl WildcardExpression {
 impl ExpressionOps for WildcardExpression {
     fn evaluate(&self, tuple: &Tuple, _schema: &Schema) -> Result<Value, ExpressionError> {
         // Get all values from the tuple as a vector
-        let values: Vec<Value> = tuple.get_values().iter().cloned().collect();
+        let values: Vec<Value> = tuple.get_values().to_vec();
 
         // Return the values as a vector type
         Ok(Value::new_vector(values))

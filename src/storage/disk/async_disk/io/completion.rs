@@ -258,7 +258,7 @@ impl CompletionTracker {
                 match operations.get(&op_id) {
                     Some(OperationStatus::Completed { result, .. }) => result.clone(),
                     Some(OperationStatus::Cancelled { reason, .. }) => {
-                        return OperationResult::Error(format!("Operation was cancelled: {}", reason));
+                        OperationResult::Error(format!("Operation was cancelled: {}", reason))
                     }
                     _ => OperationResult::Error("Operation completed without notification".to_string()),
                 }
@@ -383,8 +383,8 @@ impl CompletionTracker {
                     let mut count = 0;
                     for op_id in timed_out_ids {
                         let mut ops = operations.write().await;
-                        if let Some(status) = ops.get_mut(&op_id) {
-                            if status.is_pending() && status.is_timed_out() {
+                        if let Some(status) = ops.get_mut(&op_id)
+                            && status.is_pending() && status.is_timed_out() {
                                 let old_status = std::mem::replace(status, OperationStatus::Cancelled {
                                     started_at: Instant::now(),
                                     cancelled_at: Instant::now(),
@@ -404,7 +404,6 @@ impl CompletionTracker {
                                 // Record metrics
                                 metrics.record_operation_timed_out();
                             }
-                        }
                     }
                     count
                 };
@@ -576,11 +575,10 @@ impl Default for CompletionTracker {
 impl Drop for CompletionTracker {
     fn drop(&mut self) {
         // Cancel the cleanup task
-        if let Ok(mut cleanup_task) = self.cleanup_task.try_lock() {
-            if let Some(task) = cleanup_task.take() {
+        if let Ok(mut cleanup_task) = self.cleanup_task.try_lock()
+            && let Some(task) = cleanup_task.take() {
                 task.abort();
             }
-        }
     }
 }
 

@@ -112,7 +112,7 @@ impl TableIterator {
         }
 
         // Validate slot number
-        if let Some(page_guard) = table_heap.get_page(self.current_rid.get_page_id()).ok() {
+        if let Ok(page_guard) = table_heap.get_page(self.current_rid.get_page_id()) {
             let page = page_guard.read();
             if self.current_rid.get_slot_num() >= page.get_num_tuples() as u32 {
                 debug!("Invalid slot number, resetting to 0");

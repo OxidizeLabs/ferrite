@@ -240,5 +240,6 @@ async fn run_cli() -> Result<(), Box<dyn error::Error>> {
 
     let cli = CLI::new().await;
 
-    Ok(cli.unwrap().run().await.unwrap())
+    let _: () = cli.unwrap().run().await.unwrap();
+    Ok(())
 }

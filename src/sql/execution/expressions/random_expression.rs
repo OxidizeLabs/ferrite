@@ -40,11 +40,9 @@ impl ExpressionOps for RandomExpression {
         if let Some(seed_expr) = &self.seed {
             // If seed is provided, use it to initialize the RNG
             let seed = seed_expr.evaluate(tuple, schema)?;
-            let seed_val = seed.as_bigint().or_else(|_| {
-                Err(ExpressionError::InvalidSeed(
-                    "Seed must be convertible to integer".to_string(),
-                ))
-            })? as u64;
+            let seed_val = seed.as_bigint().map_err(|_| ExpressionError::InvalidSeed(
+                "Seed must be convertible to integer".to_string(),
+            ))? as u64;
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed_val);
             Ok(Value::new(rng.random::<f64>()))
         } else {

@@ -357,7 +357,7 @@ impl AbstractExecutor for IndexScanExecutor {
         };
 
         // Keep trying until we find a valid tuple or reach the end
-        while let Some(rid) = iter.next() {
+        for rid in iter.by_ref() {
             debug!("Found RID {:?} in index", rid);
 
             // Use RID to fetch tuple from table heap with transaction context

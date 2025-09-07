@@ -80,6 +80,12 @@ pub struct JoinState {
     pub matched_right_tuples: std::collections::HashSet<usize>,
 }
 
+impl Default for JoinState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JoinState {
     /// Create new join state
     pub fn new() -> Self {

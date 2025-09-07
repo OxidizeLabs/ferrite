@@ -42,7 +42,7 @@ use std::thread_local;
 
 // Add thread-local variable for tracking recursion depth
 thread_local! {
-    static RECURSION_DEPTH: Cell<usize> = Cell::new(0);
+    static RECURSION_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 #[derive(Debug, Clone)]
@@ -1863,7 +1863,7 @@ impl<'a> PlanConverter<'a> {
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
                     let (left_keys, right_keys, fixed_predicate) =
-                        match extract_join_keys(&predicate) {
+                        match extract_join_keys(predicate) {
                             Ok((l, r, p)) => (l, r, p),
                             Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                         };
@@ -1891,7 +1891,7 @@ impl<'a> PlanConverter<'a> {
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
                     let (left_keys, right_keys, fixed_predicate) =
-                        match extract_join_keys(&predicate) {
+                        match extract_join_keys(predicate) {
                             Ok((l, r, p)) => (l, r, p),
                             Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                         };
@@ -1919,7 +1919,7 @@ impl<'a> PlanConverter<'a> {
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
                     let (left_keys, right_keys, fixed_predicate) =
-                        match extract_join_keys(&predicate) {
+                        match extract_join_keys(predicate) {
                             Ok((l, r, p)) => (l, r, p),
                             Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                         };
@@ -2059,7 +2059,7 @@ impl<'a> PlanConverter<'a> {
                 // Create a StartTransaction plan node instead of a CommandResult
                 Ok(PlanNode::StartTransaction(
                     crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode::new(
-                        isolation_level.clone(),
+                        *isolation_level,
                         *read_only,
                     )
                 ))
@@ -2259,9 +2259,7 @@ impl LogicalToPhysical for LogicalPlan {
 
 impl Display for LogicalPlan {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            _ => write!(f, "{:#?}", self),
-        }
+        write!(f, "{:#?}", self)
     }
 }
 

@@ -61,8 +61,8 @@ impl AggregationExecutor {
         Self {
             exec_ctx: context,
             child: child_executor,
-            group_by_exprs: plan.get_group_bys().iter().cloned().collect(),
-            aggregate_exprs: plan.get_aggregates().iter().cloned().collect(),
+            group_by_exprs: plan.get_group_bys().to_vec(),
+            aggregate_exprs: plan.get_aggregates().to_vec(),
             groups: HashMap::new(),
             avg_counts: HashMap::new(),
             groups_to_return: Vec::new(),
@@ -121,10 +121,7 @@ impl AggregationExecutor {
                                 if agg_value.values[i].is_null() {
                                     agg_value.values[i] = arg_val;
                                 } else {
-                                    match arg_val.compare_less_than(&agg_value.values[i]) {
-                                        CmpBool::CmpTrue => agg_value.values[i] = arg_val,
-                                        _ => {}
-                                    }
+                                    if arg_val.compare_less_than(&agg_value.values[i]) == CmpBool::CmpTrue { agg_value.values[i] = arg_val }
                                 }
                             }
                         }
@@ -134,10 +131,7 @@ impl AggregationExecutor {
                                 if agg_value.values[i].is_null() {
                                     agg_value.values[i] = arg_val;
                                 } else {
-                                    match agg_value.values[i].compare_less_than(&arg_val) {
-                                        CmpBool::CmpTrue => agg_value.values[i] = arg_val,
-                                        _ => {}
-                                    }
+                                    if agg_value.values[i].compare_less_than(&arg_val) == CmpBool::CmpTrue { agg_value.values[i] = arg_val }
                                 }
                             }
                         }

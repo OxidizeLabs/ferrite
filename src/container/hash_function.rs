@@ -15,6 +15,15 @@ pub struct HashFunction<K> {
     _marker: PhantomData<K>,
 }
 
+impl<K> Default for HashFunction<K>
+where
+    K: Any + Hash + 'static,
+ {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K> HashFunction<K>
 where
     K: Any + Hash + 'static,

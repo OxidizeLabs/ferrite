@@ -98,8 +98,7 @@ pub fn is_aligned(buffer: &[u8], alignment: usize) -> bool {
 pub fn create_aligned_buffer(size: usize, alignment: usize) -> Vec<u8> {
     // Allocate extra space to ensure we can align the buffer
     let total_size = size + alignment - 1;
-    let mut buffer = Vec::with_capacity(total_size);
-    buffer.resize(total_size, 0);
+    let mut buffer = vec![0; total_size];
     
     // Find the aligned offset
     let ptr = buffer.as_ptr() as usize;

@@ -100,7 +100,7 @@ impl ExpressionOps for WindowExpression {
     }
 
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
-        if children.len() < 1 {
+        if children.is_empty() {
             panic!("WindowExpression requires at least one child expression");
         }
 

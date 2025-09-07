@@ -77,7 +77,7 @@ impl IndexInfo {
 
     pub fn create_dummy_key(&self) -> Tuple {
         let key_schema = self.get_key_schema();
-        Tuple::new(&[Value::new(0)], &key_schema, RID::new(0, 0))
+        Tuple::new(&[Value::new(0)], key_schema, RID::new(0, 0))
     }
 
     pub fn get_key_schema(&self) -> &Schema {
@@ -163,7 +163,7 @@ pub trait Index: Send + Sync {
         format!(
             "INDEX: ({}){}",
             self.get_index_name(),
-            self.get_metadata().to_string()
+            self.get_metadata()
         )
     }
 

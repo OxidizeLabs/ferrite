@@ -25,6 +25,12 @@ pub struct CompressionEngine {
     bytes_after_compression: u64,
 }
 
+impl Default for CompressionEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CompressionEngine {
     /// Creates a new compression engine
     pub fn new() -> Self {

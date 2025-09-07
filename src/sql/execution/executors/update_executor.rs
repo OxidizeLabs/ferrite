@@ -94,7 +94,7 @@ impl AbstractExecutor for UpdateExecutor {
             let binding = self.context.read();
             let catalog_guard = binding.get_catalog().read();
             let table_info = catalog_guard
-                .get_table(&self.plan.get_table_name())
+                .get_table(self.plan.get_table_name())
                 .ok_or_else(|| DBError::TableNotFound(self.plan.get_table_name().to_string()))?;
 
             let schema = table_info.get_table_schema().clone();

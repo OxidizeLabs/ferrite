@@ -181,7 +181,7 @@ impl AbstractExecutor for TopNPerGroupExecutor {
                     let group_heap = self
                         .groups
                         .entry(group_keys)
-                        .or_insert_with(BinaryHeap::new);
+                        .or_default();
 
                     if group_heap.len() < n {
                         // Heap not full yet, add element

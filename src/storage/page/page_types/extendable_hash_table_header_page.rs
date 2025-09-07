@@ -283,7 +283,7 @@ impl PageTrait for ExtendableHTableHeaderPage {
 
 impl Debug for ExtendableHTableHeaderPage {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self)
     }
 }
 

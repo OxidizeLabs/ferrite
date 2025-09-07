@@ -817,21 +817,21 @@ impl AsyncDiskManager {
         let mut output = String::new();
         
         // Include configuration info in metrics
-        output.push_str(&format!("# HELP tkdb_config_io_threads Number of configured I/O threads\n"));
-        output.push_str(&format!("# TYPE tkdb_config_io_threads gauge\n"));
+        output.push_str(&"# HELP tkdb_config_io_threads Number of configured I/O threads\n".to_string());
+        output.push_str(&"# TYPE tkdb_config_io_threads gauge\n".to_string());
         output.push_str(&format!("tkdb_config_io_threads {}\n", self.config.io_threads));
         
-        output.push_str(&format!("# HELP tkdb_config_cache_size_mb Cache size in MB\n"));
-        output.push_str(&format!("# TYPE tkdb_config_cache_size_mb gauge\n"));
+        output.push_str(&"# HELP tkdb_config_cache_size_mb Cache size in MB\n".to_string());
+        output.push_str(&"# TYPE tkdb_config_cache_size_mb gauge\n".to_string());
         output.push_str(&format!("tkdb_config_cache_size_mb {}\n", self.config.cache_size_mb));
         
         // Basic metrics
-        output.push_str(&format!("# HELP tkdb_read_operations Total number of read operations\n"));
-        output.push_str(&format!("# TYPE tkdb_read_operations counter\n"));
+        output.push_str(&"# HELP tkdb_read_operations Total number of read operations\n".to_string());
+        output.push_str(&"# TYPE tkdb_read_operations counter\n".to_string());
         output.push_str(&format!("tkdb_read_operations {}\n", metrics.retry_count));
         
-        output.push_str(&format!("# HELP tkdb_write_operations Total number of write operations\n"));
-        output.push_str(&format!("# TYPE tkdb_write_operations counter\n"));
+        output.push_str(&"# HELP tkdb_write_operations Total number of write operations\n".to_string());
+        output.push_str(&"# TYPE tkdb_write_operations counter\n".to_string());
         output.push_str(&format!("tkdb_write_operations {}\n", metrics.retry_count));
         
         // More metrics would be added here
