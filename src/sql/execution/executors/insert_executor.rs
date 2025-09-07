@@ -100,7 +100,7 @@ impl InsertExecutor {
                 // Validate that the foreign key value exists in the referenced table
                 if !Self::validate_foreign_key_reference_with_context(
                     context,
-                    &value,
+                    value,
                     &foreign_key_constraint.referenced_table,
                     &foreign_key_constraint.referenced_column
                 )? {
@@ -210,7 +210,7 @@ impl AbstractExecutor for InsertExecutor {
             let binding = self.context.read();
             let catalog_guard = binding.get_catalog().read();
             let table_info = catalog_guard
-                .get_table(&self.plan.get_table_name())
+                .get_table(self.plan.get_table_name())
                 .ok_or_else(|| DBError::TableNotFound(self.plan.get_table_name().to_string()))?;
 
             let schema = table_info.get_table_schema().clone();
@@ -254,7 +254,7 @@ impl AbstractExecutor for InsertExecutor {
                 if values_to_insert.len() > 1 {
                     debug!("Using TRUE bulk insert for small batch of {} rows", values_to_insert.len());
                     let batch_result = self.bulk_insert_values(
-                        &values_to_insert,
+                        values_to_insert,
                         &schema,
                         &transactional_table_heap,
                         txn_context.clone(),

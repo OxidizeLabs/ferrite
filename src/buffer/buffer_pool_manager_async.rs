@@ -317,7 +317,7 @@ impl BufferPoolManager {
         // This avoids duplication since AsyncDiskManager handles cache levels internally
         futures::executor::block_on(async {
             self.disk_manager.read_page(page_id).await
-        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        }).map_err(|e| std::io::Error::other(e))
     }
 
     /// Load page bypassing AsyncDiskManager cache (BPM as sole cache)
@@ -329,7 +329,7 @@ impl BufferPoolManager {
         // For now, we'll use the regular read_page but this could be optimized
         futures::executor::block_on(async {
             self.disk_manager.read_page(page_id).await
-        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        }).map_err(|e| std::io::Error::other(e))
     }
 
     /// Creates a page from raw data with proper type checking
@@ -1027,11 +1027,10 @@ impl BufferPoolManager {
                 // Mark pages as clean
                 let pages = self.pages.read();
                 for (page_id, _) in &dirty_pages {
-                    if let Some(frame_id) = self.page_table.read().get(page_id) {
-                        if let Some(Some(page)) = pages.get(*frame_id as usize) {
+                    if let Some(frame_id) = self.page_table.read().get(page_id)
+                        && let Some(Some(page)) = pages.get(*frame_id as usize) {
                             page.write().set_dirty(false);
                         }
-                    }
                 }
                 trace!("Successfully flushed {} dirty pages in batch", dirty_pages.len());
                 Ok(dirty_pages.len())

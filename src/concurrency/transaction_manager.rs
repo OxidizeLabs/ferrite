@@ -390,11 +390,10 @@ impl TransactionManager {
                         .fetch_page::<TablePage>(rid.get_page_id())
                     {
                         let mut page = page_guard.write();
-                        if let Ok((_, _)) = page.get_tuple(&rid, true) {
-                            if let Err(e) = page.update_tuple_meta(meta, &rid) {
+                        if let Ok((_, _)) = page.get_tuple(&rid, true) 
+                            && let Err(e) = page.update_tuple_meta(meta, &rid) {
                                 log::error!("Failed to mark tuple as deleted: {}", e);
                             }
-                        }
                     }
                 }
             }
@@ -497,11 +496,10 @@ impl TransactionManager {
         let txn = txn_ctx.as_ref().map(|ctx| ctx.get_transaction());
 
         // Check if transaction is in a valid state
-        if let Some(txn) = &txn {
-            if txn.get_state() != TransactionState::Running {
+        if let Some(txn) = &txn
+            && txn.get_state() != TransactionState::Running {
                 return Err("Transaction not in running state".to_string());
             }
-        }
 
         // If successful, update transaction's write set
         if let Some(txn) = txn {

@@ -155,7 +155,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(|v| Value::new_with_type(Val::TinyInt(v), TypeId::TinyInt))
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
 
             // SmallInt operations
@@ -173,7 +173,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
 
             // Integer operations
@@ -191,7 +191,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
 
             // BigInt operations
@@ -209,7 +209,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
 
             // Float operations
@@ -262,7 +262,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::SmallInt(l), Val::TinyInt(r)) => {
                 let r = *r as i16;
@@ -279,7 +279,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::TinyInt(l), Val::Integer(r)) => {
                 let l = *l as i32;
@@ -296,7 +296,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::Integer(l), Val::TinyInt(r)) => {
                 let r = *r as i32;
@@ -313,7 +313,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::SmallInt(l), Val::Integer(r)) => {
                 let l = *l as i32;
@@ -330,7 +330,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::Integer(l), Val::SmallInt(r)) => {
                 let r = *r as i32;
@@ -347,7 +347,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::TinyInt(l), Val::BigInt(r)) => {
                 let l = *l as i64;
@@ -364,7 +364,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::BigInt(l), Val::TinyInt(r)) => {
                 let r = *r as i64;
@@ -381,7 +381,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::SmallInt(l), Val::BigInt(r)) => {
                 let l = *l as i64;
@@ -398,7 +398,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::BigInt(l), Val::SmallInt(r)) => {
                 let r = *r as i64;
@@ -415,7 +415,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::BigInt(l), Val::Integer(r)) => {
                 let result = match self.op {
@@ -431,7 +431,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::Integer(l), Val::BigInt(r)) => {
                 let result = match self.op {
@@ -447,7 +447,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
 
             // Float with integer types
@@ -772,7 +772,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::BigInt(l), Val::BigInt(r)) => {
                 let result = match self.op {
@@ -783,7 +783,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::Decimal(l), Val::Decimal(r)) => {
                 let result = match self.op {
@@ -831,7 +831,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::Integer(l), Val::BigInt(r)) => {
                 let result = match self.op {
@@ -847,7 +847,7 @@ impl ExpressionOps for ArithmeticExpression {
                 };
                 result
                     .map(Value::from)
-                    .ok_or_else(|| ExpressionError::ArithmeticError(Overflow))
+                    .ok_or(ExpressionError::ArithmeticError(Overflow))
             }
             (Val::BigInt(l), Val::Decimal(r)) | (Val::Decimal(r), Val::BigInt(l)) => {
                 let l = *l as f64;
