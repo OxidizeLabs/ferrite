@@ -230,7 +230,7 @@ mod test_utils {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::storage::index::index::{IndexInfo, IndexType};
+    use crate::storage::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -279,7 +279,7 @@ mod tests {
     use super::test_utils::*;
     use super::*;
     use crate::common::logger::initialize_logger;
-    use crate::storage::index::index::Index;
+    use crate::storage::index::Index;
 
     #[test]
     fn test_iterator_basic() {

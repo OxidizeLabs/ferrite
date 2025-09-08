@@ -8,7 +8,7 @@ use crate::sql::execution::expressions::comparison_expression::ComparisonType;
 use crate::sql::execution::expressions::logic_expression::LogicType;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
-use crate::storage::index::index::IndexInfo;
+use crate::storage::index::IndexInfo;
 use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
@@ -422,7 +422,7 @@ mod index_scan_executor_tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::common::config::{IndexOidT, TableOidT};
     use crate::concurrency::lock_manager::LockManager;
@@ -432,7 +432,7 @@ mod index_scan_executor_tests {
     use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::index::index::IndexType;
+    use crate::storage::index::IndexType;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};

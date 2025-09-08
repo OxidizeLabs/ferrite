@@ -1,6 +1,6 @@
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::catalog::Catalog;
+use tkdb::catalog::Catalog;
 use tkdb::sql::planner::logical_plan::LogicalPlanType;
 use tkdb::sql::planner::plan_builder::LogicalPlanBuilder;
 use tkdb::sql::planner::query_planner::QueryPlanner;

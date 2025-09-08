@@ -1,7 +1,7 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
 use crate::types_db::value::Value;
 use std::any::Any;
 use std::fmt::Debug;
@@ -89,6 +89,7 @@ impl ExtendableHTableBucketPage {
     }
 
     /// Serializes the bucket page data
+    #[allow(dead_code)]
     fn serialize_entries(&mut self) -> Result<(), PageError> {
         // Start after the page header
         let mut offset = BUCKET_HEADER_SIZE;

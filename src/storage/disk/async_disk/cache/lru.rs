@@ -3561,7 +3561,7 @@ mod tests {
                 let cold_items = [1, 3, 5];
                 
                 // Simulate workload with hotspots
-                for _round in 0..20 {
+                for round in 0..20 {
                     // Access hotspots frequently
                     for _ in 0..5 {
                         for &hot_item in &hotspots {

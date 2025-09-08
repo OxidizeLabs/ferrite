@@ -1,5 +1,5 @@
 use crate::common::config::PageId;
-use crate::storage::page::page::{Page, PageTrait, PageType};
+use crate::storage::page::{Page, PageTrait, PageType};
 use log::trace;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::Arc;
@@ -139,8 +139,8 @@ mod tests {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
-    use crate::storage::page::page::PAGE_TYPE_OFFSET;
-    use crate::storage::page::page::{BasicPage, PageTrait, PageType};
+    use crate::storage::page::PAGE_TYPE_OFFSET;
+    use crate::storage::page::{BasicPage, PageTrait, PageType};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use std::thread;

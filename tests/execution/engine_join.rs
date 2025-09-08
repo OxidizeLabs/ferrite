@@ -1,12 +1,7 @@
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
 use tkdb::common::result_writer::CliResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::Val::Null;
-use tkdb::types_db::value::Value;
 
 /// Test suite for join operations covering all join types and edge cases
 /// Migrated from src/sql/execution/execution_engine.rs join_tests module

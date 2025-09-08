@@ -1,6 +1,6 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
 use log::{debug, info};
 use std::any::Any;
 use std::fmt;
@@ -298,7 +298,7 @@ mod basic_behavior {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
-    use crate::storage::page::page::PageTrait;
+    use crate::storage::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use log::info;
     use parking_lot::RwLock;

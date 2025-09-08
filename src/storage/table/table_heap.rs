@@ -9,7 +9,7 @@ use crate::concurrency::transaction::UndoLink;
 use crate::concurrency::transaction::UndoLog;
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
-use crate::storage::page::page::{Page, PageTrait};
+use crate::storage::page::{Page, PageTrait};
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_iterator::TableIterator;

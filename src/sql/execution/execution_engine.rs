@@ -1,6 +1,6 @@
 use crate::sql::execution::check_option::CheckOption;
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
@@ -9,7 +9,7 @@ use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
-use crate::sql::optimizer::optimizer::Optimizer;
+use crate::sql::optimizer::Optimizer;
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
 use crate::sql::planner::query_planner::QueryPlanner;
 use crate::types_db::type_id::TypeId;

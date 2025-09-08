@@ -252,6 +252,7 @@ impl CoalescingEngine {
     }
 
     /// Merges adjacent writes into a coalesced write
+    #[allow(dead_code)]
     fn merge_adjacent_writes(&mut self, page_id: PageId, data: Vec<u8>, adjacent_pages: Vec<PageId>) -> IoResult<Vec<u8>> {
         let now = Instant::now();
         

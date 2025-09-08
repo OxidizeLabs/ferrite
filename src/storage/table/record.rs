@@ -7,6 +7,7 @@ use std::fmt::{Display, Formatter};
 
 /// Represents a tuple that has been stored in the database with a record ID.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Record {
     tuple: Tuple,
     rid: RID,

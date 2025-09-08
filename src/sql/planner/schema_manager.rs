@@ -13,6 +13,19 @@ use sqlparser::ast::{
 use std::collections::HashSet;
 use std::sync::Arc;
 
+// Type alias for complex return type
+type ColumnOptionsResult = Result<
+    (
+        bool,
+        bool,
+        bool,
+        Option<ForeignKeyConstraint>,
+        Option<String>,
+        Option<Value>,
+    ),
+    String,
+>;
+
 /// 2. Responsible for schema-related operations
 pub struct SchemaManager {}
 
@@ -156,17 +169,7 @@ impl SchemaManager {
     fn parse_column_options(
         &self,
         options: &[ColumnOptionDef],
-    ) -> Result<
-        (
-            bool,
-            bool,
-            bool,
-            Option<ForeignKeyConstraint>,
-            Option<String>,
-            Option<Value>,
-        ),
-        String,
-    > {
+    ) -> ColumnOptionsResult {
         let mut is_primary_key = false;
         let mut is_not_null = false;
         let mut is_unique = false;

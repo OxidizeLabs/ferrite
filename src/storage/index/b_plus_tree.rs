@@ -1,6 +1,6 @@
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
-use crate::storage::index::index::{Index, IndexInfo};
+use crate::storage::index::{Index, IndexInfo};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
@@ -1015,7 +1015,7 @@ mod test_utils {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction::IsolationLevel;
-    use crate::storage::index::index::{IndexInfo, IndexType};
+    use crate::storage::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 

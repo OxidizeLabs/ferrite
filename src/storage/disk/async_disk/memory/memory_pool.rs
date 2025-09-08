@@ -8,6 +8,7 @@ use std::alloc::{GlobalAlloc, Layout};
 /// NUMA-aware memory allocator for high-performance scenarios
 #[derive(Debug)]
 pub struct NumaAllocator {
+    #[allow(dead_code)]
     node_id: usize,
     allocated_bytes: AtomicUsize,
 }
@@ -51,7 +52,9 @@ unsafe impl GlobalAlloc for NumaAllocator {
 pub struct MemoryPool {
     pool_size_mb: usize,
     allocated_bytes: AtomicUsize,
+    #[allow(dead_code)]
     numa_aware: bool,
+    #[allow(dead_code)]
     numa_node: Option<usize>,
 }
 

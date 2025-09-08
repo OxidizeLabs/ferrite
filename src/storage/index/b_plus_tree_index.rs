@@ -3,7 +3,7 @@ use crate::common::{
     config::{PageId, INVALID_PAGE_ID},
     rid::RID,
 };
-use crate::storage::index::index::IndexInfo;
+use crate::storage::index::IndexInfo;
 use crate::storage::index::types::comparators::{i32_comparator, I32Comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
 use crate::storage::page::page_guard::PageGuard;
@@ -2764,7 +2764,7 @@ mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
-    use crate::storage::index::index::{IndexInfo, IndexType};
+    use crate::storage::index::{IndexInfo, IndexType};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;

@@ -2032,7 +2032,7 @@ mod tests {
                     let test_keys = vec!["key1", "key2", "key3", "key4", "key5", "nonexistent"];
                     for key in test_keys {
                         let contains_result = cache.contains(&key.to_string());
-                        let get_result = cache.cache.get(&key.to_string()).is_some();
+                        let get_result = cache.cache.get(key).is_some();
                         assert_eq!(contains_result, get_result);
                     }
                 };
@@ -2816,7 +2816,7 @@ mod tests {
                 // Now test eviction with mixed frequency items
                 let start = Instant::now();
                 for i in 0..500 {
-                    cache_with_access.insert(format!("new_evict_{}", i), (i + 2000) as i32);
+                    cache_with_access.insert(format!("new_evict_{}", i), i + 2000);
                 }
                 let mixed_eviction_duration = start.elapsed();
                 
@@ -2905,7 +2905,7 @@ mod tests {
                 // Large values (also integers for consistency, but simulating larger data)
                 let start = Instant::now();
                 for i in 0..1000 {
-                    value_size_cache.insert(format!("large_{}", i), (i * 1000000) as i32);
+                    value_size_cache.insert(format!("large_{}", i), i * 1000000);
                 }
                 let large_value_duration = start.elapsed();
                 
@@ -3037,7 +3037,7 @@ mod tests {
                     if i % 2 == 0 {
                         // Update existing key
                         let key = format!("mixed_{}", i % 1500);
-                        mixed_cache.insert(key, (i + 5000) as i32);
+                        mixed_cache.insert(key, i + 5000);
                     } else {
                         // Insert new key (might trigger eviction)
                         mixed_cache.insert(format!("new_mixed_{}", i), i);
@@ -3073,19 +3073,19 @@ mod tests {
                 // Test updating items with different frequencies
                 let start = Instant::now();
                 for i in 0..100 {
-                    freq_cache.insert(format!("freq_{}", i), (i + 10000) as i32); // High freq
+                    freq_cache.insert(format!("freq_{}", i), i + 10000); // High freq
                 }
                 let high_freq_update_duration = start.elapsed();
                 
                 let start = Instant::now();
                 for i in 200..300 {
-                    freq_cache.insert(format!("freq_{}", i), (i + 10000) as i32); // Medium freq
+                    freq_cache.insert(format!("freq_{}", i), i + 10000); // Medium freq
                 }
                 let medium_freq_update_duration = start.elapsed();
                 
                 let start = Instant::now();
                 for i in 1800..1900 {
-                    freq_cache.insert(format!("freq_{}", i), (i + 10000) as i32); // Low freq
+                    freq_cache.insert(format!("freq_{}", i), i + 10000); // Low freq
                 }
                 let low_freq_update_duration = start.elapsed();
                 
@@ -3108,14 +3108,14 @@ mod tests {
                 // Test updates on full cache
                 let start = Instant::now();
                 for i in 0..500 {
-                    full_cache.insert(format!("full_{}", i), (i + 2000) as i32);
+                    full_cache.insert(format!("full_{}", i), i + 2000);
                 }
                 let full_update_duration = start.elapsed();
                 
                 // Test new insertions on full cache (triggers eviction)
                 let start = Instant::now();
                 for i in 0..500 {
-                    full_cache.insert(format!("new_full_{}", i), (i + 3000) as i32);
+                    full_cache.insert(format!("new_full_{}", i), i + 3000);
                 }
                 let full_new_duration = start.elapsed();
                 
@@ -3140,7 +3140,7 @@ mod tests {
                 for &batch_size in &batch_sizes {
                     let start = Instant::now();
                     for i in 0..batch_size {
-                        batch_cache.insert(format!("batch_{}", i), (i + 20000) as i32);
+                        batch_cache.insert(format!("batch_{}", i), i + 20000);
                     }
                     batch_update_times.push(start.elapsed());
                 }
@@ -3198,7 +3198,7 @@ mod tests {
                 // Measure update performance (should preserve frequency)
                 let start = Instant::now();
                 for i in 0..1000 {
-                    tracking_cache.insert(format!("freq_track_{}", i), (i + 10000) as i32);
+                    tracking_cache.insert(format!("freq_track_{}", i), i + 10000);
                 }
                 let update_tracking_duration = start.elapsed();
                 
@@ -3228,7 +3228,7 @@ mod tests {
                 // Now measure eviction with frequency consideration
                 let start = Instant::now();
                 for i in 0..1000 {
-                    eviction_cache.insert(format!("new_evict_track_{}", i), (i + 5000) as i32);
+                    eviction_cache.insert(format!("new_evict_track_{}", i), i + 5000);
                 }
                 let eviction_tracking_duration = start.elapsed();
                 
@@ -3303,7 +3303,7 @@ mod tests {
                         mixed_freq_cache.insert(format!("new_mixed_{}", i), i);
                     } else if i % 3 == 1 {
                         // Update existing
-                        mixed_freq_cache.insert(format!("mixed_freq_{}", i % 5000), (i + 20000) as i32);
+                        mixed_freq_cache.insert(format!("mixed_freq_{}", i % 5000), i + 20000);
                     } else {
                         // Access existing (increment frequency)
                         mixed_freq_cache.get(&format!("mixed_freq_{}", i % 5000));
@@ -3456,7 +3456,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 0..200 {
-                    uniform_cache.insert(format!("uniform_new_{}", i), (i + 1000) as i32);
+                    uniform_cache.insert(format!("uniform_new_{}", i), i + 1000);
                 }
                 let uniform_eviction_duration = start.elapsed();
                 
@@ -3478,7 +3478,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 0..500 {
-                    skewed_cache.insert(format!("skewed_new_{}", i), (i + 2000) as i32);
+                    skewed_cache.insert(format!("skewed_new_{}", i), i + 2000);
                 }
                 let skewed_eviction_duration = start.elapsed();
                 
@@ -3501,7 +3501,7 @@ mod tests {
                 for round in 0..10 {
                     let start = Instant::now();
                     for i in 0..20 {
-                        consistent_cache.insert(format!("round_{}_{}", round, i), (round * 100 + i) as i32);
+                        consistent_cache.insert(format!("round_{}_{}", round, i), round * 100 + i);
                     }
                     eviction_durations.push(start.elapsed());
                 }
@@ -3688,7 +3688,7 @@ mod tests {
                 for round in 0..5 {
                     // Add some new items to maintain cache size
                     for i in 0..10 {
-                        consistency_cache.insert(format!("round_{}_{}", round, i), (round * 100 + i) as i32);
+                        consistency_cache.insert(format!("round_{}_{}", round, i), round * 100 + i);
                     }
                     
                     let start = Instant::now();
@@ -4788,7 +4788,7 @@ mod tests {
                 // Test overflow behavior (should evict LFU items)
                 let overflow_items = 20;
                 for i in 0..overflow_items {
-                    boundary_cache.insert(format!("overflow_{}", i), (100 + i));
+                    boundary_cache.insert(format!("overflow_{}", i), 100 + i);
                     // Should maintain capacity
                     assert_eq!(boundary_cache.len(), boundary_cache_size);
                 }
@@ -5270,7 +5270,7 @@ mod tests {
                                 0 | 1 => {
                                     // Insert operations (25% of operations)
                                     let key = format!("mixed_{}_{}", thread_id, i);
-                                    let value = (thread_id * 1000 + i);
+                                    let value = thread_id * 1000 + i;
                                     cache_clone.lock().unwrap().insert(key, value);
                                     counts_clone.lock().unwrap().0 += 1;
                                 },
@@ -5386,7 +5386,7 @@ mod tests {
                     let handle = thread::spawn(move || {
                         for i in 0..inserts_per_thread {
                             let key = format!("evict_trigger_{}_{}", thread_id, i);
-                            let value = (thread_id * 1000 + i);
+                            let value = thread_id * 1000 + i;
                             cache_clone.lock().unwrap().insert(key, value);
                             
                             // Small delay to increase thread interleaving
@@ -7018,7 +7018,7 @@ mod tests {
                     let mut tier2_count = 0; 
                     let mut tier3_count = 0;
                     let mut filler_count = 0;
-                    let _stress_count = 0;
+                    let mut stress_count = 0;
                     
                     for i in 0..10 {
                         if cache_guard.contains(&format!("tier1_{}", i)) { tier1_count += 1; }

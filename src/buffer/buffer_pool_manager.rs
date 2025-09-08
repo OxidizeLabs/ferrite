@@ -4,8 +4,8 @@
 // use crate::common::exception::DeletePageError;
 // use crate::storage::disk::async_disk::FileDiskManager;
 // use crate::storage::disk::disk_scheduler::DiskScheduler;
-// use crate::storage::page::page::{Page, PageTrait};
-// use crate::storage::page::page::{PageType, PAGE_TYPE_OFFSET};
+// use crate::storage::page::{Page, PageTrait};
+// use crate::storage::page::{PageType, PAGE_TYPE_OFFSET};
 // use crate::storage::page::page_guard::PageGuard;
 // use log::{error, info, trace, warn};
 // use parking_lot::{RwLock, RwLockReadGuard};
@@ -867,7 +867,7 @@
 // mod tests {
 //     use super::*;
 //     use crate::common::config::INVALID_PAGE_ID;
-//     use crate::storage::page::page::{BasicPage, PageTrait, PageType};
+//     use crate::storage::page::{BasicPage, PageTrait, PageType};
 //     use parking_lot::RwLock;
 //     use std::error::Error;
 //     use std::sync::Arc;

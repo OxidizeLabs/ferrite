@@ -3,8 +3,8 @@ use crate::common::config::INVALID_PAGE_ID;
 use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 use crate::common::exception::DeletePageError;
 use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::storage::page::page::{Page, PageTrait};
-use crate::storage::page::page::{PageType, PAGE_TYPE_OFFSET};
+use crate::storage::page::{Page, PageTrait};
+use crate::storage::page::{PageType, PAGE_TYPE_OFFSET};
 use crate::storage::page::page_guard::PageGuard;
 use log::{error, info, trace, warn};
 use parking_lot::{RwLock, RwLockReadGuard};
@@ -14,6 +14,10 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+// Type aliases for complex types
+type PageCollection = Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>;
+type PageTable = Arc<RwLock<HashMap<PageId, FrameId>>>;
+
 /// The `BufferPoolManager` is responsible for managing the buffer pool,
 /// including fetching and unpinning pages, and handling page replacement.
 /// This version integrates with the new AsyncAsyncDiskManager for better performance
@@ -21,8 +25,8 @@ use std::sync::Arc;
 pub struct BufferPoolManager {
     pool_size: usize,
     next_page_id: AtomicU64,
-    pages: Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>,
-    page_table: Arc<RwLock<HashMap<PageId, FrameId>>>,
+    pages: PageCollection,
+    page_table: PageTable,
     replacer: Arc<RwLock<LRUKReplacer>>,
     free_list: Arc<RwLock<Vec<FrameId>>>,
     disk_manager: Arc<AsyncDiskManager>,
@@ -116,7 +120,7 @@ impl BufferPoolManager {
     }
 
     /// Returns the pages in the buffer pool.
-    pub fn get_pages(&self) -> Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>> {
+    pub fn get_pages(&self) -> PageCollection {
         self.pages.clone()
     }
 
@@ -1357,7 +1361,7 @@ impl Clone for BufferPoolManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::page::page::{BasicPage, PageTrait, PageType};
+    use crate::storage::page::{BasicPage, PageTrait, PageType};
     use std::sync::Arc;
     use tempfile::TempDir;
 

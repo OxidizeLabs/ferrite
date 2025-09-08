@@ -6,7 +6,7 @@ use tkdb::catalog::schema::Schema;
 use tkdb::types_db::type_id::TypeId;
 use std::sync::Arc;
 use parking_lot::RwLock;
-use tkdb::catalog::catalog::Catalog;
+use tkdb::catalog::Catalog;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::concurrency::transaction::{IsolationLevel, Transaction};
