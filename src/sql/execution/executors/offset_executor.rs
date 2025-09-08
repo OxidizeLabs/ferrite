@@ -327,7 +327,7 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let tuples = vec![
+        let tuples = [
             Arc::new(Tuple::new(
                 &[Value::new(1), Value::new("Alice")],
                 &schema,

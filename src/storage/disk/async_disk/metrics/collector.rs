@@ -174,47 +174,46 @@ impl MetricsCollector {
 
     /// Creates bottleneck detection rules
     pub fn create_bottleneck_rules() -> Vec<BottleneckRule> {
-        let mut rules = Vec::new();
-
-        // I/O Bottleneck
-        rules.push(BottleneckRule {
-            name: "IO Bottleneck".to_string(),
-            conditions: vec![
-                MetricCondition {
-                    metric: "io_queue_depth".to_string(),
-                    operator: ThresholdComparison::GreaterThan,
-                    value: 10.0,
-                    duration: Duration::from_secs(60),
-                },
-                MetricCondition {
-                    metric: "read_latency_avg_ns".to_string(),
-                    operator: ThresholdComparison::GreaterThan,
-                    value: 50_000_000.0, // 50ms
-                    duration: Duration::from_secs(60),
-                },
-            ],
-            action: BottleneckAction::Alert("I/O subsystem is a bottleneck".to_string()),
-        });
-
-        // Cache Bottleneck
-        rules.push(BottleneckRule {
-            name: "Cache Bottleneck".to_string(),
-            conditions: vec![
-                MetricCondition {
-                    metric: "cache_hit_ratio".to_string(),
-                    operator: ThresholdComparison::LessThan,
-                    value: 0.5, // 50%
-                    duration: Duration::from_secs(300),
-                },
-                MetricCondition {
-                    metric: "cache_evictions".to_string(),
-                    operator: ThresholdComparison::GreaterThan,
-                    value: 1000.0,
-                    duration: Duration::from_secs(60),
-                },
-            ],
-            action: BottleneckAction::CacheEvict,
-        });
+        let rules = vec![
+            // I/O Bottleneck
+            BottleneckRule {
+                name: "IO Bottleneck".to_string(),
+                conditions: vec![
+                    MetricCondition {
+                        metric: "io_queue_depth".to_string(),
+                        operator: ThresholdComparison::GreaterThan,
+                        value: 10.0,
+                        duration: Duration::from_secs(60),
+                    },
+                    MetricCondition {
+                        metric: "read_latency_avg_ns".to_string(),
+                        operator: ThresholdComparison::GreaterThan,
+                        value: 50_000_000.0, // 50ms
+                        duration: Duration::from_secs(60),
+                    },
+                ],
+                action: BottleneckAction::Alert("I/O subsystem is a bottleneck".to_string()),
+            },
+            // Cache Bottleneck
+            BottleneckRule {
+                name: "Cache Bottleneck".to_string(),
+                conditions: vec![
+                    MetricCondition {
+                        metric: "cache_hit_ratio".to_string(),
+                        operator: ThresholdComparison::LessThan,
+                        value: 0.5, // 50%
+                        duration: Duration::from_secs(300),
+                    },
+                    MetricCondition {
+                        metric: "cache_evictions".to_string(),
+                        operator: ThresholdComparison::GreaterThan,
+                        value: 1000.0,
+                        duration: Duration::from_secs(60),
+                    },
+                ],
+                action: BottleneckAction::CacheEvict,
+            },
+        ];
 
         // Add more rules as needed...
 
@@ -223,30 +222,29 @@ impl MetricsCollector {
 
     /// Creates escalation rules
     pub fn create_escalation_rules() -> Vec<EscalationRule> {
-        let mut rules = Vec::new();
-
-        // Critical performance issues
-        rules.push(EscalationRule {
-            alert_type: AlertType::Performance,
-            severity: AlertSeverity::Critical,
-            escalation_delay: Duration::from_secs(300), // 5 minutes
-            max_escalations: 3,
-            escalation_actions: vec![
-                EscalationAction::NotifyAdmins,
-                EscalationAction::SendEmail("admin@example.com".to_string()),
-            ],
-        });
-
-        // Resource exhaustion
-        rules.push(EscalationRule {
-            alert_type: AlertType::Resource,
-            severity: AlertSeverity::Warning,
-            escalation_delay: Duration::from_secs(1800), // 30 minutes
-            max_escalations: 2,
-            escalation_actions: vec![
-                EscalationAction::SendEmail("admin@example.com".to_string()),
-            ],
-        });
+        let rules = vec![
+            // Critical performance issues
+            EscalationRule {
+                alert_type: AlertType::Performance,
+                severity: AlertSeverity::Critical,
+                escalation_delay: Duration::from_secs(300), // 5 minutes
+                max_escalations: 3,
+                escalation_actions: vec![
+                    EscalationAction::NotifyAdmins,
+                    EscalationAction::SendEmail("admin@example.com".to_string()),
+                ],
+            },
+            // Resource exhaustion
+            EscalationRule {
+                alert_type: AlertType::Resource,
+                severity: AlertSeverity::Warning,
+                escalation_delay: Duration::from_secs(1800), // 30 minutes
+                max_escalations: 2,
+                escalation_actions: vec![
+                    EscalationAction::SendEmail("admin@example.com".to_string()),
+                ],
+            },
+        ];
 
         // Add more rules as needed...
 

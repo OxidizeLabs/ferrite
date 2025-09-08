@@ -354,7 +354,7 @@ use super::*;
         let original_schema = Schema::new(original_columns);
 
         // Copy only id and age columns
-        let copied_schema = Schema::copy_schema(&original_schema, &vec![0, 2]);
+        let copied_schema = Schema::copy_schema(&original_schema, &[0, 2]);
 
         assert_eq!(copied_schema.get_column_count(), 2);
         assert_eq!(copied_schema.get_column(0).unwrap().get_name(), "id");
@@ -461,14 +461,14 @@ use super::*;
         original_schema.set_primary_key_columns(vec![0, 2]);
 
         // Test that primary keys are preserved when copying schema
-        let copied_schema = Schema::copy_schema(&original_schema, &vec![0, 1, 2]);
+        let copied_schema = Schema::copy_schema(&original_schema, &[0, 1, 2]);
         assert_eq!(
             original_schema.get_primary_key_columns(),
             copied_schema.get_primary_key_columns()
         );
 
         // Test that primary keys are preserved when copying subset of columns
-        let partial_schema = Schema::copy_schema(&original_schema, &vec![0, 2]);
+        let partial_schema = Schema::copy_schema(&original_schema, &[0, 2]);
         assert_eq!(
             original_schema.get_primary_key_columns(),
             partial_schema.get_primary_key_columns()

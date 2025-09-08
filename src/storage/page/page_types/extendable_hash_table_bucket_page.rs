@@ -416,7 +416,7 @@ mod basic_behavior {
         let mut handles = vec![];
 
         for i in 0..num_threads {
-            let bpm_clone = Arc::clone(&bpm);
+            let bpm_clone = Arc::clone(bpm);
             let handle = thread::spawn(move || {
                 for j in 0..operations_per_thread {
                     let bucket_page = bpm_clone
