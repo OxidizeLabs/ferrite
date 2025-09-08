@@ -1,9 +1,8 @@
-use crate::common::config::{Lsn, INVALID_LSN, LOG_BUFFER_SIZE};
+use crate::common::config::{Lsn, INVALID_LSN};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::AsyncDiskManager;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use log::{debug, error, trace, warn};
-use parking_lot::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -22,47 +21,10 @@ pub struct LogManager {
 struct LogManagerState {
     next_lsn: AtomicU64,
     persistent_lsn: AtomicU64,
-    log_buffer: RwLock<LogBuffer>,
     flush_thread: Mutex<Option<thread::JoinHandle<()>>>,
     stop_flag: AtomicBool,
     disk_manager: Arc<AsyncDiskManager>,
     log_queue: (Sender<Arc<LogRecord>>, Receiver<Arc<LogRecord>>),
-}
-
-struct LogBuffer {
-    data: Vec<u8>,
-    write_pos: usize,
-}
-
-impl LogBuffer {
-    fn new(size: usize) -> Self {
-        Self {
-            data: vec![0; size],
-            write_pos: 0,
-        }
-    }
-
-    fn append(&mut self, bytes: &[u8]) -> bool {
-        if self.write_pos + bytes.len() > self.data.len() {
-            return false;
-        }
-        self.data[self.write_pos..self.write_pos + bytes.len()].copy_from_slice(bytes);
-        self.write_pos += bytes.len();
-        true
-    }
-
-    fn clear(&mut self) {
-        self.write_pos = 0;
-        self.data.fill(0);
-    }
-
-    fn is_empty(&self) -> bool {
-        self.write_pos == 0
-    }
-
-    fn get_data(&self) -> &[u8] {
-        &self.data[..self.write_pos]
-    }
 }
 
 impl LogManager {
@@ -81,7 +43,6 @@ impl LogManager {
             state: Arc::new(LogManagerState {
                 next_lsn: AtomicU64::new(0),
                 persistent_lsn: AtomicU64::new(INVALID_LSN),
-                log_buffer: RwLock::new(LogBuffer::new(LOG_BUFFER_SIZE as usize)),
                 flush_thread: Mutex::new(None),
                 stop_flag: AtomicBool::new(false),
                 disk_manager,
@@ -273,12 +234,6 @@ impl LogManager {
     pub fn set_persistent_lsn(&mut self, lsn: Lsn) {
         debug!("Setting persistent LSN to {}", lsn);
         self.state.persistent_lsn.store(lsn, Ordering::SeqCst);
-    }
-
-    pub fn get_log_buffer_size(&self) -> usize {
-        let size = self.state.log_buffer.read().data.len();
-        trace!("Retrieved log buffer size: {}", size);
-        size
     }
 
     /// Parses a log record from raw bytes
@@ -724,10 +679,6 @@ mod tests {
 
             assert_eq!(ctx.log_manager.get_next_lsn(), 0);
             assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
-            assert_eq!(
-                ctx.log_manager.get_log_buffer_size(),
-                LOG_BUFFER_SIZE as usize
-            );
         }
 
         #[tokio::test]
@@ -839,6 +790,7 @@ mod tests {
 
     /// Tests for threading and concurrency
     mod threading_tests {
+        use parking_lot::RwLock;
         use super::*;
         use crate::common::config::PageId;
 
