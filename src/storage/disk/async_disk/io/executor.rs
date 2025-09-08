@@ -799,7 +799,7 @@ mod tests {
                     }
                     3 => {
                         // Sync
-                        let _ = executor_clone.execute_sync().await.unwrap();
+                        executor_clone.execute_sync().await.unwrap();
                     }
                     _ => unreachable!(),
                 }

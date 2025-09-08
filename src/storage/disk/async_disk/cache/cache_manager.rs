@@ -1015,8 +1015,10 @@ mod tests {
 
     #[test]
     fn test_admission_controller_rejection() {
-        let mut config = DiskManagerConfig::default();
-        config.cache_size_mb = 1; // Very small cache to trigger admission control
+        let config = DiskManagerConfig {
+            cache_size_mb: 1, // Very small cache to trigger admission control
+            ..Default::default()
+        };
         let cache_manager = CacheManager::new(&config);
 
         // Fill cache completely
@@ -1040,8 +1042,10 @@ mod tests {
 
     #[test]
     fn test_cache_eviction_under_pressure() {
-        let mut config = DiskManagerConfig::default();
-        config.cache_size_mb = 1; // Small cache
+        let config = DiskManagerConfig {
+            cache_size_mb: 1, // Small cache
+            ..Default::default()
+        };
         let cache_manager = CacheManager::new(&config);
 
         // Fill cache beyond capacity
@@ -1322,8 +1326,7 @@ mod tests {
         assert!(!predicted_pages.is_empty());
 
         // Access some of the predicted pages (hits)
-        for i in 0..predicted_pages.len().min(3) {
-            let page_id = predicted_pages[i];
+        for page_id in predicted_pages.iter().take(predicted_pages.len().min(3)).copied() {
             let data = vec![page_id as u8; 64];
             cache_manager.store_page(page_id, data.clone());
             
@@ -1369,7 +1372,7 @@ mod tests {
 
         // Accuracy should still be reasonable
         let accuracy = cache_manager.get_prefetch_accuracy();
-        assert!(accuracy >= 0.0 && accuracy <= 1.0);
+        assert!((0.0..=1.0).contains(&accuracy));
     }
 
     #[test]
@@ -1507,14 +1510,13 @@ mod tests {
         let _ = cache_manager.get_page(1);
 
         // Get page access details to verify LRU-K specific information
-        if let Some(details) = cache_manager.get_page_access_details(1) {
-            if details.algorithm == "LRU-K" {
+        if let Some(details) = cache_manager.get_page_access_details(1)
+            && details.algorithm == "LRU-K" {
                 assert_eq!(details.k_value, Some(2));
                 assert!(details.access_count.is_some());
                 // Page 1 should have at least 2 accesses (K value reached)
                 assert!(details.access_count.unwrap() >= 2);
             }
-        }
     }
 
     #[test]
@@ -1543,7 +1545,8 @@ mod tests {
 
         // Statistics
         let stats = cache_manager.get_cache_statistics();
-        assert!(stats.hot_cache_used >= 0);
+        // hot_cache_used is unsigned, so always >= 0 - just verify it's accessible
+        let _ = stats.hot_cache_used;
         
         // Enhanced statistics using new traits
         let enhanced_stats = cache_manager.get_enhanced_cache_statistics();

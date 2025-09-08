@@ -248,7 +248,7 @@ mod test_utils {
 
     pub fn create_tuple(id: i32, value: &str, schema: &Schema) -> Arc<Tuple> {
         let values = vec![Value::new(id), Value::new(value)];
-        Arc::new(Tuple::new(&values, &schema, RID::new(0, 0)))
+        Arc::new(Tuple::new(&values, schema, RID::new(0, 0)))
     }
 
     pub fn create_test_metadata(table_name: String, index_name: String) -> IndexInfo {

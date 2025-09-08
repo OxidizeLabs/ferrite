@@ -1092,20 +1092,20 @@ mod unit_tests {
         let tree_read_guard = tree.read();
 
         let binding = tuple1.keys_from_tuple(vec![0]);
-        let key1 = binding.get(0).unwrap();
+        let key1 = binding.first().unwrap();
         let binding = tuple2.keys_from_tuple(vec![0]);
-        let key2 = binding.get(0).unwrap();
+        let key2 = binding.first().unwrap();
 
         assert_eq!(
-            tree_read_guard.compare_keys_ordering(key1, &key2),
+            tree_read_guard.compare_keys_ordering(key1, key2),
             std::cmp::Ordering::Less
         );
         assert_eq!(
-            tree_read_guard.compare_keys_ordering(&key2, &key1),
+            tree_read_guard.compare_keys_ordering(key2, key1),
             std::cmp::Ordering::Greater
         );
         assert_eq!(
-            tree_read_guard.compare_keys_ordering(&key1, &key1),
+            tree_read_guard.compare_keys_ordering(key1, key1),
             std::cmp::Ordering::Equal
         );
     }
@@ -1518,11 +1518,11 @@ mod split_behavior_tests {
         let left_child = root.children[0].read();
         let right_child = root.children[1].read();
         assert!(
-            matches!(left_child.next_leaf, Some(_)),
+            left_child.next_leaf.is_some(),
             "Left leaf should have next pointer"
         );
         assert!(
-            matches!(right_child.next_leaf, None),
+            right_child.next_leaf.is_none(),
             "Right leaf should have no next pointer"
         );
     }
@@ -1556,7 +1556,7 @@ mod split_behavior_tests {
             NodeType::Internal,
             "Root should be internal"
         );
-        assert!(root.keys.len() > 0, "Root should have at least one key");
+        assert!(!root.keys.is_empty(), "Root should have at least one key");
 
         // Verify all leaf nodes are properly linked
         let mut current_node = Arc::clone(&tree_write_guard.root);

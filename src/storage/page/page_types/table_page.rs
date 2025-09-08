@@ -1133,9 +1133,9 @@ mod unit_tests {
     #[test]
     fn test_insert_and_get_tuple() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let tuple_id = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let tuple_id = page.insert_tuple(&meta, &tuple).unwrap();
         assert_eq!(page.header.num_tuples, 1);
 
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id, false).unwrap();
@@ -1150,9 +1150,9 @@ mod unit_tests {
     #[test]
     fn test_update_tuple_meta() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let tuple_rid_id = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let tuple_rid_id = page.insert_tuple(&meta, &tuple).unwrap();
 
         // Create new metadata with deleted flag set to true
         let mut new_meta = TupleMeta::new(456);
@@ -1216,10 +1216,10 @@ mod unit_tests {
     #[test]
     fn test_update_tuple_in_place_unsafe() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
         // First insert a tuple
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
 
         // Test with invalid RID
         let invalid_rid = RID::new(1, 999);
@@ -1361,9 +1361,9 @@ mod tuple_operation_tests {
     #[test]
     fn test_basic_tuple_insertion() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
         assert_eq!(page.header.num_tuples, 1);
         assert_eq!(rid.get_page_id(), 1);
         assert_eq!(rid.get_slot_num(), 0);
@@ -1372,9 +1372,9 @@ mod tuple_operation_tests {
     #[test]
     fn test_tuple_retrieval() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid, false).unwrap();
 
         assert_eq!(
@@ -1389,9 +1389,9 @@ mod tuple_operation_tests {
     #[test]
     fn test_tuple_metadata_update() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
 
         // Create new metadata with deleted flag set to true
         let mut new_meta = TupleMeta::new(456);
@@ -1411,9 +1411,9 @@ mod tuple_operation_tests {
     #[test]
     fn test_tuple_in_place_update() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
         let new_meta = TupleMeta::new(789);
         let new_tuple = create_test_tuple(2).1;
 
@@ -1721,9 +1721,9 @@ mod serialization_tests {
         // Insert test tuple before spawning threads
         {
             let mut page_guard = page.lock();
-            let (meta, mut tuple) = create_test_tuple();
+            let (meta, tuple) = create_test_tuple();
             debug!("Original meta timestamp: {:?}", meta.get_commit_timestamp());
-            page_guard.insert_tuple(&meta, &mut tuple).unwrap();
+            page_guard.insert_tuple(&meta, &tuple).unwrap();
 
             // Verify initial insertion
             let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid, false).unwrap();
@@ -1778,7 +1778,7 @@ mod serialization_tests {
             match handle.join() {
                 Ok(result) => {
                     let (timestamp, value) =
-                        result.expect(&format!("Thread {} failed to read tuple", i));
+                        result.unwrap_or_else(|_| panic!("Thread {} failed to read tuple", i));
                     assert_eq!(timestamp, 123);
                     assert_eq!(value, Value::new(42));
                 }
@@ -2079,7 +2079,7 @@ mod page_type_tests {
         assert_eq!(page.get_page_type(), PageType::Table);
 
         // Update tuple meta
-        let mut new_meta = meta.clone();
+        let mut new_meta = meta;
         new_meta.set_deleted(true);
         page.update_tuple_meta(new_meta, &rid).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);

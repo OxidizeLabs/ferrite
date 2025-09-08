@@ -51,6 +51,12 @@ pub enum BPlusTreeError {
     ConversionError(String),
 }
 
+impl From<String> for BPlusTreeError {
+    fn from(error: String) -> Self {
+        BPlusTreeError::ConversionError(error)
+    }
+}
+
 pub struct TypedBPlusTreeIndex {
     // Index metadata, etc.
     type_id: TypeId,
@@ -2843,7 +2849,7 @@ mod tests {
         let key = 42;
         let value = RID::new(1, 1);
         println!("Inserting key {} with value {:?}", key, value);
-        let insert_result = tree.insert(key, value.clone());
+        let insert_result = tree.insert(key, value);
         if let Err(ref e) = insert_result {
             println!("Insert failed with error: {}", e);
         }
@@ -3162,11 +3168,5 @@ mod tests {
         assert_eq!(metadata_ref.get_index_name(), "test_validation_index");
 
         println!("All validation tests passed!");
-    }
-}
-
-impl From<String> for BPlusTreeError {
-    fn from(error: String) -> Self {
-        BPlusTreeError::ConversionError(error)
     }
 }

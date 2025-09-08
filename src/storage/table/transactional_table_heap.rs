@@ -1193,11 +1193,11 @@ mod tests {
         let txn1 = txn_ctx1.get_transaction();
 
         // Insert initial version with txn1's ID
-        let (meta, mut tuple) = create_test_tuple();
+        let (meta, tuple) = create_test_tuple();
 
         let rid = ctx
             .txn_heap
-            .insert_tuple(Arc::from(meta), &mut tuple, txn_ctx1.clone())
+            .insert_tuple(Arc::from(meta), &tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Commit first transaction
@@ -1212,7 +1212,7 @@ mod tests {
         new_tuple.get_values_mut()[1] = Value::new(200);
 
         ctx.txn_heap
-            .update_tuple(&meta, &mut new_tuple, rid, txn_ctx2.clone())
+            .update_tuple(&meta, &new_tuple, rid, txn_ctx2.clone())
             .expect("Update failed");
 
         // Create third transaction to verify version chain
@@ -1271,11 +1271,11 @@ mod tests {
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
 
         // Insert tuple
-        let (meta, mut tuple) = create_test_tuple();
+        let (meta, tuple) = create_test_tuple();
 
         let rid = ctx
             .txn_heap
-            .insert_tuple(Arc::from(meta), &mut tuple, txn_ctx1.clone())
+            .insert_tuple(Arc::from(meta), &tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Verify visibility based on the isolation level

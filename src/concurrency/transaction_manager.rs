@@ -1136,7 +1136,7 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await;
         }
 
         #[tokio::test]
@@ -1424,7 +1424,7 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await;
         }
     }
 
@@ -1540,7 +1540,7 @@ mod tests {
                 let reader_buffer_pool = buffer_pool.clone();
                 let reader_lock_manager = lock_manager.clone();
                 let reader_table_heap = table_heap_arc.clone();
-                let reader_schema = schema_arc.clone();
+                let _reader_schema = schema_arc.clone();
                 let reader_rids = rids_arc.clone();
                 let reader_barrier = barrier.clone();
 
@@ -1607,7 +1607,7 @@ mod tests {
                 let writer_lock_manager = lock_manager.clone();
                 let writer_table_heap = table_heap_arc.clone();
                 let writer_schema = schema_arc.clone();
-                let writer_rids = rids_arc.clone();
+                let _writer_rids = rids_arc.clone();
                 let writer_barrier = barrier.clone();
                 let writer_rid = rids_arc[i];
 
@@ -2317,7 +2317,7 @@ mod tests {
                     "Skipping test_undo_log_creation: update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager()).await;
                 return;
             }
 
@@ -2408,7 +2408,7 @@ mod tests {
                     "Skipping test_undo_log_application: update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager()).await;
                 return;
             }
 
@@ -2425,7 +2425,7 @@ mod tests {
                     "Warning: Failed to read updated tuple: {:?}",
                     after_update.err()
                 );
-                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager()).await;
                 return;
             }
 

@@ -2477,7 +2477,7 @@ mod tests {
                 }
                 
                 // Record initial ordering
-                let initial_ranks: Vec<_> = (1..=4)
+                let _initial_ranks: Vec<_> = (1..=4)
                     .map(|i| (i, cache.recency_rank(&i).unwrap()))
                     .collect();
                 
@@ -2546,7 +2546,7 @@ mod tests {
                 }
                 
                 // Record initial ordering
-                let initial_ranks: Vec<_> = (1..=4)
+                let _initial_ranks: Vec<_> = (1..=4)
                     .map(|i| (i, cache.recency_rank(&i).unwrap()))
                     .collect();
                 
@@ -2557,7 +2557,7 @@ mod tests {
                 assert_eq!(*cache.peek(&3).unwrap(), 300);
                 
                 // Ordering should be unchanged
-                for (key, expected_rank) in initial_ranks {
+                for (key, expected_rank) in _initial_ranks {
                     assert_eq!(cache.recency_rank(&key), Some(expected_rank));
                 }
                 
@@ -3359,7 +3359,7 @@ mod tests {
                 cache.insert(3, Arc::new(300));
                 
                 // Perform circular access pattern: 1 -> 2 -> 3 -> 1 -> 2 -> 3...
-                for round in 0..5 {
+                for _round in 0..5 {
                     for key in [1, 2, 3] {
                         cache.get(&key);
                         assert_eq!(cache.recency_rank(&key), Some(0)); // Should be at head
@@ -3398,7 +3398,7 @@ mod tests {
                 }
                 
                 // Simulate working set access pattern
-                for round in 0..3 {
+                for _round in 0..3 {
                     for &key in &working_set {
                         // Try to access all items in working set
                         if cache.contains(&key) {
@@ -3561,7 +3561,7 @@ mod tests {
                 let cold_items = [1, 3, 5];
                 
                 // Simulate workload with hotspots
-                for round in 0..20 {
+                for _round in 0..20 {
                     // Access hotspots frequently
                     for _ in 0..5 {
                         for &hot_item in &hotspots {
@@ -3720,7 +3720,7 @@ mod tests {
                 }
                 
                 // Record initial ranks
-                let initial_ranks: Vec<_> = (1..=4)
+                let _initial_ranks: Vec<_> = (1..=4)
                     .map(|i| (i, cache.recency_rank(&i).unwrap()))
                     .collect();
                 
@@ -3734,7 +3734,7 @@ mod tests {
                 
                 // Other items should have shifted accordingly
                 for i in [1, 3, 4] {
-                    let old_rank = initial_ranks.iter()
+                    let old_rank = _initial_ranks.iter()
                         .find(|(key, _)| *key == i)
                         .unwrap().1;
                     let new_rank = cache.recency_rank(&i);
@@ -3749,7 +3749,7 @@ mod tests {
                 }
                 
                 // Touch operation should also update ranks
-                let old_rank_1 = cache.recency_rank(&1).unwrap();
+                let _old_rank_1 = cache.recency_rank(&1).unwrap();
                 cache.touch(&1);
                 assert_eq!(cache.recency_rank(&1).unwrap(), 0);
                 assert_eq!(cache.recency_rank(&2).unwrap(), 1); // 2 demoted

@@ -2162,7 +2162,7 @@ mod tests {
                 
                 // Setup: Fill cache with items
                 for i in 0..cache_size {
-                    cache.insert(format!("key_{}", i), i as i32);
+                    cache.insert(format!("key_{}", i), i);
                 }
                 
                 // Test 1: Uniform frequency distribution (all items accessed equally)
@@ -2228,7 +2228,7 @@ mod tests {
                 
                 // Setup: Fill cache with items
                 for i in 0..cache_size {
-                    cache.insert(format!("item_{}", i), i as i32);
+                    cache.insert(format!("item_{}", i), i);
                 }
                 
                 // Test 1: Contains performance for existing keys
@@ -2291,7 +2291,7 @@ mod tests {
                 let mut large_cache = LFUCache::new(large_cache_size);
                 
                 for i in 0..large_cache_size {
-                    large_cache.insert(format!("large_{}", i), i as i32);
+                    large_cache.insert(format!("large_{}", i), i);
                 }
                 
                 let start = Instant::now();
@@ -2312,7 +2312,7 @@ mod tests {
                 
                 // Setup: Fill cache and create varied frequency distributions
                 for i in 0..cache_size {
-                    cache.insert(format!("freq_{}", i), i as i32);
+                    cache.insert(format!("freq_{}", i), i);
                 }
                 
                 // Create different frequency patterns
@@ -2427,7 +2427,7 @@ mod tests {
                 let mut small_cache = LFUCache::new(small_cache_size);
                 
                 for i in 0..small_cache_size {
-                    small_cache.insert(format!("small_{}", i), i as i32);
+                    small_cache.insert(format!("small_{}", i), i);
                 }
                 
                 let start = Instant::now();
@@ -2441,7 +2441,7 @@ mod tests {
                 let mut medium_cache = LFUCache::new(medium_cache_size);
                 
                 for i in 0..medium_cache_size {
-                    medium_cache.insert(format!("medium_{}", i), i as i32);
+                    medium_cache.insert(format!("medium_{}", i), i);
                 }
                 
                 let start = Instant::now();
@@ -2455,7 +2455,7 @@ mod tests {
                 let mut large_cache = LFUCache::new(large_cache_size);
                 
                 for i in 0..large_cache_size {
-                    large_cache.insert(format!("large_{}", i), i as i32);
+                    large_cache.insert(format!("large_{}", i), i);
                 }
                 
                 let start = Instant::now();
@@ -2469,7 +2469,7 @@ mod tests {
                 
                 // Insert items with intentionally varied frequencies
                 for i in 0..50000 {
-                    varied_cache.insert(format!("varied_{}", i), i as i32);
+                    varied_cache.insert(format!("varied_{}", i), i);
                 }
                 
                 // Create frequency distribution: some high, some medium, many low
@@ -2505,7 +2505,7 @@ mod tests {
                 // Test 5: Performance when LFU changes frequently
                 let mut dynamic_cache = LFUCache::new(5000);
                 for i in 0..5000 {
-                    dynamic_cache.insert(format!("dynamic_{}", i), i as i32);
+                    dynamic_cache.insert(format!("dynamic_{}", i), i);
                 }
                 
                 let start = Instant::now();
@@ -2552,7 +2552,7 @@ mod tests {
                 // Test 6: Performance consistency across multiple operations
                 let mut consistency_cache = LFUCache::new(20000);
                 for i in 0..20000 {
-                    consistency_cache.insert(format!("consistency_{}", i), i as i32);
+                    consistency_cache.insert(format!("consistency_{}", i), i);
                 }
                 
                 let mut durations = Vec::new();
@@ -2579,7 +2579,7 @@ mod tests {
                 
                 // Setup: Fill cache with items
                 for i in 0..cache_size {
-                    cache.insert(format!("hit_{}", i), i as i32);
+                    cache.insert(format!("hit_{}", i), i);
                 }
                 
                 // Test 1: Pure cache hits performance
@@ -2770,7 +2770,7 @@ mod tests {
                 // Phase 1: Fill cache to capacity without eviction
                 let start = Instant::now();
                 for i in 0..cache_capacity {
-                    cache.insert(format!("initial_{}", i), i as i32);
+                    cache.insert(format!("initial_{}", i), i);
                 }
                 let fill_duration = start.elapsed();
                 assert_eq!(cache.len(), cache_capacity);
@@ -2779,7 +2779,7 @@ mod tests {
                 let eviction_count = 2000;
                 let start = Instant::now();
                 for i in 0..eviction_count {
-                    cache.insert(format!("evict_{}", i), (i + cache_capacity) as i32);
+                    cache.insert(format!("evict_{}", i), i + cache_capacity);
                 }
                 let eviction_duration = start.elapsed();
                 assert_eq!(cache.len(), cache_capacity); // Should still be at capacity
@@ -2803,7 +2803,7 @@ mod tests {
                 
                 // Fill cache
                 for i in 0..1000 {
-                    cache_with_access.insert(format!("access_{}", i), i as i32);
+                    cache_with_access.insert(format!("access_{}", i), i);
                 }
                 
                 // Create frequency distribution by accessing some items
@@ -2836,13 +2836,13 @@ mod tests {
                     
                     // Fill to capacity
                     for i in 0..size {
-                        test_cache.insert(format!("scale_{}", i), i as i32);
+                        test_cache.insert(format!("scale_{}", i), i);
                     }
                     
                     // Measure eviction performance
                     let start = Instant::now();
                     for i in 0..100 {
-                        test_cache.insert(format!("evict_scale_{}", i), (i + size) as i32);
+                        test_cache.insert(format!("evict_scale_{}", i), i + size);
                     }
                     let duration = start.elapsed();
                     eviction_times.push(duration);
@@ -2868,7 +2868,7 @@ mod tests {
                 for &batch_size in &batch_sizes {
                     let start = Instant::now();
                     for i in 0..batch_size {
-                        small_cache.insert(format!("small_batch_{}_{}", batch_size, i), i as i32);
+                        small_cache.insert(format!("small_batch_{}_{}", batch_size, i), i);
                     }
                     small_batch_times.push(start.elapsed());
                 }
@@ -2885,7 +2885,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 0..large_cache_size {
-                    large_cache.insert(format!("large_{}", i), i as i32);
+                    large_cache.insert(format!("large_{}", i), i);
                 }
                 let large_batch_duration = start.elapsed();
                 
@@ -2898,7 +2898,7 @@ mod tests {
                 // Small values (integers)
                 let start = Instant::now();
                 for i in 0..1000 {
-                    value_size_cache.insert(format!("int_{}", i), i as i32);
+                    value_size_cache.insert(format!("int_{}", i), i);
                 }
                 let small_value_duration = start.elapsed();
                 
@@ -2921,7 +2921,7 @@ mod tests {
                 let start = Instant::now();
                 for i in 0..1000 {
                     // Insert
-                    mixed_cache.insert(format!("mixed_{}", i), i as i32);
+                    mixed_cache.insert(format!("mixed_{}", i), i);
                     
                     // Occasionally read to create frequency variance
                     if i % 10 == 0 && i > 0 {
@@ -2944,7 +2944,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 0..throughput_cache_size {
-                    throughput_cache.insert(format!("throughput_{}", i), i as i32);
+                    throughput_cache.insert(format!("throughput_{}", i), i);
                 }
                 let throughput_duration = start.elapsed();
                 
@@ -2973,7 +2973,7 @@ mod tests {
                     
                     let start = Instant::now();
                     for i in 0..size {
-                        allocation_cache.insert(format!("prog_{}_{}", size, i), i as i32);
+                        allocation_cache.insert(format!("prog_{}_{}", size, i), i);
                     }
                     progressive_times.push(start.elapsed());
                 }
@@ -2996,7 +2996,7 @@ mod tests {
                 // Phase 1: Initial population with new insertions
                 let start = Instant::now();
                 for i in 0..cache_size {
-                    cache.insert(format!("new_{}", i), i as i32);
+                    cache.insert(format!("new_{}", i), i);
                 }
                 let new_insertion_duration = start.elapsed();
                 assert_eq!(cache.len(), cache_size);
@@ -3006,7 +3006,7 @@ mod tests {
                 let start = Instant::now();
                 for i in 0..update_count {
                     let key = format!("new_{}", i % cache_size);
-                    cache.insert(key, (i + 10000) as i32);
+                    cache.insert(key, i + 10000);
                 }
                 let update_duration = start.elapsed();
                 assert_eq!(cache.len(), cache_size); // Length shouldn't change
@@ -3029,7 +3029,7 @@ mod tests {
                 
                 // Pre-populate half the cache
                 for i in 0..1500 {
-                    mixed_cache.insert(format!("mixed_{}", i), i as i32);
+                    mixed_cache.insert(format!("mixed_{}", i), i);
                 }
                 
                 let start = Instant::now();
@@ -3040,7 +3040,7 @@ mod tests {
                         mixed_cache.insert(key, (i + 5000) as i32);
                     } else {
                         // Insert new key (might trigger eviction)
-                        mixed_cache.insert(format!("new_mixed_{}", i), i as i32);
+                        mixed_cache.insert(format!("new_mixed_{}", i), i);
                     }
                 }
                 let mixed_duration = start.elapsed();
@@ -3053,7 +3053,7 @@ mod tests {
                 
                 // Create items with different frequencies
                 for i in 0..2000 {
-                    freq_cache.insert(format!("freq_{}", i), i as i32);
+                    freq_cache.insert(format!("freq_{}", i), i);
                 }
                 
                 // Create frequency distribution
@@ -3102,7 +3102,7 @@ mod tests {
                 
                 // Fill to capacity
                 for i in 0..1000 {
-                    full_cache.insert(format!("full_{}", i), i as i32);
+                    full_cache.insert(format!("full_{}", i), i);
                 }
                 
                 // Test updates on full cache
@@ -3130,7 +3130,7 @@ mod tests {
                 
                 // Initial population
                 for i in 0..5000 {
-                    batch_cache.insert(format!("batch_{}", i), i as i32);
+                    batch_cache.insert(format!("batch_{}", i), i);
                 }
                 
                 // Batch updates
@@ -3175,7 +3175,7 @@ mod tests {
                 // Measure pure insertion time (frequency tracking included)
                 let start = Instant::now();
                 for i in 0..cache_size {
-                    cache.insert(format!("track_{}", i), i as i32);
+                    cache.insert(format!("track_{}", i), i);
                 }
                 let insertion_with_tracking_duration = start.elapsed();
                 
@@ -3192,7 +3192,7 @@ mod tests {
                 
                 // Initial population
                 for i in 0..5000 {
-                    tracking_cache.insert(format!("freq_track_{}", i), i as i32);
+                    tracking_cache.insert(format!("freq_track_{}", i), i);
                 }
                 
                 // Measure update performance (should preserve frequency)
@@ -3215,7 +3215,7 @@ mod tests {
                 
                 // Fill cache
                 for i in 0..2000 {
-                    eviction_cache.insert(format!("evict_track_{}", i), i as i32);
+                    eviction_cache.insert(format!("evict_track_{}", i), i);
                 }
                 
                 // Create frequency variance
@@ -3244,7 +3244,7 @@ mod tests {
                 
                 // Insert items
                 for i in 0..3000 {
-                    accuracy_cache.insert(format!("accuracy_{}", i), i as i32);
+                    accuracy_cache.insert(format!("accuracy_{}", i), i);
                 }
                 
                 // Create complex frequency patterns
@@ -3276,7 +3276,7 @@ mod tests {
                 // Insert large number of items and verify each has correct frequency
                 let start = Instant::now();
                 for i in 0..20000 {
-                    memory_test_cache.insert(format!("memory_test_{}", i), i as i32);
+                    memory_test_cache.insert(format!("memory_test_{}", i), i);
                     
                     // Verify frequency tracking for every 1000th item
                     if i % 1000 == 0 {
@@ -3293,14 +3293,14 @@ mod tests {
                 
                 // Populate cache
                 for i in 0..5000 {
-                    mixed_freq_cache.insert(format!("mixed_freq_{}", i), i as i32);
+                    mixed_freq_cache.insert(format!("mixed_freq_{}", i), i);
                 }
                 
                 let start = Instant::now();
                 for i in 0..10000 {
                     if i % 3 == 0 {
                         // Insert new (might evict)
-                        mixed_freq_cache.insert(format!("new_mixed_{}", i), i as i32);
+                        mixed_freq_cache.insert(format!("new_mixed_{}", i), i);
                     } else if i % 3 == 1 {
                         // Update existing
                         mixed_freq_cache.insert(format!("mixed_freq_{}", i % 5000), (i + 20000) as i32);
@@ -3319,7 +3319,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 0..5000 {
-                    rapid_cache.insert(format!("rapid_{}", i), i as i32);
+                    rapid_cache.insert(format!("rapid_{}", i), i);
                     
                     // Verify frequency tracking works under rapid insertion
                     if i < 1000 && i % 100 == 0 {
@@ -3339,7 +3339,7 @@ mod tests {
                 
                 // Insert and access to create very high frequencies
                 for i in 0..100 {
-                    bounds_cache.insert(format!("bounds_{}", i), i as i32);
+                    bounds_cache.insert(format!("bounds_{}", i), i);
                 }
                 
                 // Create extremely high frequency for one item
@@ -3378,7 +3378,7 @@ mod tests {
                 
                 // Fill cache to capacity
                 for i in 0..1000 {
-                    cache.insert(format!("key_{}", i), i as i32);
+                    cache.insert(format!("key_{}", i), i);
                 }
                 
                 // Create frequency distribution to establish clear LFU items
@@ -3398,7 +3398,7 @@ mod tests {
                 // Test eviction performance
                 let start = Instant::now();
                 for i in 1000..1500 {
-                    cache.insert(format!("new_key_{}", i), i as i32);
+                    cache.insert(format!("new_key_{}", i), i);
                 }
                 let eviction_duration = start.elapsed();
                 
@@ -3421,7 +3421,7 @@ mod tests {
                     
                     // Fill cache
                     for i in 0..size {
-                        test_cache.insert(format!("scale_{}", i), i as i32);
+                        test_cache.insert(format!("scale_{}", i), i);
                     }
                     
                     // Create some frequency variance
@@ -3432,7 +3432,7 @@ mod tests {
                     // Measure eviction performance
                     let start = Instant::now();
                     for i in 0..100 {
-                        test_cache.insert(format!("evict_{}", i), (i + size) as i32);
+                        test_cache.insert(format!("evict_{}", i), i + size);
                     }
                     let duration = start.elapsed();
                     eviction_times.push(duration);
@@ -3450,7 +3450,7 @@ mod tests {
                 
                 // Fill cache with uniform frequency
                 for i in 0..500 {
-                    uniform_cache.insert(format!("uniform_{}", i), i as i32);
+                    uniform_cache.insert(format!("uniform_{}", i), i);
                     uniform_cache.get(&format!("uniform_{}", i)); // All have frequency 2
                 }
                 
@@ -3468,7 +3468,7 @@ mod tests {
                 
                 // Fill cache
                 for i in 0..1000 {
-                    skewed_cache.insert(format!("skewed_{}", i), i as i32);
+                    skewed_cache.insert(format!("skewed_{}", i), i);
                 }
                 
                 // Create highly skewed distribution
@@ -3494,7 +3494,7 @@ mod tests {
                 
                 // Fill cache initially
                 for i in 0..100 {
-                    consistent_cache.insert(format!("consistent_{}", i), i as i32);
+                    consistent_cache.insert(format!("consistent_{}", i), i);
                 }
                 
                 // Perform multiple rounds of eviction
@@ -3528,7 +3528,7 @@ mod tests {
                 
                 // Fill cache with items
                 for i in 0..2000 {
-                    cache.insert(format!("pop_{}", i), i as i32);
+                    cache.insert(format!("pop_{}", i), i);
                 }
                 
                 // Create frequency distribution
@@ -3574,7 +3574,7 @@ mod tests {
                     
                     // Fill cache
                     for i in 0..size {
-                        test_cache.insert(format!("size_{}", i), i as i32);
+                        test_cache.insert(format!("size_{}", i), i);
                     }
                     
                     // Create some frequency variance
@@ -3603,7 +3603,7 @@ mod tests {
                 
                 // Fill cache with uniform frequency
                 for i in 0..300 {
-                    uniform_cache.insert(format!("uniform_{}", i), i as i32);
+                    uniform_cache.insert(format!("uniform_{}", i), i);
                     uniform_cache.get(&format!("uniform_{}", i)); // All have frequency 2
                 }
                 
@@ -3625,7 +3625,7 @@ mod tests {
                 
                 // Fill cache
                 for i in 0..100 {
-                    empty_cache.insert(format!("empty_{}", i), i as i32);
+                    empty_cache.insert(format!("empty_{}", i), i);
                 }
                 
                 let start = Instant::now();
@@ -3645,7 +3645,7 @@ mod tests {
                 
                 // Fill cache
                 for i in 0..1000 {
-                    skewed_cache.insert(format!("skewed_{}", i), i as i32);
+                    skewed_cache.insert(format!("skewed_{}", i), i);
                 }
                 
                 // Create very skewed distribution
@@ -3681,7 +3681,7 @@ mod tests {
                 
                 // Fill cache
                 for i in 0..200 {
-                    consistency_cache.insert(format!("consistency_{}", i), i as i32);
+                    consistency_cache.insert(format!("consistency_{}", i), i);
                 }
                 
                 // Perform multiple rounds of pop operations
@@ -3733,7 +3733,7 @@ mod tests {
                 
                 // Fill cache where all items have frequency 1
                 for i in 0..1000 {
-                    cache.insert(format!("same_freq_{}", i), i as i32);
+                    cache.insert(format!("same_freq_{}", i), i);
                 }
                 
                 // All items should have frequency 1
@@ -3744,7 +3744,7 @@ mod tests {
                 // Test eviction performance with same frequency items
                 let start = Instant::now();
                 for i in 1000..1500 {
-                    cache.insert(format!("new_same_{}", i), i as i32);
+                    cache.insert(format!("new_same_{}", i), i);
                 }
                 let same_freq_duration = start.elapsed();
                 
@@ -3757,19 +3757,19 @@ mod tests {
                 
                 // Group 1: frequency 1 (400 items)
                 for i in 0..400 {
-                    grouped_cache.insert(format!("group1_{}", i), i as i32);
+                    grouped_cache.insert(format!("group1_{}", i), i);
                 }
                 
                 // Group 2: frequency 3 (400 items)
                 for i in 400..800 {
-                    grouped_cache.insert(format!("group2_{}", i), i as i32);
+                    grouped_cache.insert(format!("group2_{}", i), i);
                     grouped_cache.get(&format!("group2_{}", i));
                     grouped_cache.get(&format!("group2_{}", i));
                 }
                 
                 // Group 3: frequency 5 (400 items)
                 for i in 800..1200 {
-                    grouped_cache.insert(format!("group3_{}", i), i as i32);
+                    grouped_cache.insert(format!("group3_{}", i), i);
                     for _ in 0..4 {
                         grouped_cache.get(&format!("group3_{}", i));
                     }
@@ -3778,7 +3778,7 @@ mod tests {
                 // Force eviction of group 1 (frequency 1)
                 let start = Instant::now();
                 for i in 1200..1600 {
-                    grouped_cache.insert(format!("new_group_{}", i), i as i32);
+                    grouped_cache.insert(format!("new_group_{}", i), i);
                 }
                 let grouped_eviction_duration = start.elapsed();
                 
@@ -3830,7 +3830,7 @@ mod tests {
                 
                 // Fill cache and make all items have frequency 3
                 for i in 0..2000 {
-                    identical_cache.insert(format!("identical_{}", i), i as i32);
+                    identical_cache.insert(format!("identical_{}", i), i);
                     identical_cache.get(&format!("identical_{}", i));
                     identical_cache.get(&format!("identical_{}", i));
                 }
@@ -3843,7 +3843,7 @@ mod tests {
                 // Test eviction performance with identical frequencies
                 let start = Instant::now();
                 for i in 2000..2500 {
-                    identical_cache.insert(format!("new_identical_{}", i), i as i32);
+                    identical_cache.insert(format!("new_identical_{}", i), i);
                 }
                 let identical_duration = start.elapsed();
                 
@@ -3861,7 +3861,7 @@ mod tests {
                     
                     // Fill cache
                     for i in 0..500 {
-                        ratio_cache.insert(format!("ratio_{}", i), i as i32);
+                        ratio_cache.insert(format!("ratio_{}", i), i);
                     }
                     
                     // Make some items have frequency 2, others keep frequency 1
@@ -3879,7 +3879,7 @@ mod tests {
                     // Test eviction performance
                     let start = Instant::now();
                     for i in 500..600 {
-                        ratio_cache.insert(format!("new_ratio_{}", i), i as i32);
+                        ratio_cache.insert(format!("new_ratio_{}", i), i);
                     }
                     let duration = start.elapsed();
                     ratio_times.push(duration);
@@ -3896,7 +3896,7 @@ mod tests {
                 
                 // Create alternating frequency pattern
                 for i in 0..300 {
-                    pattern_cache.insert(format!("pattern_{}", i), i as i32);
+                    pattern_cache.insert(format!("pattern_{}", i), i);
                     if i % 2 == 0 {
                         pattern_cache.get(&format!("pattern_{}", i)); // Even indices: freq 2
                     }
@@ -3919,7 +3919,7 @@ mod tests {
                 // Force eviction of freq 1 items
                 let start = Instant::now();
                 for i in 300..450 {
-                    pattern_cache.insert(format!("new_pattern_{}", i), i as i32);
+                    pattern_cache.insert(format!("new_pattern_{}", i), i);
                 }
                 let pattern_duration = start.elapsed();
                 
@@ -3931,12 +3931,11 @@ mod tests {
                 let mut remaining_freq1 = 0;
                 let mut remaining_freq2 = 0;
                 for i in 0..300 {
-                    if pattern_cache.contains(&format!("pattern_{}", i)) {
-                        if let Some(freq) = pattern_cache.frequency(&format!("pattern_{}", i)) {
+                    if pattern_cache.contains(&format!("pattern_{}", i))
+                        && let Some(freq) = pattern_cache.frequency(&format!("pattern_{}", i)) {
                             if freq == 1 { remaining_freq1 += 1; }
                             else if freq == 2 { remaining_freq2 += 1; }
                         }
-                    }
                 }
                 
                 assert!(remaining_freq2 > remaining_freq1, 
@@ -3947,7 +3946,7 @@ mod tests {
                 
                 // Fill and access all items once to make them frequency 2
                 for i in 0..500 {
-                    worst_case_cache.insert(format!("worst_{}", i), i as i32);
+                    worst_case_cache.insert(format!("worst_{}", i), i);
                     worst_case_cache.get(&format!("worst_{}", i));
                 }
                 
@@ -3958,7 +3957,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 500..750 {
-                    worst_case_cache.insert(format!("worst_new_{}", i), i as i32);
+                    worst_case_cache.insert(format!("worst_new_{}", i), i);
                 }
                 let worst_case_duration = start.elapsed();
                 
@@ -3982,7 +3981,7 @@ mod tests {
                 
                 // Create uniform frequency distribution (all items frequency 3)
                 for i in 0..1000 {
-                    uniform_cache.insert(format!("uniform_{}", i), i as i32);
+                    uniform_cache.insert(format!("uniform_{}", i), i);
                     uniform_cache.get(&format!("uniform_{}", i));
                     uniform_cache.get(&format!("uniform_{}", i));
                 }
@@ -3994,7 +3993,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 1000..1200 {
-                    uniform_cache.insert(format!("new_uniform_{}", i), i as i32);
+                    uniform_cache.insert(format!("new_uniform_{}", i), i);
                 }
                 let uniform_duration = start.elapsed();
                 
@@ -4007,7 +4006,7 @@ mod tests {
                 
                 // Create normal distribution of frequencies (center items higher frequency)
                 for i in 0..1000 {
-                    normal_cache.insert(format!("normal_{}", i), i as i32);
+                    normal_cache.insert(format!("normal_{}", i), i);
                 }
                 
                 // Create bell curve frequency pattern
@@ -4021,7 +4020,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 1000..1200 {
-                    normal_cache.insert(format!("new_normal_{}", i), i as i32);
+                    normal_cache.insert(format!("new_normal_{}", i), i);
                 }
                 let normal_duration = start.elapsed();
                 
@@ -4039,7 +4038,7 @@ mod tests {
                 
                 // Create exponential frequency distribution
                 for i in 0..1000 {
-                    exponential_cache.insert(format!("exp_{}", i), i as i32);
+                    exponential_cache.insert(format!("exp_{}", i), i);
                 }
                 
                 // Create exponential decay pattern
@@ -4052,7 +4051,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 1000..1300 {
-                    exponential_cache.insert(format!("new_exp_{}", i), i as i32);
+                    exponential_cache.insert(format!("new_exp_{}", i), i);
                 }
                 let exponential_duration = start.elapsed();
                 
@@ -4070,7 +4069,7 @@ mod tests {
                 
                 // Create Zipf distribution (80/20 rule)
                 for i in 0..1000 {
-                    zipf_cache.insert(format!("zipf_{}", i), i as i32);
+                    zipf_cache.insert(format!("zipf_{}", i), i);
                 }
                 
                 // Top 20% get 80% of accesses
@@ -4092,7 +4091,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 1000..1400 {
-                    zipf_cache.insert(format!("new_zipf_{}", i), i as i32);
+                    zipf_cache.insert(format!("new_zipf_{}", i), i);
                 }
                 let zipf_duration = start.elapsed();
                 
@@ -4110,7 +4109,7 @@ mod tests {
                 
                 // Create bimodal distribution (two peaks)
                 for i in 0..1000 {
-                    bimodal_cache.insert(format!("bimodal_{}", i), i as i32);
+                    bimodal_cache.insert(format!("bimodal_{}", i), i);
                 }
                 
                 // Peak 1: items 200-300 (high frequency)
@@ -4140,7 +4139,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 1000..1300 {
-                    bimodal_cache.insert(format!("new_bimodal_{}", i), i as i32);
+                    bimodal_cache.insert(format!("new_bimodal_{}", i), i);
                 }
                 let bimodal_duration = start.elapsed();
                 
@@ -4167,7 +4166,7 @@ mod tests {
                 
                 // Fill cache initially
                 for i in 0..500 {
-                    dynamic_cache.insert(format!("dynamic_{}", i), i as i32);
+                    dynamic_cache.insert(format!("dynamic_{}", i), i);
                 }
                 
                 // Phase 1: Create initial distribution (linear)
@@ -4186,7 +4185,7 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 500..650 {
-                    dynamic_cache.insert(format!("new_dynamic_{}", i), i as i32);
+                    dynamic_cache.insert(format!("new_dynamic_{}", i), i);
                 }
                 let dynamic_duration = start.elapsed();
                 
@@ -4200,7 +4199,7 @@ mod tests {
                 
                 // Sparse: frequencies 1, 10, 20, 30 (big gaps)
                 for i in 0..400 {
-                    sparse_cache.insert(format!("sparse_{}", i), i as i32);
+                    sparse_cache.insert(format!("sparse_{}", i), i);
                     let freq_group = i / 100;
                     let target_freq = match freq_group {
                         0 => 1,
@@ -4215,7 +4214,7 @@ mod tests {
                 
                 // Dense: frequencies 1, 2, 3, 4 (small gaps)
                 for i in 0..400 {
-                    dense_cache.insert(format!("dense_{}", i), i as i32);
+                    dense_cache.insert(format!("dense_{}", i), i);
                     let freq_group = i / 100;
                     let target_freq = freq_group + 1;
                     for _ in 1..target_freq {
@@ -4225,13 +4224,13 @@ mod tests {
                 
                 let start = Instant::now();
                 for i in 400..500 {
-                    sparse_cache.insert(format!("new_sparse_{}", i), i as i32);
+                    sparse_cache.insert(format!("new_sparse_{}", i), i);
                 }
                 let sparse_eviction_duration = start.elapsed();
                 
                 let start = Instant::now();
                 for i in 400..500 {
-                    dense_cache.insert(format!("new_dense_{}", i), i as i32);
+                    dense_cache.insert(format!("new_dense_{}", i), i);
                 }
                 let dense_eviction_duration = start.elapsed();
                 
@@ -4325,7 +4324,7 @@ mod tests {
                 }
 
                 // Verify performance characteristics
-                for (_i, &(size, time)) in results.iter().enumerate() {
+                for &(size, time) in results.iter() {
                     println!("Cache size: {}, Total insert time: {:?}, Avg per insert: {:?}",
                              size, time, time / size as u32);
 
@@ -4349,7 +4348,7 @@ mod tests {
 
                     // Pre-populate cache
                     for i in 0..cache_size {
-                        cache.insert(format!("key_{}", i), i as i32);
+                        cache.insert(format!("key_{}", i), i);
                     }
 
                     // Measure random access time
@@ -4390,7 +4389,7 @@ mod tests {
 
                     // Pre-populate cache with different frequencies
                     for i in 0..cache_size {
-                        cache.insert(format!("key_{}", i), i as i32);
+                        cache.insert(format!("key_{}", i), i);
                         // Create frequency differences
                         for _ in 0..(i % 5) {
                             cache.get(&format!("key_{}", i));
@@ -4438,7 +4437,7 @@ mod tests {
 
                     // Pre-populate cache
                     for i in 0..cache_size {
-                        cache.insert(format!("key_{}", i), i as i32);
+                        cache.insert(format!("key_{}", i), i);
                         // Create varied frequency distribution
                         for _ in 0..(i % 7) {
                             cache.get(&format!("key_{}", i));
@@ -4481,7 +4480,7 @@ mod tests {
 
                     // Pre-populate cache
                     for i in 0..cache_size {
-                        cache.insert(format!("key_{}", i), i as i32);
+                        cache.insert(format!("key_{}", i), i);
                     }
 
                     let test_keys: Vec<String> = (0..1000)
@@ -4542,7 +4541,7 @@ mod tests {
 
                     // Fill cache to capacity
                     for i in 0..cache_size {
-                        cache.insert(format!("test_key_{:08}", i), i as i32);
+                        cache.insert(format!("test_key_{:08}", i), i);
                     }
 
                     // Verify cache respects capacity constraints
@@ -4551,7 +4550,7 @@ mod tests {
 
                     // Test overfill behavior
                     let pre_overfill_len = cache.len();
-                    cache.insert("overflow_key".to_string(), -1);
+                    cache.insert("overflow_key".to_string(), usize::MAX);
 
                     // Should maintain capacity by evicting LFU item
                     assert_eq!(cache.len(), cache_size);
@@ -4597,7 +4596,7 @@ mod tests {
 
                 // Fill cache and verify it doesn't use excessive memory
                 for i in 0..cache_size {
-                    cache.insert(format!("key_{:06}", i), i as i32);
+                    cache.insert(format!("key_{:06}", i), i);
                 }
 
                 assert_eq!(cache.len(), cache_size);
@@ -4616,7 +4615,7 @@ mod tests {
                     match i % 8 {
                         0 => {
                             // Insert new items (should evict LFU)
-                            cache.insert(format!("temp_key_{}", i), i as i32);
+                            cache.insert(format!("temp_key_{}", i), i);
                         },
                         1 => {
                             // Access existing items (increments frequency)
@@ -4701,7 +4700,7 @@ mod tests {
                     // Refill with new data
                     for i in 0..cache_size {
                         if cache.len() < cache_size {
-                            cache.insert(format!("frag_{}_{}", cycle, i), (cycle * 1000 + i) as i32);
+                            cache.insert(format!("frag_{}_{}", cycle, i), cycle * 1000 + i);
                         }
                     }
                     
@@ -4727,7 +4726,7 @@ mod tests {
                     // Fill with variable-sized keys
                     for i in 0..100 {
                         let key = format!("{}{:03}", base_key, i);
-                        test_cache.insert(key, i as i32);
+                        test_cache.insert(key, i);
                     }
                     
                     assert_eq!(test_cache.len(), 100);
@@ -4782,14 +4781,14 @@ mod tests {
                 
                 // Fill exactly to capacity
                 for i in 0..boundary_cache_size {
-                    boundary_cache.insert(format!("boundary_{}", i), i as i32);
+                    boundary_cache.insert(format!("boundary_{}", i), i);
                 }
                 assert_eq!(boundary_cache.len(), boundary_cache_size);
                 
                 // Test overflow behavior (should evict LFU items)
                 let overflow_items = 20;
                 for i in 0..overflow_items {
-                    boundary_cache.insert(format!("overflow_{}", i), (100 + i) as i32);
+                    boundary_cache.insert(format!("overflow_{}", i), (100 + i));
                     // Should maintain capacity
                     assert_eq!(boundary_cache.len(), boundary_cache_size);
                 }
@@ -4836,7 +4835,7 @@ mod tests {
                     let (_, insert_time) = measure_time(|| {
                         for i in 0..cache_size {
                             let key = format!("{}{:06}", long_key, i);
-                            cache.insert(key, i as i32);
+                            cache.insert(key, i);
                         }
                     });
 
@@ -4860,7 +4859,7 @@ mod tests {
 
                 // Pre-populate
                 for i in 0..cache_size {
-                    cache.insert(format!("key_{}", i), i as i32);
+                    cache.insert(format!("key_{}", i), i);
                 }
 
                 // Mixed workload performance test
@@ -4877,7 +4876,7 @@ mod tests {
                                 *results.entry("gets").or_insert(0) += 1;
                             },
                             6..=7 => { // 20% inserts
-                                cache.insert(format!("new_key_{}", i), i as i32);
+                                cache.insert(format!("new_key_{}", i), i);
                                 *results.entry("inserts").or_insert(0) += 1;
                             },
                             8 => { // 10% frequency ops
@@ -4919,7 +4918,7 @@ mod tests {
 
                 // Worst case: all items have the same frequency
                 for i in 0..cache_size {
-                    cache.insert(format!("key_{:06}", i), i as i32);
+                    cache.insert(format!("key_{:06}", i), i);
                 }
 
                 // All items now have frequency 1 (worst case for LFU operations)
@@ -4941,7 +4940,7 @@ mod tests {
 
                 // Refill and test peek_lfu worst case
                 for i in 0..100 {
-                    cache.insert(format!("refill_key_{}", i), i as i32);
+                    cache.insert(format!("refill_key_{}", i), i);
                 }
 
                 let peek_count = 1000;
@@ -5026,7 +5025,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..500 {
-                        cache_guard.insert(format!("key_{}", i), i as i32);
+                        cache_guard.insert(format!("key_{}", i), i);
                     }
                 }
                 
@@ -5079,7 +5078,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..100 {
-                        cache_guard.insert(format!("freq_key_{}", i), i as i32);
+                        cache_guard.insert(format!("freq_key_{}", i), i);
                     }
                 }
                 
@@ -5151,7 +5150,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..200 {
-                        cache_guard.insert(format!("lfu_key_{}", i), i as i32);
+                        cache_guard.insert(format!("lfu_key_{}", i), i);
                     }
                     
                     // Create frequency differences - some items will be more frequent
@@ -5254,7 +5253,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..150 {
-                        cache_guard.insert(format!("initial_{}", i), i as i32);
+                        cache_guard.insert(format!("initial_{}", i), i);
                     }
                 }
                 
@@ -5271,11 +5270,11 @@ mod tests {
                                 0 | 1 => {
                                     // Insert operations (25% of operations)
                                     let key = format!("mixed_{}_{}", thread_id, i);
-                                    let value = (thread_id * 1000 + i) as i32;
+                                    let value = (thread_id * 1000 + i);
                                     cache_clone.lock().unwrap().insert(key, value);
                                     counts_clone.lock().unwrap().0 += 1;
                                 },
-                                2 | 3 | 4 => {
+                                2..=4 => {
                                     // Get operations (37.5% of operations)
                                     let key = if i % 2 == 0 {
                                         format!("initial_{}", i % 150)
@@ -5362,7 +5361,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..100 {
-                        cache_guard.insert(format!("base_{}", i), i as i32);
+                        cache_guard.insert(format!("base_{}", i), i);
                     }
                     
                     // Create frequency differences to establish clear LFU candidates
@@ -5387,7 +5386,7 @@ mod tests {
                     let handle = thread::spawn(move || {
                         for i in 0..inserts_per_thread {
                             let key = format!("evict_trigger_{}_{}", thread_id, i);
-                            let value = (thread_id * 1000 + i) as i32;
+                            let value = (thread_id * 1000 + i);
                             cache_clone.lock().unwrap().insert(key, value);
                             
                             // Small delay to increase thread interleaving
@@ -5493,7 +5492,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..100 {
-                        cache_guard.insert(format!("fair_{}", i), i as i32);
+                        cache_guard.insert(format!("fair_{}", i), i);
                     }
                 }
                 
@@ -5681,7 +5680,7 @@ mod tests {
                                     // Insert operation (creates most contention)
                                     let new_key = format!("thread_{}_{}", thread_id, i);
                                     if let Ok(mut cache) = cache_clone.try_lock() {
-                                        cache.insert(new_key, thread_id as i32);
+                                        cache.insert(new_key, thread_id);
                                         success_count_clone.fetch_add(1, Ordering::Relaxed);
                                     } else {
                                         conflict_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -6147,7 +6146,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..50 {
-                        cache_guard.insert(format!("persistent_{}", i), i as i32);
+                        cache_guard.insert(format!("persistent_{}", i), i);
                         // Access each item multiple times to build initial frequency
                         for _ in 0..5 {
                             cache_guard.get(&format!("persistent_{}", i));
@@ -6271,7 +6270,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..75 {
-                        cache_guard.insert(format!("baseline_{}", i), i as i32);
+                        cache_guard.insert(format!("baseline_{}", i), i);
                     }
                 }
                 
@@ -6439,7 +6438,7 @@ mod tests {
                 {
                     let mut cache_guard = cache.lock().unwrap();
                     for i in 0..50 {
-                        cache_guard.insert(format!("initial_{}", i), i as i32);
+                        cache_guard.insert(format!("initial_{}", i), i);
                     }
                 }
                 
@@ -6665,7 +6664,7 @@ mod tests {
                                 
                                 // Mix of operations (emphasize pattern access)
                                 match i % 8 {
-                                    0 | 1 | 2 | 3 | 4 => {
+                                    0..=4 => {
                                         // Access existing keys following the distribution pattern (62.5%)
                                         cache_clone.lock().unwrap().get(&key);
                                         local_ops += 1;
@@ -6907,7 +6906,7 @@ mod tests {
                                     }
                                     local_ops += 1;
                                 }
-                                4 | 5 | 6 => {
+                                4..=6 => {
                                     // Insert new items - HIGH frequency (30% for strong pressure)
                                     let key = format!("stress_{}_{}", thread_id, i);
                                     let mut cache = cache_clone.lock().unwrap();
@@ -7019,7 +7018,7 @@ mod tests {
                     let mut tier2_count = 0; 
                     let mut tier3_count = 0;
                     let mut filler_count = 0;
-                    let mut stress_count = 0;
+                    let _stress_count = 0;
                     
                     for i in 0..10 {
                         if cache_guard.contains(&format!("tier1_{}", i)) { tier1_count += 1; }

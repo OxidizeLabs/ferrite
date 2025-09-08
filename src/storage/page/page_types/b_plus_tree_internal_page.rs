@@ -967,7 +967,7 @@ mod tests {
         assert_eq!(page.get_value_at(0), None);
 
         // Insert first key-value pair: this sets up the first key and both left/right pointers
-        assert_eq!(page.insert_key_value(1, 2), true);
+        assert!(page.insert_key_value(1, 2));
         assert_eq!(page.get_size(), 1);
         assert_eq!(page.get_key_at(0), Some(1)); // Key at index 0
         assert_eq!(page.get_value_at(0), Some(2)); // First (leftmost) pointer
@@ -975,7 +975,7 @@ mod tests {
 
         // Insert second key-value pair (3, 4)
         // This adds the second key and its corresponding pointer
-        assert_eq!(page.insert_key_value(3, 4), true);
+        assert!(page.insert_key_value(3, 4));
         assert_eq!(page.get_size(), 2);
         assert_eq!(page.get_key_at(0), Some(1)); // First key
         assert_eq!(page.get_key_at(1), Some(3)); // Second key
@@ -984,7 +984,7 @@ mod tests {
         assert_eq!(page.get_value_at(2), Some(4)); // Rightmost pointer (associated with key 3)
 
         // Insert third key-value pair (5, 6) - should maintain sorted order
-        assert_eq!(page.insert_key_value(5, 6), true);
+        assert!(page.insert_key_value(5, 6));
         assert_eq!(page.get_size(), 3);
         assert_eq!(page.get_key_at(0), Some(1)); // First key
         assert_eq!(page.get_key_at(1), Some(3)); // Second key
@@ -995,7 +995,7 @@ mod tests {
         assert_eq!(page.get_value_at(3), Some(6)); // Rightmost pointer
 
         // Insert key between existing keys to test sorted ordering
-        assert_eq!(page.insert_key_value(4, 8), true);
+        assert!(page.insert_key_value(4, 8));
         assert_eq!(page.get_size(), 4);
         assert_eq!(page.get_key_at(0), Some(1)); // First key
         assert_eq!(page.get_key_at(1), Some(3)); // Second key
@@ -1008,7 +1008,7 @@ mod tests {
         assert_eq!(page.get_value_at(4), Some(6)); // Rightmost pointer (for key 5)
 
         // Try to insert when page is full
-        assert_eq!(page.insert_key_value(7, 10), false);
+        assert!(!page.insert_key_value(7, 10));
         assert_eq!(page.get_size(), 4); // Size shouldn't change
     }
 
