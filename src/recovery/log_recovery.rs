@@ -505,7 +505,7 @@ mod tests {
     use std::time::Duration;
     use chrono::Utc;
     use tempfile::TempDir;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction_manager::TransactionManager;

@@ -5,7 +5,7 @@ use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::storage::index::b_plus_tree::BPlusTree;
-use crate::storage::index::index::{IndexInfo, IndexType};
+use crate::storage::index::{IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use core::fmt;
 use log::{info, warn};
@@ -13,6 +13,29 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+
+/// Parameters for creating a catalog with existing data
+pub struct CatalogCreationParams {
+    pub bpm: Arc<BufferPoolManager>,
+    pub next_index_oid: IndexOidT,
+    pub next_table_oid: TableOidT,
+    pub tables: HashMap<TableOidT, TableInfo>,
+    pub indexes: HashMap<IndexOidT, (Arc<IndexInfo>, Arc<RwLock<BPlusTree>>)>,
+    pub table_names: HashMap<String, TableOidT>,
+    pub index_names: HashMap<String, IndexOidT>,
+    pub txn_manager: Arc<TransactionManager>,
+}
+
+/// Parameters for creating an index
+pub struct IndexCreationParams {
+    pub index_name: String,
+    pub table_name: String,
+    pub key_schema: Schema,
+    pub key_attrs: Vec<usize>,
+    pub key_size: usize,
+    pub unique: bool,
+    pub index_type: IndexType,
+}
 
 /// The Catalog is a non-persistent catalog that is designed for
 /// use by executors within the DBMS execution engine. It handles
@@ -46,6 +69,7 @@ impl Catalog {
     }
 
     /// For backward compatibility - constructs a catalog with existing data
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_existing_data(
         bpm: Arc<BufferPoolManager>,
         next_index_oid: IndexOidT,
@@ -212,6 +236,7 @@ impl Catalog {
     }
 
     /// Creates a new index in the current database, populates existing data of the table, and returns its metadata.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_index(
         &mut self,
         index_name: &str,

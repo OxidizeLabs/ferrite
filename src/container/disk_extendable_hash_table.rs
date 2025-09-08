@@ -3,7 +3,7 @@ use crate::common::config::PageId;
 use crate::common::config::INVALID_PAGE_ID;
 use crate::common::rid::RID;
 use crate::container::hash_function::HashFunction;
-use crate::storage::page::page::PageTrait;
+use crate::storage::page::PageTrait;
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::extendable_hash_table_bucket_page::ExtendableHTableBucketPage;
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;

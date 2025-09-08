@@ -87,7 +87,7 @@
 //! while providing better performance, safety, and maintainability.
 
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::executors::aggregation_executor::AggregationExecutor;
@@ -122,6 +122,10 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
+
+// Type aliases for complex types
+type ExecutorPair = (Arc<Mutex<ExecutorType>>, Arc<Mutex<ExecutorType>>);
+type NLJCheckExecSet = VecDeque<ExecutorPair>;
 
 /// Type-safe, thread-safe executor enum that eliminates dynamic dispatch
 pub enum ExecutorType {
@@ -404,7 +408,7 @@ pub struct ExecutionContext {
     buffer_pool_manager: Arc<BufferPoolManager>,
     catalog: Arc<RwLock<Catalog>>,
     transaction_context: Arc<TransactionContext>,
-    nlj_check_exec_set: VecDeque<(Arc<Mutex<ExecutorType>>, Arc<Mutex<ExecutorType>>)>,
+    nlj_check_exec_set: NLJCheckExecSet,
     check_options: Arc<CheckOptions>,
     is_delete: bool,
     chain_after_transaction: bool,
@@ -451,7 +455,7 @@ impl ExecutionContext {
 
     pub fn get_nlj_check_exec_set(
         &self,
-    ) -> &VecDeque<(Arc<Mutex<ExecutorType>>, Arc<Mutex<ExecutorType>>)> {
+    ) -> &NLJCheckExecSet {
         &self.nlj_check_exec_set
     }
 

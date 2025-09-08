@@ -845,7 +845,7 @@ impl Display for PlanNode {
 mod basic_behaviour {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -1086,7 +1086,7 @@ mod basic_behaviour {
 mod complex_behaviour {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction_manager::TransactionManager;

@@ -1,6 +1,6 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
 use std::any::Any;
 
 /// The header page for a B+ tree.
@@ -290,7 +290,7 @@ mod tests {
     #[cfg(test)]
     mod unit_tests {
         use crate::common::config::{PageId, INVALID_PAGE_ID};
-        use crate::storage::page::page::Page;
+        use crate::storage::page::Page;
         use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
 
         #[test]
@@ -505,7 +505,7 @@ mod tests {
 
     #[cfg(test)]
     mod integration_tests {
-        use crate::storage::page::page::PageTrait;
+        use crate::storage::page::PageTrait;
         use crate::storage::page::page_guard::PageGuard;
         use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
         use crate::storage::page::page_types::b_plus_tree_header_page::tests::TestContext;

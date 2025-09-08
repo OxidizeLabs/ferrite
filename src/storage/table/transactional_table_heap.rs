@@ -1,4 +1,4 @@
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::common::config::Timestamp;
@@ -134,6 +134,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates check constraints for the given values against the schema
+    #[allow(dead_code)]
     fn validate_check_constraints(values: &[Value], schema: &Schema) -> Result<(), String> {
         for (i, column) in schema.get_columns().iter().enumerate() {
             if let Some(constraint_expr) = column.get_check_constraint() {
@@ -163,6 +164,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates NOT NULL constraints for the given values against the schema
+    #[allow(dead_code)]
     fn validate_not_null_constraints(values: &[Value], schema: &Schema) -> Result<(), String> {
         for (i, column) in schema.get_columns().iter().enumerate() {
             if column.is_not_null() {
@@ -195,6 +197,7 @@ impl TransactionalTableHeap {
     }
 
     /// Evaluates simple check constraints without requiring full SQL parsing
+    #[allow(dead_code)]
     fn evaluate_simple_constraint(
         constraint: &str,
         value: &Value,
@@ -321,6 +324,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates PRIMARY KEY and UNIQUE constraints for the given values against existing data
+    #[allow(dead_code)]
     fn validate_primary_key_and_unique_constraints(
         &self,
         values: &[Value],
@@ -378,6 +382,7 @@ impl TransactionalTableHeap {
     }
 
     /// Check if inserting the given primary key values would violate the PRIMARY KEY constraint
+    #[allow(dead_code)]
     fn check_primary_key_violation(
         &self,
         pk_values: &[Value],
@@ -414,6 +419,7 @@ impl TransactionalTableHeap {
     }
 
     /// Check if inserting the given value would violate a UNIQUE constraint
+    #[allow(dead_code)]
     fn check_unique_constraint_violation(
         &self,
         column_name: &str,
@@ -440,6 +446,7 @@ impl TransactionalTableHeap {
     }
 
     /// Helper function to find the index of a column by name
+    #[allow(dead_code)]
     fn find_column_index(schema: &Schema, column_name: &str) -> Option<usize> {
         schema.get_columns()
             .iter()
@@ -774,6 +781,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates FOREIGN KEY constraints for the given values against referenced tables
+    #[allow(dead_code)]
     fn validate_foreign_key_constraints(
         &self,
         values: &[Value],
@@ -820,6 +828,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validate that a foreign key value exists in the referenced table
+    #[allow(dead_code)]
     fn validate_foreign_key_reference(
         &self,
         value: &Value,

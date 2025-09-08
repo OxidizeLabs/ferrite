@@ -1,5 +1,5 @@
 use super::logical_plan::LogicalPlan;
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::sql::planner::plan_builder::LogicalPlanBuilder;
 use parking_lot::RwLock;
 use sqlparser::ast::Statement;

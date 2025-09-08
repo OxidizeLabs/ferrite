@@ -9,6 +9,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+// Type aliases for complex types
+type PageRequest = (PageId, Arc<RwLock<[u8; 4096]>>, mpsc::Sender<()>);
+
 // Define DiskRequest struct
 #[derive(Debug)]
 pub struct DiskRequest {
@@ -21,8 +24,8 @@ pub struct DiskRequest {
 // PERFORMANCE OPTIMIZATION: Batch request structure
 #[derive(Debug)]
 pub struct BatchDiskRequest {
-    write_requests: Vec<(PageId, Arc<RwLock<[u8; 4096]>>, mpsc::Sender<()>)>,
-    read_requests: Vec<(PageId, Arc<RwLock<[u8; 4096]>>, mpsc::Sender<()>)>,
+    write_requests: Vec<PageRequest>,
+    read_requests: Vec<PageRequest>,
 }
 
 impl BatchDiskRequest {

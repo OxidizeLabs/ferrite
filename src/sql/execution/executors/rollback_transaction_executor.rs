@@ -94,7 +94,7 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;

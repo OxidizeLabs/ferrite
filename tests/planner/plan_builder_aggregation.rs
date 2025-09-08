@@ -3,7 +3,7 @@ use tkdb::sql::execution::expressions::aggregate_expression::AggregationType;
 use tkdb::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use tkdb::{buffer::buffer_pool_manager_async::BufferPoolManager, sql::execution::plans::abstract_plan::PlanNode};
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::catalog::Catalog;
+use tkdb::catalog::Catalog;
 use tkdb::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
 use tkdb::sql::planner::query_planner::QueryPlanner;
 use tkdb::types_db::type_id::TypeId;

@@ -1,4 +1,4 @@
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
@@ -11,7 +11,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 // Additional imports for constraint index creation
-use crate::storage::index::index::IndexType;
+use crate::storage::index::IndexType;
 
 pub struct Optimizer {
     catalog: Arc<RwLock<Catalog>>,

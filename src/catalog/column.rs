@@ -21,6 +21,21 @@ pub struct Column {
     scale: Option<u8>, // For DECIMAL/NUMERIC types: number of digits after decimal point
 }
 
+/// Parameters for creating a column from SQL type information
+pub struct ColumnSqlInfo {
+    pub column_name: String,
+    pub column_type: TypeId,
+    pub length: Option<usize>,
+    pub precision: Option<u8>,
+    pub scale: Option<u8>,
+    pub is_primary_key: bool,
+    pub is_not_null: bool,
+    pub is_unique: bool,
+    pub check_constraint: Option<String>,
+    pub default_value: Option<Value>,
+    pub foreign_key: Option<ForeignKeyConstraint>,
+}
+
 /// Foreign key constraint information
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub struct ForeignKeyConstraint {
@@ -243,6 +258,7 @@ impl Column {
     }
 
     /// Create a column from SQL type information with all parameters
+    #[allow(clippy::too_many_arguments)]
     pub fn from_sql_info(
         column_name: &str,
         column_type: TypeId,

@@ -1,8 +1,8 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
-use crate::storage::page::page::Page;
-use crate::storage::page::page::PAGE_TYPE_OFFSET;
-use crate::storage::page::page::{PageTrait, PageType, PageTypeId};
+use crate::storage::page::Page;
+use crate::storage::page::PAGE_TYPE_OFFSET;
+use crate::storage::page::{PageTrait, PageType, PageTypeId};
 use log::{debug, info, warn};
 use std::any::Any;
 use std::collections::HashMap;

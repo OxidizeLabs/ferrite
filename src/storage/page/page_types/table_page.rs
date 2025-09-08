@@ -1,8 +1,8 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
-use crate::storage::page::page::Page;
-use crate::storage::page::page::{
+use crate::storage::page::Page;
+use crate::storage::page::{
     PageTrait, PageType, PageTypeId, PAGE_ID_OFFSET, PAGE_TYPE_OFFSET,
 };
 use crate::storage::table::tuple::{Tuple, TupleMeta};

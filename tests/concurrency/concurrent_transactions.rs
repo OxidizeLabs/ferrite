@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::catalog::Catalog;
+use tkdb::catalog::Catalog;
 use tkdb::common::result_writer::CliResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::concurrency::transaction_manager::TransactionManager;

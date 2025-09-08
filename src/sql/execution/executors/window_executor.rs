@@ -16,6 +16,10 @@ use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// Type aliases for complex types
+type TupleWithPartitionAndSort = (Vec<Value>, Vec<Value>, Arc<Tuple>, RID);
+type PartitionMap = HashMap<Vec<Value>, Vec<(Vec<Value>, Arc<Tuple>, RID)>>;
+
 /// Wrapper type for tuple and sort keys to implement custom ordering
 #[derive(Eq)]
 struct TupleWithKeys {
@@ -126,7 +130,7 @@ impl AbstractExecutor for WindowExecutor {
             self.child_executor.init();
 
             // Collect all tuples and their sort keys
-            let mut all_tuples: Vec<(Vec<Value>, Vec<Value>, Arc<Tuple>, RID)> = Vec::new();
+            let mut all_tuples: Vec<TupleWithPartitionAndSort> = Vec::new();
             loop {
                 match self.child_executor.next() {
                     Ok(Some((tuple, rid))) => {
@@ -143,8 +147,7 @@ impl AbstractExecutor for WindowExecutor {
             }
 
             // Group tuples by partition
-            let mut partitions_map: HashMap<Vec<Value>, Vec<(Vec<Value>, Arc<Tuple>, RID)>> =
-                HashMap::new();
+            let mut partitions_map: PartitionMap = HashMap::new();
             for (partition_keys, sort_keys, tuple, rid) in all_tuples {
                 partitions_map
                     .entry(partition_keys)
@@ -269,7 +272,7 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};

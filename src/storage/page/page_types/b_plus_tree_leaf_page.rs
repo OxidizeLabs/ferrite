@@ -1,7 +1,7 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::exception::PageError;
 use crate::storage::index::types::{KeyComparator, KeyType};
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId};
+use crate::storage::page::{Page, PageTrait, PageType, PageTypeId};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};

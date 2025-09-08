@@ -6,7 +6,7 @@ use rustyline::DefaultEditor;
 use std::error;
 use std::sync::Arc;
 use tkdb::cli::CLI;
-use tkdb::client::client::DatabaseClient;
+use tkdb::client::DatabaseClient;
 use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
 use tkdb::common::logger::initialize_logger;

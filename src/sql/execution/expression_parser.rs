@@ -1,4 +1,4 @@
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
@@ -78,6 +78,9 @@ use sqlparser::ast::{
 };
 use sqlparser::tokenizer::{Location, Span};
 use std::sync::Arc;
+
+// Type alias for complex return type
+type WindowSpecResult = Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String>;
 
 /// 1. Responsible for parsing SQL expressions into our internal expression types
 pub struct ExpressionParser {
@@ -3296,7 +3299,7 @@ impl ExpressionParser {
         &self,
         spec: &WindowType,
         schema: &Schema,
-    ) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String> {
+    ) -> WindowSpecResult {
         debug!("Parsing window specification: {:?}", spec);
         let mut partition_by = Vec::new();
         let mut order_by = Vec::new();

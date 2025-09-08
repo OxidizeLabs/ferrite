@@ -3,7 +3,7 @@ use tkdb::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use tkdb::types_db::type_id::TypeId;
 use tkdb::{buffer::buffer_pool_manager_async::BufferPoolManager, sql::execution::expressions::abstract_expression::Expression};
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::catalog::Catalog;
+use tkdb::catalog::Catalog;
 use tkdb::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
 use tkdb::sql::planner::query_planner::QueryPlanner;
 use parking_lot::RwLock;

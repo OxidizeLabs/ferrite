@@ -1,7 +1,7 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
-use crate::catalog::catalog::Catalog;
-use crate::client::client::ClientSession;
+use crate::catalog::Catalog;
+use crate::client::ClientSession;
 use crate::common::exception::DBError;
 use crate::common::result_writer::{CliResultWriter, NetworkResultWriter, ResultWriter};
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
@@ -378,22 +378,26 @@ impl DBInstance {
         query: DatabaseRequest,
         client_id: u64,
     ) -> Result<DatabaseResponse, DBError> {
-        let mut sessions = self.client_sessions.lock();
-        let session = sessions
-            .get_mut(&client_id)
-            .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
-
         match query {
             DatabaseRequest::Query(sql) => {
-                let mut writer = NetworkResultWriter::new();
+                // Extract session data first
+                let (txn_ctx, has_current_transaction) = {
+                    let mut sessions = self.client_sessions.lock();
+                    let session = sessions
+                        .get_mut(&client_id)
+                        .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
 
-                // Create transaction context
-                let txn_ctx = if let Some(txn) = &session.current_transaction {
-                    txn.clone()
-                } else {
-                    self.transaction_factory
-                        .begin_transaction(session.isolation_level)
+                    let txn_ctx = if let Some(txn) = &session.current_transaction {
+                        txn.clone()
+                    } else {
+                        self.transaction_factory
+                            .begin_transaction(session.isolation_level)
+                    };
+                    let has_current_transaction = session.current_transaction.is_some();
+                    (txn_ctx, has_current_transaction)
                 };
+
+                let mut writer = NetworkResultWriter::new();
 
                 // Create execution context
                 let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
@@ -403,13 +407,14 @@ impl DBInstance {
                 )));
 
                 // Execute query
-                match self
-                    .execution_engine
-                    .lock()
-                    .execute_sql(&sql, exec_ctx, &mut writer).await
-                {
+                let execution_result = {
+                    let mut engine = self.execution_engine.lock();
+                    engine.execute_sql(&sql, exec_ctx, &mut writer).await
+                };
+
+                match execution_result {
                     Ok(_) => {
-                        if session.current_transaction.is_none() {
+                        if !has_current_transaction {
                             // Auto-commit if not in transaction
                             if !self.transaction_factory.commit_transaction(txn_ctx.clone()).await {
                                 self.transaction_factory.abort_transaction(txn_ctx);
@@ -422,7 +427,7 @@ impl DBInstance {
                         Ok(DatabaseResponse::Results(writer.into_results()))
                     }
                     Err(e) => {
-                        if session.current_transaction.is_none() {
+                        if !has_current_transaction {
                             self.transaction_factory.abort_transaction(txn_ctx);
                         }
                         Err(e)
@@ -430,16 +435,51 @@ impl DBInstance {
                 }
             }
             DatabaseRequest::BeginTransaction { isolation_level } => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions
+                    .get_mut(&client_id)
+                    .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
                 self.handle_begin_transaction(session, isolation_level)
             }
-            DatabaseRequest::Commit => self.handle_commit(session).await,
-            DatabaseRequest::Rollback => self.handle_rollback(session),
-            DatabaseRequest::Prepare(sql) => self.handle_sql_query(sql, session).await,
+            #[allow(clippy::await_holding_lock)]
+            DatabaseRequest::Commit => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions
+                    .get_mut(&client_id)
+                    .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
+                self.handle_commit(session).await
+            }
+            DatabaseRequest::Rollback => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions
+                    .get_mut(&client_id)
+                    .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
+                self.handle_rollback(session)
+            }
+            #[allow(clippy::await_holding_lock)]
+            DatabaseRequest::Prepare(sql) => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions
+                    .get_mut(&client_id)
+                    .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
+                self.handle_sql_query(sql, session).await
+            }
+            #[allow(clippy::await_holding_lock)]
             DatabaseRequest::Execute { stmt_id, params } => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions
+                    .get_mut(&client_id)
+                    .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
                 self.handle_execute_statement(stmt_id, params, session)
                     .await
             }
-            DatabaseRequest::Close(stmt_id) => self.handle_close_statement(stmt_id, session),
+            DatabaseRequest::Close(stmt_id) => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions
+                    .get_mut(&client_id)
+                    .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
+                self.handle_close_statement(stmt_id, session)
+            }
         }
     }
 

@@ -110,7 +110,7 @@ mod tests {
     mod helpers {
         use tempfile::TempDir;
         use super::*;
-        use crate::catalog::catalog::Catalog;
+        use crate::catalog::Catalog;
         use crate::common::logger::initialize_logger;
         use crate::sql::execution::plans::abstract_plan::PlanNode;
         use crate::sql::execution::transaction_context::TransactionContext;

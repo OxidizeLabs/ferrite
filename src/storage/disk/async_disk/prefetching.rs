@@ -158,6 +158,7 @@ impl MLPrefetcher {
 pub struct PrefetchEngine {
     ml_prefetcher: MLPrefetcher,
     sequential_prefetch_enabled: bool,
+    #[allow(dead_code)]
     spatial_prefetch_enabled: bool,
     prefetch_distance: usize,
     prefetch_threshold: f64,

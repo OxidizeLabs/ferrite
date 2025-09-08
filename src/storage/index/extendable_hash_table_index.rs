@@ -7,7 +7,7 @@
 // use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
 // use crate::container::hash_function::HashFunction;
 // use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType, ValueType};
-// use crate::storage::index::index::{Index, IndexMetadata};
+// use crate::storage::index::{Index, IndexMetadata};
 // use crate::storage::table::tuple::Tuple;
 //
 // /// An index implementation using an extendable hash table.
@@ -137,7 +137,7 @@
 //     use super::*;
 //     use crate::common::config::PageId;
 //     use crate::storage::disk::disk_manager::FileDiskManager;
-//     use crate::storage::index::index::IndexMetadata;
+//     use crate::storage::index::IndexMetadata;
 //     use std::cmp::Ordering;
 //
 //     #[derive(Clone)]

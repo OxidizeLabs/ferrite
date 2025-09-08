@@ -1,6 +1,6 @@
 use super::logical_plan::{LogicalPlan, LogicalPlanType};
 use super::schema_manager::SchemaManager;
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::concurrency::transaction::IsolationLevel;
