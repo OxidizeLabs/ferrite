@@ -198,7 +198,7 @@ impl Column {
             TypeId::Point => 16,
         }
     }
-    
+
     /// Create a new column with default parameters
     pub fn new(column_name: &str, column_type: TypeId) -> Self {
         ColumnBuilder::new(column_name, column_type).build()
@@ -842,7 +842,8 @@ mod unit_tests {
     fn test_serialization_consistency() {
         let original = Column::new("test", TypeId::Integer);
         let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
-        let (deserialized, _): (Column, usize) = bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
+        let (deserialized, _): (Column, usize) =
+            bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
 
         assert_eq!(original, deserialized);
         assert_eq!(original.get_name(), deserialized.get_name());
@@ -906,7 +907,8 @@ mod unit_tests {
     fn test_primary_key_serialization() {
         let original = Column::new_primary_key("id", TypeId::Integer);
         let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
-        let (deserialized, _): (Column, usize) = bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
+        let (deserialized, _): (Column, usize) =
+            bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
 
         assert!(deserialized.is_primary_key());
         assert_eq!(original.get_name(), deserialized.get_name());

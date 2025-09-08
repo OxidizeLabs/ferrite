@@ -218,9 +218,9 @@ impl LRUKReplacer {
                 self.curr_size += 1;
                 evictable.push_back(frame_id);
             } else if let Some(pos) = evictable.iter().position(|&x| x == frame_id) {
-                    evictable.remove(pos);
-                    self.curr_size -= 1;
-                }
+                evictable.remove(pos);
+                self.curr_size -= 1;
+            }
             true
         } else {
             false

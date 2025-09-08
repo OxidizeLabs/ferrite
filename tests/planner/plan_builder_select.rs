@@ -1,16 +1,15 @@
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::sql::planner::logical_plan::LogicalPlanType;
-use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::sql::execution::expressions::comparison_expression::ComparisonType;
+use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::common::logger::init_test_logger;
+use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
+use tkdb::buffer::lru_k_replacer::LRUKReplacer;
+use tkdb::catalog::Catalog;
 use tkdb::sql::execution::expressions::abstract_expression::Expression;
-
+use tkdb::sql::execution::expressions::comparison_expression::ComparisonType;
+use tkdb::sql::planner::logical_plan::LogicalPlanType;
+use tkdb::sql::planner::query_planner::QueryPlanner;
+use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -38,16 +37,24 @@ impl TestContext {
             .unwrap()
             .to_string();
 
-        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await.unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let disk_manager_arc = Arc::new(disk_manager);
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
+        let bpm =
+            Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
-        let transaction_manager = Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+        let transaction_manager =
+            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
-        Self { catalog, planner, _temp_dir: temp_dir }
+        Self {
+            catalog,
+            planner,
+            _temp_dir: temp_dir,
+        }
     }
 
     fn setup_users(&mut self) {
@@ -65,7 +72,10 @@ impl TestContext {
 async fn simple_select() {
     let mut fixture = TestContext::new("simple_select").await;
     fixture.setup_users();
-    let plan = fixture.planner.create_logical_plan("SELECT * FROM users").unwrap();
+    let plan = fixture
+        .planner
+        .create_logical_plan("SELECT * FROM users")
+        .unwrap();
     match &plan.plan_type {
         LogicalPlanType::Projection { schema, .. } => assert_eq!(schema.get_column_count(), 3),
         _ => panic!("Expected Projection root"),
@@ -76,7 +86,10 @@ async fn simple_select() {
 async fn select_specific_columns() {
     let mut fixture = TestContext::new("select_specific_columns").await;
     fixture.setup_users();
-    let plan = fixture.planner.create_logical_plan("SELECT id, name FROM users").unwrap();
+    let plan = fixture
+        .planner
+        .create_logical_plan("SELECT id, name FROM users")
+        .unwrap();
     match &plan.plan_type {
         LogicalPlanType::Projection { schema, .. } => assert_eq!(schema.get_column_count(), 2),
         _ => panic!("Expected Projection root"),
@@ -87,7 +100,10 @@ async fn select_specific_columns() {
 async fn select_with_filter() {
     let mut fixture = TestContext::new("select_with_filter").await;
     fixture.setup_users();
-    let plan = fixture.planner.create_logical_plan("SELECT * FROM users WHERE age > 25").unwrap();
+    let plan = fixture
+        .planner
+        .create_logical_plan("SELECT * FROM users WHERE age > 25")
+        .unwrap();
     match &plan.children[0].plan_type {
         LogicalPlanType::Filter { .. } => (),
         _ => panic!("Expected Filter"),
@@ -98,10 +114,15 @@ async fn select_with_filter() {
 async fn select_with_equality_filter() {
     let mut fixture = TestContext::new("select_equality_filter").await;
     fixture.setup_users();
-    let plan = fixture.planner.create_logical_plan("SELECT * FROM users WHERE id = 1").unwrap();
+    let plan = fixture
+        .planner
+        .create_logical_plan("SELECT * FROM users WHERE id = 1")
+        .unwrap();
     match &plan.children[0].plan_type {
         LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
-            tkdb::sql::execution::expressions::abstract_expression::Expression::Comparison(comp) => {
+            tkdb::sql::execution::expressions::abstract_expression::Expression::Comparison(
+                comp,
+            ) => {
                 assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
             }
             _ => panic!("Expected Comparison"),
@@ -113,7 +134,9 @@ async fn select_with_equality_filter() {
 #[tokio::test]
 async fn select_from_nonexistent_table() {
     let mut fixture = TestContext::new("select_nonexistent_table").await;
-    let result = fixture.planner.create_logical_plan("SELECT * FROM nonexistent_table");
+    let result = fixture
+        .planner
+        .create_logical_plan("SELECT * FROM nonexistent_table");
     assert!(result.is_err());
 }
 
@@ -418,8 +441,7 @@ async fn test_select_constant_expressions() {
     let mut fixture = TestContext::new("select_constants").await;
     fixture.setup_users();
 
-    let select_sql =
-        "SELECT id, 'constant_string' AS const_str, 42 AS const_num FROM users";
+    let select_sql = "SELECT id, 'constant_string' AS const_str, 42 AS const_num FROM users";
     let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
     match &plan.plan_type {
@@ -447,8 +469,7 @@ async fn test_select_complex_expressions() {
     let mut fixture = TestContext::new("select_complex_expressions").await;
     fixture.setup_users();
 
-    let select_sql =
-        "SELECT id, age * 2 + 1 AS formula, name FROM users WHERE age * 2 > 50";
+    let select_sql = "SELECT id, age * 2 + 1 AS formula, name FROM users WHERE age * 2 > 50";
     let plan = fixture.planner.create_logical_plan(select_sql).unwrap();
 
     match &plan.plan_type {
@@ -625,12 +646,7 @@ async fn test_select_all_comparison_operators() {
         match &plan.children[0].plan_type {
             LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
                 Expression::Comparison(comp) => {
-                    assert_eq!(
-                        comp.get_comp_type(),
-                        expected_op,
-                        "Failed for SQL: {}",
-                        sql
-                    );
+                    assert_eq!(comp.get_comp_type(), expected_op, "Failed for SQL: {}", sql);
                 }
                 _ => panic!("Expected Comparison expression for SQL: {}", sql),
             },
@@ -660,12 +676,10 @@ async fn test_select_with_complex_where_conditions() {
             Ok(plan) => {
                 // If it works, verify basic structure
                 match &plan.plan_type {
-                    LogicalPlanType::Projection { .. } => {
-                        match &plan.children[0].plan_type {
-                            LogicalPlanType::Filter { .. } => (),
-                            _ => panic!("Expected Filter node for SQL: {}", sql),
-                        }
-                    }
+                    LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
+                        LogicalPlanType::Filter { .. } => (),
+                        _ => panic!("Expected Filter node for SQL: {}", sql),
+                    },
                     _ => panic!("Expected Projection as root for SQL: {}", sql),
                 }
             }
@@ -745,6 +759,4 @@ async fn test_select_very_long_query() {
 }
 
 #[tokio::test]
-async fn test_select_with_nested_expressions() {
-}
-
+async fn test_select_with_nested_expressions() {}

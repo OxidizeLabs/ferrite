@@ -1,6 +1,5 @@
 use futures::future;
 use parking_lot::RwLock;
-use  tokio::sync::Mutex as AsyncMutex;
 use std::sync::Arc;
 use std::time::Duration;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
@@ -10,11 +9,12 @@ use tkdb::common::result_writer::CliResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::concurrency::transaction_manager::TransactionManager;
 use tkdb::concurrency::transaction_manager_factory::TransactionManagerFactory;
-use tkdb::sql::execution::execution_context::ExecutionContext;
-use tkdb::sql::execution::execution_engine::ExecutionEngine;
 use tkdb::recovery::log_manager::LogManager;
 use tkdb::recovery::wal_manager::WALManager;
+use tkdb::sql::execution::execution_context::ExecutionContext;
+use tkdb::sql::execution::execution_engine::ExecutionEngine;
 use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use tokio::sync::Mutex as AsyncMutex;
 
 pub struct ConcurrentTestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -30,15 +30,20 @@ impl ConcurrentTestContext {
             format!("tests/data/{}.db", name),
             format!("tests/data/{}.log", name),
             DiskManagerConfig::default(),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         let disk_manager_arc = Arc::new(disk_manager);
 
-        let buffer_pool_manager = Arc::new(BufferPoolManager::new(
-            32,
-            disk_manager_arc.clone(),
-            Arc::new(RwLock::new(LRUKReplacer::new(32, 2))),
-        ).unwrap());
+        let buffer_pool_manager = Arc::new(
+            BufferPoolManager::new(
+                32,
+                disk_manager_arc.clone(),
+                Arc::new(RwLock::new(LRUKReplacer::new(32, 2))),
+            )
+            .unwrap(),
+        );
 
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
         let transaction_manager = Arc::new(TransactionManager::new());
@@ -48,9 +53,8 @@ impl ConcurrentTestContext {
             transaction_manager.clone(),
         )));
 
-        let transaction_factory = Arc::new(TransactionManagerFactory::new(
-            buffer_pool_manager.clone(),
-        ));
+        let transaction_factory =
+            Arc::new(TransactionManagerFactory::new(buffer_pool_manager.clone()));
 
         let wal_manager = Arc::new(WALManager::new(log_manager));
 
@@ -73,16 +77,21 @@ impl ConcurrentTestContext {
         let mut writer = CliResultWriter::new();
         let create_sql = "CREATE TABLE test_table (id INTEGER PRIMARY KEY, value INTEGER);";
 
-        let txn_ctx = self.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+        let txn_ctx = self
+            .transaction_factory
+            .begin_transaction(IsolationLevel::RepeatableRead);
         let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
             self.buffer_pool_manager.clone(),
             self.catalog.clone(),
             txn_ctx.clone(),
         )));
 
-        let result = self.execution_engine
+        let result = self
+            .execution_engine
             .lock()
-            .await.execute_sql(create_sql, exec_ctx, &mut writer).await
+            .await
+            .execute_sql(create_sql, exec_ctx, &mut writer)
+            .await
             .map_err(|e| format!("Failed to create table: {}", e))?;
 
         if result {
@@ -110,7 +119,9 @@ async fn test_concurrent_inserts() {
             let mut writer = CliResultWriter::new();
             let insert_sql = format!("INSERT INTO test_table VALUES ({}, {});", i, i * 100);
 
-            let txn_ctx = ctx_clone.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+            let txn_ctx = ctx_clone
+                .transaction_factory
+                .begin_transaction(IsolationLevel::RepeatableRead);
             let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
                 ctx_clone.buffer_pool_manager.clone(),
                 ctx_clone.catalog.clone(),
@@ -123,7 +134,12 @@ async fn test_concurrent_inserts() {
             };
 
             match result {
-                Ok(_) => ctx_clone.transaction_factory.commit_transaction(txn_ctx).await,
+                Ok(_) => {
+                    ctx_clone
+                        .transaction_factory
+                        .commit_transaction(txn_ctx)
+                        .await
+                }
                 Err(_) => {
                     ctx_clone.transaction_factory.abort_transaction(txn_ctx);
                     false
@@ -139,13 +155,15 @@ async fn test_concurrent_inserts() {
         .into_iter()
         .map(|r| r.unwrap())
         .collect();
-    
+
     assert!(results.iter().any(|&r| r), "All transactions failed");
 
     // Verify the results
     let mut writer = CliResultWriter::new();
     let select_sql = "SELECT COUNT(*) FROM test_table";
-    let txn_ctx = ctx.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+    let txn_ctx = ctx
+        .transaction_factory
+        .begin_transaction(IsolationLevel::RepeatableRead);
     let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
         ctx.buffer_pool_manager.clone(),
         ctx.catalog.clone(),
@@ -153,7 +171,10 @@ async fn test_concurrent_inserts() {
     )));
     let result = ctx
         .execution_engine
-        .lock().await.execute_sql(select_sql, exec_ctx, &mut writer).await;
+        .lock()
+        .await
+        .execute_sql(select_sql, exec_ctx, &mut writer)
+        .await;
 
     assert!(result.is_ok());
     ctx.transaction_factory.commit_transaction(txn_ctx).await;
@@ -166,7 +187,9 @@ async fn test_concurrent_updates() {
 
     // Insert initial data
     let mut writer = CliResultWriter::new();
-    let txn_ctx = ctx.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+    let txn_ctx = ctx
+        .transaction_factory
+        .begin_transaction(IsolationLevel::RepeatableRead);
     let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
         ctx.buffer_pool_manager.clone(),
         ctx.catalog.clone(),
@@ -176,7 +199,9 @@ async fn test_concurrent_updates() {
     let result = ctx
         .execution_engine
         .lock()
-        .await.execute_sql(insert_sql, exec_ctx, &mut writer).await;
+        .await
+        .execute_sql(insert_sql, exec_ctx, &mut writer)
+        .await;
     assert!(result.is_ok());
     assert!(ctx.transaction_factory.commit_transaction(txn_ctx).await);
 
@@ -189,7 +214,9 @@ async fn test_concurrent_updates() {
             let mut writer = CliResultWriter::new();
             let update_sql = format!("UPDATE test_table SET value = {} WHERE id = 1;", i * 100);
 
-            let txn_ctx = ctx_clone.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+            let txn_ctx = ctx_clone
+                .transaction_factory
+                .begin_transaction(IsolationLevel::RepeatableRead);
             let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
                 ctx_clone.buffer_pool_manager.clone(),
                 ctx_clone.catalog.clone(),
@@ -198,10 +225,17 @@ async fn test_concurrent_updates() {
             let result = ctx_clone
                 .execution_engine
                 .lock()
-                .await.execute_sql(&update_sql, exec_ctx, &mut writer).await;
+                .await
+                .execute_sql(&update_sql, exec_ctx, &mut writer)
+                .await;
 
             match result {
-                Ok(_) => ctx_clone.transaction_factory.commit_transaction(txn_ctx).await,
+                Ok(_) => {
+                    ctx_clone
+                        .transaction_factory
+                        .commit_transaction(txn_ctx)
+                        .await
+                }
                 Err(_) => {
                     ctx_clone.transaction_factory.abort_transaction(txn_ctx);
                     false
@@ -216,8 +250,11 @@ async fn test_concurrent_updates() {
         .into_iter()
         .map(|r| r.unwrap())
         .collect();
-    
-    assert!(results.iter().any(|&r| !r), "Expected some transactions to fail due to conflicts");
+
+    assert!(
+        results.iter().any(|&r| !r),
+        "Expected some transactions to fail due to conflicts"
+    );
 }
 
 #[tokio::test]
@@ -227,7 +264,9 @@ async fn test_deadlock_detection() {
 
     // Insert initial data
     let mut writer = CliResultWriter::new();
-    let txn_ctx = ctx.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+    let txn_ctx = ctx
+        .transaction_factory
+        .begin_transaction(IsolationLevel::RepeatableRead);
     let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
         ctx.buffer_pool_manager.clone(),
         ctx.catalog.clone(),
@@ -237,7 +276,9 @@ async fn test_deadlock_detection() {
     let result = ctx
         .execution_engine
         .lock()
-        .await.execute_sql(insert_sql, exec_ctx, &mut writer).await;
+        .await
+        .execute_sql(insert_sql, exec_ctx, &mut writer)
+        .await;
     assert!(result.is_ok());
     assert!(ctx.transaction_factory.commit_transaction(txn_ctx).await);
 
@@ -246,7 +287,9 @@ async fn test_deadlock_detection() {
 
     let handle1 = tokio::spawn(async move {
         let mut writer = CliResultWriter::new();
-        let txn_ctx = ctx_clone1.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+        let txn_ctx = ctx_clone1
+            .transaction_factory
+            .begin_transaction(IsolationLevel::RepeatableRead);
         let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
             ctx_clone1.buffer_pool_manager.clone(),
             ctx_clone1.catalog.clone(),
@@ -258,7 +301,9 @@ async fn test_deadlock_detection() {
         let result1 = ctx_clone1
             .execution_engine
             .lock()
-            .await.execute_sql(sql1, exec_ctx.clone(), &mut writer).await;
+            .await
+            .execute_sql(sql1, exec_ctx.clone(), &mut writer)
+            .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -267,10 +312,17 @@ async fn test_deadlock_detection() {
         let result2 = ctx_clone1
             .execution_engine
             .lock()
-            .await.execute_sql(sql2, exec_ctx, &mut writer).await;
+            .await
+            .execute_sql(sql2, exec_ctx, &mut writer)
+            .await;
 
         match (result1, result2) {
-            (Ok(_), Ok(_)) => ctx_clone1.transaction_factory.commit_transaction(txn_ctx).await,
+            (Ok(_), Ok(_)) => {
+                ctx_clone1
+                    .transaction_factory
+                    .commit_transaction(txn_ctx)
+                    .await
+            }
             _ => {
                 ctx_clone1.transaction_factory.abort_transaction(txn_ctx);
                 false
@@ -280,7 +332,9 @@ async fn test_deadlock_detection() {
 
     let handle2 = tokio::spawn(async move {
         let mut writer = CliResultWriter::new();
-        let txn_ctx = ctx_clone2.transaction_factory.begin_transaction(IsolationLevel::RepeatableRead);
+        let txn_ctx = ctx_clone2
+            .transaction_factory
+            .begin_transaction(IsolationLevel::RepeatableRead);
         let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
             ctx_clone2.buffer_pool_manager.clone(),
             ctx_clone2.catalog.clone(),
@@ -292,7 +346,9 @@ async fn test_deadlock_detection() {
         let result1 = ctx_clone2
             .execution_engine
             .lock()
-            .await.execute_sql(sql1, exec_ctx.clone(), &mut writer).await;
+            .await
+            .execute_sql(sql1, exec_ctx.clone(), &mut writer)
+            .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -301,10 +357,17 @@ async fn test_deadlock_detection() {
         let result2 = ctx_clone2
             .execution_engine
             .lock()
-            .await.execute_sql(sql2, exec_ctx, &mut writer).await;
+            .await
+            .execute_sql(sql2, exec_ctx, &mut writer)
+            .await;
 
         match (result1, result2) {
-            (Ok(_), Ok(_)) => ctx_clone2.transaction_factory.commit_transaction(txn_ctx).await,
+            (Ok(_), Ok(_)) => {
+                ctx_clone2
+                    .transaction_factory
+                    .commit_transaction(txn_ctx)
+                    .await
+            }
             _ => {
                 ctx_clone2.transaction_factory.abort_transaction(txn_ctx);
                 false

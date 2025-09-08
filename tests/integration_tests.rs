@@ -1,6 +1,6 @@
-mod common;
 mod buffer;
 mod catalog;
+mod common;
 mod concurrency;
 mod execution;
 mod network;

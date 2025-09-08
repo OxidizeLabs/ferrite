@@ -1,6 +1,6 @@
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::temp_db_config;
-use tkdb::common::db_instance::{DBInstance, DBConfig};
+use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::result_writer::CliResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
 
@@ -16,16 +16,18 @@ async fn recovery_smoke_reopen_triggers_recovery() {
             "CREATE TABLE r (id INTEGER);",
             IsolationLevel::ReadCommitted,
             &mut writer,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         db.execute_sql(
             "INSERT INTO r VALUES (1);",
             IsolationLevel::ReadCommitted,
             &mut writer,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
     }
 
     let db = DBInstance::new(cfg.clone()).await.unwrap();
     assert!(db.get_recovery_manager().is_some());
 }
-
-

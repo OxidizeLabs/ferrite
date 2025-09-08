@@ -604,7 +604,7 @@ async fn test_join_with_null_handling() {
     assert!(success, "Left join with NULL values failed");
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn basic_inner_join() {
     // Keep the original simple test for compatibility
     init_test_logger();

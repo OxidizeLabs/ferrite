@@ -114,7 +114,9 @@ impl ComparisonExpression {
                     ComparisonType::LessThan => lhs.compare_less_than(&cast_rhs),
                     ComparisonType::LessThanOrEqual => lhs.compare_less_than_equals(&cast_rhs),
                     ComparisonType::GreaterThan => lhs.compare_greater_than(&cast_rhs),
-                    ComparisonType::GreaterThanOrEqual => lhs.compare_greater_than_equals(&cast_rhs),
+                    ComparisonType::GreaterThanOrEqual => {
+                        lhs.compare_greater_than_equals(&cast_rhs)
+                    }
                     ComparisonType::IsNotNull => unreachable!(),
                 };
                 return Ok(cast_result);

@@ -111,7 +111,7 @@ pub enum DeletePageError {
     #[error("Page pinned - PageID: {0}")]
     PagePinned(PageId),
     #[error("Invalid Frame - FrameID: {0}")]
-    InvalidFrame(FrameId)
+    InvalidFrame(FrameId),
 }
 
 #[derive(Debug)]

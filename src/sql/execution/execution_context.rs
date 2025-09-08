@@ -7,7 +7,7 @@
 //!
 //! ### All Supported Executor Types:
 //! - `AggregationExecutor` - Handles GROUP BY and aggregate functions
-//! - `CommandExecutor` - Executes database commands  
+//! - `CommandExecutor` - Executes database commands
 //! - `CommitTransactionExecutor` - Commits transactions
 //! - `CreateIndexExecutor` - Creates database indexes
 //! - `CreateTableExecutor` - Creates new tables
@@ -453,9 +453,7 @@ impl ExecutionContext {
         self.buffer_pool_manager.clone()
     }
 
-    pub fn get_nlj_check_exec_set(
-        &self,
-    ) -> &NLJCheckExecSet {
+    pub fn get_nlj_check_exec_set(&self) -> &NLJCheckExecSet {
         &self.nlj_check_exec_set
     }
 

@@ -71,7 +71,7 @@ async fn test_where_clause() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO users VALUES 
+        "INSERT INTO users VALUES
          (1, 'Alice', 25, true),
          (2, 'Bob', 30, true),
          (3, 'Charlie', 35, false),
@@ -86,13 +86,25 @@ async fn test_where_clause() {
         // Simple equality condition
         ("SELECT name FROM users WHERE id = 2", vec!["Bob"]),
         // Comparison operator
-        ("SELECT name FROM users WHERE age > 30", vec!["Charlie", "David"]),
+        (
+            "SELECT name FROM users WHERE age > 30",
+            vec!["Charlie", "David"],
+        ),
         // Boolean condition
-        ("SELECT name FROM users WHERE active = true", vec!["Alice", "Bob", "David"]),
+        (
+            "SELECT name FROM users WHERE active = true",
+            vec!["Alice", "Bob", "David"],
+        ),
         // Multiple conditions with AND
-        ("SELECT name FROM users WHERE age > 25 AND active = true", vec!["Bob", "David"]),
+        (
+            "SELECT name FROM users WHERE age > 25 AND active = true",
+            vec!["Bob", "David"],
+        ),
         // Multiple conditions with OR
-        ("SELECT name FROM users WHERE id = 1 OR id = 3", vec!["Alice", "Charlie"]),
+        (
+            "SELECT name FROM users WHERE id = 1 OR id = 3",
+            vec!["Alice", "Charlie"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
@@ -142,7 +154,7 @@ async fn test_where_comparison_operators() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          (1, 85, 50000, 4.5, 'Alice'),
          (2, 92, 65000, 4.8, 'Bob'),
          (3, 78, 45000, 3.9, 'Charlie'),
@@ -156,21 +168,45 @@ async fn test_where_comparison_operators() {
 
     let test_cases = vec![
         // Greater than
-        ("SELECT name FROM employees WHERE score > 90", vec!["Bob", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE score > 90",
+            vec!["Bob", "Diana"],
+        ),
         // Less than
-        ("SELECT name FROM employees WHERE score < 80", vec!["Charlie"]),
+        (
+            "SELECT name FROM employees WHERE score < 80",
+            vec!["Charlie"],
+        ),
         // Greater than or equal
-        ("SELECT name FROM employees WHERE score >= 88", vec!["Bob", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE score >= 88",
+            vec!["Bob", "Diana", "Eve"],
+        ),
         // Less than or equal
-        ("SELECT name FROM employees WHERE score <= 85", vec!["Alice", "Charlie"]),
+        (
+            "SELECT name FROM employees WHERE score <= 85",
+            vec!["Alice", "Charlie"],
+        ),
         // Not equal
-        ("SELECT name FROM employees WHERE score != 85", vec!["Bob", "Charlie", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE score != 85",
+            vec!["Bob", "Charlie", "Diana", "Eve"],
+        ),
         // BigInt comparisons
-        ("SELECT name FROM employees WHERE salary > 60000", vec!["Bob", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE salary > 60000",
+            vec!["Bob", "Diana"],
+        ),
         // Float comparisons
-        ("SELECT name FROM employees WHERE rating >= 4.5", vec!["Alice", "Bob", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE rating >= 4.5",
+            vec!["Alice", "Bob", "Diana", "Eve"],
+        ),
         // Combined comparisons
-        ("SELECT name FROM employees WHERE score > 80 AND salary < 70000", vec!["Alice", "Bob", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE score > 80 AND salary < 70000",
+            vec!["Alice", "Bob", "Eve"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
@@ -220,7 +256,7 @@ async fn test_where_string_operations() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO contacts VALUES 
+        "INSERT INTO contacts VALUES
          (1, 'Alice Johnson', 'alice@company.com', 'Engineering', 'New York'),
          (2, 'Bob Smith', 'bob@company.com', 'Sales', 'Los Angeles'),
          (3, 'Charlie Brown', 'charlie@external.org', 'Engineering', 'Chicago'),
@@ -234,15 +270,30 @@ async fn test_where_string_operations() {
 
     let test_cases = vec![
         // Exact string match
-        ("SELECT name FROM contacts WHERE department = 'Engineering'", vec!["Alice Johnson", "Charlie Brown", "Eve Davis"]),
+        (
+            "SELECT name FROM contacts WHERE department = 'Engineering'",
+            vec!["Alice Johnson", "Charlie Brown", "Eve Davis"],
+        ),
         // String inequality
-        ("SELECT name FROM contacts WHERE department != 'Engineering'", vec!["Bob Smith", "Diana Prince"]),
+        (
+            "SELECT name FROM contacts WHERE department != 'Engineering'",
+            vec!["Bob Smith", "Diana Prince"],
+        ),
         // String comparison (lexicographic)
-        ("SELECT name FROM contacts WHERE name > 'Charlie'", vec!["Charlie Brown", "Diana Prince", "Eve Davis"]),
+        (
+            "SELECT name FROM contacts WHERE name > 'Charlie'",
+            vec!["Charlie Brown", "Diana Prince", "Eve Davis"],
+        ),
         // Multiple string conditions
-        ("SELECT name FROM contacts WHERE department = 'Engineering' AND city = 'New York'", vec!["Alice Johnson"]),
+        (
+            "SELECT name FROM contacts WHERE department = 'Engineering' AND city = 'New York'",
+            vec!["Alice Johnson"],
+        ),
         // String OR conditions
-        ("SELECT name FROM contacts WHERE city = 'New York' OR city = 'Chicago'", vec!["Alice Johnson", "Charlie Brown", "Diana Prince"]),
+        (
+            "SELECT name FROM contacts WHERE city = 'New York' OR city = 'Chicago'",
+            vec!["Alice Johnson", "Charlie Brown", "Diana Prince"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
@@ -292,7 +343,7 @@ async fn test_where_null_conditions() {
 
     // Insert test data with NULL values
     db.execute_sql(
-        "INSERT INTO users VALUES 
+        "INSERT INTO users VALUES
          (1, 'Alice', 'alice@example.com', '123-456-7890', 25),
          (2, 'Bob', 'bob@example.com', NULL, 30),
          (3, 'Charlie', NULL, '987-654-3210', NULL),
@@ -305,15 +356,33 @@ async fn test_where_null_conditions() {
 
     let test_cases = vec![
         // IS NULL
-        ("SELECT name FROM users WHERE email IS NULL", vec!["Charlie", "Diana"]),
-        ("SELECT name FROM users WHERE phone IS NULL", vec!["Bob", "Diana"]),
+        (
+            "SELECT name FROM users WHERE email IS NULL",
+            vec!["Charlie", "Diana"],
+        ),
+        (
+            "SELECT name FROM users WHERE phone IS NULL",
+            vec!["Bob", "Diana"],
+        ),
         ("SELECT name FROM users WHERE age IS NULL", vec!["Charlie"]),
         // IS NOT NULL
-        ("SELECT name FROM users WHERE email IS NOT NULL", vec!["Alice", "Bob"]),
-        ("SELECT name FROM users WHERE phone IS NOT NULL", vec!["Alice", "Charlie"]),
+        (
+            "SELECT name FROM users WHERE email IS NOT NULL",
+            vec!["Alice", "Bob"],
+        ),
+        (
+            "SELECT name FROM users WHERE phone IS NOT NULL",
+            vec!["Alice", "Charlie"],
+        ),
         // Combining NULL checks with other conditions
-        ("SELECT name FROM users WHERE email IS NOT NULL AND age > 25", vec!["Bob"]),
-        ("SELECT name FROM users WHERE phone IS NULL OR age IS NULL", vec!["Bob", "Charlie", "Diana"]),
+        (
+            "SELECT name FROM users WHERE email IS NOT NULL AND age > 25",
+            vec!["Bob"],
+        ),
+        (
+            "SELECT name FROM users WHERE phone IS NULL OR age IS NULL",
+            vec!["Bob", "Charlie", "Diana"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
@@ -363,7 +432,7 @@ async fn test_where_complex_boolean_logic() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          (1, 'Alice', 25, 60000, 'Engineering', true, false),
          (2, 'Bob', 30, 75000, 'Sales', true, true),
          (3, 'Charlie', 35, 80000, 'Engineering', false, true),
@@ -377,17 +446,35 @@ async fn test_where_complex_boolean_logic() {
 
     let test_cases = vec![
         // Complex AND/OR combinations
-        ("SELECT name FROM employees WHERE (age > 30 AND salary > 70000) OR department = 'Marketing'", vec!["Charlie", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE (age > 30 AND salary > 70000) OR department = 'Marketing'",
+            vec!["Charlie", "Diana", "Eve"],
+        ),
         // Nested boolean conditions
-        ("SELECT name FROM employees WHERE active = true AND (department = 'Engineering' OR remote = true)", vec!["Alice", "Bob", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE active = true AND (department = 'Engineering' OR remote = true)",
+            vec!["Alice", "Bob", "Eve"],
+        ),
         // Multiple boolean fields
-        ("SELECT name FROM employees WHERE active = true AND remote = true", vec!["Bob", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE active = true AND remote = true",
+            vec!["Bob", "Eve"],
+        ),
         // Range conditions with boolean
-        ("SELECT name FROM employees WHERE salary BETWEEN 60000 AND 80000 AND active = true", vec!["Alice", "Bob", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE salary BETWEEN 60000 AND 80000 AND active = true",
+            vec!["Alice", "Bob", "Diana"],
+        ),
         // Multiple OR conditions
-        ("SELECT name FROM employees WHERE department = 'Engineering' OR department = 'Sales' OR salary > 85000", vec!["Alice", "Bob", "Charlie", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE department = 'Engineering' OR department = 'Sales' OR salary > 85000",
+            vec!["Alice", "Bob", "Charlie", "Eve"],
+        ),
         // Complex three-way conditions
-        ("SELECT name FROM employees WHERE (age > 25 AND age < 35) AND (salary > 65000 OR remote = true)", vec!["Bob", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE (age > 25 AND age < 35) AND (salary > 65000 OR remote = true)",
+            vec!["Bob", "Diana", "Eve"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
@@ -449,7 +536,7 @@ async fn test_where_in_conditions() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          (1, 'Alice', 10, 'active', 85),
          (2, 'Bob', 20, 'inactive', 90),
          (3, 'Charlie', 10, 'active', 78),
@@ -463,24 +550,47 @@ async fn test_where_in_conditions() {
 
     let test_cases = vec![
         // IN with integers
-        ("SELECT name FROM employees WHERE department_id IN (10, 30)", vec!["Alice", "Charlie", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE department_id IN (10, 30)",
+            vec!["Alice", "Charlie", "Diana"],
+        ),
         // IN with strings
-        ("SELECT name FROM employees WHERE status IN ('active', 'pending')", vec!["Alice", "Charlie", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE status IN ('active', 'pending')",
+            vec!["Alice", "Charlie", "Diana", "Eve"],
+        ),
         // NOT IN with integers
-        ("SELECT name FROM employees WHERE department_id NOT IN (10)", vec!["Bob", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE department_id NOT IN (10)",
+            vec!["Bob", "Diana", "Eve"],
+        ),
         // NOT IN with strings
-        ("SELECT name FROM employees WHERE status NOT IN ('inactive')", vec!["Alice", "Charlie", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE status NOT IN ('inactive')",
+            vec!["Alice", "Charlie", "Diana", "Eve"],
+        ),
         // IN with single value (equivalent to equality)
-        ("SELECT name FROM employees WHERE department_id IN (20)", vec!["Bob", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE department_id IN (20)",
+            vec!["Bob", "Eve"],
+        ),
         // Complex IN conditions
-        ("SELECT name FROM employees WHERE department_id IN (10, 20) AND status IN ('active')", vec!["Alice", "Charlie", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE department_id IN (10, 20) AND status IN ('active')",
+            vec!["Alice", "Charlie", "Eve"],
+        ),
         // IN with scores
-        ("SELECT name FROM employees WHERE score IN (85, 90, 95)", vec!["Alice", "Bob", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE score IN (85, 90, 95)",
+            vec!["Alice", "Bob", "Diana"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
         let mut test_writer = TestResultWriter::new();
-        let result = db.execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer).await;
+        let result = db
+            .execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer)
+            .await;
 
         match result {
             Ok(_) => {
@@ -543,7 +653,7 @@ async fn test_where_between_conditions() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          (1, 'Alice', 25, 50000, 4.2, '2020-01-15'),
          (2, 'Bob', 30, 65000, 4.5, '2019-03-20'),
          (3, 'Charlie', 35, 75000, 4.8, '2021-07-10'),
@@ -557,24 +667,47 @@ async fn test_where_between_conditions() {
 
     let test_cases = vec![
         // BETWEEN with integers
-        ("SELECT name FROM employees WHERE age BETWEEN 28 AND 32", vec!["Bob", "Diana", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE age BETWEEN 28 AND 32",
+            vec!["Bob", "Diana", "Eve"],
+        ),
         // BETWEEN with salary (BigInt)
-        ("SELECT name FROM employees WHERE salary BETWEEN 60000 AND 75000", vec!["Bob", "Charlie", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE salary BETWEEN 60000 AND 75000",
+            vec!["Bob", "Charlie", "Diana"],
+        ),
         // BETWEEN with floats
-        ("SELECT name FROM employees WHERE rating BETWEEN 4.0 AND 4.5", vec!["Alice", "Bob", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE rating BETWEEN 4.0 AND 4.5",
+            vec!["Alice", "Bob", "Diana"],
+        ),
         // NOT BETWEEN
-        ("SELECT name FROM employees WHERE age NOT BETWEEN 25 AND 30", vec!["Charlie", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE age NOT BETWEEN 25 AND 30",
+            vec!["Charlie", "Eve"],
+        ),
         // BETWEEN with dates
-        ("SELECT name FROM employees WHERE hire_date BETWEEN '2020-01-01' AND '2021-12-31'", vec!["Alice", "Charlie"]),
+        (
+            "SELECT name FROM employees WHERE hire_date BETWEEN '2020-01-01' AND '2021-12-31'",
+            vec!["Alice", "Charlie"],
+        ),
         // Combined BETWEEN conditions
-        ("SELECT name FROM employees WHERE age BETWEEN 25 AND 35 AND salary BETWEEN 50000 AND 70000", vec!["Alice", "Bob", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE age BETWEEN 25 AND 35 AND salary BETWEEN 50000 AND 70000",
+            vec!["Alice", "Bob", "Diana"],
+        ),
         // BETWEEN with exact boundaries
-        ("SELECT name FROM employees WHERE age BETWEEN 25 AND 25", vec!["Alice"]),
+        (
+            "SELECT name FROM employees WHERE age BETWEEN 25 AND 25",
+            vec!["Alice"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
         let mut test_writer = TestResultWriter::new();
-        let result = db.execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer).await;
+        let result = db
+            .execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer)
+            .await;
 
         match result {
             Ok(_) => {
@@ -614,7 +747,10 @@ async fn test_where_between_conditions() {
                 }
             }
             Err(_) => {
-                println!("BETWEEN operator not yet implemented, skipping test: {}", sql);
+                println!(
+                    "BETWEEN operator not yet implemented, skipping test: {}",
+                    sql
+                );
             }
         }
     }
@@ -637,7 +773,7 @@ async fn test_where_like_patterns() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO products VALUES 
+        "INSERT INTO products VALUES
          (1, 'Alice Johnson', 'alice@company.com', 'PROD-001', 'High-quality laptop computer'),
          (2, 'Bob Smith', 'bob@external.org', 'SERV-100', 'Software development service'),
          (3, 'Charlie Brown', 'charlie@company.com', 'PROD-002', 'Professional mouse pad'),
@@ -651,25 +787,60 @@ async fn test_where_like_patterns() {
 
     let test_cases = vec![
         // Simple wildcard patterns
-        ("SELECT name FROM products WHERE email LIKE '%@company.com'", vec!["Alice Johnson", "Charlie Brown", "Eve Adams"]),
-        ("SELECT name FROM products WHERE name LIKE 'A%'", vec!["Alice Johnson"]),
-        ("SELECT name FROM products WHERE name LIKE '%Smith'", vec!["Bob Smith"]),
+        (
+            "SELECT name FROM products WHERE email LIKE '%@company.com'",
+            vec!["Alice Johnson", "Charlie Brown", "Eve Adams"],
+        ),
+        (
+            "SELECT name FROM products WHERE name LIKE 'A%'",
+            vec!["Alice Johnson"],
+        ),
+        (
+            "SELECT name FROM products WHERE name LIKE '%Smith'",
+            vec!["Bob Smith"],
+        ),
         // Wildcard in the middle
-        ("SELECT name FROM products WHERE product_code LIKE 'PROD-%'", vec!["Alice Johnson", "Charlie Brown", "Eve Adams"]),
+        (
+            "SELECT name FROM products WHERE product_code LIKE 'PROD-%'",
+            vec!["Alice Johnson", "Charlie Brown", "Eve Adams"],
+        ),
         // Single character wildcard
-        ("SELECT name FROM products WHERE product_code LIKE 'PROD-00_'", vec!["Alice Johnson", "Charlie Brown", "Eve Adams"]),
+        (
+            "SELECT name FROM products WHERE product_code LIKE 'PROD-00_'",
+            vec!["Alice Johnson", "Charlie Brown", "Eve Adams"],
+        ),
         // Pattern with multiple wildcards
-        ("SELECT name FROM products WHERE description LIKE '%laptop%'", vec!["Alice Johnson", "Diana Prince"]),
-        ("SELECT name FROM products WHERE description LIKE '%computer%'", vec!["Alice Johnson", "Eve Adams"]),
+        (
+            "SELECT name FROM products WHERE description LIKE '%laptop%'",
+            vec!["Alice Johnson", "Diana Prince"],
+        ),
+        (
+            "SELECT name FROM products WHERE description LIKE '%computer%'",
+            vec!["Alice Johnson", "Eve Adams"],
+        ),
         // NOT LIKE
-        ("SELECT name FROM products WHERE email NOT LIKE '%@company.com'", vec!["Bob Smith", "Diana Prince"]),
+        (
+            "SELECT name FROM products WHERE email NOT LIKE '%@company.com'",
+            vec!["Bob Smith", "Diana Prince"],
+        ),
         // Complex patterns
-        ("SELECT name FROM products WHERE product_code LIKE '%0%'", vec!["Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Eve Adams"]),
+        (
+            "SELECT name FROM products WHERE product_code LIKE '%0%'",
+            vec![
+                "Alice Johnson",
+                "Bob Smith",
+                "Charlie Brown",
+                "Diana Prince",
+                "Eve Adams",
+            ],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
         let mut test_writer = TestResultWriter::new();
-        let result = db.execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer).await;
+        let result = db
+            .execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer)
+            .await;
 
         match result {
             Ok(_) => {
@@ -722,7 +893,7 @@ async fn test_where_date_time_comparisons() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO events VALUES 
+        "INSERT INTO events VALUES
          (1, 'Meeting A', '2023-01-15', '09:00:00', '2023-01-10 08:30:00', 1),
          (2, 'Conference', '2023-03-20', '14:30:00', '2023-02-15 16:45:00', 2),
          (3, 'Workshop', '2023-02-10', '10:15:00', '2023-01-25 12:00:00', 1),
@@ -736,26 +907,55 @@ async fn test_where_date_time_comparisons() {
 
     let test_cases = vec![
         // Date comparisons
-        ("SELECT event_name FROM events WHERE event_date > '2023-02-01'", vec!["Conference", "Workshop", "Presentation"]),
-        ("SELECT event_name FROM events WHERE event_date = '2023-01-15'", vec!["Meeting A"]),
+        (
+            "SELECT event_name FROM events WHERE event_date > '2023-02-01'",
+            vec!["Conference", "Workshop", "Presentation"],
+        ),
+        (
+            "SELECT event_name FROM events WHERE event_date = '2023-01-15'",
+            vec!["Meeting A"],
+        ),
         // Date range
-        ("SELECT event_name FROM events WHERE event_date BETWEEN '2023-01-01' AND '2023-02-28'", vec!["Meeting A", "Workshop", "Training"]),
+        (
+            "SELECT event_name FROM events WHERE event_date BETWEEN '2023-01-01' AND '2023-02-28'",
+            vec!["Meeting A", "Workshop", "Training"],
+        ),
         // Time comparisons
-        ("SELECT event_name FROM events WHERE start_time > '12:00:00'", vec!["Conference", "Presentation"]),
-        ("SELECT event_name FROM events WHERE start_time < '11:00:00'", vec!["Meeting A", "Workshop"]),
+        (
+            "SELECT event_name FROM events WHERE start_time > '12:00:00'",
+            vec!["Conference", "Presentation"],
+        ),
+        (
+            "SELECT event_name FROM events WHERE start_time < '11:00:00'",
+            vec!["Meeting A", "Workshop"],
+        ),
         // Timestamp comparisons
-        ("SELECT event_name FROM events WHERE created_at > '2023-02-01 00:00:00'", vec!["Conference", "Presentation"]),
+        (
+            "SELECT event_name FROM events WHERE created_at > '2023-02-01 00:00:00'",
+            vec!["Conference", "Presentation"],
+        ),
         // Complex date/time conditions
-        ("SELECT event_name FROM events WHERE event_date > '2023-01-01' AND start_time < '12:00:00'", vec!["Meeting A", "Workshop", "Training"]),
+        (
+            "SELECT event_name FROM events WHERE event_date > '2023-01-01' AND start_time < '12:00:00'",
+            vec!["Meeting A", "Workshop", "Training"],
+        ),
         // Date with other conditions
-        ("SELECT event_name FROM events WHERE event_date > '2023-02-01' AND priority <= 2", vec!["Conference", "Workshop"]),
+        (
+            "SELECT event_name FROM events WHERE event_date > '2023-02-01' AND priority <= 2",
+            vec!["Conference", "Workshop"],
+        ),
         // Different date formats (if supported)
-        ("SELECT event_name FROM events WHERE event_date >= '2023-03-01'", vec!["Conference", "Presentation"]),
+        (
+            "SELECT event_name FROM events WHERE event_date >= '2023-03-01'",
+            vec!["Conference", "Presentation"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
         let mut test_writer = TestResultWriter::new();
-        let result = db.execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer).await;
+        let result = db
+            .execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer)
+            .await;
 
         match result {
             Ok(_) => {
@@ -785,7 +985,10 @@ async fn test_where_date_time_comparisons() {
                 }
             }
             Err(_) => {
-                println!("Date/time comparison not fully implemented, skipping test: {}", sql);
+                println!(
+                    "Date/time comparison not fully implemented, skipping test: {}",
+                    sql
+                );
             }
         }
     }
@@ -808,7 +1011,7 @@ async fn test_where_edge_cases_and_errors() {
 
     // Insert test data including edge cases
     db.execute_sql(
-        "INSERT INTO test_data VALUES 
+        "INSERT INTO test_data VALUES
          (1, 'Alice', 0, true),
          (2, 'Bob', -1, false),
          (3, 'Charlie', 2147483647, true),
@@ -823,15 +1026,33 @@ async fn test_where_edge_cases_and_errors() {
     let working_cases = vec![
         // Zero comparisons
         ("SELECT name FROM test_data WHERE value = 0", vec!["Alice"]),
-        ("SELECT name FROM test_data WHERE value > 0", vec!["Charlie"]),
-        ("SELECT name FROM test_data WHERE value < 0", vec!["Bob", "Diana"]),
+        (
+            "SELECT name FROM test_data WHERE value > 0",
+            vec!["Charlie"],
+        ),
+        (
+            "SELECT name FROM test_data WHERE value < 0",
+            vec!["Bob", "Diana"],
+        ),
         // Extreme values
-        ("SELECT name FROM test_data WHERE value = 2147483647", vec!["Charlie"]),
+        (
+            "SELECT name FROM test_data WHERE value = 2147483647",
+            vec!["Charlie"],
+        ),
         // Boolean edge cases
-        ("SELECT name FROM test_data WHERE flag = true", vec!["Alice", "Charlie"]),
-        ("SELECT name FROM test_data WHERE flag = false", vec!["Bob", "Diana"]),
+        (
+            "SELECT name FROM test_data WHERE flag = true",
+            vec!["Alice", "Charlie"],
+        ),
+        (
+            "SELECT name FROM test_data WHERE flag = false",
+            vec!["Bob", "Diana"],
+        ),
         // Empty string (if supported)
-        ("SELECT name FROM test_data WHERE name != ''", vec!["Alice", "Bob", "Charlie", "Diana"]),
+        (
+            "SELECT name FROM test_data WHERE name != ''",
+            vec!["Alice", "Bob", "Charlie", "Diana"],
+        ),
     ];
 
     for (sql, expected_names) in working_cases {
@@ -873,7 +1094,9 @@ async fn test_where_edge_cases_and_errors() {
 
     for sql in error_cases {
         let mut test_writer = TestResultWriter::new();
-        let result = db.execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer).await;
+        let result = db
+            .execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer)
+            .await;
 
         assert!(result.is_err(), "Expected error for invalid query: {}", sql);
     }
@@ -905,7 +1128,7 @@ async fn test_where_subquery_conditions() {
 
     // Insert employee data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          (1, 'Alice', 60000, 1),
          (2, 'Bob', 75000, 2),
          (3, 'Charlie', 80000, 1),
@@ -919,7 +1142,7 @@ async fn test_where_subquery_conditions() {
 
     // Insert department data
     db.execute_sql(
-        "INSERT INTO departments VALUES 
+        "INSERT INTO departments VALUES
          (1, 'Engineering', 500000),
          (2, 'Sales', 300000),
          (3, 'Marketing', 200000);",
@@ -931,16 +1154,27 @@ async fn test_where_subquery_conditions() {
 
     let test_cases = vec![
         // Subquery with scalar comparison
-        ("SELECT name FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)", vec!["Bob", "Charlie", "Eve"]),
+        (
+            "SELECT name FROM employees WHERE salary > (SELECT AVG(salary) FROM employees)",
+            vec!["Bob", "Charlie", "Eve"],
+        ),
         // Multiple subqueries
-        ("SELECT name FROM employees WHERE salary > (SELECT MIN(salary) FROM employees) AND salary < (SELECT MAX(salary) FROM employees)", vec!["Bob", "Charlie", "Diana"]),
+        (
+            "SELECT name FROM employees WHERE salary > (SELECT MIN(salary) FROM employees) AND salary < (SELECT MAX(salary) FROM employees)",
+            vec!["Bob", "Charlie", "Diana"],
+        ),
         // Subquery in complex condition
-        ("SELECT name FROM employees WHERE department_id = 1 AND salary > (SELECT AVG(salary) FROM employees WHERE department_id = 1)", vec!["Charlie"]),
+        (
+            "SELECT name FROM employees WHERE department_id = 1 AND salary > (SELECT AVG(salary) FROM employees WHERE department_id = 1)",
+            vec!["Charlie"],
+        ),
     ];
 
     for (sql, expected_names) in test_cases {
         let mut test_writer = TestResultWriter::new();
-        let result = db.execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer).await;
+        let result = db
+            .execute_sql(sql, IsolationLevel::ReadCommitted, &mut test_writer)
+            .await;
 
         match result {
             Ok(_) => {
@@ -970,7 +1204,10 @@ async fn test_where_subquery_conditions() {
                 }
             }
             Err(_) => {
-                println!("Subquery in WHERE not fully implemented, skipping test: {}", sql);
+                println!(
+                    "Subquery in WHERE not fully implemented, skipping test: {}",
+                    sql
+                );
             }
         }
     }

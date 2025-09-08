@@ -272,58 +272,75 @@ mod tests {
     #[test]
     fn test_numeric_type_selection() {
         // Test TinyInt range (i8: -128 to 127)
-        let tiny_pos = LiteralValueExpression::new(SQLValue::Number("127".to_string(), false)).unwrap();
+        let tiny_pos =
+            LiteralValueExpression::new(SQLValue::Number("127".to_string(), false)).unwrap();
         assert_eq!(tiny_pos.get_return_type().get_type(), TypeId::TinyInt);
         assert_eq!(tiny_pos.get_value(), &Value::new(127i8));
 
-        let tiny_neg = LiteralValueExpression::new(SQLValue::Number("-128".to_string(), false)).unwrap();
+        let tiny_neg =
+            LiteralValueExpression::new(SQLValue::Number("-128".to_string(), false)).unwrap();
         assert_eq!(tiny_neg.get_return_type().get_type(), TypeId::TinyInt);
         assert_eq!(tiny_neg.get_value(), &Value::new(-128i8));
 
         // Test SmallInt range (i16: -32,768 to 32,767)
-        let small_pos = LiteralValueExpression::new(SQLValue::Number("32767".to_string(), false)).unwrap();
+        let small_pos =
+            LiteralValueExpression::new(SQLValue::Number("32767".to_string(), false)).unwrap();
         assert_eq!(small_pos.get_return_type().get_type(), TypeId::SmallInt);
         assert_eq!(small_pos.get_value(), &Value::new(32767i16));
 
-        let small_neg = LiteralValueExpression::new(SQLValue::Number("-32768".to_string(), false)).unwrap();
+        let small_neg =
+            LiteralValueExpression::new(SQLValue::Number("-32768".to_string(), false)).unwrap();
         assert_eq!(small_neg.get_return_type().get_type(), TypeId::SmallInt);
         assert_eq!(small_neg.get_value(), &Value::new(-32768i16));
 
         // Test values that exceed TinyInt but fit in SmallInt
-        let exceed_tiny = LiteralValueExpression::new(SQLValue::Number("128".to_string(), false)).unwrap();
+        let exceed_tiny =
+            LiteralValueExpression::new(SQLValue::Number("128".to_string(), false)).unwrap();
         assert_eq!(exceed_tiny.get_return_type().get_type(), TypeId::SmallInt);
         assert_eq!(exceed_tiny.get_value(), &Value::new(128i16));
 
         // Test Integer range (i32: -2,147,483,648 to 2,147,483,647)
-        let int_pos = LiteralValueExpression::new(SQLValue::Number("2147483647".to_string(), false)).unwrap();
+        let int_pos =
+            LiteralValueExpression::new(SQLValue::Number("2147483647".to_string(), false)).unwrap();
         assert_eq!(int_pos.get_return_type().get_type(), TypeId::Integer);
         assert_eq!(int_pos.get_value(), &Value::new(2147483647i32));
 
-        let int_neg = LiteralValueExpression::new(SQLValue::Number("-2147483648".to_string(), false)).unwrap();
+        let int_neg =
+            LiteralValueExpression::new(SQLValue::Number("-2147483648".to_string(), false))
+                .unwrap();
         assert_eq!(int_neg.get_return_type().get_type(), TypeId::Integer);
         assert_eq!(int_neg.get_value(), &Value::new(-2147483648i32));
 
         // Test values that exceed SmallInt but fit in Integer
-        let exceed_small = LiteralValueExpression::new(SQLValue::Number("32768".to_string(), false)).unwrap();
+        let exceed_small =
+            LiteralValueExpression::new(SQLValue::Number("32768".to_string(), false)).unwrap();
         assert_eq!(exceed_small.get_return_type().get_type(), TypeId::Integer);
         assert_eq!(exceed_small.get_value(), &Value::new(32768i32));
 
         // Test BigInt range (i64: -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807)
-        let big_pos = LiteralValueExpression::new(SQLValue::Number("9223372036854775807".to_string(), false)).unwrap();
+        let big_pos =
+            LiteralValueExpression::new(SQLValue::Number("9223372036854775807".to_string(), false))
+                .unwrap();
         assert_eq!(big_pos.get_return_type().get_type(), TypeId::BigInt);
         assert_eq!(big_pos.get_value(), &Value::new(9223372036854775807i64));
 
-        let big_neg = LiteralValueExpression::new(SQLValue::Number("-9223372036854775808".to_string(), false)).unwrap();
+        let big_neg = LiteralValueExpression::new(SQLValue::Number(
+            "-9223372036854775808".to_string(),
+            false,
+        ))
+        .unwrap();
         assert_eq!(big_neg.get_return_type().get_type(), TypeId::BigInt);
         assert_eq!(big_neg.get_value(), &Value::new(-9223372036854775808i64));
 
         // Test values that exceed Integer but fit in BigInt
-        let exceed_int = LiteralValueExpression::new(SQLValue::Number("2147483648".to_string(), false)).unwrap();
+        let exceed_int =
+            LiteralValueExpression::new(SQLValue::Number("2147483648".to_string(), false)).unwrap();
         assert_eq!(exceed_int.get_return_type().get_type(), TypeId::BigInt);
         assert_eq!(exceed_int.get_value(), &Value::new(2147483648i64));
 
         // Test decimal values still parse as Decimal
-        let decimal = LiteralValueExpression::new(SQLValue::Number("123.456".to_string(), false)).unwrap();
+        let decimal =
+            LiteralValueExpression::new(SQLValue::Number("123.456".to_string(), false)).unwrap();
         assert_eq!(decimal.get_return_type().get_type(), TypeId::Decimal);
         assert_eq!(decimal.get_value(), &Value::new(123.456f64));
 
@@ -336,13 +353,27 @@ mod tests {
     #[test]
     fn test_numeric_overflow() {
         // Test value that exceeds i64::MAX should return an error
-        let overflow_result = LiteralValueExpression::new(SQLValue::Number("18446744073709551616".to_string(), false));
+        let overflow_result = LiteralValueExpression::new(SQLValue::Number(
+            "18446744073709551616".to_string(),
+            false,
+        ));
         assert!(overflow_result.is_err());
-        assert!(overflow_result.unwrap_err().contains("too large to represent"));
+        assert!(
+            overflow_result
+                .unwrap_err()
+                .contains("too large to represent")
+        );
 
         // Test very large negative value
-        let neg_overflow_result = LiteralValueExpression::new(SQLValue::Number("-18446744073709551616".to_string(), false));
+        let neg_overflow_result = LiteralValueExpression::new(SQLValue::Number(
+            "-18446744073709551616".to_string(),
+            false,
+        ));
         assert!(neg_overflow_result.is_err());
-        assert!(neg_overflow_result.unwrap_err().contains("too large to represent"));
+        assert!(
+            neg_overflow_result
+                .unwrap_err()
+                .contains("too large to represent")
+        );
     }
 }

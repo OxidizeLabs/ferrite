@@ -118,7 +118,7 @@ Each test captures comprehensive metrics:
 
 ### I/O Performance
 - **Read Latency Avg**: Average microseconds for read operations
-- **Write Latency Avg**: Average microseconds for write operations  
+- **Write Latency Avg**: Average microseconds for write operations
 - **I/O Throughput**: Megabytes per second transfer rate
 - **I/O Queue Depth**: Current pending operations
 

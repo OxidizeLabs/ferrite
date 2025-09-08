@@ -136,10 +136,11 @@ impl Display for CoalesceExpression {
             }
             // Handle NULL values specially when displaying
             if let Expression::Constant(constant) = child.as_ref()
-                && constant.get_return_type().get_type() == TypeId::Invalid {
-                    write!(f, "NULL")?;
-                    continue;
-                }
+                && constant.get_return_type().get_type() == TypeId::Invalid
+            {
+                write!(f, "NULL")?;
+                continue;
+            }
             write!(f, "{}", child)?;
         }
         write!(f, ")")

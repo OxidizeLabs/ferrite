@@ -1,4 +1,6 @@
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait, MutableCache};
+use crate::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LRUKCacheTrait, MutableCache,
+};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -8,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// This cache evicts the item whose K-th most recent access is furthest in the past.
 #[derive(Debug)]
 pub struct LRUKCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
@@ -18,7 +20,7 @@ where
 }
 
 impl<K, V> LRUKCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
@@ -45,11 +47,9 @@ where
     }
 }
 
-
-
 // Implementation of the new specialized traits
 impl<K, V> CoreCache<K, V> for LRUKCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
@@ -138,11 +138,11 @@ where
     fn contains(&self, key: &K) -> bool {
         self.cache.contains_key(key)
     }
-    
+
     fn len(&self) -> usize {
         self.cache.len()
     }
-    
+
     fn capacity(&self) -> usize {
         self.capacity
     }
@@ -153,7 +153,7 @@ where
 }
 
 impl<K, V> MutableCache<K, V> for LRUKCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
@@ -163,7 +163,7 @@ where
 }
 
 impl<K, V> LRUKCacheTrait<K, V> for LRUKCache<K, V>
-where 
+where
     K: Eq + Hash + Clone,
     V: Clone,
 {
@@ -173,48 +173,46 @@ where
         }
 
         // Find the victim key using the same logic as the insert method
-            let mut victim_key = None;
-            let mut min_k_accesses = usize::MAX;
-            let mut oldest_k_access = u64::MAX;
+        let mut victim_key = None;
+        let mut min_k_accesses = usize::MAX;
+        let mut oldest_k_access = u64::MAX;
 
-            for (k, (_, history)) in &self.cache {
-                let num_accesses = history.len();
+        for (k, (_, history)) in &self.cache {
+            let num_accesses = history.len();
 
-                // First prioritize items with fewer than k accesses
-                if num_accesses < self.k {
-                    if victim_key.is_none() || num_accesses < min_k_accesses {
-                        min_k_accesses = num_accesses;
-                        oldest_k_access = history.front().copied().unwrap_or(u64::MAX);
-                        victim_key = Some(k.clone());
-                    } else if num_accesses == min_k_accesses {
-                        // If same number of accesses, choose the one with earlier first access
-                        let first_access = history.front().copied().unwrap_or(u64::MAX);
-                        if first_access < oldest_k_access {
-                            oldest_k_access = first_access;
-                            victim_key = Some(k.clone());
-                        }
-                    }
-                } else if min_k_accesses >= self.k {
-                    // For items with k or more accesses, compare their k-th most recent access
-                    let k_access = history
-                        .get(num_accesses - self.k)
-                        .copied()
-                        .unwrap_or(u64::MAX);
-
-                    if victim_key.is_none() || k_access < oldest_k_access {
-                        min_k_accesses = self.k;
-                        oldest_k_access = k_access;
+            // First prioritize items with fewer than k accesses
+            if num_accesses < self.k {
+                if victim_key.is_none() || num_accesses < min_k_accesses {
+                    min_k_accesses = num_accesses;
+                    oldest_k_access = history.front().copied().unwrap_or(u64::MAX);
+                    victim_key = Some(k.clone());
+                } else if num_accesses == min_k_accesses {
+                    // If same number of accesses, choose the one with earlier first access
+                    let first_access = history.front().copied().unwrap_or(u64::MAX);
+                    if first_access < oldest_k_access {
+                        oldest_k_access = first_access;
                         victim_key = Some(k.clone());
                     }
                 }
+            } else if min_k_accesses >= self.k {
+                // For items with k or more accesses, compare their k-th most recent access
+                let k_access = history
+                    .get(num_accesses - self.k)
+                    .copied()
+                    .unwrap_or(u64::MAX);
+
+                if victim_key.is_none() || k_access < oldest_k_access {
+                    min_k_accesses = self.k;
+                    oldest_k_access = k_access;
+                    victim_key = Some(k.clone());
+                }
             }
+        }
 
         // Remove and return the victim
-        victim_key.and_then(|key| {
-            self.cache.remove(&key).map(|(value, _)| (key, value))
-        })
+        victim_key.and_then(|key| self.cache.remove(&key).map(|(value, _)| (key, value)))
     }
-    
+
     fn peek_lru_k(&self) -> Option<(&K, &V)> {
         if self.cache.is_empty() {
             return None;
@@ -253,25 +251,23 @@ where
             }
         }
 
-        victim_key.and_then(|key| {
-            self.cache.get(key).map(|(value, _)| (key, value))
-        })
+        victim_key.and_then(|key| self.cache.get(key).map(|(value, _)| (key, value)))
     }
-    
+
     fn k_value(&self) -> usize {
         self.k
     }
-    
+
     fn access_history(&self, key: &K) -> Option<Vec<u64>> {
         self.cache.get(key).map(|(_, history)| {
             history.iter().rev().copied().collect() // Most recent first
         })
     }
-    
+
     fn access_count(&self, key: &K) -> Option<usize> {
         self.cache.get(key).map(|(_, history)| history.len())
     }
-    
+
     fn k_distance(&self, key: &K) -> Option<u64> {
         self.cache.get(key).and_then(|(_, history)| {
             if history.len() >= self.k {
@@ -282,7 +278,7 @@ where
             }
         })
     }
-    
+
     fn touch(&mut self, key: &K) -> bool {
         if let Some((_, history)) = self.cache.get_mut(key) {
             let now = Self::current_time_in_micros();
@@ -295,24 +291,27 @@ where
             false
         }
     }
-    
+
     fn k_distance_rank(&self, key: &K) -> Option<usize> {
         if !self.cache.contains_key(key) {
             return None;
         }
 
         let mut items_with_distances: Vec<(bool, u64)> = Vec::new();
-        
+
         for (_, history) in self.cache.values() {
             let num_accesses = history.len();
-            
+
             if num_accesses < self.k {
                 // Items with fewer than K accesses use their earliest access time
                 let earliest = history.front().copied().unwrap_or(u64::MAX);
                 items_with_distances.push((false, earliest)); // false = not full K accesses
             } else {
                 // Items with K or more accesses use their K-distance
-                let k_distance = history.get(num_accesses - self.k).copied().unwrap_or(u64::MAX);
+                let k_distance = history
+                    .get(num_accesses - self.k)
+                    .copied()
+                    .unwrap_or(u64::MAX);
                 items_with_distances.push((true, k_distance)); // true = has full K accesses
             }
         }
@@ -322,8 +321,8 @@ where
         items_with_distances.sort_by(|a, b| {
             match (a.0, b.0) {
                 (false, false) => a.1.cmp(&b.1), // Both have < K accesses, sort by earliest
-                (true, true) => a.1.cmp(&b.1),   // Both have >= K accesses, sort by K-distance  
-                (false, true) => std::cmp::Ordering::Less,  // < K accesses comes first
+                (true, true) => a.1.cmp(&b.1),   // Both have >= K accesses, sort by K-distance
+                (false, true) => std::cmp::Ordering::Less, // < K accesses comes first
                 (true, false) => std::cmp::Ordering::Greater, // >= K accesses comes second
             }
         });
@@ -334,10 +333,18 @@ where
         let target_value = if target_num_accesses < self.k {
             (false, target_history.front().copied().unwrap_or(u64::MAX))
         } else {
-            (true, target_history.get(target_num_accesses - self.k).copied().unwrap_or(u64::MAX))
+            (
+                true,
+                target_history
+                    .get(target_num_accesses - self.k)
+                    .copied()
+                    .unwrap_or(u64::MAX),
+            )
         };
 
-        items_with_distances.iter().position(|item| item == &target_value)
+        items_with_distances
+            .iter()
+            .position(|item| item == &target_value)
     }
 }
 

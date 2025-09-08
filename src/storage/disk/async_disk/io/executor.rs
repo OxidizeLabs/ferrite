@@ -4,7 +4,7 @@
 // including file operations for both database and log files.
 
 use super::operations::{IOOperation, IOOperationType};
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use std::io::Result as IoResult;
 use std::sync::Arc;
 use tokio::fs::File;
@@ -12,7 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 /// I/O operation executor responsible for executing operations
-/// 
+///
 /// This component handles the actual file I/O operations including:
 /// - Reading and writing database pages
 /// - Reading and writing log entries
@@ -22,14 +22,14 @@ use tokio::sync::Mutex;
 pub struct IOOperationExecutor {
     /// Database file handle for page operations
     db_file: Arc<Mutex<File>>,
-    
+
     /// Log file handle for log operations
     log_file: Arc<Mutex<File>>,
 }
 
 impl IOOperationExecutor {
     /// Creates a new I/O operation executor
-    /// 
+    ///
     /// # Arguments
     /// * `db_file` - Shared database file handle
     /// * `log_file` - Shared log file handle
@@ -38,30 +38,26 @@ impl IOOperationExecutor {
     }
 
     /// Executes a single I/O operation
-    /// 
+    ///
     /// This is the main entry point for operation execution. It matches
     /// on the operation type and delegates to the appropriate method.
     /// The result is sent through the completion_sender and also returned.
-    /// 
+    ///
     /// # Arguments
     /// * `operation` - The I/O operation to execute
-    /// 
+    ///
     /// # Returns
     /// The result data as a vector of bytes, or an I/O error
     pub async fn execute_operation(&self, operation: IOOperation) -> IoResult<Vec<u8>> {
         let completion_sender = operation.completion_sender;
-        
+
         let result = match operation.operation_type {
-            IOOperationType::ReadPage { page_id } => {
-                self.execute_read_page(page_id).await
-            }
+            IOOperationType::ReadPage { page_id } => self.execute_read_page(page_id).await,
             IOOperationType::WritePage { page_id, data } => {
                 self.execute_write_page(page_id, &data).await?;
                 Ok(data) // Return the written data
             }
-            IOOperationType::ReadLog { offset, size } => {
-                self.execute_read_log(offset, size).await
-            }
+            IOOperationType::ReadLog { offset, size } => self.execute_read_log(offset, size).await,
             IOOperationType::WriteLog { data, offset } => {
                 self.execute_write_log(&data, offset).await?;
                 Ok(data) // Return the written data
@@ -94,15 +90,15 @@ impl IOOperationExecutor {
                 let _ = completion_sender.send(Err(new_error));
             }
         }
-        
+
         result
     }
 
     /// Reads a page from the database file
-    /// 
+    ///
     /// # Arguments
     /// * `page_id` - The page identifier to read
-    /// 
+    ///
     /// # Returns
     /// The page data as a vector of bytes
     async fn execute_read_page(&self, page_id: PageId) -> IoResult<Vec<u8>> {
@@ -116,7 +112,7 @@ impl IOOperationExecutor {
     }
 
     /// Writes a page to the database file
-    /// 
+    ///
     /// # Arguments
     /// * `page_id` - The page identifier to write to
     /// * `data` - The page data to write
@@ -124,30 +120,38 @@ impl IOOperationExecutor {
         let offset = page_id * DB_PAGE_SIZE;
 
         let mut file = self.db_file.lock().await;
-        
+
         // Debug: Check file size before write
         let file_size_before = file.metadata().await?.len();
-        log::debug!("execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}", 
-                   page_id, offset, data.len(), file_size_before);
-        
+        log::debug!(
+            "execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}",
+            page_id,
+            offset,
+            data.len(),
+            file_size_before
+        );
+
         file.seek(std::io::SeekFrom::Start(offset)).await?;
         file.write_all(data).await?;
-        file.flush().await?;  // Ensure data is flushed to OS buffers
-        
+        file.flush().await?; // Ensure data is flushed to OS buffers
+
         // Debug: Check file size after write and flush
         let file_size_after = file.metadata().await?.len();
-        log::debug!("execute_write_page: COMPLETED page_id={}, file_size_after={}", 
-                   page_id, file_size_after);
-        
+        log::debug!(
+            "execute_write_page: COMPLETED page_id={}, file_size_after={}",
+            page_id,
+            file_size_after
+        );
+
         Ok(())
     }
 
     /// Reads data from the log file at a specific offset
-    /// 
+    ///
     /// # Arguments
     /// * `offset` - Byte offset in the log file
     /// * `size` - Number of bytes to read
-    /// 
+    ///
     /// # Returns
     /// The log data as a vector of bytes
     async fn execute_read_log(&self, offset: u64, size: usize) -> IoResult<Vec<u8>> {
@@ -160,7 +164,7 @@ impl IOOperationExecutor {
     }
 
     /// Writes data to the log file at a specific offset
-    /// 
+    ///
     /// # Arguments
     /// * `data` - The data to write
     /// * `offset` - Byte offset in the log file
@@ -168,22 +172,22 @@ impl IOOperationExecutor {
         let mut file = self.log_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
         file.write_all(data).await?;
-        file.flush().await?;  // Ensure data is flushed to OS buffers
+        file.flush().await?; // Ensure data is flushed to OS buffers
         Ok(())
     }
 
     /// Appends data to the end of the log file
-    /// 
+    ///
     /// # Arguments
     /// * `data` - The data to append
-    /// 
+    ///
     /// # Returns
     /// The byte offset where the data was written
     async fn execute_append_log(&self, data: &[u8]) -> IoResult<u64> {
         let mut file = self.log_file.lock().await;
         let offset = file.seek(std::io::SeekFrom::End(0)).await?;
         file.write_all(data).await?;
-        file.flush().await?;  // Ensure data is flushed to OS buffers
+        file.flush().await?; // Ensure data is flushed to OS buffers
         Ok(offset)
     }
 
@@ -191,13 +195,13 @@ impl IOOperationExecutor {
     async fn execute_sync(&self) -> IoResult<()> {
         log::debug!("execute_sync: Starting sync_all() for database file");
         let file = self.db_file.lock().await;
-        
+
         // Debug: Check file size before sync
         let file_size = file.metadata().await?.len();
         log::debug!("execute_sync: file_size_before_sync={}", file_size);
-        
+
         let result = file.sync_all().await;
-        
+
         log::debug!("execute_sync: sync_all() completed, result={:?}", result);
         result
     }
@@ -238,27 +242,45 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        
-        let db_path = format!("/tmp/test_executor_db_{}_{}.dat", std::process::id(), unique_id);
-        let log_path = format!("/tmp/test_executor_log_{}_{}.dat", std::process::id(), unique_id);
+
+        let db_path = format!(
+            "/tmp/test_executor_db_{}_{}.dat",
+            std::process::id(),
+            unique_id
+        );
+        let log_path = format!(
+            "/tmp/test_executor_log_{}_{}.dat",
+            std::process::id(),
+            unique_id
+        );
 
         // Create and initialize test files
         let mut db_file = File::create(&db_path).await.unwrap();
         let mut log_file = File::create(&log_path).await.unwrap();
-        
+
         // Write initial data
         db_file.write_all(&vec![0u8; 8192]).await.unwrap(); // 2 pages
         log_file.write_all(b"initial log").await.unwrap();
-        
+
         drop(db_file);
         drop(log_file);
-        
+
         // Reopen for executor
         let db_file = Arc::new(Mutex::new(
-            File::options().read(true).write(true).open(&db_path).await.unwrap()
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&db_path)
+                .await
+                .unwrap(),
         ));
         let log_file = Arc::new(Mutex::new(
-            File::options().read(true).write(true).open(&log_path).await.unwrap()
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&log_path)
+                .await
+                .unwrap(),
         ));
 
         let executor = IOOperationExecutor::new(db_file, log_file);
@@ -269,27 +291,45 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        
-        let db_path = format!("/tmp/test_executor_large_db_{}_{}.dat", std::process::id(), unique_id);
-        let log_path = format!("/tmp/test_executor_large_log_{}_{}.dat", std::process::id(), unique_id);
+
+        let db_path = format!(
+            "/tmp/test_executor_large_db_{}_{}.dat",
+            std::process::id(),
+            unique_id
+        );
+        let log_path = format!(
+            "/tmp/test_executor_large_log_{}_{}.dat",
+            std::process::id(),
+            unique_id
+        );
 
         // Create large test files
         let mut db_file = File::create(&db_path).await.unwrap();
         let mut log_file = File::create(&log_path).await.unwrap();
-        
+
         // Initialize with 10 pages (40KB)
         db_file.write_all(&vec![0u8; 40960]).await.unwrap();
         log_file.write_all(b"large initial log").await.unwrap();
-        
+
         drop(db_file);
         drop(log_file);
-        
+
         // Reopen for executor
         let db_file = Arc::new(Mutex::new(
-            File::options().read(true).write(true).open(&db_path).await.unwrap()
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&db_path)
+                .await
+                .unwrap(),
         ));
         let log_file = Arc::new(Mutex::new(
-            File::options().read(true).write(true).open(&log_path).await.unwrap()
+            File::options()
+                .read(true)
+                .write(true)
+                .open(&log_path)
+                .await
+                .unwrap(),
         ));
 
         let executor = IOOperationExecutor::new(db_file, log_file);
@@ -326,16 +366,22 @@ mod tests {
         // Test log append
         let log_data = b"test log entry";
         let offset = executor.execute_append_log(log_data).await.unwrap();
-        
+
         // Test log read
-        let read_data = executor.execute_read_log(offset, log_data.len()).await.unwrap();
+        let read_data = executor
+            .execute_read_log(offset, log_data.len())
+            .await
+            .unwrap();
         assert_eq!(log_data, &read_data[..]);
 
         // Test log write at specific offset
         let new_data = b"overwritten";
         executor.execute_write_log(new_data, offset).await.unwrap();
-        
-        let read_overwritten = executor.execute_read_log(offset, new_data.len()).await.unwrap();
+
+        let read_overwritten = executor
+            .execute_read_log(offset, new_data.len())
+            .await
+            .unwrap();
         assert_eq!(new_data, &read_overwritten[..]);
 
         // Cleanup
@@ -427,7 +473,10 @@ mod tests {
         let read_log_op = IOOperation {
             priority: 3,
             id: 3,
-            operation_type: IOOperationType::ReadLog { offset: 0, size: 11 },
+            operation_type: IOOperationType::ReadLog {
+                offset: 0,
+                size: 11,
+            },
             completion_sender: sender,
             submitted_at: Instant::now(),
         };
@@ -518,10 +567,10 @@ mod tests {
 
         // Execute operation
         let direct_result = executor.execute_operation(operation).await.unwrap();
-        
+
         // Check completion channel
         let channel_result = receiver.await.unwrap().unwrap();
-        
+
         assert_eq!(direct_result, test_data);
         assert_eq!(channel_result, test_data);
 
@@ -537,11 +586,17 @@ mod tests {
         // Test writing to page beyond current file size
         let test_data = vec![77u8; 4096];
         let result = executor.execute_write_page(10, &test_data).await;
-        assert!(result.is_ok(), "Should be able to write beyond current file size");
+        assert!(
+            result.is_ok(),
+            "Should be able to write beyond current file size"
+        );
 
         // Test reading from that page
         let read_result = executor.execute_read_page(10).await;
-        assert!(read_result.is_ok(), "Should be able to read from extended page");
+        assert!(
+            read_result.is_ok(),
+            "Should be able to read from extended page"
+        );
 
         // Cleanup
         let _ = std::fs::remove_file(db_path);
@@ -553,11 +608,14 @@ mod tests {
         let (executor, db_path, log_path) = create_test_executor().await;
 
         let mut expected_offset = 11; // After "initial log"
-        
+
         // Append multiple log entries
         for i in 0..5 {
             let log_data = format!("log entry {}", i);
-            let offset = executor.execute_append_log(log_data.as_bytes()).await.unwrap();
+            let offset = executor
+                .execute_append_log(log_data.as_bytes())
+                .await
+                .unwrap();
             assert_eq!(offset, expected_offset);
             expected_offset += log_data.len() as u64;
         }
@@ -566,7 +624,10 @@ mod tests {
         let mut current_offset = 11;
         for i in 0..5 {
             let expected_data = format!("log entry {}", i);
-            let read_data = executor.execute_read_log(current_offset, expected_data.len()).await.unwrap();
+            let read_data = executor
+                .execute_read_log(current_offset, expected_data.len())
+                .await
+                .unwrap();
             assert_eq!(read_data, expected_data.as_bytes());
             current_offset += expected_data.len() as u64;
         }
@@ -582,13 +643,16 @@ mod tests {
         let executor = Arc::new(executor);
 
         let mut handles = Vec::new();
-        
+
         // Launch concurrent page writes
         for i in 0..10 {
             let executor_clone = Arc::clone(&executor);
             let handle = tokio::spawn(async move {
                 let test_data = vec![i as u8; 4096];
-                executor_clone.execute_write_page(i, &test_data).await.unwrap();
+                executor_clone
+                    .execute_write_page(i, &test_data)
+                    .await
+                    .unwrap();
                 (i, test_data)
             });
             handles.push(handle);
@@ -617,13 +681,16 @@ mod tests {
         let executor = Arc::new(executor);
 
         let mut handles = Vec::new();
-        
+
         // Launch concurrent log appends
         for i in 0..10 {
             let executor_clone = Arc::clone(&executor);
             let handle = tokio::spawn(async move {
                 let log_data = format!("concurrent log {}", i);
-                let offset = executor_clone.execute_append_log(log_data.as_bytes()).await.unwrap();
+                let offset = executor_clone
+                    .execute_append_log(log_data.as_bytes())
+                    .await
+                    .unwrap();
                 (offset, log_data)
             });
             handles.push(handle);
@@ -637,7 +704,10 @@ mod tests {
 
         // Verify all appends completed and data is readable
         for (offset, expected_data) in results {
-            let read_data = executor.execute_read_log(offset, expected_data.len()).await.unwrap();
+            let read_data = executor
+                .execute_read_log(offset, expected_data.len())
+                .await
+                .unwrap();
             assert_eq!(read_data, expected_data.as_bytes());
         }
 
@@ -653,15 +723,18 @@ mod tests {
         // Test writing large page data
         let large_data = vec![0x55u8; 4096];
         executor.execute_write_page(5, &large_data).await.unwrap();
-        
+
         let read_data = executor.execute_read_page(5).await.unwrap();
         assert_eq!(read_data, large_data);
 
         // Test large log data
         let large_log_data = vec![0xAAu8; 8192]; // 8KB log entry
         let offset = executor.execute_append_log(&large_log_data).await.unwrap();
-        
-        let read_log_data = executor.execute_read_log(offset, large_log_data.len()).await.unwrap();
+
+        let read_log_data = executor
+            .execute_read_log(offset, large_log_data.len())
+            .await
+            .unwrap();
         assert_eq!(read_log_data, large_log_data);
 
         // Cleanup
@@ -683,7 +756,10 @@ mod tests {
 
         // Write patterns
         for (page_id, pattern) in patterns.iter().enumerate() {
-            executor.execute_write_page(page_id as u64, pattern).await.unwrap();
+            executor
+                .execute_write_page(page_id as u64, pattern)
+                .await
+                .unwrap();
         }
 
         // Sync to ensure data is written
@@ -692,7 +768,11 @@ mod tests {
         // Read and verify patterns
         for (page_id, expected_pattern) in patterns.iter().enumerate() {
             let read_data = executor.execute_read_page(page_id as u64).await.unwrap();
-            assert_eq!(read_data, *expected_pattern, "Pattern mismatch for page {}", page_id);
+            assert_eq!(
+                read_data, *expected_pattern,
+                "Pattern mismatch for page {}",
+                page_id
+            );
         }
 
         // Cleanup
@@ -710,18 +790,30 @@ mod tests {
 
         // Overwrite with shorter data
         let shorter_data = b"short";
-        executor.execute_write_log(shorter_data, offset).await.unwrap();
+        executor
+            .execute_write_log(shorter_data, offset)
+            .await
+            .unwrap();
 
         // Read back and verify
-        let read_data = executor.execute_read_log(offset, shorter_data.len()).await.unwrap();
+        let read_data = executor
+            .execute_read_log(offset, shorter_data.len())
+            .await
+            .unwrap();
         assert_eq!(read_data, shorter_data);
 
         // Overwrite with longer data
         let longer_data = b"much longer log entry";
-        executor.execute_write_log(longer_data, offset).await.unwrap();
+        executor
+            .execute_write_log(longer_data, offset)
+            .await
+            .unwrap();
 
         // Read back and verify
-        let read_data = executor.execute_read_log(offset, longer_data.len()).await.unwrap();
+        let read_data = executor
+            .execute_read_log(offset, longer_data.len())
+            .await
+            .unwrap();
         assert_eq!(read_data, longer_data);
 
         // Cleanup
@@ -786,7 +878,10 @@ mod tests {
                     0 => {
                         // Page write
                         let data = vec![i as u8; 4096];
-                        executor_clone.execute_write_page(i % 10, &data).await.unwrap();
+                        executor_clone
+                            .execute_write_page(i % 10, &data)
+                            .await
+                            .unwrap();
                     }
                     1 => {
                         // Page read
@@ -795,7 +890,10 @@ mod tests {
                     2 => {
                         // Log append
                         let log_data = format!("stress log {}", i);
-                        let _ = executor_clone.execute_append_log(log_data.as_bytes()).await.unwrap();
+                        let _ = executor_clone
+                            .execute_append_log(log_data.as_bytes())
+                            .await
+                            .unwrap();
                     }
                     3 => {
                         // Sync
@@ -822,4 +920,4 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
         let _ = std::fs::remove_file(log_path);
     }
-} 
+}

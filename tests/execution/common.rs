@@ -1,26 +1,25 @@
+use crate::common::logger::init_test_logger;
+use parking_lot::RwLock;
+use std::sync::Arc;
 use tempfile::TempDir;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalog::Catalog;
+use tkdb::catalog::column::Column;
+use tkdb::catalog::schema::Schema;
 use tkdb::common::result_writer::ResultWriter;
+use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::concurrency::transaction_manager_factory::TransactionManagerFactory;
+use tkdb::recovery::log_manager::LogManager;
 use tkdb::recovery::wal_manager::WALManager;
 use tkdb::sql::execution::execution_context::ExecutionContext;
 use tkdb::sql::execution::execution_engine::ExecutionEngine;
 use tkdb::storage::disk::async_disk::AsyncDiskManager;
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::Value;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::concurrency::transaction::IsolationLevel;
+use tkdb::storage::disk::async_disk::DiskManagerConfig;
 use tkdb::storage::table::table_heap::TableInfo;
 use tkdb::storage::table::transactional_table_heap::TransactionalTableHeap;
-use tkdb::recovery::log_manager::LogManager;
-use tkdb::storage::disk::async_disk::DiskManagerConfig;
-use crate::common::logger::init_test_logger;
-
+use tkdb::types_db::type_id::TypeId;
+use tkdb::types_db::value::Value;
 
 pub struct TestContext {
     pub engine: ExecutionEngine,
@@ -36,7 +35,7 @@ impl TestContext {
         let buffer_pool_size = if name.contains("bulk") {
             200 // Use larger pool size for bulk operations
         } else {
-            10  // Default size for regular tests
+            10 // Default size for regular tests
         };
         const K: usize = 2;
 
@@ -56,15 +55,19 @@ impl TestContext {
             .to_string();
 
         // Create disk components
-        let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+        let disk_manager = AsyncDiskManager::new(
+            db_path.clone(),
+            log_path.clone(),
+            DiskManagerConfig::default(),
+        )
+        .await;
         let disk_manager_arc = Arc::new(disk_manager.unwrap());
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
-        let bpm = Arc::new(BufferPoolManager::new(
-            buffer_pool_size,
-            disk_manager_arc.clone(),
-            replacer.clone(),
-        ).unwrap());
-        
+        let bpm = Arc::new(
+            BufferPoolManager::new(buffer_pool_size, disk_manager_arc.clone(), replacer.clone())
+                .unwrap(),
+        );
+
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
 
         // Create WAL manager with the log manager

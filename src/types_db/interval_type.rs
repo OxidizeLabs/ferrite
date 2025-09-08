@@ -150,24 +150,15 @@ impl Type for IntervalType {
         match other.get_val() {
             Val::Integer(_r) => {
                 // Multiplying empty interval by a scalar always gives zero interval
-                Ok(Value::new_with_type(
-                    Val::Interval(0),
-                    TypeId::Interval,
-                ))
+                Ok(Value::new_with_type(Val::Interval(0), TypeId::Interval))
             }
             Val::BigInt(_r) => {
                 // Multiplying empty interval by a scalar always gives zero interval
-                Ok(Value::new_with_type(
-                    Val::Interval(0),
-                    TypeId::Interval,
-                ))
+                Ok(Value::new_with_type(Val::Interval(0), TypeId::Interval))
             }
             Val::Decimal(_r) => {
                 // Multiplying empty interval by a scalar always gives zero interval
-                Ok(Value::new_with_type(
-                    Val::Interval(0),
-                    TypeId::Interval,
-                ))
+                Ok(Value::new_with_type(Val::Interval(0), TypeId::Interval))
             }
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Interval by non-numeric type".to_string()),
@@ -181,24 +172,15 @@ impl Type for IntervalType {
             Val::Decimal(r) if *r == 0.0 => Err("Division by zero".to_string()),
             Val::Integer(_r) => {
                 // Dividing empty interval by a scalar always gives zero interval
-                Ok(Value::new_with_type(
-                    Val::Interval(0),
-                    TypeId::Interval,
-                ))
+                Ok(Value::new_with_type(Val::Interval(0), TypeId::Interval))
             }
             Val::BigInt(_r) => {
                 // Dividing empty interval by a scalar always gives zero interval
-                Ok(Value::new_with_type(
-                    Val::Interval(0),
-                    TypeId::Interval,
-                ))
+                Ok(Value::new_with_type(Val::Interval(0), TypeId::Interval))
             }
             Val::Decimal(_r) => {
                 // Dividing empty interval by a scalar always gives zero interval
-                Ok(Value::new_with_type(
-                    Val::Interval(0),
-                    TypeId::Interval,
-                ))
+                Ok(Value::new_with_type(Val::Interval(0), TypeId::Interval))
             }
             Val::Interval(r) if *r == 0 => Err("Division by zero".to_string()),
             Val::Interval(_r) => {

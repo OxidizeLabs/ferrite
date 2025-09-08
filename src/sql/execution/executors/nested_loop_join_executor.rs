@@ -27,7 +27,6 @@ use parking_lot::RwLock;
 use sqlparser::ast::JoinOperator as JoinType;
 use std::sync::Arc;
 
-
 // =============================================================================
 // 1. JOIN STATE MANAGEMENT
 // =============================================================================
@@ -75,7 +74,7 @@ pub struct JoinState {
 
     /// All right tuples seen during main join (for full outer joins)
     pub all_right_tuples: Vec<(Arc<Tuple>, RID)>,
-    
+
     /// Right tuples that have been matched (for full outer joins)
     pub matched_right_tuples: std::collections::HashSet<usize>,
 }
@@ -156,7 +155,7 @@ impl JoinState {
         self.unmatched_right_tuples.push(tuple);
     }
 
-    /// Add unmatched left tuple  
+    /// Add unmatched left tuple
     pub fn add_unmatched_left_tuple(&mut self, tuple: (Arc<Tuple>, RID)) {
         self.unmatched_left_tuples.push(tuple);
     }
@@ -188,7 +187,7 @@ impl JoinState {
         self.all_right_tuples.push(tuple);
     }
 
-    /// Mark a right tuple as matched (for full outer joins) 
+    /// Mark a right tuple as matched (for full outer joins)
     pub fn mark_right_tuple_matched(&mut self, index: usize) {
         self.matched_right_tuples.insert(index);
     }
@@ -317,7 +316,7 @@ impl JoinPredicateEvaluator {
         debug!("Left tuple values: {:?}", left_tuple.get_values());
         debug!("Right tuple values: {:?}", right_tuple.get_values());
         debug!("About to evaluate predicate");
-        
+
         let start_time = std::time::Instant::now();
         let result = self.predicate.evaluate_join(
             left_tuple,
@@ -327,7 +326,7 @@ impl JoinPredicateEvaluator {
         );
         let duration = start_time.elapsed();
         debug!("Predicate evaluation took: {:?}", duration);
-        
+
         match result {
             Ok(value) => {
                 debug!("Predicate evaluation succeeded with value: {:?}", value);
@@ -336,15 +335,18 @@ impl JoinPredicateEvaluator {
                     Val::Boolean(result) => {
                         debug!("Predicate evaluation result: {}", result);
                         Ok(*result)
-                    },
+                    }
                     Val::Null => {
                         debug!("Predicate evaluation returned null, treating as false");
                         Ok(false)
-                    }, // Treat null as false
+                    } // Treat null as false
                     other => {
-                        debug!("Predicate evaluation returned non-boolean: {:?}, treating as false", other);
+                        debug!(
+                            "Predicate evaluation returned non-boolean: {:?}, treating as false",
+                            other
+                        );
                         Ok(false)
-                    },         // Treat non-boolean as false
+                    } // Treat non-boolean as false
                 }
             }
             Err(e) => {
@@ -353,7 +355,7 @@ impl JoinPredicateEvaluator {
                     "Predicate evaluation error: {}",
                     e
                 )))
-            },
+            }
         }
     }
 }
@@ -500,7 +502,7 @@ impl JoinTypeHandler {
                         self.tuple_combiner.combine_tuples(left_tuple, right_tuple);
                     Ok(Some((combined_tuple, RID::new(0, 0))))
                 } else {
-                    // Don't add to unmatched right tuples here - we'll determine 
+                    // Don't add to unmatched right tuples here - we'll determine
                     // truly unmatched right tuples after processing all combinations
                     Ok(None)
                 }
@@ -701,11 +703,13 @@ impl NestedLoopJoinExecutor {
     /// Execute main join logic
     fn execute_main_join(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         loop {
-            debug!("JOIN: Loop iteration - current_left_tuple: {:?}, left_exhausted: {}, right_exhausted: {}", 
-                   self.join_state.current_left_tuple.is_some(), 
-                   self.join_state.left_executor_exhausted, 
-                   self.join_state.right_executor_exhausted);
-            
+            debug!(
+                "JOIN: Loop iteration - current_left_tuple: {:?}, left_exhausted: {}, right_exhausted: {}",
+                self.join_state.current_left_tuple.is_some(),
+                self.join_state.left_executor_exhausted,
+                self.join_state.right_executor_exhausted
+            );
+
             // Get or fetch current left tuple
             if self.join_state.current_left_tuple.is_none()
                 && !self.join_state.left_executor_exhausted
@@ -729,28 +733,43 @@ impl NestedLoopJoinExecutor {
                     match self.executor_manager.get_next_right_tuple()? {
                         Some((right_tuple, right_rid)) => {
                             // For right and full outer joins, track all right tuples
-                            if matches!(self.join_handler.join_type, JoinType::Right(_) | JoinType::RightOuter(_) | JoinType::FullOuter(_)) {
+                            if matches!(
+                                self.join_handler.join_type,
+                                JoinType::Right(_)
+                                    | JoinType::RightOuter(_)
+                                    | JoinType::FullOuter(_)
+                            ) {
                                 // Check if this right tuple is already in our collection
-                                let tuple_exists = self.join_state.all_right_tuples.iter().any(|(t, _)| {
-                                    t.get_values() == right_tuple.get_values()
-                                });
-                                
+                                let tuple_exists = self
+                                    .join_state
+                                    .all_right_tuples
+                                    .iter()
+                                    .any(|(t, _)| t.get_values() == right_tuple.get_values());
+
                                 if !tuple_exists {
-                                    self.join_state.add_right_tuple((right_tuple.clone(), right_rid));
+                                    self.join_state
+                                        .add_right_tuple((right_tuple.clone(), right_rid));
                                 }
                             }
-                            
+
                             if let Some(result) = self.join_handler.process_tuple_pair(
                                 left_tuple,
                                 &right_tuple,
                                 &mut self.join_state,
                             )? {
                                 // For right and full outer joins, mark the right tuple as matched
-                                if matches!(self.join_handler.join_type, JoinType::Right(_) | JoinType::RightOuter(_) | JoinType::FullOuter(_)) {
+                                if matches!(
+                                    self.join_handler.join_type,
+                                    JoinType::Right(_)
+                                        | JoinType::RightOuter(_)
+                                        | JoinType::FullOuter(_)
+                                ) {
                                     // Find the index of this right tuple
-                                    if let Some(index) = self.join_state.all_right_tuples.iter().position(|(t, _)| {
-                                        t.get_values() == right_tuple.get_values()
-                                    }) {
+                                    if let Some(index) =
+                                        self.join_state.all_right_tuples.iter().position(
+                                            |(t, _)| t.get_values() == right_tuple.get_values(),
+                                        )
+                                    {
                                         self.join_state.mark_right_tuple_matched(index);
                                     }
                                 }

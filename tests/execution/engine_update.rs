@@ -22,7 +22,7 @@ async fn test_update_basic_operations() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 25, 50000, true),
         (2, 'Bob', 30, 60000, true),
         (3, 'Charlie', 35, 70000, false),
@@ -93,7 +93,7 @@ async fn test_update_with_conditions() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 25, 50000, 'Engineering'),
         (2, 'Bob', 30, 60000, 'Sales'),
         (3, 'Charlie', 35, 70000, 'Engineering'),
@@ -126,7 +126,8 @@ async fn test_update_with_conditions() {
     assert!(success, "String condition update failed");
 
     // Verify Engineering employees got 10% raise
-    let select_sql = "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name";
+    let select_sql =
+        "SELECT name, salary FROM employees WHERE department = 'Engineering' ORDER BY name";
     db.execute_sql(select_sql, IsolationLevel::ReadCommitted, &mut writer)
         .await
         .unwrap();
@@ -165,7 +166,7 @@ async fn test_update_with_expressions() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 50000, 5000, 3),
         (2, 'Bob', 60000, 8000, 5),
         (3, 'Charlie', 70000, 10000, 7)";
@@ -219,7 +220,7 @@ async fn test_update_no_rows_affected() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 25),
         (2, 'Bob', 30)";
     db.execute_sql(insert_sql, IsolationLevel::ReadCommitted, &mut writer)
@@ -260,7 +261,7 @@ async fn test_update_all_rows() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 'active'),
         (2, 'Bob', 'inactive'),
         (3, 'Charlie', 'pending')";
@@ -300,7 +301,7 @@ async fn test_update_in_transaction() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO accounts VALUES 
+    let insert_sql = "INSERT INTO accounts VALUES
         (1, 'Alice', 1000),
         (2, 'Bob', 500)";
     db.execute_sql(insert_sql, IsolationLevel::ReadCommitted, &mut writer)

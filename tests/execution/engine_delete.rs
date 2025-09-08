@@ -11,9 +11,9 @@ async fn test_delete_basic_operations() {
 
     // Create test table
     let create_sql = "CREATE TABLE users (
-        id INTEGER, 
-        name VARCHAR(50), 
-        age INTEGER, 
+        id INTEGER,
+        name VARCHAR(50),
+        age INTEGER,
         active BOOLEAN
     )";
     db.execute_sql(create_sql, IsolationLevel::ReadCommitted, &mut writer)
@@ -21,7 +21,7 @@ async fn test_delete_basic_operations() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO users VALUES 
+    let insert_sql = "INSERT INTO users VALUES
         (1, 'Alice', 25, true),
         (2, 'Bob', 30, true),
         (3, 'Charlie', 35, false),
@@ -86,7 +86,7 @@ async fn test_delete_with_conditions() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 25, 50000, 'Engineering'),
         (2, 'Bob', 30, 60000, 'Sales'),
         (3, 'Charlie', 35, 70000, 'Engineering'),
@@ -156,7 +156,7 @@ async fn test_delete_no_rows_affected() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 25),
         (2, 'Bob', 30)";
     db.execute_sql(insert_sql, IsolationLevel::ReadCommitted, &mut writer)
@@ -197,7 +197,7 @@ async fn test_delete_all_rows() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO temp_data VALUES 
+    let insert_sql = "INSERT INTO temp_data VALUES
         (1, 'Alice', 'active'),
         (2, 'Bob', 'inactive'),
         (3, 'Charlie', 'pending')";
@@ -237,7 +237,7 @@ async fn test_delete_in_transaction() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO accounts VALUES 
+    let insert_sql = "INSERT INTO accounts VALUES
         (1, 'Alice', 1000),
         (2, 'Bob', 500),
         (3, 'Charlie', 0)";
@@ -318,7 +318,7 @@ async fn test_delete_with_complex_conditions() {
         .unwrap();
 
     // Insert test data
-    let insert_sql = "INSERT INTO employees VALUES 
+    let insert_sql = "INSERT INTO employees VALUES
         (1, 'Alice', 25, 50000, 'Engineering', true),
         (2, 'Bob', 30, 60000, 'Sales', true),
         (3, 'Charlie', 35, 70000, 'Engineering', false),
@@ -426,7 +426,7 @@ async fn test_delete_with_foreign_key_constraints() {
     assert!(success, "Create employees table with FK failed");
 
     // Insert parent records
-    let insert_dept_sql = "INSERT INTO departments_fk VALUES 
+    let insert_dept_sql = "INSERT INTO departments_fk VALUES
         (1, 'Engineering'),
         (2, 'Sales'),
         (3, 'Marketing')";
@@ -437,7 +437,7 @@ async fn test_delete_with_foreign_key_constraints() {
     assert!(success, "Insert departments failed");
 
     // Insert child records
-    let insert_emp_sql = "INSERT INTO employees_fk VALUES 
+    let insert_emp_sql = "INSERT INTO employees_fk VALUES
         (1, 'Alice', 1),
         (2, 'Bob', 2),
         (3, 'Charlie', 1)";
@@ -515,7 +515,7 @@ async fn test_delete_with_subqueries() {
         .unwrap();
 
     // Insert employee data
-    let insert_emp_sql = "INSERT INTO employees_sub VALUES 
+    let insert_emp_sql = "INSERT INTO employees_sub VALUES
         (1, 'Alice', 60000, 1),
         (2, 'Bob', 75000, 2),
         (3, 'Charlie', 80000, 1),
@@ -526,7 +526,7 @@ async fn test_delete_with_subqueries() {
         .unwrap();
 
     // Insert department data
-    let insert_dept_sql = "INSERT INTO departments_sub VALUES 
+    let insert_dept_sql = "INSERT INTO departments_sub VALUES
         (1, 'Engineering', 500000),
         (2, 'Sales', 300000),
         (3, 'Marketing', 200000)";
@@ -541,27 +541,27 @@ async fn test_delete_with_subqueries() {
         .await;
 
     assert!(result.is_ok(), "Simple DELETE operation failed");
-    
+
     // Verify Diana (the only employee in department 3) was deleted
     let count_sql = "SELECT COUNT(*) FROM employees_sub WHERE department_id = 3";
     db.execute_sql(count_sql, IsolationLevel::ReadCommitted, &mut writer)
         .await
         .unwrap();
-    
+
     // Test 2: Delete employees with salary above 70000 (Bob, Charlie, Eve)
     let delete_sql = "DELETE FROM employees_sub WHERE salary > 70000";
     let result = db
         .execute_sql(delete_sql, IsolationLevel::ReadCommitted, &mut writer)
         .await;
-        
+
     assert!(result.is_ok(), "Salary-based DELETE operation failed");
-    
+
     // Verify high-salary employees are deleted
     let count_sql = "SELECT COUNT(*) FROM employees_sub";
     db.execute_sql(count_sql, IsolationLevel::ReadCommitted, &mut writer)
         .await
         .unwrap();
-    
+
     // TODO: When subquery support is fully implemented, replace with:
     // DELETE FROM employees_sub WHERE department_id IN (SELECT id FROM departments_sub WHERE budget < 250000)
     // And:
@@ -640,7 +640,10 @@ async fn test_delete_performance_bulk_operations() {
     let inactive_delete_duration = start_time.elapsed();
 
     assert!(success, "Bulk delete inactive records failed");
-    println!("Delete inactive records took: {:?}", inactive_delete_duration);
+    println!(
+        "Delete inactive records took: {:?}",
+        inactive_delete_duration
+    );
 
     // Final count
     let count_sql = "SELECT COUNT(*) FROM bulk_delete_test";
@@ -658,7 +661,10 @@ async fn test_delete_performance_bulk_operations() {
     let complex_delete_duration = start_time.elapsed();
 
     assert!(success, "Complex condition delete failed");
-    println!("Complex condition delete took: {:?}", complex_delete_duration);
+    println!(
+        "Complex condition delete took: {:?}",
+        complex_delete_duration
+    );
 
     // Report performance summary
     println!("\nDelete Performance Summary:");
@@ -681,30 +687,42 @@ async fn test_delete_with_join_conditions() {
         amount BIGINT,
         status VARCHAR(20)
     )";
-    db.execute_sql(create_orders_sql, IsolationLevel::ReadCommitted, &mut writer)
-        .await
-        .unwrap();
+    db.execute_sql(
+        create_orders_sql,
+        IsolationLevel::ReadCommitted,
+        &mut writer,
+    )
+    .await
+    .unwrap();
 
     let create_customers_sql = "CREATE TABLE customers_del (
         id INTEGER,
         name VARCHAR(50),
         active BOOLEAN
     )";
-    db.execute_sql(create_customers_sql, IsolationLevel::ReadCommitted, &mut writer)
-        .await
-        .unwrap();
+    db.execute_sql(
+        create_customers_sql,
+        IsolationLevel::ReadCommitted,
+        &mut writer,
+    )
+    .await
+    .unwrap();
 
     // Insert customer data
-    let insert_customer_sql = "INSERT INTO customers_del VALUES 
+    let insert_customer_sql = "INSERT INTO customers_del VALUES
         (1, 'Alice Corp', true),
         (2, 'Bob Ltd', false),
         (3, 'Charlie Inc', true)";
-    db.execute_sql(insert_customer_sql, IsolationLevel::ReadCommitted, &mut writer)
-        .await
-        .unwrap();
+    db.execute_sql(
+        insert_customer_sql,
+        IsolationLevel::ReadCommitted,
+        &mut writer,
+    )
+    .await
+    .unwrap();
 
     // Insert order data
-    let insert_order_sql = "INSERT INTO orders_del VALUES 
+    let insert_order_sql = "INSERT INTO orders_del VALUES
         (1, 1, 101, 1000, 'pending'),
         (2, 2, 102, 2000, 'completed'),
         (3, 1, 103, 1500, 'shipped'),
@@ -716,7 +734,7 @@ async fn test_delete_with_join_conditions() {
 
     // Note: Since EXISTS subquery support isn't fully implemented yet,
     // we'll use a direct approach to delete orders from inactive customers
-    
+
     // Delete orders with customer_id = 2 (Bob Ltd is inactive)
     let delete_sql = "DELETE FROM orders_del WHERE customer_id = 2";
     let success = db
@@ -724,7 +742,7 @@ async fn test_delete_with_join_conditions() {
         .await
         .unwrap();
     assert!(success, "Simple customer-based delete failed");
-    
+
     // Verify orders from inactive customers are deleted
     let count_sql = "SELECT COUNT(*) FROM orders_del";
     db.execute_sql(count_sql, IsolationLevel::ReadCommitted, &mut writer)
@@ -732,7 +750,7 @@ async fn test_delete_with_join_conditions() {
         .unwrap();
 
     // TODO: When subquery support is fully implemented, replace with:
-    // DELETE FROM orders_del WHERE EXISTS (SELECT 1 FROM customers_del 
+    // DELETE FROM orders_del WHERE EXISTS (SELECT 1 FROM customers_del
     //   WHERE customers_del.id = orders_del.customer_id AND customers_del.active = false)
 
     // Test: Delete pending orders

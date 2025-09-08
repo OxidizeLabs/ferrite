@@ -2,7 +2,9 @@
 // HEAP-BASED LFU CACHE IMPLEMENTATION
 // ==============================================
 
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
+use crate::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LFUCacheTrait, MutableCache,
+};
 use std::cmp::Reverse;
 /// # Heap-Based LFU Cache Implementation
 ///
@@ -170,11 +172,12 @@ where
     fn pop_lfu_internal(&mut self) -> Option<(K, u64)> {
         while let Some(Reverse((heap_freq, key))) = self.freq_heap.peek() {
             if let Some(&current_freq) = self.frequencies.get(key)
-                && *heap_freq == current_freq {
-                    // This is a valid (non-stale) entry
-                    let Reverse((freq, key)) = self.freq_heap.pop().unwrap();
-                    return Some((key, freq));
-                }
+                && *heap_freq == current_freq
+            {
+                // This is a valid (non-stale) entry
+                let Reverse((freq, key)) = self.freq_heap.pop().unwrap();
+                return Some((key, freq));
+            }
 
             // This entry is stale (key doesn't exist or frequency changed)
             self.freq_heap.pop();
@@ -342,7 +345,9 @@ where
 #[cfg(test)]
 mod heap_lfu_tests {
     use super::*;
-    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
+    use crate::storage::disk::async_disk::cache::cache_traits::{
+        CoreCache, LFUCacheTrait, MutableCache,
+    };
     use crate::storage::disk::async_disk::cache::lfu::LFUCache;
 
     #[test]
@@ -418,7 +423,7 @@ mod heap_lfu_tests {
         cache.insert("high".to_string(), 3);
 
         // Create frequency differences
-        cache.get(&"med".to_string());  // med freq = 2
+        cache.get(&"med".to_string()); // med freq = 2
         cache.get(&"high".to_string()); // high freq = 2
         cache.get(&"high".to_string()); // high freq = 3
 

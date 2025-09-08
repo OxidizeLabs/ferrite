@@ -1,15 +1,15 @@
+use crate::common::logger::init_test_logger;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalog::Catalog;
 use tkdb::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use tkdb::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
 use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::types_db::type_id::TypeId;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::common::logger::init_test_logger;
+use tkdb::types_db::type_id::TypeId;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -37,21 +37,37 @@ impl TestContext {
             .unwrap()
             .to_string();
 
-        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await.unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let disk_manager_arc = Arc::new(disk_manager);
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
+        let bpm =
+            Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
-        let transaction_manager = Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+        let transaction_manager =
+            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
-        Self { catalog, planner, _temp_dir: temp_dir }
+        Self {
+            catalog,
+            planner,
+            _temp_dir: temp_dir,
+        }
     }
 
-    fn create_table(&mut self, table_name: &str, columns: &str, if_not_exists: bool) -> Result<(), String> {
+    fn create_table(
+        &mut self,
+        table_name: &str,
+        columns: &str,
+        if_not_exists: bool,
+    ) -> Result<(), String> {
         let if_not_exists_clause = if if_not_exists { "IF NOT EXISTS " } else { "" };
-        let create_sql = format!("CREATE TABLE {}{} ({})", if_not_exists_clause, table_name, columns);
+        let create_sql = format!(
+            "CREATE TABLE {}{} ({})",
+            if_not_exists_clause, table_name, columns
+        );
         let create_plan = self.planner.create_logical_plan(&create_sql)?;
         let physical_plan = create_plan.to_physical_plan()?;
         match physical_plan {
@@ -69,7 +85,11 @@ impl TestContext {
 
     fn assert_table_exists(&self, table_name: &str) {
         let catalog = self.catalog.read();
-        assert!(catalog.get_table(table_name).is_some(), "Table '{}' should exist", table_name);
+        assert!(
+            catalog.get_table(table_name).is_some(),
+            "Table '{}' should exist",
+            table_name
+        );
     }
 
     fn assert_table_schema(&self, table_name: &str, expected_columns: &[(String, TypeId)]) {
@@ -86,11 +106,16 @@ impl TestContext {
 #[tokio::test]
 async fn create_simple_table() {
     let mut fixture = TestContext::new("create_simple_table").await;
-    fixture.create_table("users", "id INTEGER, name VARCHAR(255)", false).unwrap();
+    fixture
+        .create_table("users", "id INTEGER, name VARCHAR(255)", false)
+        .unwrap();
     fixture.assert_table_exists("users");
     fixture.assert_table_schema(
         "users",
-        &[("id".to_string(), TypeId::Integer), ("name".to_string(), TypeId::VarChar)],
+        &[
+            ("id".to_string(), TypeId::Integer),
+            ("name".to_string(), TypeId::VarChar),
+        ],
     );
 }
 
@@ -160,14 +185,19 @@ async fn create_table_with_default_values() {
 #[tokio::test]
 async fn create_table_single_column() {
     let mut fixture = TestContext::new("create_table_single_column").await;
-    fixture.create_table("simple", "value INTEGER", false).unwrap();
+    fixture
+        .create_table("simple", "value INTEGER", false)
+        .unwrap();
     fixture.assert_table_exists("simple");
 }
 
 #[tokio::test]
 async fn create_table_many_columns() {
     let mut fixture = TestContext::new("create_table_many_columns").await;
-    let columns = (1..=20).map(|i| format!("col{} INTEGER", i)).collect::<Vec<_>>().join(", ");
+    let columns = (1..=20)
+        .map(|i| format!("col{} INTEGER", i))
+        .collect::<Vec<_>>()
+        .join(", ");
     fixture.create_table("wide_table", &columns, false).unwrap();
     fixture.assert_table_exists("wide_table");
 }
@@ -189,7 +219,11 @@ async fn create_table_quoted_identifiers() {
 async fn create_table_case_sensitivity() {
     let mut fixture = TestContext::new("create_table_case").await;
     fixture
-        .create_table("MyTable", "ID INTEGER, Name VARCHAR(255), Age INTEGER", false)
+        .create_table(
+            "MyTable",
+            "ID INTEGER, Name VARCHAR(255), Age INTEGER",
+            false,
+        )
         .unwrap();
     fixture.assert_table_exists("MyTable");
 }
@@ -225,7 +259,13 @@ async fn create_table_with_check_constraint() {
 #[tokio::test]
 async fn create_table_with_foreign_key() {
     let mut fixture = TestContext::new("create_table_with_fk").await;
-    fixture.create_table("categories", "id INTEGER PRIMARY KEY, name VARCHAR(255)", false).unwrap();
+    fixture
+        .create_table(
+            "categories",
+            "id INTEGER PRIMARY KEY, name VARCHAR(255)",
+            false,
+        )
+        .unwrap();
     fixture
         .create_table(
             "products",
@@ -268,7 +308,9 @@ async fn create_temporary_table() {
     let create_sql = "CREATE TEMPORARY TABLE temp_data (id INTEGER, value VARCHAR(255))";
     let plan = fixture.planner.create_logical_plan(create_sql).unwrap();
     match &plan.plan_type {
-        LogicalPlanType::CreateTable { schema, table_name, .. } => {
+        LogicalPlanType::CreateTable {
+            schema, table_name, ..
+        } => {
             assert_eq!(table_name, "temp_data");
             assert_eq!(schema.get_column_count(), 2);
         }
@@ -380,8 +422,7 @@ async fn test_create_table_with_engine_options() {
     let mut fixture = TestContext::new("create_table_engine").await;
 
     // Test MySQL-style engine options
-    let create_sql =
-        "CREATE TABLE test_table (id INTEGER) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+    let create_sql = "CREATE TABLE test_table (id INTEGER) ENGINE=InnoDB DEFAULT CHARSET=utf8";
     let plan = fixture.planner.create_logical_plan(create_sql).unwrap();
 
     match &plan.plan_type {

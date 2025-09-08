@@ -23,5 +23,3 @@ macro_rules! assert_err {
         if $expr.is_ok() { panic!(concat!("Expected Err(_): ", $($arg)+)); }
     };
 }
-
-

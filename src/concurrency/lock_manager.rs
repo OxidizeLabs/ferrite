@@ -1,4 +1,4 @@
-use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
+use crate::common::config::{INVALID_TXN_ID, TableOidT, TxnId};
 use crate::common::exception::LockError;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::IsolationLevel;
@@ -6,8 +6,8 @@ use crate::concurrency::transaction::{Transaction, TransactionState};
 use parking_lot::lock_api::MutexGuard;
 use parking_lot::{Condvar, Mutex, RawMutex};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, thread};
 
 /// [LOCK_NOTE]
@@ -300,7 +300,7 @@ impl LockRequestQueue {
                     (mode1, mode2) if mode1 == mode2 => true,
                     // Invalid upgrade
                     _ => false,
-                }
+                };
             }
         }
 
@@ -455,9 +455,10 @@ impl DeadlockDetector {
                     &mut path,
                     &mut on_path,
                     abort_txn,
-                ) {
-                    return true;
-                }
+                )
+            {
+                return true;
+            }
         }
         false
     }
@@ -486,9 +487,10 @@ impl DeadlockDetector {
                     return true;
                 }
                 if !visited.contains(&next)
-                    && Self::dfs_cycle(next, waits_for, visited, path, on_path, abort_txn) {
-                        return true;
-                    }
+                    && Self::dfs_cycle(next, waits_for, visited, path, on_path, abort_txn)
+                {
+                    return true;
+                }
             }
         }
 
@@ -647,7 +649,8 @@ impl LockStateManager {
         let mut i = 0;
         while i < queue.request_queue.len() {
             let request = queue.request_queue[i].clone();
-            if !request.lock().is_granted() && queue.compatible_with_existing_locks(&request.lock()) {
+            if !request.lock().is_granted() && queue.compatible_with_existing_locks(&request.lock())
+            {
                 request.lock().granted = true;
                 // Don't increment i since we want to check the next request
             } else {
@@ -1118,10 +1121,11 @@ impl LockManager {
 
     pub fn check_deadlock(&self, txn: Arc<Transaction>) -> Result<bool, LockError> {
         if let Some(abort_txn) = self.deadlock_detector.get_and_clear_abort_txn()
-            && abort_txn == txn.get_transaction_id() {
-                txn.set_state(TransactionState::Aborted);
-                return Ok(true);
-            }
+            && abort_txn == txn.get_transaction_id()
+        {
+            txn.set_state(TransactionState::Aborted);
+            return Ok(true);
+        }
         Ok(false)
     }
 
@@ -1187,8 +1191,8 @@ mod tests {
     use super::*;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
-    use parking_lot::lock_api::MutexGuard;
     use parking_lot::RawMutex;
+    use parking_lot::lock_api::MutexGuard;
 
     pub struct TestContext {
         lock_manager: Arc<Mutex<LockManager>>,

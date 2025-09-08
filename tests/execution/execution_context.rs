@@ -1,22 +1,22 @@
+use crate::common::logger::init_test_logger;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
+use tkdb::buffer::lru_k_replacer::LRUKReplacer;
+use tkdb::catalog::Catalog;
+use tkdb::catalog::column::Column;
+use tkdb::catalog::schema::Schema;
+use tkdb::concurrency::lock_manager::LockManager;
+use tkdb::concurrency::transaction::{IsolationLevel, Transaction};
+use tkdb::concurrency::transaction_manager::TransactionManager;
+use tkdb::sql::execution::check_option::CheckOption;
 use tkdb::sql::execution::execution_context::{ExecutionContext, ExecutorType};
 use tkdb::sql::execution::executors::create_table_executor::CreateTableExecutor;
 use tkdb::sql::execution::plans::create_table_plan::CreateTablePlanNode;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::types_db::type_id::TypeId;
-use std::sync::Arc;
-use parking_lot::RwLock;
-use tkdb::catalog::Catalog;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::concurrency::transaction::{IsolationLevel, Transaction};
-use tkdb::concurrency::transaction_manager::TransactionManager;
-use tkdb::concurrency::lock_manager::LockManager;
 use tkdb::sql::execution::transaction_context::TransactionContext;
 use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tkdb::sql::execution::check_option::CheckOption;
-use crate::common::logger::init_test_logger;
-use tempfile::TempDir;
+use tkdb::types_db::type_id::TypeId;
 
 struct TestContext {
     bpm: Arc<BufferPoolManager>,
@@ -45,10 +45,14 @@ impl TestContext {
             .unwrap()
             .to_string();
 
-        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await.unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let disk_manager_arc = Arc::new(disk_manager);
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc.clone(), replacer).unwrap());
+        let bpm = Arc::new(
+            BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc.clone(), replacer).unwrap(),
+        );
 
         let transaction_manager = Arc::new(TransactionManager::new());
         let lock_manager = Arc::new(LockManager::new());
@@ -66,22 +70,37 @@ impl TestContext {
             transaction_context,
         )));
 
-        Self { bpm, catalog, execution_context, _temp_dir: temp_dir }
+        Self {
+            bpm,
+            catalog,
+            execution_context,
+            _temp_dir: temp_dir,
+        }
     }
 }
 
 fn create_test_schema() -> Schema {
-    Schema::new(vec![Column::new("id", TypeId::Integer), Column::new("name", TypeId::VarChar)])
+    Schema::new(vec![
+        Column::new("id", TypeId::Integer),
+        Column::new("name", TypeId::VarChar),
+    ])
 }
 
 #[tokio::test]
 async fn executor_type_create_table_construction() {
     let test_ctx = TestContext::new("executor_type_create_table_construction").await;
     let schema = create_test_schema();
-    let plan = Arc::new(CreateTablePlanNode::new(schema, "test_table".to_string(), false));
+    let plan = Arc::new(CreateTablePlanNode::new(
+        schema,
+        "test_table".to_string(),
+        false,
+    ));
     let executor = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan, false);
     let executor_type = ExecutorType::CreateTable(executor);
-    assert_eq!(ExecutionContext::get_executor_type_name(&executor_type), "CreateTableExecutor");
+    assert_eq!(
+        ExecutionContext::get_executor_type_name(&executor_type),
+        "CreateTableExecutor"
+    );
 }
 
 #[tokio::test]
@@ -104,22 +123,32 @@ async fn execution_context_getters_setters() {
     }
 }
 
-
 #[tokio::test]
 async fn executor_type_from_constructors() {
     let test_ctx = TestContext::new("executor_type_from_constructors").await;
     let schema = create_test_schema();
-    let plan = Arc::new(CreateTablePlanNode::new(schema, "test_table".to_string(), false));
+    let plan = Arc::new(CreateTablePlanNode::new(
+        schema,
+        "test_table".to_string(),
+        false,
+    ));
     let executor = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan, false);
     let executor_type = ExecutorType::from_create_table(executor);
-    assert_eq!(ExecutionContext::get_executor_type_name(&executor_type), "CreateTableExecutor");
+    assert_eq!(
+        ExecutionContext::get_executor_type_name(&executor_type),
+        "CreateTableExecutor"
+    );
 }
 
 #[tokio::test]
 async fn executor_type_init_and_operations() {
     let test_ctx = TestContext::new("executor_type_init_and_operations").await;
     let schema = create_test_schema();
-    let plan = Arc::new(CreateTablePlanNode::new(schema, "test_table".to_string(), false));
+    let plan = Arc::new(CreateTablePlanNode::new(
+        schema,
+        "test_table".to_string(),
+        false,
+    ));
 
     let executor = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan, false);
     let mut executor_type = ExecutorType::from_create_table(executor);
@@ -140,8 +169,16 @@ async fn execution_context_add_check_option() {
     let test_ctx = TestContext::new("execution_context_add_check_option").await;
     let schema = create_test_schema();
 
-    let plan1 = Arc::new(CreateTablePlanNode::new(schema.clone(), "table1".to_string(), false));
-    let plan2 = Arc::new(CreateTablePlanNode::new(schema, "table2".to_string(), false));
+    let plan1 = Arc::new(CreateTablePlanNode::new(
+        schema.clone(),
+        "table1".to_string(),
+        false,
+    ));
+    let plan2 = Arc::new(CreateTablePlanNode::new(
+        schema,
+        "table2".to_string(),
+        false,
+    ));
 
     let executor1 = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan1, false);
     let executor2 = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan2, false);
@@ -165,7 +202,11 @@ async fn execution_context_add_check_option() {
 async fn executor_type_pattern_matching() {
     let test_ctx = TestContext::new("executor_type_pattern_matching").await;
     let schema = create_test_schema();
-    let plan = Arc::new(CreateTablePlanNode::new(schema, "test_table".to_string(), false));
+    let plan = Arc::new(CreateTablePlanNode::new(
+        schema,
+        "test_table".to_string(),
+        false,
+    ));
 
     let executor = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan, false);
     let executor_type = ExecutorType::from_create_table(executor);
@@ -216,8 +257,16 @@ async fn multiple_executor_types_in_context() {
     let test_ctx = TestContext::new("multiple_executor_types_in_context").await;
     let schema = create_test_schema();
 
-    let plan1 = Arc::new(CreateTablePlanNode::new(schema.clone(), "table1".to_string(), false));
-    let plan2 = Arc::new(CreateTablePlanNode::new(schema, "table2".to_string(), false));
+    let plan1 = Arc::new(CreateTablePlanNode::new(
+        schema.clone(),
+        "table1".to_string(),
+        false,
+    ));
+    let plan2 = Arc::new(CreateTablePlanNode::new(
+        schema,
+        "table2".to_string(),
+        false,
+    ));
 
     let exec1 = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan1, false);
     let exec2 = CreateTableExecutor::new(test_ctx.execution_context.clone(), plan2, false);
@@ -248,4 +297,3 @@ async fn execution_context_init_check_options() {
         assert!(check_options.has_check(&CheckOption::EnableTopnCheck));
     }
 }
-

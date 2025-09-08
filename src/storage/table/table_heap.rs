@@ -1,6 +1,6 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
-use crate::common::config::{PageId, TableOidT, INVALID_PAGE_ID};
+use crate::common::config::{INVALID_PAGE_ID, PageId, TableOidT};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
@@ -152,11 +152,9 @@ impl TableHeap {
                         Ok(rid)
                     }
                     None => {
-                        Err(
-                            "Failed to insert tuple into page despite having space".to_string()
-                        )
+                        Err("Failed to insert tuple into page despite having space".to_string())
                     }
-                }
+                };
             }
         }
 
@@ -795,7 +793,7 @@ impl TableHeap {
                     Ok(rid)
                 } else {
                     Err("Failed to insert tuple into page".to_string())
-                }
+                };
             }
         }
 
@@ -819,7 +817,11 @@ impl TableHeap {
             .map_err(|e| format!("Failed to update tuple: {}", e))
     }
 
-    pub fn get_tuple_internal(&self, rid: RID, allow_deleted: bool) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
+    pub fn get_tuple_internal(
+        &self,
+        rid: RID,
+        allow_deleted: bool,
+    ) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
         let (meta, tuple) = page.get_tuple(&rid, allow_deleted)?;
@@ -845,7 +847,7 @@ impl TableHeap {
     ) -> Result<RID, String> {
         // Expand values to match schema, handling AUTO_INCREMENT and DEFAULT values
         let expanded_values = self.expand_values_for_schema(values, schema)?;
-        
+
         let _write_guard = self.latch.write();
 
         // Get the last page
@@ -891,7 +893,7 @@ impl TableHeap {
         schema: &Schema,
     ) -> Result<Vec<Value>, String> {
         let schema_column_count = schema.get_column_count() as usize;
-        
+
         // If we have more values than columns, that's an error
         if values.len() > schema_column_count {
             return Err(format!(
@@ -900,19 +902,19 @@ impl TableHeap {
                 schema_column_count
             ));
         }
-        
+
         let mut expanded_values = Vec::with_capacity(schema_column_count);
-        
+
         // Process each column in the schema
         for i in 0..schema_column_count {
-            let column = schema.get_column(i).ok_or_else(|| {
-                format!("Column index {} out of bounds in schema", i)
-            })?;
-            
+            let column = schema
+                .get_column(i)
+                .ok_or_else(|| format!("Column index {} out of bounds in schema", i))?;
+
             if i < values.len() {
                 // We have a value for this position
                 let value = &values[i];
-                
+
                 // Check if this is a NULL value for an AUTO_INCREMENT column
                 if value.is_null() && column.is_primary_key() {
                     // Replace NULL with auto-generated value for AUTO_INCREMENT primary keys
@@ -955,17 +957,18 @@ impl TableHeap {
                 }
             }
         }
-        
+
         Ok(expanded_values)
     }
-    
+
     /// Gets the next auto-increment value for this table
     /// For now, this is a simple implementation - in a real system this would
     /// be tracked per table and persisted
     fn get_next_auto_increment_value(&self) -> Result<i32, String> {
         // Simple implementation: start from 1 and increment
         // In a real implementation, this should be tracked per table
-        static AUTO_INCREMENT_COUNTER: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(1);
+        static AUTO_INCREMENT_COUNTER: std::sync::atomic::AtomicI32 =
+            std::sync::atomic::AtomicI32::new(1);
         Ok(AUTO_INCREMENT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
     }
 

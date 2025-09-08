@@ -1,8 +1,8 @@
 use super::logical_plan::{LogicalPlan, LogicalPlanType};
 use super::schema_manager::SchemaManager;
+use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::catalog::Catalog;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -52,9 +52,7 @@ impl LogicalPlanBuilder {
                 _ => return Err("Expected Update statement".to_string()),
             },
             SetExpr::Delete(_) => return Err("DELETE is not supported in this context".to_string()),
-            SetExpr::SetOperation {
-                ..
-            } => {
+            SetExpr::SetOperation { .. } => {
                 return Err(
                     "Set operations (UNION, INTERSECT, etc.) are not yet supported".to_string(),
                 );
@@ -75,30 +73,32 @@ impl LogicalPlanBuilder {
 
         // For non-SELECT queries, handle ORDER BY here if present
         if !matches!(&*query.body, SetExpr::Select(_))
-            && let Some(order_by) = &query.order_by {
-                let Some(schema) = current_plan.get_schema() else {
-                    return Err("Internal error: missing schema while applying ORDER BY".to_string());
-                };
+            && let Some(order_by) = &query.order_by
+        {
+            let Some(schema) = current_plan.get_schema() else {
+                return Err("Internal error: missing schema while applying ORDER BY".to_string());
+            };
 
-                // Build sort specifications with ASC/DESC support
-                let sort_specifications = match &order_by.kind {
-                    OrderByKind::Expressions(order_by_exprs) => {
-                        self.expression_parser
-                            .parse_order_by_specifications(order_by_exprs, &schema)?
-                    }
-                    OrderByKind::All(_) => {
-                        // Handle ALL case if needed
-                        return Err("ORDER BY ALL is not supported yet".to_string());
-                    }
-                };
+            // Build sort specifications with ASC/DESC support
+            let sort_specifications = match &order_by.kind {
+                OrderByKind::Expressions(order_by_exprs) => self
+                    .expression_parser
+                    .parse_order_by_specifications(order_by_exprs, &schema)?,
+                OrderByKind::All(_) => {
+                    // Handle ALL case if needed
+                    return Err("ORDER BY ALL is not supported yet".to_string());
+                }
+            };
 
-                current_plan = LogicalPlan::sort(sort_specifications, schema.clone(), current_plan);
-            }
+            current_plan = LogicalPlan::sort(sort_specifications, schema.clone(), current_plan);
+        }
 
         // Handle LIMIT and OFFSET if present
         if let Some(limit_clause) = &query.limit_clause {
             let Some(schema) = current_plan.get_schema() else {
-                return Err("Internal error: missing schema while applying LIMIT/OFFSET".to_string());
+                return Err(
+                    "Internal error: missing schema while applying LIMIT/OFFSET".to_string()
+                );
             };
 
             // Extract the limit expression based on the LimitClause variant
@@ -300,9 +300,12 @@ impl LogicalPlanBuilder {
                 // Replace aggregate functions in the HAVING expression with column references
                 // to the pre-computed aggregate values from the aggregation output
                 let current_schema = current_plan.get_schema().clone().unwrap();
-                let transformed_having_expr = self
-                    .expression_parser
-                    .replace_aggregates_with_column_refs(&having_expr, &current_schema, &agg_exprs_for_having)?;
+                let transformed_having_expr =
+                    self.expression_parser.replace_aggregates_with_column_refs(
+                        &having_expr,
+                        &current_schema,
+                        &agg_exprs_for_having,
+                    )?;
 
                 current_plan = LogicalPlan::filter(
                     current_schema,
@@ -327,19 +330,21 @@ impl LogicalPlanBuilder {
 
         // Apply HAVING clause if it exists and we don't have aggregates
         // This is a bit unusual but SQL allows it
-        if !has_aggregates && !has_group_by
-            && let Some(having) = &select.having {
-                let having_expr = self
-                    .expression_parser
-                    .parse_expression(having, &original_schema)?;
-                current_plan = LogicalPlan::filter(
-                    current_plan.get_schema().clone().unwrap(),
-                    String::new(), // table_name
-                    0,             // table_oid
-                    Arc::new(having_expr),
-                    current_plan,
-                );
-            }
+        if !has_aggregates
+            && !has_group_by
+            && let Some(having) = &select.having
+        {
+            let having_expr = self
+                .expression_parser
+                .parse_expression(having, &original_schema)?;
+            current_plan = LogicalPlan::filter(
+                current_plan.get_schema().clone().unwrap(),
+                String::new(), // table_name
+                0,             // table_oid
+                Arc::new(having_expr),
+                current_plan,
+            );
+        }
 
         // Apply DISTINCT if requested
         if select.distinct.is_some() {
@@ -359,7 +364,10 @@ impl LogicalPlanBuilder {
             let sort_specifications = match &order_by.kind {
                 OrderByKind::Expressions(order_by_exprs) => {
                     // Try to parse with the projection schema first, then fallback to original schema
-                    match self.expression_parser.parse_order_by_specifications(order_by_exprs, &projection_schema) {
+                    match self
+                        .expression_parser
+                        .parse_order_by_specifications(order_by_exprs, &projection_schema)
+                    {
                         Ok(specs) => specs,
                         Err(_) => {
                             // Fallback: manually parse with fallback logic for each expression
@@ -377,10 +385,12 @@ impl LogicalPlanBuilder {
                                     Some(false) => crate::sql::execution::plans::sort_plan::OrderDirection::Desc,
                                 };
 
-                                specs.push(crate::sql::execution::plans::sort_plan::OrderBySpec::new(
-                                    Arc::new(expr),
-                                    direction,
-                                ));
+                                specs.push(
+                                    crate::sql::execution::plans::sort_plan::OrderBySpec::new(
+                                        Arc::new(expr),
+                                        direction,
+                                    ),
+                                );
                             }
                             specs
                         }
@@ -392,7 +402,8 @@ impl LogicalPlanBuilder {
                 }
             };
 
-            current_plan = LogicalPlan::sort(sort_specifications, projection_schema.clone(), current_plan);
+            current_plan =
+                LogicalPlan::sort(sort_specifications, projection_schema.clone(), current_plan);
         }
 
         // Apply SORT BY if it exists (Hive-specific)
@@ -801,11 +812,15 @@ impl LogicalPlanBuilder {
     ) -> Result<(), String> {
         for constraint in constraints {
             match constraint {
-                TableConstraint::PrimaryKey { columns: pk_columns, .. } => {
+                TableConstraint::PrimaryKey {
+                    columns: pk_columns,
+                    ..
+                } => {
                     // Set primary key flag on the specified columns
                     for pk_col_ident in pk_columns {
                         let pk_col_name = pk_col_ident.to_string();
-                        let column_found = columns.iter_mut().find(|col| col.get_name() == pk_col_name);
+                        let column_found =
+                            columns.iter_mut().find(|col| col.get_name() == pk_col_name);
                         match column_found {
                             Some(column) => {
                                 column.set_primary_key(true);
@@ -820,11 +835,16 @@ impl LogicalPlanBuilder {
                         }
                     }
                 }
-                TableConstraint::Unique { columns: unique_columns, .. } => {
+                TableConstraint::Unique {
+                    columns: unique_columns,
+                    ..
+                } => {
                     // Set unique flag on the specified columns
                     for unique_col_ident in unique_columns {
                         let unique_col_name = unique_col_ident.to_string();
-                        let column_found = columns.iter_mut().find(|col| col.get_name() == unique_col_name);
+                        let column_found = columns
+                            .iter_mut()
+                            .find(|col| col.get_name() == unique_col_name);
                         match column_found {
                             Some(column) => {
                                 column.set_unique(true);
@@ -838,21 +858,28 @@ impl LogicalPlanBuilder {
                         }
                     }
                 }
-                TableConstraint::ForeignKey { columns: fk_columns, foreign_table, referred_columns, .. } => {
+                TableConstraint::ForeignKey {
+                    columns: fk_columns,
+                    foreign_table,
+                    referred_columns,
+                    ..
+                } => {
                     // Process FOREIGN KEY constraint
                     if fk_columns.len() != 1 {
                         log::warn!("Multi-column FOREIGN KEY constraints are not yet supported");
                         continue;
                     }
                     if referred_columns.len() != 1 {
-                        log::warn!("FOREIGN KEY constraints with multiple referred columns are not yet supported");
+                        log::warn!(
+                            "FOREIGN KEY constraints with multiple referred columns are not yet supported"
+                        );
                         continue;
                     }
-                    
+
                     let fk_col_name = fk_columns[0].to_string();
                     let referred_table = foreign_table.to_string();
                     let referred_col_name = referred_columns[0].to_string();
-                    
+
                     let column_found = columns.iter_mut().find(|col| col.get_name() == fk_col_name);
                     match column_found {
                         Some(column) => {
@@ -865,7 +892,10 @@ impl LogicalPlanBuilder {
                                 on_update: None,
                             };
                             column.set_foreign_key(Some(foreign_key_constraint));
-                            debug!("Set FOREIGN KEY constraint on column '{}' referencing '{}({})'", fk_col_name, referred_table, referred_col_name);
+                            debug!(
+                                "Set FOREIGN KEY constraint on column '{}' referencing '{}({})'",
+                                fk_col_name, referred_table, referred_col_name
+                            );
                         }
                         None => {
                             return Err(format!(
@@ -1496,7 +1526,10 @@ impl LogicalPlanBuilder {
                         Some(DropBehavior::Restrict) => " RESTRICT",
                         None => "",
                     };
-                    format!("DROP {}{}{}{}", column_kw, if_exists_kw, cols, behavior_suffix)
+                    format!(
+                        "DROP {}{}{}{}",
+                        column_kw, if_exists_kw, cols, behavior_suffix
+                    )
                 }
                 AlterTableOperation::RenameColumn {
                     old_column_name,
@@ -1676,14 +1709,13 @@ impl LogicalPlanBuilder {
             .ok_or_else(|| "Failed to determine schema for altered view".to_string())?;
 
         // Handle custom column names if provided
-        if !columns.is_empty()
-            && columns.len() != schema.get_column_count() as usize {
-                return Err(format!(
-                    "Number of column names ({}) does not match number of columns in result set ({})",
-                    columns.len(),
-                    schema.get_column_count()
-                ));
-            }
+        if !columns.is_empty() && columns.len() != schema.get_column_count() as usize {
+            return Err(format!(
+                "Number of column names ({}) does not match number of columns in result set ({})",
+                columns.len(),
+                schema.get_column_count()
+            ));
+        }
 
         // Construct the operation string
         let mut operation = "AS ".to_string();
@@ -2069,43 +2101,42 @@ impl LogicalPlanBuilder {
                 };
 
                 // Extract schema name if present
-                let schema_name = match &in_clause.parent_type {
-                    Some(
-                        ShowStatementInParentType::Database | ShowStatementInParentType::Schema,
-                    ) => {
-                        // In this case, the parent_name is the schema and we need to get the table from elsewhere
-                        // This would typically come from the filter_position
-                        if let Some(filter_pos) = &show_options.filter_position {
-                            return match filter_pos {
-                                ShowStatementFilterPosition::Infix(filter)
-                                | ShowStatementFilterPosition::Suffix(filter) => {
-                                    match filter {
-                                        ShowStatementFilter::NoKeyword(table) => {
-                                            // Parent name is the schema, this is the table
-                                            Ok(LogicalPlan::show_columns_with_options(
-                                                table.clone(),
-                                                Some(parent_name),
-                                                *extended,
-                                                *full,
-                                            ))
-                                        }
-                                        _ => {
-                                            Err("Table name is required for SHOW COLUMNS"
-                                                .to_string())
+                let schema_name =
+                    match &in_clause.parent_type {
+                        Some(
+                            ShowStatementInParentType::Database | ShowStatementInParentType::Schema,
+                        ) => {
+                            // In this case, the parent_name is the schema and we need to get the table from elsewhere
+                            // This would typically come from the filter_position
+                            if let Some(filter_pos) = &show_options.filter_position {
+                                return match filter_pos {
+                                    ShowStatementFilterPosition::Infix(filter)
+                                    | ShowStatementFilterPosition::Suffix(filter) => {
+                                        match filter {
+                                            ShowStatementFilter::NoKeyword(table) => {
+                                                // Parent name is the schema, this is the table
+                                                Ok(LogicalPlan::show_columns_with_options(
+                                                    table.clone(),
+                                                    Some(parent_name),
+                                                    *extended,
+                                                    *full,
+                                                ))
+                                            }
+                                            _ => Err("Table name is required for SHOW COLUMNS"
+                                                .to_string()),
                                         }
                                     }
-                                }
+                                };
                             }
+                            // If we don't have a filter with the table name, we can't proceed
+                            return Err("Table name is required for SHOW COLUMNS".to_string());
                         }
-                        // If we don't have a filter with the table name, we can't proceed
-                        return Err("Table name is required for SHOW COLUMNS".to_string());
-                    }
-                    Some(ShowStatementInParentType::Table) => {
-                        // In this case, parent_name is the table and we might have the schema elsewhere
-                        None
-                    }
-                    _ => None,
-                };
+                        Some(ShowStatementInParentType::Table) => {
+                            // In this case, parent_name is the table and we might have the schema elsewhere
+                            None
+                        }
+                        _ => None,
+                    };
 
                 (parent_name, schema_name)
             }
@@ -2126,14 +2157,10 @@ impl LogicalPlanBuilder {
                                         *full,
                                     ))
                                 }
-                                _ => {
-                                    Err(
-                                        "Table name is required for SHOW COLUMNS".to_string()
-                                    )
-                                }
+                                _ => Err("Table name is required for SHOW COLUMNS".to_string()),
                             }
                         }
-                    }
+                    };
                 }
                 return Err("Table name is required for SHOW COLUMNS".to_string());
             }

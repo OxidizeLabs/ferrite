@@ -1,5 +1,5 @@
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::{get_type_size, CmpBool, Type};
+use crate::types_db::types::{CmpBool, Type, get_type_size};
 use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -663,29 +663,32 @@ impl Value {
                 if let Ok(t) = s.parse::<u64>() {
                     return Ok(Value::new_with_type(Val::Timestamp(t), target_type));
                 }
-                
+
                 // Try parsing various timestamp formats
                 use chrono::{DateTime, NaiveDateTime};
-                
+
                 // Try ISO8601/RFC3339 format first
                 if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
                     let timestamp = dt.timestamp() as u64;
                     return Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type));
                 }
-                
+
                 // Try standard format YYYY-MM-DD HH:MM:SS
                 let format = if s.contains('.') {
                     "%Y-%m-%d %H:%M:%S.%f"
                 } else {
                     "%Y-%m-%d %H:%M:%S"
                 };
-                
+
                 match NaiveDateTime::parse_from_str(s, format) {
                     Ok(dt) => {
                         let timestamp = dt.and_utc().timestamp() as u64;
                         Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type))
                     }
-                    Err(_) => Err(format!("Cannot convert string '{}' to Timestamp: invalid format", s))
+                    Err(_) => Err(format!(
+                        "Cannot convert string '{}' to Timestamp: invalid format",
+                        s
+                    )),
                 }
             }
             (Val::VarLen(s), TypeId::Date) => {
@@ -693,17 +696,24 @@ impl Value {
                 if let Ok(d) = s.parse::<i32>() {
                     return Ok(Value::new_with_type(Val::Date(d), target_type));
                 }
-                
+
                 // Try parsing as YYYY-MM-DD format
                 use chrono::NaiveDate;
                 match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
                     Ok(date) => {
                         // Convert to days since Unix epoch (1970-01-01)
                         let unix_epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-                        let days_since_epoch = date.signed_duration_since(unix_epoch).num_days() as i32;
-                        Ok(Value::new_with_type(Val::Date(days_since_epoch), target_type))
+                        let days_since_epoch =
+                            date.signed_duration_since(unix_epoch).num_days() as i32;
+                        Ok(Value::new_with_type(
+                            Val::Date(days_since_epoch),
+                            target_type,
+                        ))
                     }
-                    Err(_) => Err(format!("Cannot convert string '{}' to Date: invalid format", s))
+                    Err(_) => Err(format!(
+                        "Cannot convert string '{}' to Date: invalid format",
+                        s
+                    )),
                 }
             }
             (Val::VarLen(s), TypeId::Time) => {
@@ -711,7 +721,7 @@ impl Value {
                 if let Ok(t) = s.parse::<i32>() {
                     return Ok(Value::new_with_type(Val::Time(t), target_type));
                 }
-                
+
                 // Try parsing as HH:MM:SS format
                 use chrono::{NaiveTime, Timelike};
                 let format = if s.contains('.') {
@@ -719,14 +729,21 @@ impl Value {
                 } else {
                     "%H:%M:%S"
                 };
-                
+
                 match NaiveTime::parse_from_str(s, format) {
                     Ok(time) => {
                         // Convert to seconds since midnight using Timelike trait
-                        let seconds_since_midnight = (time.hour() * 3600 + time.minute() * 60 + time.second()) as i32;
-                        Ok(Value::new_with_type(Val::Time(seconds_since_midnight), target_type))
+                        let seconds_since_midnight =
+                            (time.hour() * 3600 + time.minute() * 60 + time.second()) as i32;
+                        Ok(Value::new_with_type(
+                            Val::Time(seconds_since_midnight),
+                            target_type,
+                        ))
                     }
-                    Err(_) => Err(format!("Cannot convert string '{}' to Time: invalid format", s))
+                    Err(_) => Err(format!(
+                        "Cannot convert string '{}' to Time: invalid format",
+                        s
+                    )),
                 }
             }
             (Val::VarLen(s), TypeId::Interval) => s
@@ -785,29 +802,32 @@ impl Value {
                 if let Ok(t) = s.parse::<u64>() {
                     return Ok(Value::new_with_type(Val::Timestamp(t), target_type));
                 }
-                
+
                 // Try parsing various timestamp formats
                 use chrono::{DateTime, NaiveDateTime};
-                
+
                 // Try ISO8601/RFC3339 format first
                 if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
                     let timestamp = dt.timestamp() as u64;
                     return Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type));
                 }
-                
+
                 // Try standard format YYYY-MM-DD HH:MM:SS
                 let format = if s.contains('.') {
                     "%Y-%m-%d %H:%M:%S.%f"
                 } else {
                     "%Y-%m-%d %H:%M:%S"
                 };
-                
+
                 match NaiveDateTime::parse_from_str(s, format) {
                     Ok(dt) => {
                         let timestamp = dt.and_utc().timestamp() as u64;
                         Ok(Value::new_with_type(Val::Timestamp(timestamp), target_type))
                     }
-                    Err(_) => Err(format!("Cannot convert string '{}' to Timestamp: invalid format", s))
+                    Err(_) => Err(format!(
+                        "Cannot convert string '{}' to Timestamp: invalid format",
+                        s
+                    )),
                 }
             }
             (Val::ConstLen(s), TypeId::Date) => {
@@ -815,17 +835,24 @@ impl Value {
                 if let Ok(d) = s.parse::<i32>() {
                     return Ok(Value::new_with_type(Val::Date(d), target_type));
                 }
-                
+
                 // Try parsing as YYYY-MM-DD format
                 use chrono::NaiveDate;
                 match NaiveDate::parse_from_str(s, "%Y-%m-%d") {
                     Ok(date) => {
                         // Convert to days since Unix epoch (1970-01-01)
                         let unix_epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-                        let days_since_epoch = date.signed_duration_since(unix_epoch).num_days() as i32;
-                        Ok(Value::new_with_type(Val::Date(days_since_epoch), target_type))
+                        let days_since_epoch =
+                            date.signed_duration_since(unix_epoch).num_days() as i32;
+                        Ok(Value::new_with_type(
+                            Val::Date(days_since_epoch),
+                            target_type,
+                        ))
                     }
-                    Err(_) => Err(format!("Cannot convert string '{}' to Date: invalid format", s))
+                    Err(_) => Err(format!(
+                        "Cannot convert string '{}' to Date: invalid format",
+                        s
+                    )),
                 }
             }
             (Val::ConstLen(s), TypeId::Time) => {
@@ -833,7 +860,7 @@ impl Value {
                 if let Ok(t) = s.parse::<i32>() {
                     return Ok(Value::new_with_type(Val::Time(t), target_type));
                 }
-                
+
                 // Try parsing as HH:MM:SS format
                 use chrono::{NaiveTime, Timelike};
                 let format = if s.contains('.') {
@@ -841,14 +868,21 @@ impl Value {
                 } else {
                     "%H:%M:%S"
                 };
-                
+
                 match NaiveTime::parse_from_str(s, format) {
                     Ok(time) => {
                         // Convert to seconds since midnight using Timelike trait
-                        let seconds_since_midnight = (time.hour() * 3600 + time.minute() * 60 + time.second()) as i32;
-                        Ok(Value::new_with_type(Val::Time(seconds_since_midnight), target_type))
+                        let seconds_since_midnight =
+                            (time.hour() * 3600 + time.minute() * 60 + time.second()) as i32;
+                        Ok(Value::new_with_type(
+                            Val::Time(seconds_since_midnight),
+                            target_type,
+                        ))
                     }
-                    Err(_) => Err(format!("Cannot convert string '{}' to Time: invalid format", s))
+                    Err(_) => Err(format!(
+                        "Cannot convert string '{}' to Time: invalid format",
+                        s
+                    )),
                 }
             }
             (Val::ConstLen(s), TypeId::Interval) => s
@@ -1092,10 +1126,11 @@ impl Value {
                 // Find the index of the field name
                 for (i, name_value) in field_names.iter().enumerate() {
                     if let Val::VarLen(name) | Val::ConstLen(name) = &name_value.value_
-                        && name == field_name {
-                            // Return the value at the corresponding index (offset by 1)
-                            return struct_data.get(i + 1);
-                        }
+                        && name == field_name
+                    {
+                        // Return the value at the corresponding index (offset by 1)
+                        return struct_data.get(i + 1);
+                    }
                 }
             }
         }
@@ -1111,18 +1146,19 @@ impl Value {
     pub fn get_struct_field_names(&self) -> Vec<String> {
         if let Some(struct_data) = &self.struct_data
             && let Some(first) = struct_data.first()
-                && let Val::Vector(field_names) = &first.value_ {
-                    return field_names
-                        .iter()
-                        .filter_map(|v| {
-                            if let Val::VarLen(name) | Val::ConstLen(name) = &v.value_ {
-                                Some(name.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                }
+            && let Val::Vector(field_names) = &first.value_
+        {
+            return field_names
+                .iter()
+                .filter_map(|v| {
+                    if let Val::VarLen(name) | Val::ConstLen(name) = &v.value_ {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+        }
         Vec::new()
     }
 
@@ -1206,9 +1242,9 @@ impl Value {
             TypeId::Decimal => {
                 if let Some(col) = column
                     && let (Some(_precision), Some(scale)) = (col.get_precision(), col.get_scale())
-                    {
-                        return self.format_decimal_with_scale(scale);
-                    }
+                {
+                    return self.format_decimal_with_scale(scale);
+                }
                 // Fall back to default formatting
                 ToString::to_string(self)
             }
@@ -1340,7 +1376,7 @@ impl Type for Value {
             (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as f64)),
-            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a <( *b as f64)),
+            (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as f64)),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a < (*b as f64)),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a < (*b as f64)),
             _ => {
@@ -1387,7 +1423,7 @@ impl Type for Value {
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as f64),
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as f64),
-            
+
             (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a <= *b as f32),
             (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a <= *b as f32),
             (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a <= *b as f32),
@@ -1396,7 +1432,7 @@ impl Type for Value {
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a <= *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a <= *b as f64),
             (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a <= *b as f64),
-            
+
             (Val::Float(a), Val::Float(b)) => CmpBool::from(*a <= *b),
             _ => {
                 // Check if types match before comparing values
@@ -1440,7 +1476,7 @@ impl Type for Value {
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as f64),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a > *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a > *b as f64),
-            
+
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1485,7 +1521,7 @@ impl Type for Value {
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a >= *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a >= *b as f64),
             (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a >= *b as f64),
-            
+
             (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as f32),
             (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as f32),
             (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a >= *b as f32),
@@ -2280,21 +2316,25 @@ mod unit_tests {
         // Test serialization of different Val variants
         let val_boolean = Val::Boolean(true);
         let config = bincode::config::standard();
-        let serialized_boolean = bincode::encode_to_vec(&val_boolean, config).expect("Serialization failed");
+        let serialized_boolean =
+            bincode::encode_to_vec(&val_boolean, config).expect("Serialization failed");
         // We won't check exact binary representation as it may differ between bincode versions
-        
+
         let val_integer = Val::Integer(42);
-        let serialized_integer = bincode::encode_to_vec(&val_integer, config).expect("Serialization failed");
-        
+        let serialized_integer =
+            bincode::encode_to_vec(&val_integer, config).expect("Serialization failed");
+
         let val_string = Val::VarLen("Hello".to_string());
-        let serialized_string = bincode::encode_to_vec(&val_string, config).expect("Serialization failed");
-        
+        let serialized_string =
+            bincode::encode_to_vec(&val_string, config).expect("Serialization failed");
+
         let val_vector = Val::Vector(vec![
             Value::from(Val::Integer(1)),
             Value::from(Val::Integer(2)),
         ]);
-        let serialized_vector = bincode::encode_to_vec(&val_vector, config).expect("Serialization failed");
-        
+        let serialized_vector =
+            bincode::encode_to_vec(&val_vector, config).expect("Serialization failed");
+
         // Instead of checking exact binary representation which depends on bincode version,
         // just verify data was serialized successfully
         assert!(!serialized_boolean.is_empty());
@@ -2306,33 +2346,37 @@ mod unit_tests {
     #[test]
     fn test_deserialize_val() {
         let config = bincode::config::standard();
-        
+
         // Create test data with encode_to_vec and then decode it
         let val_boolean_original = Val::Boolean(true);
-        let binary_boolean = bincode::encode_to_vec(&val_boolean_original, config).expect("Encoding failed");
-        let (deserialized_boolean, _): (Val, usize) = bincode::decode_from_slice(&binary_boolean, config)
-            .expect("Deserialization failed");
+        let binary_boolean =
+            bincode::encode_to_vec(&val_boolean_original, config).expect("Encoding failed");
+        let (deserialized_boolean, _): (Val, usize) =
+            bincode::decode_from_slice(&binary_boolean, config).expect("Deserialization failed");
         assert_eq!(deserialized_boolean, Val::Boolean(true));
 
         let val_integer_original = Val::Integer(42);
-        let binary_integer = bincode::encode_to_vec(&val_integer_original, config).expect("Encoding failed");
-        let (deserialized_integer, _): (Val, usize) = bincode::decode_from_slice(&binary_integer, config)
-            .expect("Deserialization failed");
+        let binary_integer =
+            bincode::encode_to_vec(&val_integer_original, config).expect("Encoding failed");
+        let (deserialized_integer, _): (Val, usize) =
+            bincode::decode_from_slice(&binary_integer, config).expect("Deserialization failed");
         assert_eq!(deserialized_integer, Val::Integer(42));
 
         let val_string_original = Val::VarLen("Hello".to_string());
-        let binary_string = bincode::encode_to_vec(&val_string_original, config).expect("Encoding failed");
-        let (deserialized_string, _): (Val, usize) = bincode::decode_from_slice(&binary_string, config)
-            .expect("Deserialization failed");
+        let binary_string =
+            bincode::encode_to_vec(&val_string_original, config).expect("Encoding failed");
+        let (deserialized_string, _): (Val, usize) =
+            bincode::decode_from_slice(&binary_string, config).expect("Deserialization failed");
         assert_eq!(deserialized_string, Val::VarLen("Hello".to_string()));
 
         let val_vector_original = Val::Vector(vec![
             Value::from(Val::Integer(1)),
             Value::from(Val::Integer(2)),
         ]);
-        let binary_vector = bincode::encode_to_vec(&val_vector_original, config).expect("Encoding failed");
-        let (deserialized_vector, _): (Val, usize) = bincode::decode_from_slice(&binary_vector, config)
-            .expect("Deserialization failed");
+        let binary_vector =
+            bincode::encode_to_vec(&val_vector_original, config).expect("Encoding failed");
+        let (deserialized_vector, _): (Val, usize) =
+            bincode::decode_from_slice(&binary_vector, config).expect("Deserialization failed");
         assert_eq!(
             deserialized_vector,
             Val::Vector(vec![
@@ -2352,10 +2396,10 @@ mod unit_tests {
             type_id_: TypeId::Integer,
             struct_data: None,
         };
-        
+
         let config = bincode::config::standard();
         let serialized = bincode::encode_to_vec(&value, config).expect("Serialization failed");
-        
+
         // Simply verify the serialization produced non-empty data
         assert!(!serialized.is_empty());
     }
@@ -2370,11 +2414,11 @@ mod unit_tests {
             type_id_: TypeId::Integer,
             struct_data: None,
         };
-        
+
         let config = bincode::config::standard();
         let serialized = bincode::encode_to_vec(&value, config).expect("Serialization failed");
-        let (deserialized_value, _): (Value, usize) = bincode::decode_from_slice(&serialized, config)
-            .expect("Deserialization failed");
+        let (deserialized_value, _): (Value, usize) =
+            bincode::decode_from_slice(&serialized, config).expect("Deserialization failed");
         assert_eq!(deserialized_value, value);
     }
 
@@ -2388,11 +2432,12 @@ mod unit_tests {
             type_id_: TypeId::Decimal,
             struct_data: None,
         };
-        
+
         let config = bincode::config::standard();
-        let serialized = bincode::encode_to_vec(&original_value, config).expect("Serialization failed");
-        let (deserialized, _): (Value, usize) = bincode::decode_from_slice(&serialized, config)
-            .expect("Deserialization failed");
+        let serialized =
+            bincode::encode_to_vec(&original_value, config).expect("Serialization failed");
+        let (deserialized, _): (Value, usize) =
+            bincode::decode_from_slice(&serialized, config).expect("Deserialization failed");
         assert_eq!(original_value, deserialized);
     }
 
@@ -3443,7 +3488,7 @@ mod string_to_temporal_conversion_tests {
         } else {
             panic!("Expected Date value");
         }
-        
+
         // Test another date
         let date_str2 = Value::new("2000-01-01");
         let result2 = date_str2.cast_to(TypeId::Date).unwrap();
@@ -3564,7 +3609,8 @@ mod string_to_temporal_conversion_tests {
         }
 
         // Test with fractional seconds
-        let time_str_frac = Value::new_with_type(Val::ConstLen("14:22:33.500".to_string()), TypeId::Char);
+        let time_str_frac =
+            Value::new_with_type(Val::ConstLen("14:22:33.500".to_string()), TypeId::Char);
         let result2 = time_str_frac.cast_to(TypeId::Time).unwrap();
         if let Val::Time(seconds) = result2.get_val() {
             // 14:22:33 = 14*3600 + 22*60 + 33 = 51753 seconds
@@ -3577,7 +3623,7 @@ mod string_to_temporal_conversion_tests {
     #[test]
     fn test_varchar_to_timestamp_conversions() {
         // Valid timestamp string formats
-        
+
         // Test Unix timestamp string
         let unix_ts_str = Value::new("1640995200");
         let result = unix_ts_str.cast_to(TypeId::Timestamp).unwrap();
@@ -3637,7 +3683,10 @@ mod string_to_temporal_conversion_tests {
         }
 
         // Test standard datetime format
-        let std_ts_str = Value::new_with_type(Val::ConstLen("2023-06-15 09:45:30".to_string()), TypeId::Char);
+        let std_ts_str = Value::new_with_type(
+            Val::ConstLen("2023-06-15 09:45:30".to_string()),
+            TypeId::Char,
+        );
         let result2 = std_ts_str.cast_to(TypeId::Timestamp).unwrap();
         if let Val::Timestamp(ts) = result2.get_val() {
             assert!(*ts > 0);
@@ -3714,7 +3763,7 @@ mod string_to_temporal_conversion_tests {
     #[test]
     fn test_temporal_roundtrip_consistency() {
         // Test that converting temporal values to strings and back produces consistent results
-        
+
         // Date roundtrip
         let original_date = Value::new_with_type(Val::Date(19358), TypeId::Date);
         let date_as_string = original_date.cast_to(TypeId::VarChar).unwrap();
@@ -3728,7 +3777,8 @@ mod string_to_temporal_conversion_tests {
         assert_eq!(original_time.get_val(), time_back.get_val());
 
         // Timestamp roundtrip
-        let original_timestamp = Value::new_with_type(Val::Timestamp(1640995200), TypeId::Timestamp);
+        let original_timestamp =
+            Value::new_with_type(Val::Timestamp(1640995200), TypeId::Timestamp);
         let ts_as_string = original_timestamp.cast_to(TypeId::VarChar).unwrap();
         let ts_back = ts_as_string.cast_to(TypeId::Timestamp).unwrap();
         assert_eq!(original_timestamp.get_val(), ts_back.get_val());
@@ -3737,7 +3787,7 @@ mod string_to_temporal_conversion_tests {
     #[test]
     fn test_mixed_format_temporal_conversions() {
         // Test that both integer and string formats work for the same values
-        
+
         // Date: integer vs string format
         let date_int = Value::new("19358");
         let date_str = Value::new("2023-01-01");
@@ -3745,7 +3795,7 @@ mod string_to_temporal_conversion_tests {
         let str_result = date_str.cast_to(TypeId::Date).unwrap();
         assert_eq!(int_result.get_val(), str_result.get_val());
 
-        // Time: integer vs string format  
+        // Time: integer vs string format
         let time_int = Value::new("45045");
         let time_str = Value::new("12:30:45");
         let int_result2 = time_int.cast_to(TypeId::Time).unwrap();
@@ -3760,4 +3810,3 @@ mod string_to_temporal_conversion_tests {
         assert_eq!(int_result3.get_val(), str_result3.get_val());
     }
 }
-

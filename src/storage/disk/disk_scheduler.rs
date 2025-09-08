@@ -1,11 +1,11 @@
 use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::FileDiskManager;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use log::{debug, error, info, trace};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
 
 // Define DiskRequest struct
@@ -16,7 +16,6 @@ pub struct DiskRequest {
     page_id: PageId,
     sender: mpsc::Sender<()>,
 }
-
 
 // Define DiskScheduler struct
 #[derive(Debug)]
@@ -164,10 +163,11 @@ impl DiskScheduler {
 
         // Wait for the worker thread to finish
         if let Some(handle) = self.worker_thread.take()
-            && let Err(e) = handle.join() {
-                // Handle potential panics from the worker thread
-                error!("Worker thread panicked during shutdown: {:?}", e);
-            }
+            && let Err(e) = handle.join()
+        {
+            // Handle potential panics from the worker thread
+            error!("Worker thread panicked during shutdown: {:?}", e);
+        }
     }
 
     pub fn get_request_queue_length(&self) -> usize {
@@ -217,7 +217,12 @@ mod tests {
             };
 
             // Create disk manager with mock disk IO
-            let disk_manager = Arc::new(FileDiskManager::new(db_path, log_path, 64 * 1024, buffered_config));
+            let disk_manager = Arc::new(FileDiskManager::new(
+                db_path,
+                log_path,
+                64 * 1024,
+                buffered_config,
+            ));
             let disk_scheduler =
                 Arc::new(RwLock::new(DiskScheduler::new(Arc::clone(&disk_manager))));
             Self {

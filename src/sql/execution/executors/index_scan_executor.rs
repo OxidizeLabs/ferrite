@@ -8,8 +8,8 @@ use crate::sql::execution::expressions::comparison_expression::ComparisonType;
 use crate::sql::execution::expressions::logic_expression::LogicType;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
-use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::index::IndexInfo;
+use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Val, Value};
@@ -26,10 +26,7 @@ pub struct IndexScanExecutor {
 }
 
 impl IndexScanExecutor {
-    pub fn new(
-        context: Arc<RwLock<ExecutionContext>>,
-        plan: Arc<IndexScanNode>,
-    ) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<IndexScanNode>) -> Self {
         let table_name = plan.get_table_name();
         debug!(
             "Creating IndexScanExecutor for table '{}' using index '{}'",
@@ -422,8 +419,8 @@ mod index_scan_executor_tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::column::Column;
     use crate::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::config::{IndexOidT, TableOidT};
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
@@ -468,14 +465,22 @@ mod index_scan_executor_tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -634,8 +639,6 @@ mod index_scan_executor_tests {
         values
     }
 
-
-
     #[tokio::test]
     async fn test_index_scan_full() {
         let schema = create_test_schema();
@@ -763,10 +766,12 @@ mod index_scan_executor_tests {
 
         // Commit the transaction that performed the deletes
         let txn_manager = txn_ctx.get_transaction_manager();
-        txn_manager.commit(
-            txn_ctx.get_transaction(),
-            context.read().get_buffer_pool_manager(),
-        ).await;
+        txn_manager
+            .commit(
+                txn_ctx.get_transaction(),
+                context.read().get_buffer_pool_manager(),
+            )
+            .await;
 
         // Create new transaction for scanning with new execution context
         let scan_txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));

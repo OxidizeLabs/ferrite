@@ -1,14 +1,14 @@
 use criterion::{
-    criterion_group, criterion_main, AxisScale, BatchSize, BenchmarkId, Criterion,
-    PlotConfiguration, SamplingMode, Throughput,
+    AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, SamplingMode, Throughput,
+    criterion_group, criterion_main,
 };
-use std::fs::{create_dir_all, OpenOptions};
+use std::fs::{OpenOptions, create_dir_all};
+use std::hash::Hash;
+use std::hint::black_box;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::hash::Hash;
-use std::hint::black_box;
 use tkdb::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 use tkdb::storage::disk::async_disk::cache::fifo::FIFOCache;
 
@@ -119,7 +119,12 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             // Calibrate repeat count using a temporary cache so each measured sample aggregates
             // enough work to reach ~target_sample duration.
             let mut tmp_cache = FIFOCache::new(cache_size);
-            prefill_cache(&mut tmp_cache, &keys, &values, (cache_size as f64 * 0.8) as usize);
+            prefill_cache(
+                &mut tmp_cache,
+                &keys,
+                &values,
+                (cache_size as f64 * 0.8) as usize,
+            );
             let mut one_pass_tmp = || {
                 run_ops_once(&mut tmp_cache, &keys, &ops, &values);
             };
@@ -129,32 +134,36 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             // Report per-element throughput: ops per iteration = total_ops * repeat
             group.throughput(Throughput::Elements((total_ops as u64) * repeat));
 
-            group.bench_with_input(bench_id, &(cache_size, working_set), |b, &(cache_size, _)| {
-                b.iter_batched(
-                    || {
-                        // Fresh cache per sample, setup not timed
-                        let mut cache = FIFOCache::new(cache_size);
-                        prefill_cache(
-                            &mut cache,
-                            &keys,
-                            &values,
-                            (cache_size as f64 * 0.8) as usize,
-                        );
-                        cache
-                    },
-                    |mut cache| {
-                        // Jitter repeat slightly to avoid coherent sampling against periodic noise
-                        let mut hits_total = 0usize;
-                        for _k in 0..repeat_jitter_count(repeat, 5) {
-                            hits_total += run_ops_once(&mut cache, &keys, &ops, &values);
-                            // Optional: if state drift is a concern, you can occasionally refresh
-                            // a small portion of the cache here, but this keeps it simple.
-                        }
-                        black_box((hits_total, cache));
-                    },
-                    BatchSize::SmallInput,
-                );
-            });
+            group.bench_with_input(
+                bench_id,
+                &(cache_size, working_set),
+                |b, &(cache_size, _)| {
+                    b.iter_batched(
+                        || {
+                            // Fresh cache per sample, setup not timed
+                            let mut cache = FIFOCache::new(cache_size);
+                            prefill_cache(
+                                &mut cache,
+                                &keys,
+                                &values,
+                                (cache_size as f64 * 0.8) as usize,
+                            );
+                            cache
+                        },
+                        |mut cache| {
+                            // Jitter repeat slightly to avoid coherent sampling against periodic noise
+                            let mut hits_total = 0usize;
+                            for _k in 0..repeat_jitter_count(repeat, 5) {
+                                hits_total += run_ops_once(&mut cache, &keys, &ops, &values);
+                                // Optional: if state drift is a concern, you can occasionally refresh
+                                // a small portion of the cache here, but this keeps it simple.
+                            }
+                            black_box((hits_total, cache));
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
         }
     }
 
@@ -163,7 +172,10 @@ fn benchmark_access_patterns(c: &mut Criterion) {
         for &working_set in &working_sets {
             let bench_id = BenchmarkId::new(
                 "random",
-                format!("c{}_ws{}_ins1/{}", cache_size, working_set, rnd_insert_every),
+                format!(
+                    "c{}_ws{}_ins1/{}",
+                    cache_size, working_set, rnd_insert_every
+                ),
             );
 
             let keys = pregen_keys("rnd_", working_set);
@@ -171,7 +183,12 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             let ops = build_random_ops(total_ops, working_set, rnd_insert_every);
 
             let mut tmp_cache = FIFOCache::new(cache_size);
-            prefill_cache(&mut tmp_cache, &keys, &values, (cache_size as f64 * 0.6) as usize);
+            prefill_cache(
+                &mut tmp_cache,
+                &keys,
+                &values,
+                (cache_size as f64 * 0.6) as usize,
+            );
             let mut one_pass_tmp = || {
                 run_ops_once(&mut tmp_cache, &keys, &ops, &values);
             };
@@ -180,28 +197,32 @@ fn benchmark_access_patterns(c: &mut Criterion) {
 
             group.throughput(Throughput::Elements((total_ops as u64) * repeat));
 
-            group.bench_with_input(bench_id, &(cache_size, working_set), |b, &(cache_size, _)| {
-                b.iter_batched(
-                    || {
-                        let mut cache = FIFOCache::new(cache_size);
-                        prefill_cache(
-                            &mut cache,
-                            &keys,
-                            &values,
-                            (cache_size as f64 * 0.6) as usize,
-                        );
-                        cache
-                    },
-                    |mut cache| {
-                        let mut hits_total = 0usize;
-                        for _ in 0..repeat_jitter_count(repeat, 5) {
-                            hits_total += run_ops_once(&mut cache, &keys, &ops, &values);
-                        }
-                        black_box((hits_total, cache));
-                    },
-                    BatchSize::SmallInput,
-                );
-            });
+            group.bench_with_input(
+                bench_id,
+                &(cache_size, working_set),
+                |b, &(cache_size, _)| {
+                    b.iter_batched(
+                        || {
+                            let mut cache = FIFOCache::new(cache_size);
+                            prefill_cache(
+                                &mut cache,
+                                &keys,
+                                &values,
+                                (cache_size as f64 * 0.6) as usize,
+                            );
+                            cache
+                        },
+                        |mut cache| {
+                            let mut hits_total = 0usize;
+                            for _ in 0..repeat_jitter_count(repeat, 5) {
+                                hits_total += run_ops_once(&mut cache, &keys, &ops, &values);
+                            }
+                            black_box((hits_total, cache));
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
         }
     }
 
@@ -688,10 +709,7 @@ fn repeat_jitter_count(base: u64, spread_percent: i64) -> u64 {
 // CRITERION GROUPS
 // =================================================================================
 
-criterion_group!(
-    time_complexity_benches,
-    benchmark_insert_time_complexity
-);
+criterion_group!(time_complexity_benches, benchmark_insert_time_complexity);
 
 criterion_group!(
     performance_benches,

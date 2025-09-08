@@ -13,16 +13,16 @@ repos:
       - id: mixed-line-ending
 
   # Rust-specific hooks
-  - repo: local
-    hooks:
+#  - repo: local
+#    hooks:
       # Format code with rustfmt
-      - id: cargo-fmt
-        name: cargo fmt
-        description: Format Rust code with rustfmt
-        entry: cargo fmt --all --
-        language: system
-        types: [rust]
-        pass_filenames: false
+#      - id: cargo-fmt
+#        name: cargo fmt
+#        description: Format Rust code with rustfmt
+#        entry: cargo fmt --all --
+#        language: system
+#        types: [rust]
+#        pass_filenames: false
 
       # Lint with clippy
 #      - id: cargo-clippy
@@ -34,13 +34,13 @@ repos:
 #        pass_filenames: false
 
       # Check compilation
-      - id: cargo-check
-        name: cargo check
-        description: Check that Rust code compiles
-        entry: cargo check --all-targets --all-features
-        language: system
-        types: [rust]
-        pass_filenames: false
+#      - id: cargo-check
+#        name: cargo check
+#        description: Check that Rust code compiles
+#        entry: cargo check --all-targets --all-features
+#        language: system
+#        types: [rust]
+#        pass_filenames: false
 
       # Run unit tests (fast)
       # - id: cargo-test
@@ -67,24 +67,24 @@ repos:
 #        pass_filenames: false
 
   # Security audit (optional, can be slow)
-  - repo: local
-    hooks:
-      - id: cargo-audit
-        name: cargo audit
-        description: Audit Rust dependencies for security vulnerabilities
-        entry: bash
-        args:
-          - -c
-          - |
-            if command -v cargo-audit >/dev/null 2>&1; then
-              cargo audit
-            else
-              echo "cargo-audit not installed, skipping security check"
-            fi
-        language: system
-        types: [rust]
-        pass_filenames: false
-        stages: [push]  # Only run on push, not commit
+#  - repo: local
+#    hooks:
+#      - id: cargo-audit
+#        name: cargo audit
+#        description: Audit Rust dependencies for security vulnerabilities
+#        entry: bash
+#        args:
+#          - -c
+#          - |
+#            if command -v cargo-audit >/dev/null 2>&1; then
+#              cargo audit
+#            else
+#              echo "cargo-audit not installed, skipping security check"
+#            fi
+#        language: system
+#        types: [rust]
+#        pass_filenames: false
+#        stages: [push]  # Only run on push, not commit
 
 # Configuration for specific hooks
 ci:

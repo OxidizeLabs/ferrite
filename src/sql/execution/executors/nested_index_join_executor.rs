@@ -130,27 +130,28 @@ impl NestedIndexJoinExecutor {
 
         // Now try to get the first result with the newly created executor
         if let Some(executor) = &mut self.current_right_executor
-            && let Ok(Some(tuple_and_rid)) = executor.next() {
-                let right_rid = tuple_and_rid.1;
+            && let Ok(Some(tuple_and_rid)) = executor.next()
+        {
+            let right_rid = tuple_and_rid.1;
 
-                // Check if we've already processed this RID
-                if self.processed_right_rids.contains(&right_rid) {
-                    debug!(
-                        "Skipping already processed RID (first result): {:?}",
-                        right_rid
-                    );
-                    return self.get_next_inner_tuple(); // Recursively try next
-                }
-
-                // Add to processed list
+            // Check if we've already processed this RID
+            if self.processed_right_rids.contains(&right_rid) {
                 debug!(
-                    "Adding RID to processed list (first result): {:?}",
+                    "Skipping already processed RID (first result): {:?}",
                     right_rid
                 );
-                self.processed_right_rids.push(right_rid);
-
-                return Ok(Some(tuple_and_rid));
+                return self.get_next_inner_tuple(); // Recursively try next
             }
+
+            // Add to processed list
+            debug!(
+                "Adding RID to processed list (first result): {:?}",
+                right_rid
+            );
+            self.processed_right_rids.push(right_rid);
+
+            return Ok(Some(tuple_and_rid));
+        }
 
         // No results found
         Ok(None)
@@ -230,8 +231,6 @@ impl NestedIndexJoinExecutor {
             }
         };
 
-
-
         // Create and execute index scan
         let index_scan_plan = Arc::new(IndexScanNode::new(
             right_schema,
@@ -243,8 +242,7 @@ impl NestedIndexJoinExecutor {
         ));
 
         // Create new executor
-        let mut index_scan_executor =
-            IndexScanExecutor::new(self.context.clone(), index_scan_plan);
+        let mut index_scan_executor = IndexScanExecutor::new(self.context.clone(), index_scan_plan);
 
         index_scan_executor.init();
 
@@ -253,8 +251,6 @@ impl NestedIndexJoinExecutor {
         Some(())
     }
 }
-
-
 
 impl AbstractExecutor for NestedIndexJoinExecutor {
     fn init(&mut self) {
@@ -374,8 +370,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::column::Column;
     use crate::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
@@ -427,14 +423,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -666,7 +670,6 @@ mod tests {
             // Manually insert entries into the index using the B+ tree directly
             let index_oid = index_info.get_index_oid();
             if let Some((_, btree)) = catalog.get_index_by_index_oid(index_oid) {
-
                 // Insert each tuple's keys into the index
                 while let Ok(Some((tuple, rid))) = right_executor.next() {
                     // Extract the key value (id) from the tuple
@@ -675,7 +678,7 @@ mod tests {
                     for &col_idx in &key_columns {
                         key_values.push(tuple.get_values()[col_idx].clone());
                     }
-                    
+
                     // Extract the key value for the B+ tree
                     let key_value = key_values[0].clone();
 

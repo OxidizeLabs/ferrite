@@ -6,16 +6,16 @@
 use super::operations::{IOOperation, IOOperationType};
 use std::collections::BinaryHeap;
 use std::io::Result as IoResult;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 
 /// Priority queue type for I/O operations
 pub type PriorityQueue<T> = Arc<Mutex<BinaryHeap<T>>>;
 
 /// Queue manager responsible for managing I/O operation queue
-/// 
+///
 /// This component handles all queue-related operations including:
 /// - Enqueueing operations with priority
 /// - Dequeuing highest priority operations
@@ -25,7 +25,7 @@ pub type PriorityQueue<T> = Arc<Mutex<BinaryHeap<T>>>;
 pub struct IOQueueManager {
     /// The priority queue holding pending I/O operations
     queue: PriorityQueue<IOOperation>,
-    
+
     /// Atomic counter for generating unique operation IDs
     next_operation_id: AtomicU64,
 }
@@ -40,14 +40,14 @@ impl IOQueueManager {
     }
 
     /// Enqueues an I/O operation with specified priority
-    /// 
+    ///
     /// Returns the operation ID and a receiver channel that will receive
     /// the operation result when it completes.
-    /// 
+    ///
     /// # Arguments
     /// * `operation_type` - The type of I/O operation to perform
     /// * `priority` - Priority level (higher numbers = higher priority)
-    /// 
+    ///
     /// # Returns
     /// A tuple of (operation_id, result_receiver)
     pub async fn enqueue_operation(
@@ -75,7 +75,7 @@ impl IOQueueManager {
     }
 
     /// Dequeues the highest priority operation from the queue
-    /// 
+    ///
     /// Returns `Some(operation)` if an operation is available,
     /// or `None` if the queue is empty.
     pub async fn dequeue_operation(&self) -> Option<IOOperation> {
@@ -90,7 +90,7 @@ impl IOQueueManager {
     }
 
     /// Clears all pending operations from the queue
-    /// 
+    ///
     /// Returns the number of operations that were cleared.
     /// Note: This will cause all pending operations to fail
     /// when their completion channels are dropped.
@@ -138,20 +138,26 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         // Enqueue operations with different priorities
-        let (_id1, _receiver1) = queue_manager.enqueue_operation(
-            IOOperationType::ReadPage { page_id: 1 },
-            5,
-        ).await;
+        let (_id1, _receiver1) = queue_manager
+            .enqueue_operation(IOOperationType::ReadPage { page_id: 1 }, 5)
+            .await;
 
-        let (_id2, _receiver2) = queue_manager.enqueue_operation(
-            IOOperationType::WritePage { page_id: 2, data: vec![1u8; 4096] },
-            10, // Higher priority
-        ).await;
+        let (_id2, _receiver2) = queue_manager
+            .enqueue_operation(
+                IOOperationType::WritePage {
+                    page_id: 2,
+                    data: vec![1u8; 4096],
+                },
+                10, // Higher priority
+            )
+            .await;
 
-        let (_id3, _receiver3) = queue_manager.enqueue_operation(
-            IOOperationType::ReadPage { page_id: 3 },
-            3, // Lower priority
-        ).await;
+        let (_id3, _receiver3) = queue_manager
+            .enqueue_operation(
+                IOOperationType::ReadPage { page_id: 3 },
+                3, // Lower priority
+            )
+            .await;
 
         // Queue should have 3 operations
         assert_eq!(queue_manager.queue_size().await, 3);
@@ -183,10 +189,9 @@ mod tests {
 
         // Add some operations
         for i in 0..5 {
-            let (_id, _receiver) = queue_manager.enqueue_operation(
-                IOOperationType::ReadPage { page_id: i },
-                5,
-            ).await;
+            let (_id, _receiver) = queue_manager
+                .enqueue_operation(IOOperationType::ReadPage { page_id: i }, 5)
+                .await;
         }
 
         assert_eq!(queue_manager.queue_size().await, 5);
@@ -202,19 +207,17 @@ mod tests {
     async fn test_operation_id_generation() {
         let queue_manager = IOQueueManager::new();
 
-        let (id1, _receiver1) = queue_manager.enqueue_operation(
-            IOOperationType::Sync,
-            10,
-        ).await;
+        let (id1, _receiver1) = queue_manager
+            .enqueue_operation(IOOperationType::Sync, 10)
+            .await;
 
-        let (id2, _receiver2) = queue_manager.enqueue_operation(
-            IOOperationType::SyncLog,
-            10,
-        ).await;
+        let (id2, _receiver2) = queue_manager
+            .enqueue_operation(IOOperationType::SyncLog, 10)
+            .await;
 
         // IDs should be sequential
         assert_eq!(id2, id1 + 1);
-        
+
         // Next ID should be greater
         assert!(queue_manager.next_operation_id() > id2);
     }
@@ -227,14 +230,19 @@ mod tests {
         // Test all operation types can be enqueued
         let operations = vec![
             IOOperationType::ReadPage { page_id: 1 },
-            IOOperationType::WritePage { page_id: 2, data: test_data.clone() },
+            IOOperationType::WritePage {
+                page_id: 2,
+                data: test_data.clone(),
+            },
             IOOperationType::Sync,
             IOOperationType::SyncLog,
         ];
 
         let mut receivers = Vec::new();
         for (i, op_type) in operations.into_iter().enumerate() {
-            let (id, receiver) = queue_manager.enqueue_operation(op_type, (i + 1) as u8).await;
+            let (id, receiver) = queue_manager
+                .enqueue_operation(op_type, (i + 1) as u8)
+                .await;
             assert_eq!(id, i as u64);
             receivers.push(receiver);
         }
@@ -257,10 +265,12 @@ mod tests {
         // Enqueue multiple operations with same priority
         let mut operation_ids = Vec::new();
         for i in 0..5 {
-            let (id, _receiver) = queue_manager.enqueue_operation(
-                IOOperationType::ReadPage { page_id: i },
-                5, // Same priority
-            ).await;
+            let (id, _receiver) = queue_manager
+                .enqueue_operation(
+                    IOOperationType::ReadPage { page_id: i },
+                    5, // Same priority
+                )
+                .await;
             operation_ids.push(id);
         }
 
@@ -294,10 +304,14 @@ mod tests {
                 tokio::spawn(async move {
                     let mut receivers = Vec::new();
                     for op_id in 0..num_ops_per_task {
-                        let (id, receiver) = qm.enqueue_operation(
-                            IOOperationType::ReadPage { page_id: (task_id * num_ops_per_task + op_id) as u64 },
-                            ((task_id + op_id) % 10) as u8, // Varying priorities
-                        ).await;
+                        let (id, receiver) = qm
+                            .enqueue_operation(
+                                IOOperationType::ReadPage {
+                                    page_id: (task_id * num_ops_per_task + op_id) as u64,
+                                },
+                                ((task_id + op_id) % 10) as u8, // Varying priorities
+                            )
+                            .await;
                         receivers.push((id, receiver));
                     }
                     receivers
@@ -331,10 +345,12 @@ mod tests {
 
         // Enqueue operations first
         for i in 0..num_operations {
-            let (_id, _receiver) = queue_manager.enqueue_operation(
-                IOOperationType::ReadPage { page_id: i as u64 },
-                (i % 10) as u8,
-            ).await;
+            let (_id, _receiver) = queue_manager
+                .enqueue_operation(
+                    IOOperationType::ReadPage { page_id: i as u64 },
+                    (i % 10) as u8,
+                )
+                .await;
         }
 
         assert_eq!(queue_manager.queue_size().await, num_operations);
@@ -381,10 +397,14 @@ mod tests {
         let producer = tokio::spawn(async move {
             let mut count = 0usize;
             while start_time.elapsed() < duration {
-                let (_id, _receiver) = producer_qm.enqueue_operation(
-                    IOOperationType::ReadPage { page_id: count as u64 },
-                    (count % 256) as u8,
-                ).await;
+                let (_id, _receiver) = producer_qm
+                    .enqueue_operation(
+                        IOOperationType::ReadPage {
+                            page_id: count as u64,
+                        },
+                        (count % 256) as u8,
+                    )
+                    .await;
                 count += 1;
                 tokio::task::yield_now().await;
             }
@@ -410,7 +430,7 @@ mod tests {
 
         println!("Produced: {}, Consumed: {}", produced, consumed);
         assert!(produced > 0, "Should have produced some operations");
-        
+
         // Final queue size should be the difference
         let final_size = queue_manager.queue_size().await;
         assert_eq!(final_size, produced - consumed);
@@ -421,10 +441,9 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         // Enqueue an operation and get the receiver
-        let (id, receiver) = queue_manager.enqueue_operation(
-            IOOperationType::ReadPage { page_id: 42 },
-            10,
-        ).await;
+        let (id, receiver) = queue_manager
+            .enqueue_operation(IOOperationType::ReadPage { page_id: 42 }, 10)
+            .await;
 
         // Dequeue the operation
         let operation = queue_manager.dequeue_operation().await.unwrap();
@@ -433,7 +452,10 @@ mod tests {
 
         // Simulate completion by sending result through the channel
         let test_data = vec![1, 2, 3, 4];
-        operation.completion_sender.send(Ok(test_data.clone())).unwrap();
+        operation
+            .completion_sender
+            .send(Ok(test_data.clone()))
+            .unwrap();
 
         // Receiver should get the result
         let received_result = receiver.await.unwrap();
@@ -445,10 +467,9 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         // Enqueue an operation
-        let (_id, receiver) = queue_manager.enqueue_operation(
-            IOOperationType::ReadPage { page_id: 42 },
-            10,
-        ).await;
+        let (_id, receiver) = queue_manager
+            .enqueue_operation(IOOperationType::ReadPage { page_id: 42 }, 10)
+            .await;
 
         // Dequeue and drop the operation (simulating worker crash)
         let operation = queue_manager.dequeue_operation().await.unwrap();
@@ -476,12 +497,11 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         let start_time = Instant::now();
-        
+
         // Enqueue operation
-        let (_id, _receiver) = queue_manager.enqueue_operation(
-            IOOperationType::ReadPage { page_id: 1 },
-            5,
-        ).await;
+        let (_id, _receiver) = queue_manager
+            .enqueue_operation(IOOperationType::ReadPage { page_id: 1 }, 5)
+            .await;
 
         // Small delay
         tokio::time::sleep(Duration::from_millis(1)).await;
@@ -500,10 +520,15 @@ mod tests {
 
         // Test with large data payload
         let large_data = vec![42u8; 1024 * 1024]; // 1MB
-        let (_id, _receiver) = queue_manager.enqueue_operation(
-            IOOperationType::WritePage { page_id: 1, data: large_data.clone() },
-            5,
-        ).await;
+        let (_id, _receiver) = queue_manager
+            .enqueue_operation(
+                IOOperationType::WritePage {
+                    page_id: 1,
+                    data: large_data.clone(),
+                },
+                5,
+            )
+            .await;
 
         let operation = queue_manager.dequeue_operation().await.unwrap();
         match operation.operation_type {
@@ -521,15 +546,19 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         // Test with min and max priority values
-        let (_id1, _receiver1) = queue_manager.enqueue_operation(
-            IOOperationType::ReadPage { page_id: 1 },
-            u8::MIN, // Minimum priority
-        ).await;
+        let (_id1, _receiver1) = queue_manager
+            .enqueue_operation(
+                IOOperationType::ReadPage { page_id: 1 },
+                u8::MIN, // Minimum priority
+            )
+            .await;
 
-        let (_id2, _receiver2) = queue_manager.enqueue_operation(
-            IOOperationType::ReadPage { page_id: 2 },
-            u8::MAX, // Maximum priority
-        ).await;
+        let (_id2, _receiver2) = queue_manager
+            .enqueue_operation(
+                IOOperationType::ReadPage { page_id: 2 },
+                u8::MAX, // Maximum priority
+            )
+            .await;
 
         // Max priority should come first
         let op1 = queue_manager.dequeue_operation().await.unwrap();
@@ -542,16 +571,15 @@ mod tests {
     #[tokio::test]
     async fn test_queue_manager_default() {
         let queue_manager = IOQueueManager::default();
-        
+
         // Should start with empty queue and ID 0
         assert!(queue_manager.is_empty().await);
         assert_eq!(queue_manager.next_operation_id(), 0);
 
         // Should work normally
-        let (id, _receiver) = queue_manager.enqueue_operation(
-            IOOperationType::Sync,
-            5,
-        ).await;
+        let (id, _receiver) = queue_manager
+            .enqueue_operation(IOOperationType::Sync, 5)
+            .await;
         assert_eq!(id, 0);
         assert!(!queue_manager.is_empty().await);
     }
@@ -563,7 +591,13 @@ mod tests {
         // Mix of different operation types with different priorities
         let operations = vec![
             (IOOperationType::ReadPage { page_id: 1 }, 3u8),
-            (IOOperationType::WritePage { page_id: 2, data: vec![1; 100] }, 1u8),
+            (
+                IOOperationType::WritePage {
+                    page_id: 2,
+                    data: vec![1; 100],
+                },
+                1u8,
+            ),
             (IOOperationType::Sync, 5u8),
             (IOOperationType::SyncLog, 2u8),
             (IOOperationType::ReadPage { page_id: 3 }, 4u8),
@@ -594,16 +628,16 @@ mod tests {
             assert!(queue_manager.is_empty().await);
             assert_eq!(queue_manager.queue_size().await, 0);
             assert!(queue_manager.dequeue_operation().await.is_none());
-            
-            let (_id, _receiver) = queue_manager.enqueue_operation(
-                IOOperationType::Sync,
-                5,
-            ).await;
-            
+
+            let (_id, _receiver) = queue_manager
+                .enqueue_operation(IOOperationType::Sync, 5)
+                .await;
+
             assert!(!queue_manager.is_empty().await);
             assert_eq!(queue_manager.queue_size().await, 1);
-        }).await;
+        })
+        .await;
 
         assert!(result.is_ok(), "Queue operations should not timeout");
     }
-} 
+}

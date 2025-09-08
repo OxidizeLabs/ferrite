@@ -55,4 +55,4 @@ CREATE TABLE invalid_nested (
         nested_vector VECTOR(5),
         nested_struct STRUCT
     )
-); 
+);

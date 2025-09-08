@@ -160,11 +160,7 @@ pub trait Index: Send + Sync {
 
     /// Returns a string representation for debugging.
     fn to_string(&self) -> String {
-        format!(
-            "INDEX: ({}){}",
-            self.get_index_name(),
-            self.get_metadata()
-        )
+        format!("INDEX: ({}){}", self.get_index_name(), self.get_metadata())
     }
 
     /// Inserts an entry into the index.
@@ -192,11 +188,8 @@ pub trait Index: Send + Sync {
     /// - `key`: The index key.
     /// - `result`: The collection of RIDs that is populated with results of the search.
     /// - `transaction`: The transaction context.
-    fn scan_key(
-        &self,
-        key: &Tuple,
-        transaction: &Transaction,
-    ) -> Result<Vec<(Value, RID)>, String>;
+    fn scan_key(&self, key: &Tuple, transaction: &Transaction)
+    -> Result<Vec<(Value, RID)>, String>;
 
     /// Creates an iterator for scanning the index
     fn create_iterator(&self, start_key: Option<Tuple>, end_key: Option<Tuple>) -> IndexIterator;

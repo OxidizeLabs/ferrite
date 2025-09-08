@@ -258,7 +258,7 @@ mod tests {
         )));
 
         let assignment = AssignmentExpression::new(2, target_column.clone(), value_expr.clone());
-        
+
         assert_eq!(assignment.get_children().len(), 1);
     }
 

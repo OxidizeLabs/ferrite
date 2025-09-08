@@ -1,8 +1,8 @@
 use crate::storage::page::page_types::hash_table_page_defs::bucket_array_size;
 use log::info;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 
@@ -27,7 +27,8 @@ pub struct HashTableBucketPage<KeyType, ValueType, KeyComparator> {
     _marker: PhantomData<KeyComparator>,
 }
 
-impl<KeyType, ValueType, KeyComparator> Default for HashTableBucketPage<KeyType, ValueType, KeyComparator>
+impl<KeyType, ValueType, KeyComparator> Default
+    for HashTableBucketPage<KeyType, ValueType, KeyComparator>
 where
     KeyComparator: Fn(&KeyType, &KeyType) -> bool,
     KeyType: Clone + Default,

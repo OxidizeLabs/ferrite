@@ -1,4 +1,4 @@
-use crate::common::config::{PageId, INVALID_PAGE_ID};
+use crate::common::config::{INVALID_PAGE_ID, PageId};
 use bincode::{Decode, Encode};
 use std::fmt;
 use std::hash::Hash;

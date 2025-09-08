@@ -206,8 +206,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::column::Column;
     use crate::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
@@ -251,14 +251,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -363,7 +371,7 @@ mod tests {
 
         for (id, value) in test_data {
             let values = vec![Value::new(id), Value::new(value)];
-            
+
             txn_table_heap
                 .insert_tuple_from_values(values, &schema, ctx.transaction_context.clone())
                 .expect("Failed to insert tuple");
@@ -409,7 +417,8 @@ mod tests {
         // Commit the transaction after deletes
         let txn_ctx = execution_context.read().get_transaction_context();
         ctx.transaction_manager
-            .commit(txn_ctx.get_transaction(), ctx.bpm.clone()).await;
+            .commit(txn_ctx.get_transaction(), ctx.bpm.clone())
+            .await;
 
         // Create new transaction for verification
         let verify_txn_ctx = ctx.create_transaction(IsolationLevel::ReadCommitted);
@@ -435,6 +444,7 @@ mod tests {
 
         // Clean up - commit verification transaction
         ctx.transaction_manager
-            .commit(verify_txn_ctx.get_transaction(), ctx.bpm.clone()).await;
+            .commit(verify_txn_ctx.get_transaction(), ctx.bpm.clone())
+            .await;
     }
 }

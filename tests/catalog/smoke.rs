@@ -8,5 +8,3 @@ async fn catalog_smoke_list_tables_empty() {
     let (has_recovery, _) = db.files_exist();
     assert!(has_recovery || !has_recovery); // trivial sanity to use API
 }
-
-

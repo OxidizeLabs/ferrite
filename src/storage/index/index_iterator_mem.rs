@@ -200,12 +200,8 @@ impl IndexIterator {
         {
             let tree_guard = self.tree.read();
             if let Some(end) = &self.end_key {
-                self.current_batch.append(
-                    tree_guard
-                        .scan_range(seek_key, end, true)
-                        .unwrap()
-                        .as_mut(),
-                );
+                self.current_batch
+                    .append(tree_guard.scan_range(seek_key, end, true).unwrap().as_mut());
             }
         } // tree_guard is dropped here
 

@@ -1,10 +1,13 @@
-use tkdb::common::db_instance::{DBConfig, DBInstance};
+use std::error::Error;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::error::Error;
+use tkdb::common::db_instance::{DBConfig, DBInstance};
 
 fn unique_suffix() -> String {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     format!("{}", nanos)
 }
 
@@ -41,5 +44,3 @@ pub fn cleanup_temp_artifacts() {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-
-

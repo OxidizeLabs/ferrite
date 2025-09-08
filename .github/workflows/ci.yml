@@ -9,12 +9,12 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      
+
       # Always run tests
       - name: Run tests
         run: cargo test --verbose
-        
+
       # Only run benchmarks on main branch (slower)
-      - name: Run benchmarks  
+      - name: Run benchmarks
         if: github.ref == 'refs/heads/main'
         run: cargo bench

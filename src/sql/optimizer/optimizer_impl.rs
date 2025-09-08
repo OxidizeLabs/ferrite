@@ -1,5 +1,5 @@
-use crate::catalog::schema::Schema;
 use crate::catalog::Catalog;
+use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
@@ -80,7 +80,7 @@ impl Optimizer {
     }
 
     /// Phase 0: Constraint index creation (PERFORMANCE OPTIMIZATION)
-    /// 
+    ///
     /// Automatically creates indexes for constraint validation to replace O(n) table scans
     /// with O(log n) index lookups. Creates indexes for:
     /// - PRIMARY KEY constraints (composite or single column)
@@ -88,50 +88,53 @@ impl Optimizer {
     /// - FOREIGN KEY constraints (referencing columns)
     fn create_constraint_indexes(&self, plan: &mut Box<LogicalPlan>) -> Result<(), DBError> {
         trace!("Analyzing plan for constraint index creation opportunities");
-        
+
         match &plan.plan_type {
-            LogicalPlanType::CreateTable { 
-                table_name, 
-                schema, 
-                .. 
+            LogicalPlanType::CreateTable {
+                table_name, schema, ..
             } => {
                 info!("Creating constraint indexes for new table '{}'", table_name);
                 self.create_table_constraint_indexes(table_name, schema)?;
             }
-            LogicalPlanType::TableScan { 
-                table_name, 
-                .. 
-            } => {
+            LogicalPlanType::TableScan { table_name, .. } => {
                 // Check if this table needs constraint indexes
                 let catalog = self.catalog.read();
                 if let Some(table_info) = catalog.get_table(table_name) {
                     let schema = table_info.get_table_schema();
-                    
+
                     // Check if constraint indexes are missing
                     if self.needs_constraint_indexes(table_name, &schema) {
                         drop(catalog); // Release read lock
-                        info!("Creating missing constraint indexes for table '{}'", table_name);
+                        info!(
+                            "Creating missing constraint indexes for table '{}'",
+                            table_name
+                        );
                         self.create_table_constraint_indexes(table_name, &schema)?;
                     }
                 }
             }
             _ => {}
         }
-        
+
         // Recursively process children
         for child in &mut plan.children {
             self.create_constraint_indexes(child)?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Creates constraint indexes for a specific table
-    fn create_table_constraint_indexes(&self, table_name: &str, schema: &Schema) -> Result<(), DBError> {
+    fn create_table_constraint_indexes(
+        &self,
+        table_name: &str,
+        schema: &Schema,
+    ) -> Result<(), DBError> {
         let mut catalog = self.catalog.write();
-        
+
         // 1. Create PRIMARY KEY index (composite or single column)
-        let primary_key_columns: Vec<usize> = schema.get_columns()
+        let primary_key_columns: Vec<usize> = schema
+            .get_columns()
             .iter()
             .enumerate()
             .filter(|(_, col)| col.is_primary_key())
@@ -153,10 +156,16 @@ impl Optimizer {
                 IndexType::BPlusTreeIndex,
             ) {
                 Some(_) => {
-                    info!("✓ Created PRIMARY KEY index '{}' for table '{}'", pk_index_name, table_name);
+                    info!(
+                        "✓ Created PRIMARY KEY index '{}' for table '{}'",
+                        pk_index_name, table_name
+                    );
                 }
                 None => {
-                    warn!("✗ Failed to create PRIMARY KEY index for table '{}'", table_name);
+                    warn!(
+                        "✗ Failed to create PRIMARY KEY index for table '{}'",
+                        table_name
+                    );
                 }
             }
         }
@@ -178,12 +187,19 @@ impl Optimizer {
                     IndexType::BPlusTreeIndex,
                 ) {
                     Some(_) => {
-                        info!("✓ Created UNIQUE index '{}' for column '{}' in table '{}'", 
-                              unique_index_name, column.get_name(), table_name);
+                        info!(
+                            "✓ Created UNIQUE index '{}' for column '{}' in table '{}'",
+                            unique_index_name,
+                            column.get_name(),
+                            table_name
+                        );
                     }
                     None => {
-                        warn!("✗ Failed to create UNIQUE index for column '{}' in table '{}'", 
-                              column.get_name(), table_name);
+                        warn!(
+                            "✗ Failed to create UNIQUE index for column '{}' in table '{}'",
+                            column.get_name(),
+                            table_name
+                        );
                     }
                 }
             }
@@ -206,99 +222,115 @@ impl Optimizer {
                     IndexType::BPlusTreeIndex,
                 ) {
                     Some(_) => {
-                        info!("✓ Created FOREIGN KEY index '{}' for column '{}' referencing '{}.{}'", 
-                              fk_index_name, column.get_name(), 
-                              fk_constraint.referenced_table, fk_constraint.referenced_column);
+                        info!(
+                            "✓ Created FOREIGN KEY index '{}' for column '{}' referencing '{}.{}'",
+                            fk_index_name,
+                            column.get_name(),
+                            fk_constraint.referenced_table,
+                            fk_constraint.referenced_column
+                        );
                     }
                     None => {
-                        warn!("✗ Failed to create FOREIGN KEY index for column '{}' in table '{}'", 
-                              column.get_name(), table_name);
+                        warn!(
+                            "✗ Failed to create FOREIGN KEY index for column '{}' in table '{}'",
+                            column.get_name(),
+                            table_name
+                        );
                     }
                 }
 
                 // PERFORMANCE OPTIMIZATION: Also create index on referenced column if it doesn't already exist
                 self.ensure_referenced_column_index(
                     &mut catalog,
-                    &fk_constraint.referenced_table, 
-                    &fk_constraint.referenced_column
-                ).map_err(|e| {
+                    &fk_constraint.referenced_table,
+                    &fk_constraint.referenced_column,
+                )
+                .map_err(|e| {
                     warn!("✗ Failed to create index on referenced column: {}", e);
-                }).ok();
+                })
+                .ok();
             }
         }
 
         Ok(())
     }
-    
+
     /// Checks if a table needs constraint indexes (i.e., they don't already exist)
     fn needs_constraint_indexes(&self, table_name: &str, schema: &Schema) -> bool {
         let catalog = self.catalog.read();
         let existing_indexes = catalog.get_table_indexes(table_name);
-        
+
         // Check if PRIMARY KEY index exists
-        let primary_key_columns: Vec<usize> = schema.get_columns()
+        let primary_key_columns: Vec<usize> = schema
+            .get_columns()
             .iter()
             .enumerate()
             .filter(|(_, col)| col.is_primary_key())
             .map(|(i, _)| i)
             .collect();
-            
+
         if !primary_key_columns.is_empty() {
             let pk_index_name = format!("{}_pk_idx", table_name);
-            let has_pk_index = existing_indexes.iter()
+            let has_pk_index = existing_indexes
+                .iter()
                 .any(|idx| idx.get_index_name() == &pk_index_name);
             if !has_pk_index {
                 return true;
             }
         }
-        
+
         // Check if UNIQUE indexes exist
         for column in schema.get_columns().iter() {
             if column.is_unique() && !column.is_primary_key() {
                 let unique_index_name = format!("{}_{}_unique_idx", table_name, column.get_name());
-                let has_unique_index = existing_indexes.iter()
+                let has_unique_index = existing_indexes
+                    .iter()
                     .any(|idx| idx.get_index_name() == &unique_index_name);
                 if !has_unique_index {
                     return true;
                 }
             }
         }
-        
+
         // Check if FOREIGN KEY indexes exist
         for column in schema.get_columns().iter() {
             if column.get_foreign_key().is_some() {
                 let fk_index_name = format!("{}_{}_fk_idx", table_name, column.get_name());
-                let has_fk_index = existing_indexes.iter()
+                let has_fk_index = existing_indexes
+                    .iter()
                     .any(|idx| idx.get_index_name() == &fk_index_name);
                 if !has_fk_index {
                     return true;
                 }
             }
         }
-        
+
         false
     }
-    
+
     /// Ensures that referenced columns in foreign key relationships have indexes
     fn ensure_referenced_column_index(
         &self,
         catalog: &mut parking_lot::RwLockWriteGuard<Catalog>,
         referenced_table: &str,
-        referenced_column: &str
+        referenced_column: &str,
     ) -> Result<(), String> {
         if let Some(table_info) = catalog.get_table(referenced_table) {
             let referenced_table_schema = table_info.get_table_schema();
-            if let Some(column_index) = referenced_table_schema.get_column_index(referenced_column) {
+            if let Some(column_index) = referenced_table_schema.get_column_index(referenced_column)
+            {
                 let column = referenced_table_schema.get_column(column_index).unwrap();
                 let index_name = format!("{}_{}_ref_idx", referenced_table, column.get_name());
-                
+
                 // Check if index already exists
                 let existing_indexes = catalog.get_table_indexes(referenced_table);
-                let index_exists = existing_indexes.iter()
+                let index_exists = existing_indexes
+                    .iter()
                     .any(|idx| idx.get_index_name() == &index_name);
-                
+
                 if !index_exists {
-                    let index_key_schema = Schema::copy_schema(&referenced_table_schema, &[column_index]);
+                    let index_key_schema =
+                        Schema::copy_schema(&referenced_table_schema, &[column_index]);
                     let index_key_size = column.get_storage_size();
 
                     match catalog.create_index(
@@ -311,20 +343,27 @@ impl Optimizer {
                         IndexType::BPlusTreeIndex,
                     ) {
                         Some(_) => {
-                            info!("✓ Created referenced column index '{}' for '{}.{}'", 
-                                  index_name, referenced_table, referenced_column);
+                            info!(
+                                "✓ Created referenced column index '{}' for '{}.{}'",
+                                index_name, referenced_table, referenced_column
+                            );
                         }
                         None => {
-                            warn!("✗ Failed to create referenced column index for '{}.{}'", 
-                                  referenced_table, referenced_column);
+                            warn!(
+                                "✗ Failed to create referenced column index for '{}.{}'",
+                                referenced_table, referenced_column
+                            );
                         }
                     }
                 }
             }
         } else {
-            return Err(format!("Referenced table '{}' does not exist", referenced_table));
+            return Err(format!(
+                "Referenced table '{}' does not exist",
+                referenced_table
+            ));
         }
-        
+
         Ok(())
     }
 
@@ -364,30 +403,32 @@ impl Optimizer {
                         let key_attrs = index_info.get_key_attrs();
 
                         if !key_attrs.is_empty()
-                            && let Some(table_info) = catalog.get_table(table_name) {
-                                let table_schema = table_info.get_table_schema();
-                                if let Some(col_idx) =
-                                    table_schema.get_column_index(first_col.get_name())
-                                    && key_attrs[0] == col_idx {
-                                        info!(
-                                            "Converting table scan to index scan using index {} on table {}",
-                                            index_info.get_index_name(),
-                                            table_name
-                                        );
+                            && let Some(table_info) = catalog.get_table(table_name)
+                        {
+                            let table_schema = table_info.get_table_schema();
+                            if let Some(col_idx) =
+                                table_schema.get_column_index(first_col.get_name())
+                                && key_attrs[0] == col_idx
+                            {
+                                info!(
+                                    "Converting table scan to index scan using index {} on table {}",
+                                    index_info.get_index_name(),
+                                    table_name
+                                );
 
-                                        return Ok(Box::new(LogicalPlan::new(
-                                            LogicalPlanType::IndexScan {
-                                                table_name: table_name.clone(),
-                                                table_oid: *table_oid,
-                                                index_name: index_info.get_index_name().to_string(),
-                                                index_oid: index_info.get_index_oid(),
-                                                schema: schema.clone(),
-                                                predicate_keys: vec![],
-                                            },
-                                            vec![],
-                                        )));
-                                    }
+                                return Ok(Box::new(LogicalPlan::new(
+                                    LogicalPlanType::IndexScan {
+                                        table_name: table_name.clone(),
+                                        table_oid: *table_oid,
+                                        index_name: index_info.get_index_name().to_string(),
+                                        index_oid: index_info.get_index_oid(),
+                                        schema: schema.clone(),
+                                        predicate_keys: vec![],
+                                    },
+                                    vec![],
+                                )));
                             }
+                        }
                     }
                     debug!("No suitable index found for the first column");
                 }
@@ -437,12 +478,13 @@ impl Optimizer {
                 trace!("Examining filter predicate for simplification");
                 if let Expression::Constant(const_expr) = predicate.as_ref()
                     && let Val::Boolean(b) = const_expr.get_value().value_
-                    && b {
-                        debug!("Removing true filter predicate");
-                        if let Some(child) = plan.children.pop() {
-                            return Ok(child);
-                        }
+                    && b
+                {
+                    debug!("Removing true filter predicate");
+                    if let Some(child) = plan.children.pop() {
+                        return Ok(child);
                     }
+                }
                 self.apply_early_pruning_to_children(plan)
             }
             _ => self.apply_early_pruning_to_children(plan),

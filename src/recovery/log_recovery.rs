@@ -1,4 +1,4 @@
-use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
+use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
@@ -38,10 +38,7 @@ impl LogRecoveryManager {
     ///
     /// # Returns
     /// A new `LogRecoveryManager` instance.
-    pub fn new(
-        disk_manager: Arc<AsyncDiskManager>,
-        log_manager: Arc<RwLock<LogManager>>,
-    ) -> Self {
+    pub fn new(disk_manager: Arc<AsyncDiskManager>, log_manager: Arc<RwLock<LogManager>>) -> Self {
         Self {
             disk_manager,
             log_manager,
@@ -335,13 +332,14 @@ impl LogRecoveryManager {
         match record.get_log_record_type() {
             LogRecordType::Insert | LogRecordType::Update => {
                 // Get RID from record and extract page ID
-                record.get_insert_rid().or(record.get_update_rid()).map(|rid| rid.get_page_id())
+                record
+                    .get_insert_rid()
+                    .or(record.get_update_rid())
+                    .map(|rid| rid.get_page_id())
             }
             LogRecordType::MarkDelete
             | LogRecordType::ApplyDelete
-            | LogRecordType::RollbackDelete => {
-                record.get_delete_rid().map(|rid| rid.get_page_id())
-            }
+            | LogRecordType::RollbackDelete => record.get_delete_rid().map(|rid| rid.get_page_id()),
             LogRecordType::NewPage => {
                 // For new page records, the page ID is directly accessible
                 record.get_page_id().copied()
@@ -412,7 +410,8 @@ impl LogRecoveryManager {
     /// # Parameters
     /// - `record`: The update log record to undo
     fn undo_update(&self, record: &LogRecord) -> Result<(), String> {
-        if let (Some(rid), Some(_old_tuple)) = (record.get_update_rid(), record.get_original_tuple())
+        if let (Some(rid), Some(_old_tuple)) =
+            (record.get_update_rid(), record.get_original_tuple())
         {
             debug!("Undoing UPDATE for RID {:?}", rid);
             // In a real implementation, we would restore the original tuple
@@ -528,14 +527,20 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
 
             let wal_manager = WALManager::new(log_manager.clone());
 
-            let recovery_manager = LogRecoveryManager::new(disk_manager_arc.clone(), log_manager.clone());
+            let recovery_manager =
+                LogRecoveryManager::new(disk_manager_arc.clone(), log_manager.clone());
 
             Self {
                 wal_manager,
@@ -563,7 +568,6 @@ mod tests {
 
         /// Simulate a crash by stopping all active processes and destroying the context
         pub fn simulate_crash(&self) {
-
             // Force a flush of all log records by writing a commit record
             // Commit records in the WAL will trigger a flush
             let flush_txn = self.create_test_transaction(999);

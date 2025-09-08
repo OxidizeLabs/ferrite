@@ -1,5 +1,5 @@
 //! Write coalescing functionality
-//! 
+//!
 //! This module provides write coalescing capabilities to improve I/O efficiency
 //! by combining adjacent writes into larger, more efficient operations.
 

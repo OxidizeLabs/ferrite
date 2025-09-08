@@ -116,7 +116,10 @@ impl ExpressionOps for CaseExpression {
                 // For CASE WHEN ... form, check if when_value is true
                 None => match when_value.get_val() {
                     Val::Boolean(b) => {
-                        debug!("CASE WHEN condition {} evaluated to: {} for tuple {:?}", i, b, tuple_data);
+                        debug!(
+                            "CASE WHEN condition {} evaluated to: {} for tuple {:?}",
+                            i, b, tuple_data
+                        );
                         *b
                     }
                     _ => return Err(ExpressionError::InvalidType("Expected boolean".to_string())),
@@ -130,19 +133,25 @@ impl ExpressionOps for CaseExpression {
                 );
                 // Return a corresponding THEN result
                 let result = self.then_exprs[i].evaluate(tuple, schema)?;
-                debug!("CASE WHEN condition {} THEN result: {} for tuple {:?}", i, result, tuple_data);
+                debug!(
+                    "CASE WHEN condition {} THEN result: {} for tuple {:?}",
+                    i, result, tuple_data
+                );
                 return Ok(result);
             }
         }
 
-        debug!("No CASE WHEN conditions matched, evaluating ELSE expression for tuple {:?}", tuple_data);
+        debug!(
+            "No CASE WHEN conditions matched, evaluating ELSE expression for tuple {:?}",
+            tuple_data
+        );
         // If no conditions matched, return ELSE result or NULL
         match &self.else_expr {
             Some(expr) => {
                 let result = expr.evaluate(tuple, schema)?;
                 debug!("CASE ELSE result: {} for tuple {:?}", result, tuple_data);
                 Ok(result)
-            },
+            }
             None => Ok(Value::new(Val::Null)),
         }
     }

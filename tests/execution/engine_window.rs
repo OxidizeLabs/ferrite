@@ -61,7 +61,8 @@ async fn test_row_number_window_function() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -115,7 +116,8 @@ async fn test_rank_window_functions() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -207,7 +209,8 @@ async fn test_window_functions_with_partition() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -261,7 +264,8 @@ async fn test_lag_lead_window_functions() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -341,7 +345,8 @@ async fn test_first_last_value_window_functions() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -397,7 +402,8 @@ async fn test_aggregation_window_functions() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -451,7 +457,8 @@ async fn test_window_frames() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -508,7 +515,8 @@ async fn test_ntile_window_function() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -561,7 +569,8 @@ async fn test_percent_rank_window_functions() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -661,7 +670,8 @@ async fn test_complex_window_queries() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -701,12 +711,12 @@ async fn test_window_functions_edge_cases() {
         .unwrap();
 
     // Test window functions on empty table
-    let sql =
-        "SELECT id, value, ROW_NUMBER() OVER (ORDER BY id) as row_num FROM edge_cases";
+    let sql = "SELECT id, value, ROW_NUMBER() OVER (ORDER BY id) as row_num FROM edge_cases";
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {
@@ -723,7 +733,8 @@ async fn test_window_functions_edge_cases() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     if success {

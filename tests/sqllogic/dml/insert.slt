@@ -23,7 +23,7 @@ CREATE TABLE products (
 
 # Test basic insert
 statement ok
-INSERT INTO users (id, name, age, email, is_active, created_at) 
+INSERT INTO users (id, name, age, email, is_active, created_at)
 VALUES (1, 'Alice', 25, 'alice@test.com', true, TIMESTAMP 1000);
 
 # Verify insert
@@ -34,7 +34,7 @@ SELECT * FROM users ORDER BY id;
 
 # Test multiple row insert
 statement ok
-INSERT INTO users (id, name, age, email, is_active, created_at) VALUES 
+INSERT INTO users (id, name, age, email, is_active, created_at) VALUES
     (2, 'Bob', 30, 'bob@test.com', true, 2000),
     (3, 'Charlie', 35, 'charlie@test.com', false, 3000);
 
@@ -69,7 +69,7 @@ SELECT * FROM products ORDER BY id;
 
 # Test multiple product inserts
 statement ok
-INSERT INTO products (id, name, price, quantity, weight, category) VALUES 
+INSERT INTO products (id, name, price, quantity, weight, category) VALUES
     (2, 'Product B', 20.50, 50, 2.0, 'Books'),
     (3, 'Product C', 15.75, 75, 0.5, 'Electronics');
 
@@ -85,7 +85,7 @@ SELECT * FROM products ORDER BY id;
 statement ok
 INSERT INTO products (id, name, price, quantity, weight, category)
 SELECT id, name, 10.00, age, 1.00, email
-FROM users 
+FROM users
 WHERE age IS NOT NULL;
 
 # Verify insert from select
@@ -112,4 +112,4 @@ INSERT INTO nonexistent_table (id, name) VALUES (1, 'Test');
 
 # Test inserting with wrong number of columns
 statement error
-INSERT INTO users (id, name, age) VALUES (1, 'Test'); 
+INSERT INTO users (id, name, age) VALUES (1, 'Test');
