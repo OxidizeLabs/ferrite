@@ -1,14 +1,15 @@
-use crate::sql::execution::check_option::CheckOption;
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::recovery::wal_manager::WALManager;
+use crate::sql::execution::check_option::CheckOption;
 use crate::sql::execution::check_option::CheckOptions;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
+use crate::sql::execution::transaction_context::TransactionContext;
 use crate::sql::optimizer::Optimizer;
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
 use crate::sql::planner::query_planner::QueryPlanner;
@@ -19,12 +20,10 @@ use parking_lot::RwLock;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
-use crate::sql::execution::transaction_context::TransactionContext;
 
 pub struct ExecutionEngine {
     planner: QueryPlanner,
     optimizer: Optimizer,
-    catalog: Arc<RwLock<Catalog>>,
     buffer_pool_manager: Arc<BufferPoolManager>,
     transaction_factory: Arc<TransactionManagerFactory>,
     wal_manager: Arc<WALManager>,
@@ -40,7 +39,6 @@ impl ExecutionEngine {
         Self {
             planner: QueryPlanner::new(catalog.clone()),
             optimizer: Optimizer::new(catalog.clone()),
-            catalog,
             buffer_pool_manager,
             transaction_factory,
             wal_manager,
@@ -600,6 +598,7 @@ mod tests {
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::recovery::log_manager::LogManager;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::table_heap::TableInfo;
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::type_id::TypeId;
@@ -607,7 +606,6 @@ mod tests {
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         engine: ExecutionEngine,

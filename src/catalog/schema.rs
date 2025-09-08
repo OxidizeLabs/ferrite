@@ -1,8 +1,8 @@
 use crate::catalog::column::Column;
+use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
-use bincode::{Decode, Encode};
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct Schema {
@@ -274,9 +274,9 @@ impl AsRef<Schema> for Schema {
 
 #[cfg(test)]
 mod unit_tests {
-    use bincode::config;
-use super::*;
+    use super::*;
     use crate::types_db::type_id::TypeId;
+    use bincode::config;
 
     #[test]
     fn schema_serialization() {

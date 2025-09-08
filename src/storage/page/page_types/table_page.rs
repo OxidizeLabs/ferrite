@@ -6,10 +6,10 @@ use crate::storage::page::{
     PageTrait, PageType, PageTypeId, PAGE_ID_OFFSET, PAGE_TYPE_OFFSET,
 };
 use crate::storage::table::tuple::{Tuple, TupleMeta};
+use bincode::{Decode, Encode};
 use log::{debug, error};
 use std::any::Any;
 use std::mem::size_of;
-use bincode::{Decode, Encode};
 
 /// Represents a table page using a slotted page format.
 ///

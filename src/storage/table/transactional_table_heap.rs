@@ -1,5 +1,5 @@
-use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
+use crate::catalog::Catalog;
 use crate::common::config::TableOidT;
 use crate::common::config::Timestamp;
 use crate::common::config::INVALID_PAGE_ID;

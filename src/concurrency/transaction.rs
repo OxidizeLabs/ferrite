@@ -6,13 +6,13 @@ use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 use crate::storage::table::tuple::TupleMeta;
+use bincode::{Decode, Encode};
 use log;
 use log::debug;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
-use bincode::{Encode, Decode};
 
 /// Transaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

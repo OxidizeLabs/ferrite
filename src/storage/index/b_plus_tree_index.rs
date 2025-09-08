@@ -3,9 +3,9 @@ use crate::common::{
     config::{PageId, INVALID_PAGE_ID},
     rid::RID,
 };
-use crate::storage::index::IndexInfo;
 use crate::storage::index::types::comparators::{i32_comparator, I32Comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
+use crate::storage::index::IndexInfo;
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::{
     b_plus_tree_header_page::BPlusTreeHeaderPage, b_plus_tree_internal_page::BPlusTreeInternalPage,
@@ -2764,12 +2764,12 @@ mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::{IndexInfo, IndexType};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

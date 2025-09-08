@@ -2,8 +2,8 @@
 //! 
 //! This module contains memory management utilities, including NUMA-aware allocation.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::alloc::{GlobalAlloc, Layout};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// NUMA-aware memory allocator for high-performance scenarios
 #[derive(Debug)]

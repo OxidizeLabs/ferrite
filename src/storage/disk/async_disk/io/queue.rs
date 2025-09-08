@@ -5,11 +5,11 @@
 
 use super::operations::{IOOperation, IOOperationType};
 use std::collections::BinaryHeap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
-use tokio::sync::{Mutex, oneshot};
 use std::io::Result as IoResult;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::{oneshot, Mutex};
 
 /// Priority queue type for I/O operations
 pub type PriorityQueue<T> = Arc<Mutex<BinaryHeap<T>>>;

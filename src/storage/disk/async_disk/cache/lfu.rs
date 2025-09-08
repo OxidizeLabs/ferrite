@@ -1,3 +1,4 @@
+use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
 /// # LFU (Least Frequently Used) Cache Implementation
 ///
 /// This module provides a production-ready LFU cache implementation designed for TKDB's
@@ -16,7 +17,7 @@
 ///   the value and its access frequency count
 /// - **Frequency Tracking**: Each `get()` operation increments the frequency counter
 /// - **Eviction**: When at capacity, finds the item with minimum frequency and removes it
-/// - **Tie Breaking**: When multiple items have the same minimum frequency, 
+/// - **Tie Breaking**: When multiple items have the same minimum frequency,
 ///   evicts an arbitrary one (implementation-dependent HashMap iteration order)
 ///
 /// ## Performance Characteristics
@@ -180,7 +181,6 @@
 /// - **Memory Efficiency**: Single HashMap reduces allocations vs. separate frequency tracking
 use std::collections::HashMap;
 use std::hash::Hash;
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
 
 /// LFU (Least Frequently Used) Cache implementation.
 ///
@@ -4278,8 +4278,8 @@ mod tests {
         // Complexity Analysis Testing
         mod complexity {
             use super::*;
-            use std::time::{Duration, Instant};
             use std::collections::HashMap;
+            use std::time::{Duration, Instant};
 
             /// Helper function to measure execution time of a closure
             fn measure_time<F, R>(operation: F) -> (R, Duration)
@@ -4966,14 +4966,14 @@ mod tests {
         use super::*;
         use std::sync::{Arc, Mutex};
 
-         // Helper type for thread-safe testing
+        // Helper type for thread-safe testing
         type ThreadSafeLFUCache<K, V> = Arc<Mutex<LFUCache<K, V>>>;
 
         // Thread Safety Tests
         mod thread_safety {
             use super::*;
-            use std::thread;
             use std::sync::atomic::{AtomicUsize, Ordering};
+            use std::thread;
 
             #[test]
             fn test_concurrent_insertions() {
@@ -5617,8 +5617,8 @@ mod tests {
         mod stress_testing {
             use super::*;
             use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-            use std::time::{Duration, Instant};
             use std::thread;
+            use std::time::{Duration, Instant};
 
 
             #[test]

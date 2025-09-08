@@ -4,9 +4,9 @@
 // including operation types, operation metadata, and priority handling.
 
 use crate::common::config::PageId;
+use std::io::Result as IoResult;
 use std::time::Instant;
 use tokio::sync::oneshot;
-use std::io::Result as IoResult;
 
 /// Types of I/O operations supported by the async I/O engine
 #[derive(Debug, Clone)]

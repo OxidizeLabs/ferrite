@@ -1,6 +1,6 @@
-use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
+use crate::catalog::Catalog;
 use crate::common::config::TableOidT;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::{
@@ -63,8 +63,8 @@ use crate::sql::execution::expressions::tuple_expression::TupleExpression;
 use crate::sql::execution::expressions::typed_string_expression::TypedStringExpression;
 use crate::sql::execution::expressions::unary_op_expression::UnaryOpExpression;
 use crate::sql::execution::expressions::wildcard_expression::WildcardExpression;
-use crate::sql::execution::plans::window_plan::WindowFunctionType;
 use crate::sql::execution::plans::sort_plan::{OrderBySpec, OrderDirection};
+use crate::sql::execution::plans::window_plan::WindowFunctionType;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::debug;
@@ -3587,9 +3587,9 @@ mod tests {
     use crate::sql::execution::expressions::arithmetic_expression::ArithmeticOp;
     use crate::sql::execution::expressions::comparison_expression::ComparisonType;
     use crate::sql::execution::expressions::logic_expression::LogicType;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use sqlparser::ast::Ident;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         _temp_dir: TempDir,

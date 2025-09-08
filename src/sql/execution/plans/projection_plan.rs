@@ -94,15 +94,15 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
     use crate::sql::execution::expressions::mock_expression::MockExpression;
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::table_heap::{TableHeap, TableInfo};
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>

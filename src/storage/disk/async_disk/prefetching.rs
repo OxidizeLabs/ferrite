@@ -3,7 +3,7 @@
 //! This module contains the ML-based prefetcher for predicting page access patterns.
 
 use crate::common::config::PageId;
-use std::collections::{VecDeque, HashMap};
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 /// Advanced machine learning-based prefetcher

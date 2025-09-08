@@ -3,10 +3,10 @@
 //! This module provides cross-platform direct I/O functionality to ensure
 //! database operations go directly to disk rather than being buffered by the OS.
 
+use log::{debug, warn};
 use std::fs::{File, OpenOptions};
 use std::io::{Result as IoResult, Write};
 use std::path::Path;
-use log::{debug, warn};
 
 /// Configuration for direct I/O operations
 #[derive(Debug, Clone)]

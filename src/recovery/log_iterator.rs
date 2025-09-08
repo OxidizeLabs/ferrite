@@ -1,7 +1,7 @@
 use crate::recovery::log_record::{LogRecord, LogRecordType};
+use crate::storage::disk::async_disk::AsyncDiskManager;
 use log::{debug, warn};
 use std::sync::Arc;
-use crate::storage::disk::async_disk::AsyncDiskManager;
 use tokio::runtime::Handle;
 
 /// `LogIterator` provides a robust way to iterate through log records in a log file.
@@ -204,13 +204,13 @@ impl LogIterator {
 mod tests {
     use super::*;
     use crate::common::config::{Lsn, TxnId, INVALID_LSN};
+    use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
+    use crate::storage::disk::async_disk::DiskManagerConfig;
     use std::fs;
     use std::path::Path;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::DiskManagerConfig;
 
     struct TestContext {
         log_path: String,

@@ -3,10 +3,10 @@ use std::mem::size_of;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use bincode::{Encode, Decode};
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
+use bincode::{Decode, Encode};
 
 /// The type of the log record.
 #[repr(i32)]

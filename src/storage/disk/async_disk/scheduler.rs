@@ -4,11 +4,11 @@
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::IOPriority;
-use std::sync::Arc;
+use std::io::Result as IoResult;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::oneshot;
-use std::io::Result as IoResult;
 
 /// Advanced work-stealing I/O scheduler
 #[derive(Debug)]
@@ -144,7 +144,7 @@ impl PriorityTaskScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_work_stealing_scheduler() {
         let scheduler = WorkStealingScheduler::new(4);

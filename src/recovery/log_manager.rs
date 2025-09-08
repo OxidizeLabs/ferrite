@@ -14,13 +14,11 @@ use tokio::runtime::Handle;
 
 /// LogManager maintains a separate thread awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
-#[derive(Debug)]
 pub struct LogManager {
     state: Arc<LogManagerState>,
     runtime_handle: Handle,
 }
 
-#[derive(Debug)]
 struct LogManagerState {
     next_lsn: AtomicU64,
     persistent_lsn: AtomicU64,
@@ -29,10 +27,8 @@ struct LogManagerState {
     stop_flag: AtomicBool,
     disk_manager: Arc<AsyncDiskManager>,
     log_queue: (Sender<Arc<LogRecord>>, Receiver<Arc<LogRecord>>),
-    buffered_records: RwLock<Vec<Arc<LogRecord>>>,
 }
 
-#[derive(Debug)]
 struct LogBuffer {
     data: Vec<u8>,
     write_pos: usize,
@@ -90,7 +86,6 @@ impl LogManager {
                 stop_flag: AtomicBool::new(false),
                 disk_manager,
                 log_queue: (sender, receiver),
-                buffered_records: RwLock::new(Vec::new()),
             }),
             runtime_handle,
         }
@@ -363,8 +358,6 @@ mod tests {
 
     struct TestContext {
         log_manager: LogManager,
-        disk_manager: Arc<AsyncDiskManager>,
-        log_path: String,
     }
 
     impl TestContext {
@@ -394,9 +387,7 @@ mod tests {
             let log_manager = LogManager::new(disk_manager_arc.clone());
 
             Self {
-                log_manager,
-                disk_manager: disk_manager_arc,
-                log_path,
+                log_manager
             }
         }
     }

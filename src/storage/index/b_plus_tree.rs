@@ -1,5 +1,6 @@
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
+use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::index::{Index, IndexInfo};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
@@ -9,7 +10,6 @@ use parking_lot::RwLock;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::sync::Arc;
-use crate::storage::index::index_iterator_mem::IndexIterator;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {

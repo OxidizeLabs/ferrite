@@ -1,9 +1,9 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
+use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
-use bincode::{Encode, Decode};
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub struct Column {
