@@ -74,7 +74,7 @@ fn benchmark_constant_time(c: &mut Criterion) {
         let data: Vec<i32> = (0..size).collect();
         let mut map = HashMap::new();
         for i in 0..size {
-            map.insert(i as i32, i as i32);
+            map.insert(i, i);
         }
         
         group.bench_with_input(
@@ -93,7 +93,7 @@ fn benchmark_constant_time(c: &mut Criterion) {
             &size,
             |b, _| {
                 b.iter(|| {
-                    let key = (size / 2) as i32;
+                    let key = (size / 2);
                     black_box(hash_lookup(&map, key))
                 })
             },
@@ -108,7 +108,7 @@ fn benchmark_linear_time(c: &mut Criterion) {
     
     // Test different data sizes - should show linear growth
     for size in [100, 500, 1_000, 5_000, 10_000] {
-        let data: Vec<i32> = (0..size).map(|i| i as i32).collect();
+        let data: Vec<i32> = (0..size).map(|i| i).collect();
         
         group.bench_with_input(
             BenchmarkId::new("linear_search", size),
@@ -116,7 +116,7 @@ fn benchmark_linear_time(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     // Search for element that doesn't exist (worst case)
-                    let target = size as i32 + 1;
+                    let target = size + 1;
                     black_box(linear_search(&data, target))
                 })
             },
@@ -141,7 +141,7 @@ fn benchmark_quadratic_time(c: &mut Criterion) {
     
     // Use smaller sizes for quadratic algorithms
     for size in [50, 100, 200, 400, 800] {
-        let data: Vec<i32> = (0..size).map(|i| i as i32).rev().collect(); // Worst case for bubble sort
+        let data: Vec<i32> = (0..size).map(|i| i).rev().collect(); // Worst case for bubble sort
         
         group.bench_with_input(
             BenchmarkId::new("bubble_sort", size),
@@ -231,7 +231,7 @@ fn benchmark_complexity_comparison(c: &mut Criterion) {
     });
     
     // Use smaller size for quadratic to avoid timeout
-    let small_data: Vec<i32> = (0..100).map(|i| (100 - i) as i32).collect();
+    let small_data: Vec<i32> = (0..100).map(|i| (100 - i)).collect();
     group.bench_function("O(n²)_bubble_sort", |b| {
         b.iter(|| {
             black_box(bubble_sort(small_data.clone()))

@@ -127,7 +127,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             let repeat = repeat.max(1);
 
             // Report per-element throughput: ops per iteration = total_ops * repeat
-            group.throughput(Throughput::Elements((total_ops as u64) * repeat as u64));
+            group.throughput(Throughput::Elements((total_ops as u64) * repeat));
 
             group.bench_with_input(bench_id, &(cache_size, working_set), |b, &(cache_size, _)| {
                 b.iter_batched(
@@ -178,7 +178,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             let repeat = calibrate_repeat(&mut one_pass_tmp, target_sample, 1_000_000);
             let repeat = repeat.max(1);
 
-            group.throughput(Throughput::Elements((total_ops as u64) * repeat as u64));
+            group.throughput(Throughput::Elements((total_ops as u64) * repeat));
 
             group.bench_with_input(bench_id, &(cache_size, working_set), |b, &(cache_size, _)| {
                 b.iter_batched(
