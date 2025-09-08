@@ -1544,7 +1544,16 @@ mod tests {
                 let reader_rids = rids_arc.clone();
                 let reader_barrier = barrier.clone();
 
-                let handle = thread::spawn(async move || {
+                let handle = thread::spawn(move || {
+                    // Create a Tokio runtime for this thread to handle async operations
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            log::error!("Reader {} failed to create runtime: {}", i, e);
+                            return 0;
+                        }
+                    };
+
                     // Wait for all threads to be ready
                     reader_barrier.wait();
 
@@ -1582,8 +1591,8 @@ mod tests {
                         }
                     }
 
-                    // Commit the reader transaction
-                    let _ = reader_txn_manager.commit(txn, reader_buffer_pool).await;
+                    // Commit the reader transaction using the runtime
+                    let _ = rt.block_on(reader_txn_manager.commit(txn, reader_buffer_pool));
 
                     successful_reads
                 });
@@ -1602,7 +1611,16 @@ mod tests {
                 let writer_barrier = barrier.clone();
                 let writer_rid = rids_arc[i];
 
-                let handle = thread::spawn(async move || {
+                let handle = thread::spawn(move || {
+                    // Create a Tokio runtime for this thread to handle async operations
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            log::error!("Writer {} failed to create runtime: {}", i, e);
+                            return 0;
+                        }
+                    };
+
                     // Wait for all threads to be ready
                     writer_barrier.wait();
 
@@ -1645,8 +1663,8 @@ mod tests {
                         return 0;
                     }
 
-                    // Commit the transaction
-                    let _ = writer_txn_manager.commit(txn, writer_buffer_pool).await;
+                    // Commit the transaction using the runtime
+                    let _ = rt.block_on(writer_txn_manager.commit(txn, writer_buffer_pool));
 
                     1
                 });
