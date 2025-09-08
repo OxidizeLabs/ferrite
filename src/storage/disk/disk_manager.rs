@@ -118,9 +118,6 @@ pub struct FileDiskManager {
     write_buffer: Arc<RwLock<WriteBuffer>>,
     read_cache: Arc<RwLock<ReadAheadCache>>,
     background_flush_enabled: AtomicUsize, // 0 = disabled, 1 = enabled
-    // Direct I/O configuration
-    config: DiskManagerConfig,
-    direct_io_config: DirectIOConfig,
 }
 
 #[derive(Default)]
@@ -134,9 +131,6 @@ pub struct DiskMetrics {
     // PERFORMANCE OPTIMIZATION: Enhanced metrics
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,
-    sequential_reads: AtomicU64,
-    random_reads: AtomicU64,
-    batch_operations: AtomicU64,
     prefetch_hits: AtomicU64,
     write_buffer_flushes: AtomicU64,
 }
@@ -349,9 +343,6 @@ impl FileDiskManager {
             write_buffer: Arc::new(RwLock::new(WriteBuffer::new())),
             read_cache: Arc::new(RwLock::new(ReadAheadCache::new())),
             background_flush_enabled: AtomicUsize::new(1), // Enable by default
-            // Direct I/O configuration
-            config,
-            direct_io_config,
         }
     }
 
