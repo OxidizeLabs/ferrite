@@ -1,5 +1,5 @@
 //! Platform-specific direct I/O implementation for bypassing OS page cache
-//! 
+//!
 //! This module provides cross-platform direct I/O functionality to ensure
 //! database operations go directly to disk rather than being buffered by the OS.
 
@@ -37,33 +37,36 @@ pub fn open_direct_io<P: AsRef<Path>>(
 
     if config.enabled {
         debug!("Opening file with direct I/O: {}", path.as_ref().display());
-        
+
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::fs::OpenOptionsExt;
             options.custom_flags(libc::O_DIRECT);
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             // macOS doesn't have O_DIRECT, but we can use F_NOCACHE after opening
             // For now, just open normally and set F_NOCACHE later
             debug!("macOS: Direct I/O will be configured after file opening");
         }
-        
+
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::fs::OpenOptionsExt;
             // FILE_FLAG_NO_BUFFERING = 0x20000000
             options.custom_flags(0x20000000);
         }
-        
+
         #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         {
             warn!("Direct I/O not supported on this platform, falling back to buffered I/O");
         }
     } else {
-        debug!("Opening file with buffered I/O: {}", path.as_ref().display());
+        debug!(
+            "Opening file with buffered I/O: {}",
+            path.as_ref().display()
+        );
     }
 
     let file = options.open(path.as_ref())?;
@@ -99,48 +102,54 @@ pub fn create_aligned_buffer(size: usize, alignment: usize) -> Vec<u8> {
     // Allocate extra space to ensure we can align the buffer
     let total_size = size + alignment - 1;
     let mut buffer = vec![0; total_size];
-    
+
     // Find the aligned offset
     let ptr = buffer.as_ptr() as usize;
     let aligned_ptr = (ptr + alignment - 1) & !(alignment - 1);
     let offset = aligned_ptr - ptr;
-    
+
     // Truncate to the aligned portion
     buffer.drain(..offset);
     buffer.truncate(size);
-    
-    debug!("Created aligned buffer: size={}, alignment={}, ptr={:p}", 
-           size, alignment, buffer.as_ptr());
-    
+
+    debug!(
+        "Created aligned buffer: size={}, alignment={}, ptr={:p}",
+        size,
+        alignment,
+        buffer.as_ptr()
+    );
+
     buffer
 }
 
 /// Perform a direct I/O read operation with proper alignment
 pub fn read_aligned(
-    file: &mut File, 
-    offset: u64, 
-    size: usize, 
-    config: &DirectIOConfig
+    file: &mut File,
+    offset: u64,
+    size: usize,
+    config: &DirectIOConfig,
 ) -> IoResult<Vec<u8>> {
     use std::io::{Read, Seek, SeekFrom};
-    
+
     let buffer = if config.enabled {
         create_aligned_buffer(size, config.alignment)
     } else {
         vec![0u8; size]
     };
-    
+
     file.seek(SeekFrom::Start(offset))?;
-    
+
     // For direct I/O, we need to read in aligned chunks
     if config.enabled && size % config.alignment != 0 {
-        warn!("Direct I/O read size {} is not aligned to {}, this may cause issues", 
-              size, config.alignment);
+        warn!(
+            "Direct I/O read size {} is not aligned to {}, this may cause issues",
+            size, config.alignment
+        );
     }
-    
+
     let mut result = buffer;
     file.read_exact(&mut result)?;
-    
+
     Ok(result)
 }
 
@@ -152,23 +161,26 @@ pub fn write_aligned(
     config: &DirectIOConfig,
 ) -> IoResult<()> {
     use std::io::{Seek, SeekFrom, Write};
-    
+
     file.seek(SeekFrom::Start(offset))?;
-    
+
     if config.enabled {
         // Check alignment requirements
         if !is_aligned(data, config.alignment) {
             warn!("Data buffer is not aligned for direct I/O, performance may be degraded");
         }
-        
+
         if data.len() % config.alignment != 0 {
-            warn!("Write size {} is not aligned to {}, this may cause issues with direct I/O", 
-                  data.len(), config.alignment);
+            warn!(
+                "Write size {} is not aligned to {}, this may cause issues with direct I/O",
+                data.len(),
+                config.alignment
+            );
         }
     }
-    
+
     file.write_all(data)?;
-    
+
     Ok(())
 }
 
@@ -200,7 +212,7 @@ mod tests {
     fn test_file_opening() {
         let temp_file = NamedTempFile::new().unwrap();
         let config = DirectIOConfig::default();
-        
+
         let file = open_direct_io(temp_file.path(), true, true, false, &config);
         assert!(file.is_ok());
     }
@@ -212,7 +224,7 @@ mod tests {
             enabled: true,
             alignment: 512,
         };
-        
+
         // This should work on most platforms (may fall back to buffered I/O on unsupported platforms)
         let file = open_direct_io(temp_file.path(), true, true, false, &config);
         assert!(file.is_ok());

@@ -69,9 +69,8 @@ impl LogIterator {
             let offset = self.current_offset;
 
             match tokio::task::block_in_place(|| {
-                self.runtime_handle.block_on(async move {
-                    disk_manager.read_log(offset).await
-                })
+                self.runtime_handle
+                    .block_on(async move { disk_manager.read_log(offset).await })
             }) {
                 Ok(bytes) => {
                     // Deserialize bytes into LogRecord
@@ -203,7 +202,7 @@ impl LogIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::config::{Lsn, TxnId, INVALID_LSN};
+    use crate::common::config::{INVALID_LSN, Lsn, TxnId};
     use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
     use crate::storage::disk::async_disk::DiskManagerConfig;

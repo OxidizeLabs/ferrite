@@ -6,5 +6,3 @@ fn server_placeholder() {
     // Placeholder for future server tests when network mode is enabled
     assert!(true);
 }
-
-

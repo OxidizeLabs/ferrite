@@ -1,18 +1,18 @@
-use sqllogictest::{DBOutput, DefaultColumnType, DB};
+use sqllogictest::{DB, DBOutput, DefaultColumnType};
 use std::error::Error;
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tkdb::catalog::schema::Schema;
 use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
-use tkdb::common::result_writer::ResultWriter;
 use tkdb::common::logger;
+use tkdb::common::result_writer::ResultWriter;
 use tkdb::concurrency::transaction::IsolationLevel;
 use tkdb::types_db::value::Value;
-use tkdb::catalog::schema::Schema;
-use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::sync::Once;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -113,16 +113,16 @@ fn generate_temp_db_config() -> DBConfig {
         .unwrap()
         .as_nanos();
     let thread_id = std::thread::current().id();
-    
+
     // Create temp directory if it doesn't exist
     let temp_dir = PathBuf::from("tests/temp");
     fs::create_dir_all(&temp_dir).unwrap_or_else(|e| {
         eprintln!("Warning: Failed to create temp directory: {}", e);
     });
-    
+
     let db_filename = temp_dir.join(format!("test_{}_{:?}.db", timestamp, thread_id));
     let log_filename = temp_dir.join(format!("test_{}_{:?}.log", timestamp, thread_id));
-    
+
     DBConfig {
         db_filename: db_filename.to_string_lossy().to_string(),
         db_log_filename: log_filename.to_string_lossy().to_string(),
@@ -155,7 +155,7 @@ fn cleanup_temp_directory() {
 
 pub struct TKDBTest {
     instance: DBInstance,
-    config: DBConfig, // Store config for cleanup
+    config: DBConfig,             // Store config for cleanup
     stats: Arc<Mutex<TestStats>>, // Add shared statistics tracking
 }
 
@@ -167,7 +167,7 @@ impl TKDBTest {
 
     pub async fn new_with_config(config: DBConfig) -> Result<Self, Box<dyn Error>> {
         let instance = DBInstance::new(config.clone()).await?;
-        
+
         Ok(Self {
             instance,
             config,
@@ -255,10 +255,11 @@ impl DB for TKDBTest {
 
         // Execute the query - use block_in_place to run async function in sync context
         let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(
-                self.instance
-                    .execute_sql(sql, IsolationLevel::ReadCommitted, &mut writer)
-            )
+            tokio::runtime::Handle::current().block_on(self.instance.execute_sql(
+                sql,
+                IsolationLevel::ReadCommitted,
+                &mut writer,
+            ))
         });
 
         match result {
@@ -357,42 +358,42 @@ mod tests {
 
     async fn run_test_file(path: &Path) -> Result<TestStats, Box<dyn Error>> {
         let start_time = Instant::now();
-        
+
         println!("  Running {}", path.display());
-        
-        // Use the simple runner approach 
+
+        // Use the simple runner approach
         let config = generate_temp_db_config();
         let config_clone = config.clone();
-        
+
         // Create shared stats that will be used by all DB instances
         let shared_stats = Arc::new(Mutex::new(TestStats::new()));
-        
+
         let mut runner = Runner::new(|| {
             let shared_stats_clone = shared_stats.clone();
             async move {
                 let config = generate_temp_db_config(); // Generate fresh config for each connection
                 let instance = DBInstance::new(config.clone()).await?;
-                
+
                 let db = TKDBTest {
                     instance,
                     config,
                     stats: shared_stats_clone,
                 };
-                
+
                 Ok(db)
             }
         });
-        
+
         let result = runner.run_file(path);
-        
+
         // Clean up
         cleanup_temp_files(&config_clone);
-        
+
         // Create stats for the file that was attempted to be run
         let mut stats = TestStats::new();
         stats.files_run = 1; // We attempted to run one file
         stats.duration = start_time.elapsed();
-        
+
         // Get the statistics from the shared stats
         let shared_stats = shared_stats.lock().unwrap();
         stats.statements_run = shared_stats.statements_run;
@@ -402,7 +403,7 @@ mod tests {
         stats.failed_statements = shared_stats.failed_statements;
         stats.successful_queries = shared_stats.successful_queries;
         stats.failed_queries = shared_stats.failed_queries;
-        
+
         match result {
             Ok(_) => {
                 // Test file ran successfully (all tests passed)
@@ -449,7 +450,7 @@ mod tests {
                         // Duration is already tracked in the failed run, but we don't have access to it
                         // so we'll set a minimal duration
                         suite_stats.stats.duration += Duration::from_millis(1);
-                        
+
                         any_failures = true;
                         if first_error.is_none() {
                             first_error = Some(e);

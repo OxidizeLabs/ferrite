@@ -20,7 +20,7 @@ async fn test_count_aggregation() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          (1, 'Alice', 'Engineering', 70000),
          (2, 'Bob', 'Sales', 50000),
          (3, 'Charlie', 'Engineering', 80000),
@@ -80,7 +80,7 @@ async fn test_sum_aggregation() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO transactions VALUES 
+        "INSERT INTO transactions VALUES
          (1, 100, 'A'),
          (2, 200, 'B'),
          (3, 150, 'A'),
@@ -130,7 +130,7 @@ async fn test_avg_aggregation() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO grades VALUES 
+        "INSERT INTO grades VALUES
          (1, 85, 'Math'),
          (2, 92, 'Math'),
          (3, 78, 'Math'),
@@ -180,7 +180,7 @@ async fn test_min_max_aggregation() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO weather VALUES 
+        "INSERT INTO weather VALUES
          (1, 22, 'NYC'),
          (2, 35, 'Phoenix'),
          (3, 18, 'Seattle'),
@@ -240,7 +240,7 @@ async fn test_aggregation_with_group_by() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          (1, 'Engineering', 70000, 5000),
          (2, 'Engineering', 80000, 6000),
          (3, 'Sales', 50000, 3000),
@@ -310,7 +310,7 @@ async fn test_aggregation_with_null_values() {
 
     // Insert test data with NULLs
     db.execute_sql(
-        "INSERT INTO test_nulls VALUES 
+        "INSERT INTO test_nulls VALUES
          (1, 10, 'A'),
          (2, NULL, 'A'),
          (3, 20, 'B'),
@@ -426,7 +426,7 @@ async fn test_complex_aggregation_scenarios() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO sales VALUES 
+        "INSERT INTO sales VALUES
          (1, 'Laptop', 'Electronics', 1000, 2),
          (2, 'Mouse', 'Electronics', 25, 10),
          (3, 'Chair', 'Furniture', 200, 5),
@@ -492,14 +492,10 @@ async fn test_aggregation_performance() {
             values.push(format!("({}, {}, {})", i, i % 10, i * 2));
         }
         let sql = format!("INSERT INTO large_dataset VALUES {};", values.join(", "));
-        
-        db.execute_sql(
-            &sql,
-            IsolationLevel::ReadCommitted,
-            &mut writer,
-        )
-        .await
-        .unwrap();
+
+        db.execute_sql(&sql, IsolationLevel::ReadCommitted, &mut writer)
+            .await
+            .unwrap();
     }
 
     // Test aggregation performance queries

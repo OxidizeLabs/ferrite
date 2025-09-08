@@ -755,12 +755,12 @@ impl ExpressionOps for ArithmeticExpression {
         right_tuple: &Tuple,
         right_schema: &Schema,
     ) -> Result<Value, ExpressionError> {
-        let left_value = self
-            .get_left()
-            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
-        let right_value = self
-            .get_right()
-            .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let left_value =
+            self.get_left()
+                .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
+        let right_value =
+            self.get_right()
+                .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
 
         match (left_value.get_val(), right_value.get_val()) {
             (Val::Integer(l), Val::Integer(r)) => {

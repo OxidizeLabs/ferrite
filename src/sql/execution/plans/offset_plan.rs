@@ -88,4 +88,4 @@ mod tests {
         assert!(display_str.contains("Offset: 3"));
         assert!(display_str.contains("Schema:"));
     }
-} 
+}

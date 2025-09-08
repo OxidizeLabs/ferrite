@@ -1,5 +1,5 @@
 use crate::common::config::{
-    Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID,
+    INVALID_LSN, INVALID_TXN_ID, Lsn, TXN_START_ID, TableOidT, TimeStampOidT, Timestamp, TxnId,
 };
 use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
@@ -26,8 +26,7 @@ pub enum TransactionState {
 }
 
 /// Transaction isolation level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode, Default)]
 pub enum IsolationLevel {
     ReadUncommitted,
     #[default]
@@ -301,10 +300,7 @@ impl Transaction {
     /// Appends a write operation to the transaction's write set
     pub fn append_write_set(&self, table_oid: TableOidT, rid: RID) {
         let mut write_set = self.write_set.lock().unwrap();
-        write_set
-            .entry(table_oid)
-            .or_default()
-            .insert(rid);
+        write_set.entry(table_oid).or_default().insert(rid);
     }
 
     /// Gets all write operations performed in this transaction
@@ -323,10 +319,7 @@ impl Transaction {
     /// - `predicate`: The scan predicate expression.
     pub fn append_scan_predicate(&self, t: u32, predicate: Arc<Expression>) {
         let mut scan_predicates = self.scan_predicates.lock().unwrap();
-        scan_predicates
-            .entry(t)
-            .or_default()
-            .push(predicate);
+        scan_predicates.entry(t).or_default().push(predicate);
     }
 
     /// Sets the transaction state to tainted.
@@ -413,7 +406,6 @@ impl Transaction {
     }
 }
 
-
 /// Formatter implementation for `IsolationLevel`.
 impl fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -465,7 +457,7 @@ mod tests {
     }
 
     mod basic_behaviour {
-        use crate::common::config::{TimeStampOidT, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID};
+        use crate::common::config::{INVALID_LSN, INVALID_TXN_ID, TXN_START_ID, TimeStampOidT};
         use crate::common::rid::RID;
         use crate::concurrency::transaction::tests::create_test_tuple;
         use crate::concurrency::transaction::{

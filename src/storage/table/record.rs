@@ -15,7 +15,10 @@ pub struct Record {
 
 // Implement bincode's Encode trait for Record
 impl bincode::Encode for Record {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
         let values = self.tuple.get_values();
         (values, self.rid).encode(encoder)
     }
@@ -23,13 +26,19 @@ impl bincode::Encode for Record {
 
 // Implement bincode's Decode trait for Record
 impl<C> bincode::Decode<C> for Record {
-    fn decode<D: bincode::de::Decoder<Context = C>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+    fn decode<D: bincode::de::Decoder<Context = C>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
         let (values, rid): (Vec<Value>, RID) = bincode::Decode::decode(decoder)?;
         // Create a schema from the values - generate column names and types
-        let columns = values.iter().enumerate().map(|(i, value)| {
-            use crate::catalog::column::Column;
-            Column::new(&format!("col_{}", i), value.get_type_id())
-        }).collect();
+        let columns = values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| {
+                use crate::catalog::column::Column;
+                Column::new(&format!("col_{}", i), value.get_type_id())
+            })
+            .collect();
         let schema = Schema::new(columns);
         let tuple = Tuple::new(&values, &schema, rid);
         Ok(Self { tuple, rid })
@@ -44,10 +53,14 @@ impl<'de, C> bincode::BorrowDecode<'de, C> for Record {
     {
         let (values, rid): (Vec<Value>, RID) = bincode::BorrowDecode::borrow_decode(decoder)?;
         // Create a schema from the values - generate column names and types
-        let columns = values.iter().enumerate().map(|(i, value)| {
-            use crate::catalog::column::Column;
-            Column::new(&format!("col_{}", i), value.get_type_id())
-        }).collect();
+        let columns = values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| {
+                use crate::catalog::column::Column;
+                Column::new(&format!("col_{}", i), value.get_type_id())
+            })
+            .collect();
         let schema = Schema::new(columns);
         let tuple = Tuple::new(&values, &schema, rid);
         Ok(Self { tuple, rid })

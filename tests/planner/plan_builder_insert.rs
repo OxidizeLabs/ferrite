@@ -1,13 +1,13 @@
+use crate::common::logger::init_test_logger;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalog::Catalog;
 use tkdb::sql::planner::logical_plan::LogicalPlanType;
 use tkdb::sql::planner::query_planner::QueryPlanner;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::common::logger::init_test_logger;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -35,31 +35,46 @@ impl TestContext {
             .unwrap()
             .to_string();
 
-        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await.unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let disk_manager_arc = Arc::new(disk_manager);
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
+        let bpm =
+            Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
-        let transaction_manager = Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+        let transaction_manager =
+            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
-        Self { catalog, planner, _temp_dir: temp_dir }
+        Self {
+            catalog,
+            planner,
+            _temp_dir: temp_dir,
+        }
     }
 
     fn create_table(&mut self, name: &str, columns: &str) {
         let mut catalog = self.catalog.write();
         let schema = tkdb::catalog::schema::Schema::new(
-            columns.split(',').map(|c| c.trim()).filter(|c| !c.is_empty()).map(|c| {
-                let parts: Vec<&str> = c.split_whitespace().collect();
-                let (col_name, ty) = (parts[0], parts[1].to_uppercase());
-                let type_id = match ty.as_str() {
-                    "INTEGER" => tkdb::types_db::type_id::TypeId::Integer,
-                    "VARCHAR(255)" | "VARCHAR(50)" | "TEXT" | "VARCHAR" => tkdb::types_db::type_id::TypeId::VarChar,
-                    _ => tkdb::types_db::type_id::TypeId::VarChar,
-                };
-                tkdb::catalog::column::Column::new(col_name, type_id)
-            }).collect()
+            columns
+                .split(',')
+                .map(|c| c.trim())
+                .filter(|c| !c.is_empty())
+                .map(|c| {
+                    let parts: Vec<&str> = c.split_whitespace().collect();
+                    let (col_name, ty) = (parts[0], parts[1].to_uppercase());
+                    let type_id = match ty.as_str() {
+                        "INTEGER" => tkdb::types_db::type_id::TypeId::Integer,
+                        "VARCHAR(255)" | "VARCHAR(50)" | "TEXT" | "VARCHAR" => {
+                            tkdb::types_db::type_id::TypeId::VarChar
+                        }
+                        _ => tkdb::types_db::type_id::TypeId::VarChar,
+                    };
+                    tkdb::catalog::column::Column::new(col_name, type_id)
+                })
+                .collect(),
         );
         let _ = catalog.create_table(name.to_string(), schema);
     }
@@ -72,7 +87,9 @@ async fn insert_simple_row() {
     let sql = "INSERT INTO users VALUES (1, 'Alice')";
     let plan = ctx.planner.create_logical_plan(sql).unwrap();
     match &plan.plan_type {
-        LogicalPlanType::Insert { table_name, schema, .. } => {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 2);
             match &plan.children[0].plan_type {
@@ -114,7 +131,9 @@ async fn insert_with_explicit_columns() {
     let sql = "INSERT INTO users (id, name) VALUES (10, 'Zed')";
     let plan = ctx.planner.create_logical_plan(sql).unwrap();
     match &plan.plan_type {
-        LogicalPlanType::Insert { table_name, schema, .. } => {
+        LogicalPlanType::Insert {
+            table_name, schema, ..
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 2);
         }
@@ -127,11 +146,10 @@ async fn test_insert_different_data_types() {
     let mut fixture = TestContext::new("insert_different_types").await;
 
     // Create a table with various data types
-    fixture
-        .create_table(
-            "mixed_types",
-            "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN",
-        );
+    fixture.create_table(
+        "mixed_types",
+        "id INTEGER, name VARCHAR(255), age INTEGER, salary DECIMAL, active BOOLEAN",
+    );
 
     let insert_sql = "INSERT INTO mixed_types VALUES (1, 'Alice', 25, 50000.50, true)";
     let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
@@ -213,8 +231,7 @@ async fn test_insert_column_count_mismatch() {
 async fn test_insert_single_column_table() {
     let mut fixture = TestContext::new("insert_single_column").await;
 
-    fixture
-        .create_table("single_col", "id INTEGER");
+    fixture.create_table("single_col", "id INTEGER");
 
     let insert_sql = "INSERT INTO single_col VALUES (42)";
     let plan = fixture.planner.create_logical_plan(insert_sql).unwrap();
@@ -272,7 +289,7 @@ async fn test_insert_many_columns() {
     // Create a table with many columns
     fixture
         .create_table(
-            "wide_table", 
+            "wide_table",
             "col1 INTEGER, col2 VARCHAR(50), col3 INTEGER, col4 VARCHAR(50), col5 INTEGER, col6 VARCHAR(50), col7 INTEGER, col8 VARCHAR(50)"
         );
 
@@ -363,11 +380,10 @@ async fn test_insert_with_default_values() {
     let mut fixture = TestContext::new("insert_default_values").await;
 
     // Create a table with default values
-    fixture
-        .create_table(
-            "users_with_defaults",
-            "id INTEGER, name VARCHAR(255) DEFAULT 'Unknown', created_at INTEGER DEFAULT 0"
-        );
+    fixture.create_table(
+        "users_with_defaults",
+        "id INTEGER, name VARCHAR(255) DEFAULT 'Unknown', created_at INTEGER DEFAULT 0",
+    );
 
     let insert_sql = "INSERT INTO users_with_defaults (id) VALUES (1)";
 

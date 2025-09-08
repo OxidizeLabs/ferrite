@@ -1,5 +1,5 @@
 //! Machine learning-based prefetching for the Async Disk Manager
-//! 
+//!
 //! This module contains the ML-based prefetcher for predicting page access patterns.
 
 use crate::common::config::PageId;
@@ -48,8 +48,8 @@ impl MLPrefetcher {
         if let Some(preds) = &self.last_predictions {
             let hit = preds.contains(&page_id);
             let correctness = if hit { 1.0 } else { 0.0 };
-            self.prediction_accuracy =
-                self.prediction_accuracy * (1.0 - self.learning_rate) + correctness * self.learning_rate;
+            self.prediction_accuracy = self.prediction_accuracy * (1.0 - self.learning_rate)
+                + correctness * self.learning_rate;
         }
 
         // Maintain history size
@@ -68,14 +68,16 @@ impl MLPrefetcher {
         // Find patterns ending with current page
         for (pattern, weight) in &self.pattern_weights {
             if let Some(&last_page) = pattern.last()
-                && last_page == current_page && *weight > 0.5 {
-                    // Predict next pages based on this pattern
-                    for i in 1..=self.prefetch_distance {
-                        if let Some(history_entry) = self.find_pattern_continuation(pattern, i) {
-                            predictions.push(history_entry);
-                        }
+                && last_page == current_page
+                && *weight > 0.5
+            {
+                // Predict next pages based on this pattern
+                for i in 1..=self.prefetch_distance {
+                    if let Some(history_entry) = self.find_pattern_continuation(pattern, i) {
+                        predictions.push(history_entry);
                     }
                 }
+            }
         }
 
         // Remove duplicates and limit predictions
@@ -94,7 +96,8 @@ impl MLPrefetcher {
         }
 
         // Build recent access list in chronological order (oldest -> newest)
-        let mut recent_accesses: Vec<PageId> = self.access_history
+        let mut recent_accesses: Vec<PageId> = self
+            .access_history
             .iter()
             .rev()
             .take(20)
@@ -110,7 +113,8 @@ impl MLPrefetcher {
 
                     // Update pattern weight using exponential moving average
                     let current_weight = self.pattern_weights.get(&pattern).unwrap_or(&0.0);
-                    let new_weight = current_weight * (1.0 - self.learning_rate) + self.learning_rate;
+                    let new_weight =
+                        current_weight * (1.0 - self.learning_rate) + self.learning_rate;
                     self.pattern_weights.insert(pattern, new_weight);
                 }
             }
@@ -128,16 +132,18 @@ impl MLPrefetcher {
     /// Finds continuation of a pattern in history
     fn find_pattern_continuation(&self, pattern: &[PageId], offset: usize) -> Option<PageId> {
         let pattern_len = pattern.len();
-        let access_vec: Vec<PageId> = self.access_history
+        let access_vec: Vec<PageId> = self
+            .access_history
             .iter()
             .map(|(page_id, _)| *page_id)
             .collect();
 
         for i in 0..=access_vec.len().saturating_sub(pattern_len + offset) {
             if &access_vec[i..i + pattern_len] == pattern
-                && let Some(&next_page) = access_vec.get(i + pattern_len + offset - 1) {
-                    return Some(next_page);
-                }
+                && let Some(&next_page) = access_vec.get(i + pattern_len + offset - 1)
+            {
+                return Some(next_page);
+            }
         }
 
         None
@@ -181,24 +187,24 @@ impl PrefetchEngine {
 
     pub fn predict_pages_to_prefetch(&self, current_page: PageId) -> Vec<PageId> {
         let mut predictions = Vec::new();
-        
+
         // Get ML-based predictions
         if self.ml_prefetcher.get_accuracy() > self.prefetch_threshold {
             predictions.extend(self.ml_prefetcher.predict_prefetch(current_page));
         }
-        
+
         // Add sequential prefetch if enabled
         if self.sequential_prefetch_enabled {
             for i in 1..=self.prefetch_distance {
                 predictions.push(current_page + i as u64);
             }
         }
-        
+
         // Remove duplicates and limit
         predictions.sort_unstable();
         predictions.dedup();
         predictions.truncate(16); // Reasonable limit
-        
+
         predictions
     }
 }
@@ -210,17 +216,17 @@ mod tests {
     #[test]
     fn test_ml_prefetcher_basic() {
         let mut prefetcher = MLPrefetcher::new();
-        
+
         // Train with a simple pattern: 1,2,3,4,5
         for _ in 0..10 {
             for i in 1..=5 {
                 prefetcher.record_access(i);
             }
         }
-        
+
         // Test prediction after seeing page 3
         let predictions = prefetcher.predict_prefetch(3);
-        
+
         // We expect at least page 4 to be predicted
         assert!(predictions.contains(&4));
     }
@@ -228,15 +234,15 @@ mod tests {
     #[test]
     fn test_prefetch_engine() {
         let mut engine = PrefetchEngine::new(4);
-        
+
         // Record some accesses
         for i in 1..=10 {
             engine.record_access(i);
         }
-        
+
         // Test predictions
         let predictions = engine.predict_pages_to_prefetch(10);
-        
+
         // Sequential prefetching should predict at least 11
         assert!(predictions.contains(&11));
     }

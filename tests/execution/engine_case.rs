@@ -49,11 +49,13 @@ async fn test_case_when_simple() {
     ctx.insert_tuples("t1", test_data, table_schema).unwrap();
 
     // Execute the same query as the main test
-    let sql = "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
+    let sql =
+        "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
     assert!(success, "Query execution failed");
 
@@ -318,11 +320,13 @@ async fn test_case_when_with_subquery() {
     ctx.insert_tuples("t1", test_data, table_schema).unwrap();
 
     // Execute the query
-    let sql = "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
+    let sql =
+        "SELECT CASE WHEN c>(SELECT avg(c) FROM t1) THEN a*2 ELSE b*10 END FROM t1 ORDER BY 1";
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
     assert!(success, "Query execution failed");
 
@@ -394,7 +398,8 @@ async fn test_case_when_basic() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -461,7 +466,8 @@ async fn test_case_when_multiple_conditions() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -519,7 +525,8 @@ async fn test_case_when_with_null_values() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -560,7 +567,8 @@ async fn test_case_when_with_aggregations() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -605,7 +613,8 @@ async fn test_case_when_with_arithmetic() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -652,7 +661,8 @@ async fn test_case_when_nested() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -713,7 +723,8 @@ async fn test_case_when_different_data_types() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -758,7 +769,8 @@ async fn test_case_when_with_in_clause() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -789,11 +801,13 @@ async fn test_case_when_edge_cases() {
         .unwrap();
 
     // Test CASE WHEN on empty table
-    let sql = "SELECT id, CASE WHEN value > 50 THEN 'High' ELSE 'Low' END as category FROM edge_cases";
+    let sql =
+        "SELECT id, CASE WHEN value > 50 THEN 'High' ELSE 'Low' END as category FROM edge_cases";
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -806,11 +820,13 @@ async fn test_case_when_edge_cases() {
         .unwrap();
 
     // Test CASE WHEN on single row
-    let sql = "SELECT id, CASE WHEN value > 50 THEN 'High' ELSE 'Low' END as category FROM edge_cases";
+    let sql =
+        "SELECT id, CASE WHEN value > 50 THEN 'High' ELSE 'Low' END as category FROM edge_cases";
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -857,7 +873,8 @@ async fn test_case_when_performance() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Performance test query execution failed");

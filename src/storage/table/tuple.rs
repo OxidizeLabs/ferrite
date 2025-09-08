@@ -12,8 +12,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 /// Metadata associated with a tuple.
-#[derive(Debug, PartialEq, Copy, Clone)]
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Debug, PartialEq, Copy, Clone, bincode::Encode, bincode::Decode)]
 pub struct TupleMeta {
     creator_txn_id: TxnId,
     commit_timestamp: Timestamp,
@@ -142,7 +141,10 @@ pub struct Tuple {
 
 // Implement bincode's Encode trait for Tuple
 impl bincode::Encode for Tuple {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
         let values = self.values.read().clone();
         (values, self.rid).encode(encoder)
     }
@@ -150,7 +152,9 @@ impl bincode::Encode for Tuple {
 
 // Implement bincode's Decode trait for Tuple
 impl<C> bincode::Decode<C> for Tuple {
-    fn decode<D: bincode::de::Decoder<Context = C>>(decoder: &mut D) -> Result<Self, bincode::error::DecodeError> {
+    fn decode<D: bincode::de::Decoder<Context = C>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
         let (values, rid): (Vec<Value>, RID) = bincode::Decode::decode(decoder)?;
         Ok(Self {
             values: Arc::new(RwLock::new(values)),
@@ -512,7 +516,8 @@ mod tests {
         let meta = TupleMeta::new(1234567890);
         let config = config::standard();
         let serialized = bincode::encode_to_vec(meta, config)?;
-        let (deserialized, _): (TupleMeta, usize) = bincode::decode_from_slice(&serialized, config)?;
+        let (deserialized, _): (TupleMeta, usize) =
+            bincode::decode_from_slice(&serialized, config)?;
 
         assert_eq!(meta.get_creator_txn_id(), deserialized.get_creator_txn_id());
         assert_eq!(meta.is_committed(), deserialized.is_committed());

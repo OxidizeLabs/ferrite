@@ -106,7 +106,7 @@ impl SubqueryExpression {
         // 2. Replace them with correlated subquery plans
         // 3. Execute the subquery plans separately and cache results
         // 4. Use the cached results during expression evaluation
-        
+
         match self.subquery.as_ref() {
             Expression::Aggregate(agg) => {
                 // For now, return an error indicating this needs to be handled at plan level
@@ -164,7 +164,7 @@ impl ExpressionOps for SubqueryExpression {
 
                 // Get list of values from subquery
                 let result = self.subquery.evaluate(tuple, schema)?;
-                
+
                 // Convert the result to a vector if it's not already one
                 match result.get_val() {
                     Val::Vector(_) => Ok(result),
@@ -237,12 +237,12 @@ impl ExpressionOps for SubqueryExpression {
 
                 // Get list of values from subquery for join evaluation
                 let result = self.subquery.evaluate_join(
-                    left_tuple, 
-                    left_schema, 
-                    right_tuple, 
-                    right_schema
+                    left_tuple,
+                    left_schema,
+                    right_tuple,
+                    right_schema,
                 )?;
-                
+
                 // Convert the result to a vector if it's not already one
                 match result.get_val() {
                     Val::Vector(_) => Ok(result),
@@ -257,12 +257,8 @@ impl ExpressionOps for SubqueryExpression {
                     return Ok(cached_result.clone());
                 }
 
-                self.subquery.evaluate_join(
-                    left_tuple,
-                    left_schema,
-                    right_tuple,
-                    right_schema
-                )
+                self.subquery
+                    .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
             }
         }
     }
@@ -293,7 +289,7 @@ impl ExpressionOps for SubqueryExpression {
             self.subquery_type.clone(),
             self.return_type.clone(),
         );
-        
+
         // Preserve cached result if it exists
         if let Some(cached_result) = &self.cached_result {
             new_subquery.cached_result = Some(cached_result.clone());
@@ -525,12 +521,13 @@ mod tests {
 
         // Create subquery with cached result
         let cached_value = Value::new(100);
-        let subquery = SubqueryExpression::new(mock_expr.clone(), SubqueryType::Scalar, return_type)
-            .with_cached_result(cached_value.clone());
+        let subquery =
+            SubqueryExpression::new(mock_expr.clone(), SubqueryType::Scalar, return_type)
+                .with_cached_result(cached_value.clone());
 
         // Clone with same children
         let cloned = subquery.clone_with_children(vec![mock_expr]);
-        
+
         // Verify cached result is preserved
         if let Expression::Subquery(cloned_subquery) = cloned.as_ref() {
             assert!(cloned_subquery.has_cached_result());
@@ -562,7 +559,7 @@ mod tests {
 
         let (tuple, schema) = create_empty_tuple();
         let result = subquery.evaluate(&tuple, &schema);
-        
+
         // Should return an error indicating it needs to be handled at plan level
         assert!(result.is_err());
         let error_msg = format!("{}", result.unwrap_err());

@@ -166,10 +166,7 @@ impl SchemaManager {
     }
 
     /// Parse column options to extract constraint information
-    fn parse_column_options(
-        &self,
-        options: &[ColumnOptionDef],
-    ) -> ColumnOptionsResult {
+    fn parse_column_options(&self, options: &[ColumnOptionDef]) -> ColumnOptionsResult {
         let mut is_primary_key = false;
         let mut is_not_null = false;
         let mut is_unique = false;
@@ -730,30 +727,32 @@ impl SchemaManager {
                 sqlparser::ast::SelectItem::ExprWithAlias { expr, alias } => {
                     // Handle direct aliases like "e.name AS employee"
                     if let Expr::CompoundIdentifier(idents) = expr
-                        && idents.len() == 2 {
-                            let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
-                            alias_map.insert(qualified_name, alias.value.clone());
-                        }
+                        && idents.len() == 2
+                    {
+                        let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
+                        alias_map.insert(qualified_name, alias.value.clone());
+                    }
                 }
                 sqlparser::ast::SelectItem::UnnamedExpr(expr) => {
                     // For expressions without explicit aliases, check if they match GROUP BY expressions
                     if let Expr::CompoundIdentifier(idents) = expr
-                        && idents.len() == 2 {
-                            let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
+                        && idents.len() == 2
+                    {
+                        let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
 
-                            // Check if this matches any GROUP BY expression
-                            for group_expr in group_by_exprs {
-                                if let Expression::ColumnRef(col_ref) = group_expr {
-                                    let group_col_name = col_ref.get_return_type().get_name();
-                                    if group_col_name == qualified_name {
-                                        // Use a simplified alias based on the column name
-                                        let simple_name = idents[1].value.clone();
-                                        alias_map.insert(qualified_name, simple_name);
-                                        break;
-                                    }
+                        // Check if this matches any GROUP BY expression
+                        for group_expr in group_by_exprs {
+                            if let Expression::ColumnRef(col_ref) = group_expr {
+                                let group_col_name = col_ref.get_return_type().get_name();
+                                if group_col_name == qualified_name {
+                                    // Use a simplified alias based on the column name
+                                    let simple_name = idents[1].value.clone();
+                                    alias_map.insert(qualified_name, simple_name);
+                                    break;
                                 }
                             }
                         }
+                    }
                 }
                 _ => {}
             }
@@ -775,10 +774,10 @@ impl SchemaManager {
         target_schema: &Schema,
     ) -> Vec<Value> {
         let mut target_values = Vec::with_capacity(target_schema.get_column_count() as usize);
-        
+
         // First, detect if we should use name-based mapping
         let should_use_name_mapping = self.detect_name_based_mapping(source_schema, target_schema);
-        
+
         if should_use_name_mapping {
             // Use name-based mapping
             for target_col_idx in 0..target_schema.get_column_count() {
@@ -825,12 +824,12 @@ impl SchemaManager {
     /// Detects whether name-based mapping should be used by checking for column name matches
     fn detect_name_based_mapping(&self, source_schema: &Schema, target_schema: &Schema) -> bool {
         let source_count = source_schema.get_column_count();
-        
+
         // If source schema is empty, we can't do name-based mapping
         if source_count == 0 {
             return false;
         }
-        
+
         let mut matching_count = 0;
 
         // Count how many source columns have exact matches in target schema
@@ -852,7 +851,7 @@ impl SchemaManager {
         }
 
         // Use name-based mapping if we find matches for ALL source columns
-        // This ensures that partial column inserts will correctly map by name 
+        // This ensures that partial column inserts will correctly map by name
         // when column names are specified, but prevents false positives
         matching_count == source_count && matching_count > 0
     }

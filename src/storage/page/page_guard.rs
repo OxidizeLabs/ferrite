@@ -149,7 +149,7 @@ mod tests {
     use tempfile::TempDir;
 
     pub struct TestContext {
-        bpm: Arc<BufferPoolManager>
+        bpm: Arc<BufferPoolManager>,
     }
 
     impl TestContext {
@@ -174,17 +174,19 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
-            Self {
-                bpm
-            }
+            Self { bpm }
         }
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {

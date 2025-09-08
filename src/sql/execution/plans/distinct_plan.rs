@@ -42,4 +42,4 @@ impl Display for DistinctNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Distinct")
     }
-} 
+}

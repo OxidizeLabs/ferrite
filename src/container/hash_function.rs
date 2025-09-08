@@ -18,7 +18,7 @@ pub struct HashFunction<K> {
 impl<K> Default for HashFunction<K>
 where
     K: Any + Hash + 'static,
- {
+{
     fn default() -> Self {
         Self::new()
     }

@@ -160,4 +160,3 @@ mocking = ["dep:mockall"]
 # Development and testing features
 dev = ["server", "mocking"]
 full = ["cli", "client", "server"]
-

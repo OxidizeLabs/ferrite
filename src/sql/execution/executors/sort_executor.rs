@@ -81,8 +81,11 @@ impl AbstractExecutor for SortExecutor {
             let order_by_specs = self.plan.get_order_bys().clone();
             let schema = self.plan.get_output_schema().clone();
 
-            debug!("Starting to sort {} tuples with {} order by specifications", 
-                   self.sorted_tuples.len(), order_by_specs.len());
+            debug!(
+                "Starting to sort {} tuples with {} order by specifications",
+                self.sorted_tuples.len(),
+                order_by_specs.len()
+            );
 
             // Sort tuples using the order by specifications with ASC/DESC support
             self.sorted_tuples.sort_by(|(tuple_a, _), (tuple_b, _)| {
@@ -90,7 +93,7 @@ impl AbstractExecutor for SortExecutor {
                 for order_by_spec in &order_by_specs {
                     let expression = order_by_spec.get_expression();
                     let direction = order_by_spec.get_direction();
-                    
+
                     // Evaluate expressions for both tuples
                     let val_a_result = expression.evaluate(tuple_a, &schema);
                     let val_b_result = expression.evaluate(tuple_b, &schema);
@@ -105,7 +108,7 @@ impl AbstractExecutor for SortExecutor {
                                     OrderDirection::Asc => ordering,
                                     OrderDirection::Desc => ordering.reverse(),
                                 };
-                                trace!("Comparing values {:?} vs {:?}, order: {:?}, direction: {:?}, result: {:?}", 
+                                trace!("Comparing values {:?} vs {:?}, order: {:?}, direction: {:?}, result: {:?}",
                                        val_a, val_b, ordering, direction, final_ordering);
                                 return final_ordering;
                             }
@@ -180,8 +183,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::column::Column;
     use crate::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
@@ -228,14 +231,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -455,7 +466,7 @@ mod tests {
         // Create test data with duplicate ages
         let mock_data = [
             (1, "Alice", 30), // Should be second due to name ASC, age DESC
-            (2, "Bob", 30),   // Should be first due to name ASC, age DESC  
+            (2, "Bob", 30),   // Should be first due to name ASC, age DESC
             (3, "Charlie", 25),
             (4, "David", 35),
             (5, "Eve", 25), // Should come before Charlie due to name ASC
@@ -621,7 +632,7 @@ mod tests {
 
     // Update other existing tests to use new OrderBySpec API...
     // (continuing with the rest of the tests but using the new API)
-    
+
     #[tokio::test]
     async fn test_sort_executor_multiple_columns() {
         let ctx = TestContext::new("test_sort_executor_multiple").await;
@@ -632,11 +643,11 @@ mod tests {
 
         // Create test data with duplicate ages
         let mock_data = [
-            (1, "Alice", 30), 
-            (2, "Bob", 30),   
+            (1, "Alice", 30),
+            (2, "Bob", 30),
             (3, "Charlie", 25),
             (4, "David", 35),
-            (5, "Eve", 25), 
+            (5, "Eve", 25),
         ];
 
         let mock_tuples: Vec<(Vec<Value>, RID)> = mock_data

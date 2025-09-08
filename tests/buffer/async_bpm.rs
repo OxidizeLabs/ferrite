@@ -1,10 +1,10 @@
+use crate::common::logger::init_test_logger;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tempfile::TempDir;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use crate::common::logger::init_test_logger;
 
 struct AsyncTestContext {
     bpm: Arc<BufferPoolManager>,
@@ -17,12 +17,26 @@ impl AsyncTestContext {
         const BUFFER_POOL_SIZE: usize = 64;
         const K: usize = 2;
         let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join(format!("{name}.db")).to_string_lossy().to_string();
-        let log_path = temp_dir.path().join(format!("{name}.log")).to_string_lossy().to_string();
-        let disk = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await.unwrap();
+        let db_path = temp_dir
+            .path()
+            .join(format!("{name}.db"))
+            .to_string_lossy()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join(format!("{name}.log"))
+            .to_string_lossy()
+            .to_string();
+        let disk = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, Arc::new(disk), replacer).unwrap());
-        Self { bpm, _temp_dir: temp_dir }
+        let bpm =
+            Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, Arc::new(disk), replacer).unwrap());
+        Self {
+            bpm,
+            _temp_dir: temp_dir,
+        }
     }
 }
 
@@ -32,5 +46,3 @@ async fn async_basic_page_operations() {
     // Placeholder: exercise new_page/fetch_page briefly via storage TablePage in unit tests
     assert!(true);
 }
-
-

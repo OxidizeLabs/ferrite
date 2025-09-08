@@ -118,10 +118,11 @@ impl ExpressionOps for QualifiedWildcardExpression {
         let mut found_match = false;
         for i in 0..schema.get_column_count() {
             if let Some(column) = schema.get_column(i as usize)
-                && column.get_name().starts_with(&prefix) {
-                    found_match = true;
-                    break;
-                }
+                && column.get_name().starts_with(&prefix)
+            {
+                found_match = true;
+                break;
+            }
         }
 
         if !found_match {

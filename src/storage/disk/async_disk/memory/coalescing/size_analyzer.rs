@@ -1,5 +1,5 @@
 //! Advanced size analysis for write coalescing
-//! 
+//!
 //! This module provides sophisticated size calculation and analysis capabilities
 //! for determining the efficiency and memory footprint of coalescing operations.
 
@@ -11,7 +11,7 @@ use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageRange {
     pub start: PageId,
-    pub end: PageId,   // Inclusive
+    pub end: PageId, // Inclusive
     pub size_bytes: usize,
 }
 
@@ -51,7 +51,8 @@ impl SizeAnalyzer {
         new_data: &[u8],
         pending_writes: &HashMap<PageId, Vec<u8>>,
     ) -> usize {
-        let size_info = self.calculate_detailed_coalesced_size(adjacent_pages, new_data, pending_writes);
+        let size_info =
+            self.calculate_detailed_coalesced_size(adjacent_pages, new_data, pending_writes);
         size_info.total_size
     }
 
@@ -63,7 +64,7 @@ impl SizeAnalyzer {
         pending_writes: &HashMap<PageId, Vec<u8>>,
     ) -> CoalescedSizeInfo {
         // Constants for production-grade calculations
-        const ALIGNMENT_BOUNDARY: usize = 64;   // CPU cache line alignment
+        const ALIGNMENT_BOUNDARY: usize = 64; // CPU cache line alignment
         const COMPRESSION_EFFICIENCY_THRESHOLD: f64 = 0.75; // 75% compression efficiency
         const MAX_EFFICIENT_GAP_RATIO: f64 = 0.20; // 20% gap tolerance
 
@@ -146,7 +147,7 @@ impl SizeAnalyzer {
         let mut ranges = Vec::new();
         let mut current_start = sorted_pages[0];
         let mut current_end = sorted_pages[0];
-        
+
         // Initialize with the first page's data size
         let mut current_size = pending_writes
             .get(&sorted_pages[0])
@@ -261,7 +262,11 @@ impl SizeAnalyzer {
     }
 
     /// Calculates alignment and padding overhead for optimal memory access
-    pub fn calculate_alignment_overhead(&self, data_size: usize, page_ranges: &[PageRange]) -> usize {
+    pub fn calculate_alignment_overhead(
+        &self,
+        data_size: usize,
+        page_ranges: &[PageRange],
+    ) -> usize {
         const CACHE_LINE_SIZE: usize = 64;
         const PAGE_ALIGNMENT: usize = 4096;
 
@@ -649,4 +654,4 @@ mod tests {
         let result = analyzer.validate_page_ranges(&invalid_ranges);
         assert!(result.is_err());
     }
-} 
+}

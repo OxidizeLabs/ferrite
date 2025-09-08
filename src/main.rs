@@ -164,7 +164,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
 
                 // Create and format table if there are columns/rows
                 if !results.column_names.is_empty() {
-                    use prettytable::{format, Cell, Row, Table};
+                    use prettytable::{Cell, Row, Table, format};
                     let mut table = Table::new();
 
                     // Set table format with clean borders and proper alignment

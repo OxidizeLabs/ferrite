@@ -28,7 +28,7 @@ impl ConstantExpression {
     pub fn get_value(&self) -> &Value {
         &self.value
     }
-    
+
     // Helper method to create a vector constant from literal values
     pub fn new_vector(values: Vec<Value>, children: Vec<Arc<Expression>>) -> Self {
         let vector_value = Value::new_vector(values);

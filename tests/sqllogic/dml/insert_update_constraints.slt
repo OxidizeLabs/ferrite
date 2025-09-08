@@ -29,12 +29,12 @@ statement ok
 INSERT INTO departments (id, name, budget) VALUES (2, 'Sales', 300000.0);
 
 statement ok
-INSERT INTO employees (id, name, email, age, salary, department_id, status) 
+INSERT INTO employees (id, name, email, age, salary, department_id, status)
 VALUES (1, 'Alice Smith', 'alice@company.com', 28, 75000.0, 1, 'active');
 
 # Test INSERT with DEFAULT values
 statement ok
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (2, 'Bob Johnson', 'bob@company.com', 32, 68000.0, 2);
 
 # Test INSERT with only required fields (using defaults)
@@ -45,42 +45,42 @@ INSERT INTO departments (id, name) VALUES (3, 'Marketing');
 
 # Test NOT NULL constraint violation
 statement error
-INSERT INTO employees (id, email, age, salary, department_id) 
+INSERT INTO employees (id, email, age, salary, department_id)
 VALUES (3, 'charlie@company.com', 25, 60000.0, 1);
 
 # Test UNIQUE constraint violation
 statement error
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (4, 'David Wilson', 'alice@company.com', 30, 70000.0, 1);
 
 # Test CHECK constraint violation - age too young
 statement error
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (5, 'Young Person', 'young@company.com', 16, 50000.0, 1);
 
 # Test CHECK constraint violation - age too old
 statement error
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (6, 'Old Person', 'old@company.com', 70, 80000.0, 1);
 
 # Test CHECK constraint violation - negative salary
 statement error
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (7, 'Poor Person', 'poor@company.com', 25, -1000.0, 1);
 
 # Test CHECK constraint violation - invalid status
 statement error
-INSERT INTO employees (id, name, email, age, salary, department_id, status) 
+INSERT INTO employees (id, name, email, age, salary, department_id, status)
 VALUES (8, 'Invalid Status', 'invalid@company.com', 25, 55000.0, 1, 'unknown');
 
 # Test FOREIGN KEY constraint violation
 statement error
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (9, 'No Department', 'nodept@company.com', 25, 55000.0, 999);
 
 # Test PRIMARY KEY constraint violation
 statement error
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (1, 'Duplicate ID', 'duplicate@company.com', 25, 55000.0, 1);
 
 # Valid UPDATE operations
@@ -131,7 +131,7 @@ UPDATE departments SET budget = -1000.0 WHERE id = 1;
 
 # Valid batch INSERT
 statement ok
-INSERT INTO employees (id, name, email, age, salary, department_id) VALUES 
+INSERT INTO employees (id, name, email, age, salary, department_id) VALUES
 (10, 'John Doe', 'john@company.com', 30, 65000.0, 1),
 (11, 'Jane Smith', 'jane@company.com', 28, 72000.0, 2),
 (12, 'Mike Brown', 'mike@company.com', 35, 78000.0, 3);
@@ -144,13 +144,13 @@ UPDATE employees SET salary = salary * 1.1 WHERE department_id = 1;
 
 # Test UPDATE with multiple constraints
 statement ok
-UPDATE employees 
-SET age = 31, salary = 85000.0, status = 'active' 
+UPDATE employees
+SET age = 31, salary = 85000.0, status = 'active'
 WHERE id = 11 AND age >= 18 AND salary > 0;
 
 # Test INSERT after constraint-validating UPDATE
 statement ok
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (13, 'Sarah Wilson', 'sarah@company.com', 26, 69000.0, 2);
 
 # Test UPDATE cascading effects (if implemented)
@@ -161,12 +161,12 @@ UPDATE departments SET name = 'Engineering & Tech' WHERE id = 1;
 
 # Test INSERT with minimum valid values
 statement ok
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (14, 'Min Values', 'min@company.com', 18, 1.0, 1);
 
 # Test INSERT with maximum valid values
 statement ok
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (15, 'Max Values', 'max@company.com', 65, 999999.99, 1);
 
 # Test UPDATE to boundary values
@@ -178,7 +178,7 @@ UPDATE employees SET age = 18 WHERE id = 15;
 
 # Test NULL handling in optional fields
 statement ok
-INSERT INTO employees (id, name, email, age, salary) 
+INSERT INTO employees (id, name, email, age, salary)
 VALUES (16, 'No Department', 'nodept_valid@company.com', 25, 55000.0);
 
 # Test UPDATE setting optional field to NULL
@@ -192,22 +192,22 @@ statement ok
 INSERT INTO departments (id, name, budget) VALUES (4, 'HR', 200000.0);
 
 statement ok
-INSERT INTO employees (id, name, email, age, salary, department_id) 
+INSERT INTO employees (id, name, email, age, salary, department_id)
 VALUES (17, 'HR Manager', 'hr@company.com', 40, 90000.0, 4);
 
 # Test UPDATE with join-like constraints (if supported)
 statement ok
-UPDATE employees 
-SET salary = 95000.0 
+UPDATE employees
+SET salary = 95000.0
 WHERE id = 17 AND department_id IN (SELECT id FROM departments WHERE name = 'HR');
 
 # Cleanup and final validation
 
 # Verify constraint enforcement didn't break valid data
 query IITII
-SELECT id, name, age, salary, department_id 
-FROM employees 
-WHERE id <= 3 
+SELECT id, name, age, salary, department_id
+FROM employees
+WHERE id <= 3
 ORDER BY id;
 ----
 1 Alice Smith 29 80000 1
@@ -215,11 +215,11 @@ ORDER BY id;
 
 # Verify department constraints are still enforced
 query IT
-SELECT id, name 
-FROM departments 
-WHERE id <= 3 
+SELECT id, name
+FROM departments
+WHERE id <= 3
 ORDER BY id;
 ----
 1 Engineering & Tech
-2 Sales  
-3 Marketing 
+2 Sales
+3 Marketing

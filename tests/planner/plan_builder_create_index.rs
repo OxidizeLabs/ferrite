@@ -1,14 +1,14 @@
+use crate::common::logger::init_test_logger;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
 use tkdb::buffer::lru_k_replacer::LRUKReplacer;
 use tkdb::catalog::Catalog;
 use tkdb::sql::planner::logical_plan::LogicalPlanType;
 use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::types_db::type_id::TypeId;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::common::logger::init_test_logger;
+use tkdb::types_db::type_id::TypeId;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -23,19 +23,37 @@ impl TestContext {
         const K: usize = 2;
 
         let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join(format!("{name}.db")).to_str().unwrap().to_string();
-        let log_path = temp_dir.path().join(format!("{name}.log")).to_str().unwrap().to_string();
+        let db_path = temp_dir
+            .path()
+            .join(format!("{name}.db"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join(format!("{name}.log"))
+            .to_str()
+            .unwrap()
+            .to_string();
 
-        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await.unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let disk_manager_arc = Arc::new(disk_manager);
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
+        let bpm =
+            Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
-        let transaction_manager = Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+        let transaction_manager =
+            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
-        Self { catalog, planner, _temp_dir: temp_dir }
+        Self {
+            catalog,
+            planner,
+            _temp_dir: temp_dir,
+        }
     }
 
     fn create_users(&mut self) {
@@ -56,10 +74,19 @@ async fn create_simple_index() {
     fixture.create_users();
 
     let create_index_sql = "CREATE INDEX idx_name ON users (name)";
-    let plan = fixture.planner.create_logical_plan(create_index_sql).unwrap();
+    let plan = fixture
+        .planner
+        .create_logical_plan(create_index_sql)
+        .unwrap();
 
     match &plan.plan_type {
-        LogicalPlanType::CreateIndex { table_name, index_name, key_attrs, schema, if_not_exists } => {
+        LogicalPlanType::CreateIndex {
+            table_name,
+            index_name,
+            key_attrs,
+            schema,
+            if_not_exists,
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(index_name, "idx_name");
             assert_eq!(key_attrs.len(), 1);
@@ -81,7 +108,13 @@ async fn create_composite_index() {
     let sql = "CREATE INDEX idx_name_age ON users (name, age)";
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
     match &plan.plan_type {
-        LogicalPlanType::CreateIndex { table_name, index_name, key_attrs, schema, if_not_exists } => {
+        LogicalPlanType::CreateIndex {
+            table_name,
+            index_name,
+            key_attrs,
+            schema,
+            if_not_exists,
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(index_name, "idx_name_age");
             assert_eq!(key_attrs.as_slice(), [1, 2]);
@@ -99,7 +132,13 @@ async fn create_index_if_not_exists() {
     let sql = "CREATE INDEX IF NOT EXISTS idx_email ON users (email)";
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
     match &plan.plan_type {
-        LogicalPlanType::CreateIndex { table_name, index_name, key_attrs, schema, if_not_exists } => {
+        LogicalPlanType::CreateIndex {
+            table_name,
+            index_name,
+            key_attrs,
+            schema,
+            if_not_exists,
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(index_name, "idx_email");
             assert_eq!(key_attrs.as_slice(), [3]);
@@ -117,7 +156,13 @@ async fn create_index_all_columns() {
     let sql = "CREATE INDEX idx_all ON users (id, name, age, email)";
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
     match &plan.plan_type {
-        LogicalPlanType::CreateIndex { table_name, index_name, key_attrs, schema, if_not_exists } => {
+        LogicalPlanType::CreateIndex {
+            table_name,
+            index_name,
+            key_attrs,
+            schema,
+            if_not_exists,
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(index_name, "idx_all");
             assert_eq!(key_attrs.as_slice(), [0, 1, 2, 3]);
@@ -165,7 +210,13 @@ async fn create_index_on_primary_key() {
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
     match &plan.plan_type {
-        LogicalPlanType::CreateIndex { table_name, index_name, key_attrs, schema, if_not_exists } => {
+        LogicalPlanType::CreateIndex {
+            table_name,
+            index_name,
+            key_attrs,
+            schema,
+            if_not_exists,
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(index_name, "idx_id");
             assert_eq!(key_attrs.as_slice(), [0]);
@@ -190,7 +241,13 @@ async fn create_unique_index() {
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
     match &plan.plan_type {
-        LogicalPlanType::CreateIndex { table_name, index_name, key_attrs, schema, if_not_exists } => {
+        LogicalPlanType::CreateIndex {
+            table_name,
+            index_name,
+            key_attrs,
+            schema,
+            if_not_exists,
+        } => {
             assert_eq!(table_name, "users");
             assert_eq!(index_name, "idx_unique_email");
             assert_eq!(key_attrs.as_slice(), [3]);
@@ -200,5 +257,3 @@ async fn create_unique_index() {
         _ => panic!("Expected CreateIndex plan node"),
     }
 }
-
-

@@ -1,9 +1,9 @@
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::Value;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
 use crate::execution::common::TestContext;
 use crate::execution::common::TestResultWriter;
+use tkdb::catalog::column::Column;
+use tkdb::catalog::schema::Schema;
+use tkdb::types_db::type_id::TypeId;
+use tkdb::types_db::value::Value;
 
 #[tokio::test]
 // #[ignore = "Causes stack overflow in the logical plan to physical plan conversion"]
@@ -37,7 +37,8 @@ async fn test_order_by() {
     println!("Executing query: {}", sql);
     let success = match ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
     {
         Ok(s) => {
             println!("Query execution succeeded");
@@ -116,7 +117,8 @@ async fn test_order_by_desc() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -163,7 +165,8 @@ async fn test_order_by_multiple_columns() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -220,7 +223,8 @@ async fn test_order_by_with_null_values() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -258,7 +262,8 @@ async fn test_order_by_with_expressions() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -303,7 +308,8 @@ async fn test_order_by_with_limit() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -348,7 +354,8 @@ async fn test_order_by_with_offset() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -408,7 +415,8 @@ async fn test_order_by_different_data_types() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -454,7 +462,8 @@ async fn test_order_by_with_aggregation() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -488,7 +497,8 @@ async fn test_order_by_edge_cases() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -505,7 +515,8 @@ async fn test_order_by_edge_cases() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Query execution failed");
@@ -558,7 +569,8 @@ async fn test_order_by_performance() {
     let mut writer = TestResultWriter::new();
     let success = ctx
         .engine
-        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer).await
+        .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
+        .await
         .unwrap();
 
     assert!(success, "Performance test query execution failed");

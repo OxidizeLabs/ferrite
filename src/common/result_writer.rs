@@ -2,7 +2,7 @@ use crate::catalog::schema::Schema;
 use crate::server::QueryResults;
 use crate::types_db::value::Value;
 use colored::Colorize;
-use prettytable::{format, Cell, Row, Table};
+use prettytable::{Cell, Row, Table, format};
 use std::sync::{Arc, Mutex};
 
 /// Trait for writing query results in a tabular format

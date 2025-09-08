@@ -85,9 +85,9 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
-    use crate::catalog::Catalog;
     use crate::common::rid::RID;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::IsolationLevel;
@@ -132,9 +132,8 @@ mod tests {
             .unwrap();
         let disk_manager_arc = Arc::new(disk_manager);
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(
-            BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap(),
-        );
+        let bpm =
+            Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
         let transaction_manager = Arc::new(TransactionManager::new());
         let lock_manager = Arc::new(LockManager::new());
@@ -207,25 +206,24 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(2, schema.clone(), vec![]));
-        
+
         // Create mock executor as child
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),  // Provide table name instead of tuples
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(), // Provide table name instead of tuples
+                    vec![],
+                ),
+            ),
             0,
-            mock_tuples,  // Use converted tuples
+            mock_tuples, // Use converted tuples
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -285,24 +283,23 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(0, schema.clone(), vec![]));
-        
+
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(),
+                    vec![],
+                ),
+            ),
             0,
             mock_tuples,
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -356,24 +353,23 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(5, schema.clone(), vec![])); // Offset > tuple count
-        
+
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(),
+                    vec![],
+                ),
+            ),
             0,
             mock_tuples,
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -429,24 +425,23 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(3, schema.clone(), vec![])); // Offset = tuple count
-        
+
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(),
+                    vec![],
+                ),
+            ),
             0,
             mock_tuples,
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -476,24 +471,23 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(2, schema.clone(), vec![]));
-        
+
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(),
+                    vec![],
+                ),
+            ),
             0,
             mock_tuples,
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -549,24 +543,23 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(1, schema.clone(), vec![]));
-        
+
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(),
+                    vec![],
+                ),
+            ),
             0,
             mock_tuples,
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -590,13 +583,11 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let tuples = [
-            Arc::new(Tuple::new(
-                &[Value::new(1), Value::new("Alice")],
-                &schema,
-                RID::new(0, 0),
-            )),
-        ];
+        let tuples = [Arc::new(Tuple::new(
+            &[Value::new(1), Value::new("Alice")],
+            &schema,
+            RID::new(0, 0),
+        ))];
 
         let mock_tuples: Vec<(Vec<Value>, RID)> = tuples
             .iter()
@@ -614,24 +605,23 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(100, schema.clone(), vec![])); // Large offset
-        
+
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(),
+                    vec![],
+                ),
+            ),
             0,
             mock_tuples,
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -653,13 +643,11 @@ mod tests {
             Column::new("name", TypeId::VarChar),
         ]);
 
-        let tuples = [
-            Arc::new(Tuple::new(
-                &[Value::new(42), Value::new("OnlyOne")],
-                &schema,
-                RID::new(0, 0),
-            )),
-        ];
+        let tuples = [Arc::new(Tuple::new(
+            &[Value::new(42), Value::new("OnlyOne")],
+            &schema,
+            RID::new(0, 0),
+        ))];
 
         let mock_tuples: Vec<(Vec<Value>, RID)> = tuples
             .iter()
@@ -677,24 +665,23 @@ mod tests {
             transaction_context,
         )));
         let offset_node = Arc::new(OffsetNode::new(0, schema.clone(), vec![]));
-        
+
         let mock_executor = MockExecutor::new(
             context.clone(),
-            Arc::new(crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
-                schema.clone(),
-                "test_table".to_string(),
-                vec![],
-            )),
+            Arc::new(
+                crate::sql::execution::plans::mock_scan_plan::MockScanNode::new(
+                    schema.clone(),
+                    "test_table".to_string(),
+                    vec![],
+                ),
+            ),
             0,
             mock_tuples,
             schema.clone(),
         );
 
-        let mut offset_executor = OffsetExecutor::new(
-            Box::new(mock_executor),
-            context,
-            offset_node,
-        );
+        let mut offset_executor =
+            OffsetExecutor::new(Box::new(mock_executor), context, offset_node);
 
         offset_executor.init();
 
@@ -708,4 +695,4 @@ mod tests {
         assert_eq!(results[0].get_value(0).to_string(), "42");
         assert_eq!(results[0].get_value(1).to_string(), "OnlyOne");
     }
-} 
+}

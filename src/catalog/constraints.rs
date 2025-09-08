@@ -114,10 +114,7 @@ impl ConstraintValidator {
         }
 
         let table_unique_key = format!("{}:{}", table_name, column.get_name());
-        let unique_map = self
-            .unique_values
-            .entry(table_unique_key)
-            .or_default();
+        let unique_map = self.unique_values.entry(table_unique_key).or_default();
 
         let value_str = ToString::to_string(&value);
         if unique_map.contains_key(&value_str) {
@@ -144,12 +141,13 @@ impl ConstraintValidator {
                 || constraint.contains("budget > 0")
                 || constraint.contains("salary > 0"))
                 && let Ok(price) = value.as_decimal()
-                && price <= 0.0 {
-                        return Err(ConstraintViolation::Check {
-                            column: column.get_name().to_string(),
-                            constraint: constraint.clone(),
-                        });
-                    }
+                && price <= 0.0
+            {
+                return Err(ConstraintViolation::Check {
+                    column: column.get_name().to_string(),
+                    constraint: constraint.clone(),
+                });
+            }
             // Add more constraint patterns as needed
         }
         Ok(())
@@ -204,17 +202,18 @@ impl ConstraintValidator {
         _referenced_table_data: &HashMap<String, Vec<Value>>, // Mock referenced table data
     ) -> Result<(), ConstraintViolation> {
         if let Some(fk) = column.get_foreign_key()
-            && !value.is_null() {
-                // In a real implementation, you'd check if the value exists in the referenced table
-                // For now, just demonstrate the structure
-                if !_referenced_table_data.contains_key(&ToString::to_string(&value)) {
-                    return Err(ConstraintViolation::ForeignKey {
-                        column: column.get_name().to_string(),
-                        referenced_table: fk.referenced_table.clone(),
-                        referenced_column: fk.referenced_column.clone(),
-                    });
-                }
+            && !value.is_null()
+        {
+            // In a real implementation, you'd check if the value exists in the referenced table
+            // For now, just demonstrate the structure
+            if !_referenced_table_data.contains_key(&ToString::to_string(&value)) {
+                return Err(ConstraintViolation::ForeignKey {
+                    column: column.get_name().to_string(),
+                    referenced_table: fk.referenced_table.clone(),
+                    referenced_column: fk.referenced_column.clone(),
+                });
             }
+        }
         Ok(())
     }
 
@@ -223,15 +222,16 @@ impl ConstraintValidator {
         for (i, column) in schema.get_columns().iter().enumerate() {
             let value = tuple.get_value(i);
             if value.is_null()
-                && let Some(default_value) = column.get_default_value() {
-                    // In a real implementation, you'd set the default value in the tuple
-                    // This requires modifying the Tuple struct to support value updates
-                    println!(
-                        "Would set default value for column {}: {:?}",
-                        column.get_name(),
-                        default_value
-                    );
-                }
+                && let Some(default_value) = column.get_default_value()
+            {
+                // In a real implementation, you'd set the default value in the tuple
+                // This requires modifying the Tuple struct to support value updates
+                println!(
+                    "Would set default value for column {}: {:?}",
+                    column.get_name(),
+                    default_value
+                );
+            }
         }
     }
 }

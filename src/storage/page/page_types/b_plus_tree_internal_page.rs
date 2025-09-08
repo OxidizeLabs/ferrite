@@ -1,6 +1,6 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
-use crate::storage::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 use log::debug;
 use std::any::Any;
 use std::fmt::{Debug, Formatter};
@@ -285,7 +285,7 @@ impl<
                         Some(self.values[0])
                     }
                 }
-            }
+            };
         }
 
         // In B+ tree internal nodes, the keys divide the range of keys
@@ -306,7 +306,7 @@ impl<
                     Some(self.values[i + 1])
                 } else {
                     Some(self.values[self.values.len() - 1])
-                }
+                };
             }
         }
 

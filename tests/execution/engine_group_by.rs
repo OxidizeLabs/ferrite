@@ -71,7 +71,7 @@ async fn test_group_by_column_names() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          ('Alice', 25, 50000),
          ('Alice', 25, 52000),
          ('Bob', 30, 60000),
@@ -145,7 +145,7 @@ async fn test_group_by_aggregates() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO employees VALUES 
+        "INSERT INTO employees VALUES
          ('Alice', 25, 50000, 'Engineering'),
          ('Alice', 25, 52000, 'Engineering'),
          ('Bob', 30, 60000, 'Sales'),
@@ -235,7 +235,7 @@ async fn test_group_by_single_column() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO products VALUES 
+        "INSERT INTO products VALUES
          ('Electronics', 100, 5),
          ('Electronics', 150, 3),
          ('Clothing', 50, 10),
@@ -283,7 +283,7 @@ async fn test_group_by_multiple_columns() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO departments VALUES 
+        "INSERT INTO departments VALUES
          ('Engineering', 'NYC', 10, 100000),
          ('Engineering', 'SF', 15, 150000),
          ('Sales', 'NYC', 8, 80000),
@@ -336,7 +336,7 @@ async fn test_group_by_with_where_clause() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO inventory VALUES 
+        "INSERT INTO inventory VALUES
          ('Laptop', 'Electronics', 1000, true),
          ('Phone', 'Electronics', 500, true),
          ('Tablet', 'Electronics', 300, false),
@@ -389,7 +389,7 @@ async fn test_group_by_with_having_clause() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO players VALUES 
+        "INSERT INTO players VALUES
          ('Team A', 'Alice', 100, 5),
          ('Team A', 'Bob', 150, 5),
          ('Team A', 'Charlie', 80, 5),
@@ -442,7 +442,7 @@ async fn test_group_by_with_order_by() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO sales VALUES 
+        "INSERT INTO sales VALUES
          ('North', 1000, 1),
          ('North', 1200, 2),
          ('South', 800, 1),
@@ -490,7 +490,7 @@ async fn test_group_by_with_null_values() {
 
     // Insert test data with NULL values
     db.execute_sql(
-        "INSERT INTO test_nulls VALUES 
+        "INSERT INTO test_nulls VALUES
          ('A', 10, 'Description A'),
          ('A', NULL, 'Description A2'),
          (NULL, 20, 'Description B'),
@@ -542,7 +542,7 @@ async fn test_group_by_all_aggregation_functions() {
 
     // Insert test data
     db.execute_sql(
-        "INSERT INTO measurements VALUES 
+        "INSERT INTO measurements VALUES
          ('Group1', 10, 1),
          ('Group1', 20, 2),
          ('Group1', 30, 3),
@@ -652,7 +652,7 @@ async fn test_group_by_performance_large_dataset() {
     for chunk in insert_statements.chunks(200) {
         let values = chunk.join(", ");
         let sql = format!("INSERT INTO large_dataset VALUES {}", values);
-        
+
         db.execute_sql(
             &sql,
             IsolationLevel::ReadCommitted,
@@ -704,7 +704,7 @@ async fn test_group_by_distinct_operations() {
 
     // Insert test data with some duplicates
     db.execute_sql(
-        "INSERT INTO employee_skills VALUES 
+        "INSERT INTO employee_skills VALUES
          ('Engineering', 'Python', 'Alice', 9),
          ('Engineering', 'Python', 'Bob', 8),
          ('Engineering', 'Java', 'Alice', 7),

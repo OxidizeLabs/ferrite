@@ -288,7 +288,8 @@ mod unit_tests {
 
         let config = config::standard();
         let serialized = bincode::encode_to_vec(&schema, config).unwrap();
-        let (deserialized, _): (Schema, usize) = bincode::decode_from_slice(&serialized, config).unwrap();
+        let (deserialized, _): (Schema, usize) =
+            bincode::decode_from_slice(&serialized, config).unwrap();
 
         assert_eq!(schema, deserialized);
     }
@@ -442,7 +443,8 @@ mod unit_tests {
         // Test that primary keys are preserved during serialization
         let config = config::standard();
         let serialized = bincode::encode_to_vec(&schema, config).unwrap();
-        let (deserialized, _): (Schema, usize) = bincode::decode_from_slice(&serialized, config).unwrap();
+        let (deserialized, _): (Schema, usize) =
+            bincode::decode_from_slice(&serialized, config).unwrap();
 
         assert_eq!(
             schema.get_primary_key_columns(),

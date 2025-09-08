@@ -102,5 +102,3 @@ Proposed mapping (high level)
 - Buffer pool async ops → tests/buffer/async_bpm.rs
 - TableHeap multi-page/storage → tests/storage/table_heap.rs
 - Recovery/WAL → tests/recovery/*.rs
-
-

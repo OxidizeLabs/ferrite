@@ -2,7 +2,6 @@ use crate::sql::binder::bound_expression::BoundExpression;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-
 /// All types of order-bys in binder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderByType {
@@ -27,8 +26,7 @@ impl Display for BoundOrderBy {
         write!(
             f,
             "BoundOrderBy {{ type={:?}, expr={} }}",
-            self.order_type,
-            self.expr
+            self.order_type, self.expr
         )
     }
 }

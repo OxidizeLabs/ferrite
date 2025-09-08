@@ -46,10 +46,14 @@ impl OperationStatus {
     /// Completes the operation with a result
     pub fn complete(self, result: OperationResult) -> Self {
         match self {
-            Self::Pending { started_at, notifier, .. } => {
+            Self::Pending {
+                started_at,
+                notifier,
+                ..
+            } => {
                 // Try to notify waiting tasks (ignore if receiver is dropped)
                 let _ = notifier.send(result.clone());
-                
+
                 Self::Completed {
                     started_at,
                     completed_at: Instant::now(),
@@ -63,13 +67,11 @@ impl OperationStatus {
     /// Cancels the operation
     pub fn cancel(self, reason: String) -> Self {
         match self {
-            Self::Pending { started_at, .. } => {
-                Self::Cancelled {
-                    started_at,
-                    cancelled_at: Instant::now(),
-                    reason,
-                }
-            }
+            Self::Pending { started_at, .. } => Self::Cancelled {
+                started_at,
+                cancelled_at: Instant::now(),
+                reason,
+            },
             other => other, // Already completed or cancelled
         }
     }
@@ -97,10 +99,12 @@ impl OperationStatus {
     /// Checks if the operation has timed out
     pub fn is_timed_out(&self) -> bool {
         match self {
-            Self::Pending { started_at, timeout: Some(timeout), .. } => {
-                started_at.elapsed() > *timeout
-            }
+            Self::Pending {
+                started_at,
+                timeout: Some(timeout),
+                ..
+            } => started_at.elapsed() > *timeout,
             _ => false,
         }
     }
-} 
+}

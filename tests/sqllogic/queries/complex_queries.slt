@@ -70,7 +70,7 @@ INSERT INTO employee_projects (employee_id, project_id, role) VALUES
 
 # Test complex joins
 query TTRI
-SELECT 
+SELECT
     e.name as employee,
     d.name as department,
     e.salary,
@@ -103,7 +103,7 @@ Bob Engineering
 
 # Test window functions
 query TTR
-SELECT 
+SELECT
     e.name,
     d.name as department,
     e.salary,
@@ -120,7 +120,7 @@ Eve Sales 90000.00 1
 
 # Test complex aggregates
 query TRR
-SELECT 
+SELECT
     d.name,
     AVG(e.salary) as avg_salary,
     d.budget / COUNT(e.id) as budget_per_employee
@@ -158,4 +158,4 @@ ORDER BY name;
 ----
 Alice
 Bob
-Eve 
+Eve

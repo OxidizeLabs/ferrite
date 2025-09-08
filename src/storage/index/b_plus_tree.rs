@@ -702,7 +702,6 @@ impl BPlusTree {
         let mut current_path = path;
 
         while let Some((parent_arc, child_idx)) = current_path.pop() {
-
             let mut parent = parent_arc.write();
 
             // Check if child needs rebalancing
@@ -985,22 +984,22 @@ impl Index for BPlusTree {
         // Convert Option<Tuple> to Option<Arc<Tuple>>
         let start_key_arc = start_key.map(Arc::new);
         let end_key_arc = end_key.map(Arc::new);
-        
+
         // Create an Arc<RwLock<BPlusTree>> from self
         // Since we need to provide an Arc<RwLock<BPlusTree>> but we only have &self,
         // we need to create a new Arc containing a clone of the tree
         let tree_arc = Arc::new(RwLock::new(self.clone()));
-        
+
         IndexIterator::new(tree_arc, start_key_arc, end_key_arc)
     }
 
     fn create_point_iterator(&self, key: &Tuple) -> IndexIterator {
         // For point iteration, both start and end keys are the same
         let key_arc = Arc::new(key.clone());
-        
+
         // Create an Arc<RwLock<BPlusTree>> from self
         let tree_arc = Arc::new(RwLock::new(self.clone()));
-        
+
         IndexIterator::new(tree_arc, Some(key_arc.clone()), Some(key_arc))
     }
 

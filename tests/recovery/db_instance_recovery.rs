@@ -41,5 +41,3 @@ async fn db_instance_recovery_integration() {
         .await;
     assert!(result.is_ok());
 }
-
-

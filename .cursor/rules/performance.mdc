@@ -59,7 +59,7 @@ impl BufferPool {
         if let Some(frame_id) = self.page_table.get_fast(page_id) {
             return Ok(self.pin_page(frame_id));
         }
-        
+
         // Slow path: load from disk
         self.fetch_page_from_disk(page_id)
     }
@@ -172,7 +172,7 @@ impl TransactionManager {
 #[cfg(test)]
 mod performance_tests {
     use criterion::{Criterion, black_box};
-    
+
     fn benchmark_critical_path(c: &mut Criterion) {
         c.bench_function("buffer_pool_contention", |b| {
             let buffer_pool = setup_test_buffer_pool();

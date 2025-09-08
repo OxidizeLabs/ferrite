@@ -10,7 +10,7 @@ This guide shows how to use **Criterion.rs** for performance benchmarking in TKD
 # Run all benchmarks
 cargo bench
 
-# Run specific benchmark group  
+# Run specific benchmark group
 cargo bench cache_benchmarks
 
 # Run with HTML reports (opens browser)
@@ -26,7 +26,7 @@ cargo bench -- --baseline main
 
 After running benchmarks, open `target/criterion/report/index.html` in your browser for detailed analysis including:
 - Performance trends across input sizes
-- Statistical confidence intervals  
+- Statistical confidence intervals
 - Regression detection
 - Violin plots showing distribution
 
@@ -57,7 +57,7 @@ use criterion::{BenchmarkId, Criterion};
 
 fn benchmark_complexity(c: &mut Criterion) {
     let mut group = c.benchmark_group("algorithm_complexity");
-    
+
     // Test different input sizes - Criterion will detect O(n), O(n²), etc.
     for size in [100, 500, 1000, 5000, 10000] {
         group.bench_with_input(
@@ -72,7 +72,7 @@ fn benchmark_complexity(c: &mut Criterion) {
             }
         );
     }
-    
+
     group.finish();
 }
 ```
@@ -104,22 +104,22 @@ fn benchmark_with_setup(c: &mut Criterion) {
 ```rust
 fn benchmark_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_comparison");
-    
+
     group.bench_function("fifo_cache", |b| {
         // FIFO implementation
         b.iter(|| fifo_operation(black_box(input)))
     });
-    
+
     group.bench_function("lru_cache", |b| {
-        // LRU implementation  
+        // LRU implementation
         b.iter(|| lru_operation(black_box(input)))
     });
-    
+
     group.bench_function("lfu_cache", |b| {
         // LFU implementation
         b.iter(|| lfu_operation(black_box(input)))
     });
-    
+
     group.finish();
 }
 ```
@@ -142,20 +142,20 @@ black_box(result);
 ```rust
 fn benchmark_configured(c: &mut Criterion) {
     let mut group = c.benchmark_group("configured_benchmark");
-    
+
     // Longer measurements for more stable results
     group.measurement_time(Duration::from_secs(10));
-    
+
     // More samples for better statistics
     group.sample_size(200);
-    
+
     // Longer warmup for consistent results
     group.warm_up_time(Duration::from_secs(3));
-    
+
     group.bench_function("operation", |b| {
         b.iter(|| operation())
     });
-    
+
     group.finish();
 }
 ```
@@ -166,7 +166,7 @@ fn benchmark_configured(c: &mut Criterion) {
 // For expensive setup
 criterion::BatchSize::LargeInput
 
-// For cheap setup  
+// For cheap setup
 criterion::BatchSize::SmallInput
 
 // Let Criterion decide
@@ -180,7 +180,7 @@ criterion::BatchSize::PerIteration
 ```rust
 fn benchmark_buffer_pool(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_pool");
-    
+
     for pool_size in [100, 500, 1000] {
         group.bench_with_input(
             BenchmarkId::new("fetch_page", pool_size),
@@ -201,7 +201,7 @@ fn benchmark_buffer_pool(c: &mut Criterion) {
 ```rust
 fn benchmark_sql_execution(c: &mut Criterion) {
     let mut group = c.benchmark_group("sql_execution");
-    
+
     group.bench_function("select_query", |b| {
         b.iter_batched(
             || setup_test_database(),
@@ -219,7 +219,7 @@ fn benchmark_sql_execution(c: &mut Criterion) {
 ```rust
 fn benchmark_index_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("index_operations");
-    
+
     for size in [1000, 10000, 100000] {
         group.bench_with_input(
             BenchmarkId::new("btree_search", size),
@@ -240,7 +240,7 @@ fn benchmark_index_operations(c: &mut Criterion) {
 ### Complexity Detection
 Criterion automatically detects algorithmic complexity:
 - **O(1)**: Flat line across input sizes
-- **O(log n)**: Slowly increasing curve  
+- **O(log n)**: Slowly increasing curve
 - **O(n)**: Linear increase
 - **O(n log n)**: Slightly curved upward
 - **O(n²)**: Steep upward curve
@@ -272,16 +272,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          
+
       - name: Run Benchmarks
         run: |
           cargo bench -- --output-format json | tee output.json
-          
+
       - name: Compare Performance
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -308,7 +308,7 @@ cargo bench -- --baseline main
 tkdb/
 ├── benches/
 │   ├── cache_benchmarks.rs      # Cache performance tests
-│   ├── sql_benchmarks.rs        # SQL execution benchmarks  
+│   ├── sql_benchmarks.rs        # SQL execution benchmarks
 │   ├── buffer_pool_benchmarks.rs # Buffer management benchmarks
 │   └── index_benchmarks.rs      # Index operation benchmarks
 ├── Cargo.toml                   # Criterion dependencies + [[bench]] config

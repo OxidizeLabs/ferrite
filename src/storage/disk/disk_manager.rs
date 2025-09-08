@@ -1,7 +1,7 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::logger::initialize_logger;
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
-use crate::storage::disk::direct_io::{open_direct_io, DirectIOConfig};
+use crate::storage::disk::direct_io::{DirectIOConfig, open_direct_io};
 use log::{debug, error, info, trace, warn};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
@@ -10,8 +10,8 @@ use std::io::{
     BufReader, BufWriter, Error, ErrorKind, Read, Result as IoResult, Seek, SeekFrom, Write,
 };
 use std::path::Path;
-use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
 
@@ -71,10 +71,11 @@ impl ReadAheadCache {
 
         // Simple sequential prediction
         if let Some(last) = self.last_sequential
-            && page_id == last + 1 {
-                // Sequential access detected
-                return (page_id + 1..=page_id + READ_AHEAD_PAGES as PageId).collect();
-            }
+            && page_id == last + 1
+        {
+            // Sequential access detected
+            return (page_id + 1..=page_id + READ_AHEAD_PAGES as PageId).collect();
+        }
         self.last_sequential = Some(page_id);
         Vec::new()
     }
@@ -242,8 +243,8 @@ impl FileDiskManager {
     ///
     /// A new `FileDiskManager` instance.
     pub fn new(
-        db_file: String, 
-        log_file: String, 
+        db_file: String,
+        log_file: String,
         buffer_size: usize,
         config: DiskManagerConfig,
     ) -> Self {
@@ -264,24 +265,26 @@ impl FileDiskManager {
 
         // Ensure parent directories exist for both files
         if let Some(db_parent) = Path::new(&db_file).parent()
-            && let Err(e) = std::fs::create_dir_all(db_parent) {
-                error!(
-                    target: "tkdb::storage",
-                    "Failed to create parent directory for database file: {}", e
-                );
-                panic!("Failed to create database directory: {}", e);
-            }
+            && let Err(e) = std::fs::create_dir_all(db_parent)
+        {
+            error!(
+                target: "tkdb::storage",
+                "Failed to create parent directory for database file: {}", e
+            );
+            panic!("Failed to create database directory: {}", e);
+        }
         if let Some(log_parent) = Path::new(&log_file).parent()
-            && let Err(e) = std::fs::create_dir_all(log_parent) {
-                error!(
-                    target: "tkdb::storage",
-                    "Failed to create parent directory for log file: {}", e
-                );
-                panic!("Failed to create log directory: {}", e);
-            }
+            && let Err(e) = std::fs::create_dir_all(log_parent)
+        {
+            error!(
+                target: "tkdb::storage",
+                "Failed to create parent directory for log file: {}", e
+            );
+            panic!("Failed to create log directory: {}", e);
+        }
 
-        let db_io = open_direct_io(&db_file, true, true, true, &direct_io_config)
-            .unwrap_or_else(|e| {
+        let db_io =
+            open_direct_io(&db_file, true, true, true, &direct_io_config).unwrap_or_else(|e| {
                 error!(
                     target: "tkdb::storage",
                     "Failed to open database file {}: {}", db_file, e
@@ -289,8 +292,8 @@ impl FileDiskManager {
                 panic!("Failed to open database file {}: {}", db_file, e)
             });
 
-        let log_io = open_direct_io(&log_file, true, true, true, &direct_io_config)
-            .unwrap_or_else(|e| {
+        let log_io =
+            open_direct_io(&log_file, true, true, true, &direct_io_config).unwrap_or_else(|e| {
                 error!(
                     target: "tkdb::storage",
                     "Failed to open log file {}: {}", log_file, e
@@ -305,9 +308,12 @@ impl FileDiskManager {
                     target: "tkdb::storage",
                     "Failed to open database file for reading {}: {}", db_file, e
                 );
-                panic!("Failed to open database file for reading {}: {}", db_file, e)
+                panic!(
+                    "Failed to open database file for reading {}: {}",
+                    db_file, e
+                )
             });
-        
+
         let _log_read = open_direct_io(&log_file, true, false, false, &direct_io_config)
             .unwrap_or_else(|e| {
                 error!(
@@ -816,7 +822,8 @@ impl FileDiskManager {
         let flush_count = pages_to_flush.len();
 
         // Convert to batch format
-        let batch_pages: Vec<_> = pages_to_flush.into_iter()
+        let batch_pages: Vec<_> = pages_to_flush
+            .into_iter()
             .map(|(page_id, data)| (page_id, data))
             .collect();
 
@@ -826,7 +833,9 @@ impl FileDiskManager {
         // Update metrics
         write_buffer.dirty_count.store(0, Ordering::Relaxed);
         write_buffer.last_flush = Instant::now();
-        self.metrics.write_buffer_flushes.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .write_buffer_flushes
+            .fetch_add(1, Ordering::Relaxed);
 
         debug!(
             target: "tkdb::storage",
@@ -844,7 +853,12 @@ impl FileDiskManager {
         for page_id in page_ids {
             let mut page_data = [0u8; DB_PAGE_SIZE as usize];
 
-            if self.disk_io.read().read_page(page_id, &mut page_data).is_ok() {
+            if self
+                .disk_io
+                .read()
+                .read_page(page_id, &mut page_data)
+                .is_ok()
+            {
                 // Cache the prefetched page
                 let mut cache = self.read_cache.write();
                 if cache.cache.len() < 256 {
@@ -970,7 +984,8 @@ impl FileDiskManager {
                 // Cache the read page for future use
                 {
                     let mut read_cache = self.read_cache.write();
-                    if read_cache.cache.len() < 256 { // Limit cache size
+                    if read_cache.cache.len() < 256 {
+                        // Limit cache size
                         read_cache.cache.insert(page_id, *page_data);
                     }
                 }
@@ -1134,7 +1149,11 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = Arc::new(RwLock::new(FileDiskManager::new_with_defaults(db_path, log_path, 64 * 1024)));
+            let disk_manager = Arc::new(RwLock::new(FileDiskManager::new_with_defaults(
+                db_path,
+                log_path,
+                64 * 1024,
+            )));
 
             Self {
                 disk_manager,
@@ -1529,8 +1548,8 @@ mod tests {
     // Retry tests
     mod retry_tests {
         use super::*;
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         #[test]
         fn test_write_with_retry_success() {
@@ -1736,7 +1755,11 @@ mod tests {
 
             // Write second entry at offset after first entry
             let second_offset = first_entry.len() as u64;
-            assert!(disk_manager.write_log_at(second_entry, second_offset).is_ok());
+            assert!(
+                disk_manager
+                    .write_log_at(second_entry, second_offset)
+                    .is_ok()
+            );
 
             // Read both entries
             let mut buffer = vec![0u8; first_entry.len()];
@@ -1771,11 +1794,19 @@ mod tests {
             assert!(disk_manager.write_log_at(&test_data, first_offset).is_ok());
 
             let test_data2 = vec![84u8; second_size as usize];
-            assert!(disk_manager.write_log_at(&test_data2, second_offset).is_ok());
+            assert!(
+                disk_manager
+                    .write_log_at(&test_data2, second_offset)
+                    .is_ok()
+            );
 
             // Verify data
             let mut read_buffer = vec![0u8; first_size as usize];
-            assert!(disk_manager.read_log_at(&mut read_buffer, first_offset).is_ok());
+            assert!(
+                disk_manager
+                    .read_log_at(&mut read_buffer, first_offset)
+                    .is_ok()
+            );
             assert_eq!(read_buffer, test_data);
         }
 
@@ -1811,7 +1842,9 @@ mod tests {
                     // Allocate space
                     let offset = {
                         let disk_mgr = dm.write();
-                        disk_mgr.allocate_log_space(entry_bytes.len() as u64).unwrap()
+                        disk_mgr
+                            .allocate_log_space(entry_bytes.len() as u64)
+                            .unwrap()
                     };
 
                     // Write log entry
@@ -1873,14 +1906,25 @@ mod tests {
                 .to_string();
 
             // Re-create disk manager with the known file
-            let disk_manager2 = FileDiskManager::new_with_defaults(db_file.clone(),
-                temp_dir.path().join("test.log").to_str().unwrap().to_string(), 1024);
+            let disk_manager2 = FileDiskManager::new_with_defaults(
+                db_file.clone(),
+                temp_dir
+                    .path()
+                    .join("test.log")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+                1024,
+            );
             assert!(disk_manager2.write_page(0, &test_data).is_ok());
             assert!(disk_manager2.shut_down().is_ok());
 
             // Test get_file_size
             let file_size = FileDiskManager::get_file_size(&db_file).unwrap();
-            assert!(file_size >= DB_PAGE_SIZE, "File should be at least one page size");
+            assert!(
+                file_size >= DB_PAGE_SIZE,
+                "File should be at least one page size"
+            );
         }
 
         #[test]
@@ -1927,7 +1971,11 @@ mod tests {
                 .to_string();
 
             // This should create the necessary directories
-            let disk_manager = FileDiskManager::new_with_defaults(nested_db_path.clone(), nested_log_path.clone(), 1024);
+            let disk_manager = FileDiskManager::new_with_defaults(
+                nested_db_path.clone(),
+                nested_log_path.clone(),
+                1024,
+            );
 
             // Verify files were created
             assert!(fs::metadata(&nested_db_path).is_ok());
@@ -2005,8 +2053,18 @@ mod tests {
         fn test_memory_pressure_simulation() {
             // Create disk manager with very small buffer
             let temp_dir = TempDir::new().unwrap();
-            let db_path = temp_dir.path().join("pressure_test.db").to_str().unwrap().to_string();
-            let log_path = temp_dir.path().join("pressure_test.log").to_str().unwrap().to_string();
+            let db_path = temp_dir
+                .path()
+                .join("pressure_test.db")
+                .to_str()
+                .unwrap()
+                .to_string();
+            let log_path = temp_dir
+                .path()
+                .join("pressure_test.log")
+                .to_str()
+                .unwrap()
+                .to_string();
 
             let disk_manager = FileDiskManager::new_with_defaults(db_path, log_path, 64); // Very small buffer
 
@@ -2160,196 +2218,240 @@ mod tests {
             );
         }
 
-                 #[test]
-         fn test_metrics_accuracy() {
-             let ctx = TestContext::new("test_metrics_accuracy");
-             let disk_manager = ctx.disk_manager.write();
+        #[test]
+        fn test_metrics_accuracy() {
+            let ctx = TestContext::new("test_metrics_accuracy");
+            let disk_manager = ctx.disk_manager.write();
 
-             // Reset metrics by creating new disk manager
-             let initial_read_throughput = disk_manager
-                 .metrics
-                 .read_throughput_bytes
-                 .load(Ordering::Relaxed);
-             let initial_write_throughput = disk_manager
-                 .metrics
-                 .write_throughput_bytes
-                 .load(Ordering::Relaxed);
+            // Reset metrics by creating new disk manager
+            let initial_read_throughput = disk_manager
+                .metrics
+                .read_throughput_bytes
+                .load(Ordering::Relaxed);
+            let initial_write_throughput = disk_manager
+                .metrics
+                .write_throughput_bytes
+                .load(Ordering::Relaxed);
 
-             let test_data = [42u8; DB_PAGE_SIZE as usize];
-             let page_count = 10;
+            let test_data = [42u8; DB_PAGE_SIZE as usize];
+            let page_count = 10;
 
-             // Perform known operations
-             for i in 0..page_count {
-                 assert!(disk_manager.write_page(i, &test_data).is_ok());
-             }
+            // Perform known operations
+            for i in 0..page_count {
+                assert!(disk_manager.write_page(i, &test_data).is_ok());
+            }
 
-             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
-             for i in 0..page_count {
-                 assert!(disk_manager.read_page(i, &mut read_buffer).is_ok());
-             }
+            let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
+            for i in 0..page_count {
+                assert!(disk_manager.read_page(i, &mut read_buffer).is_ok());
+            }
 
-             // Check metrics
-             let final_write_throughput = disk_manager
-                 .metrics
-                 .write_throughput_bytes
-                 .load(Ordering::Relaxed);
-             let final_read_throughput = disk_manager
-                 .metrics
-                 .read_throughput_bytes
-                 .load(Ordering::Relaxed);
+            // Check metrics
+            let final_write_throughput = disk_manager
+                .metrics
+                .write_throughput_bytes
+                .load(Ordering::Relaxed);
+            let final_read_throughput = disk_manager
+                .metrics
+                .read_throughput_bytes
+                .load(Ordering::Relaxed);
 
-             let expected_bytes = (page_count as u64) * DB_PAGE_SIZE;
-             assert_eq!(
-                 final_write_throughput - initial_write_throughput,
-                 expected_bytes,
-                 "Write throughput metrics should match actual operations"
-             );
-             assert_eq!(
-                 final_read_throughput - initial_read_throughput,
-                 expected_bytes,
-                 "Read throughput metrics should match actual operations"
-             );
-         }
+            let expected_bytes = (page_count as u64) * DB_PAGE_SIZE;
+            assert_eq!(
+                final_write_throughput - initial_write_throughput,
+                expected_bytes,
+                "Write throughput metrics should match actual operations"
+            );
+            assert_eq!(
+                final_read_throughput - initial_read_throughput,
+                expected_bytes,
+                "Read throughput metrics should match actual operations"
+            );
+        }
 
-         #[test]
-         fn test_enhanced_performance_monitoring() {
-             let ctx = TestContext::new("test_enhanced_performance_monitoring");
-             let disk_manager = ctx.disk_manager.write();
+        #[test]
+        fn test_enhanced_performance_monitoring() {
+            let ctx = TestContext::new("test_enhanced_performance_monitoring");
+            let disk_manager = ctx.disk_manager.write();
 
-             println!("=== Enhanced Performance Monitoring Test ===");
+            println!("=== Enhanced Performance Monitoring Test ===");
 
-             // Test different operation patterns and measure their performance
-             let test_data = [42u8; DB_PAGE_SIZE as usize];
-             let page_count = 100;
+            // Test different operation patterns and measure their performance
+            let test_data = [42u8; DB_PAGE_SIZE as usize];
+            let page_count = 100;
 
-             // 1. Sequential Write Performance
-             println!("\n1. Testing Sequential Write Performance:");
-             let start_time = Instant::now();
-             for i in 0..page_count {
-                 assert!(disk_manager.write_page(i, &test_data).is_ok());
-             }
-             let sequential_write_duration = start_time.elapsed();
-             println!("   Sequential writes: {:?} ({:.2} pages/sec)",
-                     sequential_write_duration,
-                     page_count as f64 / sequential_write_duration.as_secs_f64());
+            // 1. Sequential Write Performance
+            println!("\n1. Testing Sequential Write Performance:");
+            let start_time = Instant::now();
+            for i in 0..page_count {
+                assert!(disk_manager.write_page(i, &test_data).is_ok());
+            }
+            let sequential_write_duration = start_time.elapsed();
+            println!(
+                "   Sequential writes: {:?} ({:.2} pages/sec)",
+                sequential_write_duration,
+                page_count as f64 / sequential_write_duration.as_secs_f64()
+            );
 
-             // 2. Sequential Read Performance
-             println!("\n2. Testing Sequential Read Performance:");
-             let start_time = Instant::now();
-             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
-             for i in 0..page_count {
-                 assert!(disk_manager.read_page(i, &mut read_buffer).is_ok());
-                 assert_eq!(read_buffer[0], 42);
-             }
-             let sequential_read_duration = start_time.elapsed();
-             println!("   Sequential reads: {:?} ({:.2} pages/sec)",
-                     sequential_read_duration,
-                     page_count as f64 / sequential_read_duration.as_secs_f64());
+            // 2. Sequential Read Performance
+            println!("\n2. Testing Sequential Read Performance:");
+            let start_time = Instant::now();
+            let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
+            for i in 0..page_count {
+                assert!(disk_manager.read_page(i, &mut read_buffer).is_ok());
+                assert_eq!(read_buffer[0], 42);
+            }
+            let sequential_read_duration = start_time.elapsed();
+            println!(
+                "   Sequential reads: {:?} ({:.2} pages/sec)",
+                sequential_read_duration,
+                page_count as f64 / sequential_read_duration.as_secs_f64()
+            );
 
-             // 3. Random Access Pattern Performance
-             println!("\n3. Testing Random Access Pattern:");
-             use std::collections::hash_map::DefaultHasher;
-             use std::hash::{Hash, Hasher};
+            // 3. Random Access Pattern Performance
+            println!("\n3. Testing Random Access Pattern:");
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
 
-             let mut random_pages: Vec<PageId> = (0..page_count).collect();
-             random_pages.sort_by_key(|&x| {
-                 let mut hasher = DefaultHasher::new();
-                 x.hash(&mut hasher);
-                 hasher.finish()
-             });
+            let mut random_pages: Vec<PageId> = (0..page_count).collect();
+            random_pages.sort_by_key(|&x| {
+                let mut hasher = DefaultHasher::new();
+                x.hash(&mut hasher);
+                hasher.finish()
+            });
 
-             let start_time = Instant::now();
-             for &page_id in &random_pages {
-                 assert!(disk_manager.read_page(page_id, &mut read_buffer).is_ok());
-             }
-             let random_read_duration = start_time.elapsed();
-             println!("   Random reads: {:?} ({:.2} pages/sec)",
-                     random_read_duration,
-                     page_count as f64 / random_read_duration.as_secs_f64());
+            let start_time = Instant::now();
+            for &page_id in &random_pages {
+                assert!(disk_manager.read_page(page_id, &mut read_buffer).is_ok());
+            }
+            let random_read_duration = start_time.elapsed();
+            println!(
+                "   Random reads: {:?} ({:.2} pages/sec)",
+                random_read_duration,
+                page_count as f64 / random_read_duration.as_secs_f64()
+            );
 
-             // 4. Batch Operation Performance
-             println!("\n4. Testing Batch Operation Performance:");
-             let batch_pages: Vec<_> = (page_count..(page_count + 50))
-                 .map(|i| {
-                     let mut data = [0u8; DB_PAGE_SIZE as usize];
-                     data[0] = (i % 256) as u8;
-                     (i as PageId, data)
-                 })
-                 .collect();
+            // 4. Batch Operation Performance
+            println!("\n4. Testing Batch Operation Performance:");
+            let batch_pages: Vec<_> = (page_count..(page_count + 50))
+                .map(|i| {
+                    let mut data = [0u8; DB_PAGE_SIZE as usize];
+                    data[0] = (i % 256) as u8;
+                    (i as PageId, data)
+                })
+                .collect();
 
-             let start_time = Instant::now();
-             assert!(disk_manager.write_pages_batch(&batch_pages).is_ok());
-             let batch_write_duration = start_time.elapsed();
-             println!("   Batch writes: {:?} ({:.2} pages/sec)",
-                     batch_write_duration,
-                     batch_pages.len() as f64 / batch_write_duration.as_secs_f64());
+            let start_time = Instant::now();
+            assert!(disk_manager.write_pages_batch(&batch_pages).is_ok());
+            let batch_write_duration = start_time.elapsed();
+            println!(
+                "   Batch writes: {:?} ({:.2} pages/sec)",
+                batch_write_duration,
+                batch_pages.len() as f64 / batch_write_duration.as_secs_f64()
+            );
 
-             let batch_read_ids: Vec<PageId> = batch_pages.iter().map(|(id, _)| *id).collect();
-             let start_time = Instant::now();
-             let batch_results = disk_manager.read_pages_batch(&batch_read_ids).unwrap();
-             let batch_read_duration = start_time.elapsed();
-             println!("   Batch reads: {:?} ({:.2} pages/sec)",
-                     batch_read_duration,
-                     batch_results.len() as f64 / batch_read_duration.as_secs_f64());
+            let batch_read_ids: Vec<PageId> = batch_pages.iter().map(|(id, _)| *id).collect();
+            let start_time = Instant::now();
+            let batch_results = disk_manager.read_pages_batch(&batch_read_ids).unwrap();
+            let batch_read_duration = start_time.elapsed();
+            println!(
+                "   Batch reads: {:?} ({:.2} pages/sec)",
+                batch_read_duration,
+                batch_results.len() as f64 / batch_read_duration.as_secs_f64()
+            );
 
-             // 5. Mixed Operation Performance
-             println!("\n5. Testing Mixed Operations:");
-             let start_time = Instant::now();
-             for i in 0..50 {
-                 // Write
-                 let mut data = [0u8; DB_PAGE_SIZE as usize];
-                 data[0] = i as u8;
-                 assert!(disk_manager.write_page(i + 200, &data).is_ok());
+            // 5. Mixed Operation Performance
+            println!("\n5. Testing Mixed Operations:");
+            let start_time = Instant::now();
+            for i in 0..50 {
+                // Write
+                let mut data = [0u8; DB_PAGE_SIZE as usize];
+                data[0] = i as u8;
+                assert!(disk_manager.write_page(i + 200, &data).is_ok());
 
-                 // Read back
-                 assert!(disk_manager.read_page(i + 200, &mut read_buffer).is_ok());
-                 assert_eq!(read_buffer[0], i as u8);
+                // Read back
+                assert!(disk_manager.read_page(i + 200, &mut read_buffer).is_ok());
+                assert_eq!(read_buffer[0], i as u8);
 
-                 // Log operation
-                 let log_entry = format!("Mixed operation log {}", i);
-                 assert!(disk_manager.write_log(log_entry.as_bytes()).is_ok());
-             }
-             let mixed_duration = start_time.elapsed();
-             println!("   Mixed operations: {:?} ({:.2} ops/sec)",
-                     mixed_duration,
-                     150.0 / mixed_duration.as_secs_f64()); // 50 writes + 50 reads + 50 logs
+                // Log operation
+                let log_entry = format!("Mixed operation log {}", i);
+                assert!(disk_manager.write_log(log_entry.as_bytes()).is_ok());
+            }
+            let mixed_duration = start_time.elapsed();
+            println!(
+                "   Mixed operations: {:?} ({:.2} ops/sec)",
+                mixed_duration,
+                150.0 / mixed_duration.as_secs_f64()
+            ); // 50 writes + 50 reads + 50 logs
 
-             // 6. Current Metrics Summary
-             println!("\n6. Current Metrics Summary:");
-             let read_throughput = disk_manager.metrics.read_throughput_bytes.load(Ordering::Relaxed);
-             let write_throughput = disk_manager.metrics.write_throughput_bytes.load(Ordering::Relaxed);
-             let read_latency = disk_manager.metrics.read_latency_ns.load(Ordering::Relaxed);
-             let write_latency = disk_manager.metrics.write_latency_ns.load(Ordering::Relaxed);
-             let read_errors = disk_manager.metrics.read_errors.load(Ordering::Relaxed);
-             let write_errors = disk_manager.metrics.write_errors.load(Ordering::Relaxed);
+            // 6. Current Metrics Summary
+            println!("\n6. Current Metrics Summary:");
+            let read_throughput = disk_manager
+                .metrics
+                .read_throughput_bytes
+                .load(Ordering::Relaxed);
+            let write_throughput = disk_manager
+                .metrics
+                .write_throughput_bytes
+                .load(Ordering::Relaxed);
+            let read_latency = disk_manager.metrics.read_latency_ns.load(Ordering::Relaxed);
+            let write_latency = disk_manager
+                .metrics
+                .write_latency_ns
+                .load(Ordering::Relaxed);
+            let read_errors = disk_manager.metrics.read_errors.load(Ordering::Relaxed);
+            let write_errors = disk_manager.metrics.write_errors.load(Ordering::Relaxed);
 
-             println!("   Total read throughput: {:.2} MB", read_throughput as f64 / 1_000_000.0);
-             println!("   Total write throughput: {:.2} MB", write_throughput as f64 / 1_000_000.0);
-             println!("   Cumulative read latency: {:?}", Duration::from_nanos(read_latency));
-             println!("   Cumulative write latency: {:?}", Duration::from_nanos(write_latency));
-             println!("   Read errors: {}", read_errors);
-             println!("   Write errors: {}", write_errors);
+            println!(
+                "   Total read throughput: {:.2} MB",
+                read_throughput as f64 / 1_000_000.0
+            );
+            println!(
+                "   Total write throughput: {:.2} MB",
+                write_throughput as f64 / 1_000_000.0
+            );
+            println!(
+                "   Cumulative read latency: {:?}",
+                Duration::from_nanos(read_latency)
+            );
+            println!(
+                "   Cumulative write latency: {:?}",
+                Duration::from_nanos(write_latency)
+            );
+            println!("   Read errors: {}", read_errors);
+            println!("   Write errors: {}", write_errors);
 
-             // 7. Health Check
-             println!("\n7. Health Check:");
-             let is_healthy = disk_manager.check_health();
-             println!("   Disk Manager Health: {}", if is_healthy { "HEALTHY" } else { "UNHEALTHY" });
+            // 7. Health Check
+            println!("\n7. Health Check:");
+            let is_healthy = disk_manager.check_health();
+            println!(
+                "   Disk Manager Health: {}",
+                if is_healthy { "HEALTHY" } else { "UNHEALTHY" }
+            );
 
-             // 8. Performance Comparison Summary
-             println!("\n8. Performance Comparison Summary:");
-             println!("   Sequential vs Random read ratio: {:.2}x",
-                     random_read_duration.as_secs_f64() / sequential_read_duration.as_secs_f64());
+            // 8. Performance Comparison Summary
+            println!("\n8. Performance Comparison Summary:");
+            println!(
+                "   Sequential vs Random read ratio: {:.2}x",
+                random_read_duration.as_secs_f64() / sequential_read_duration.as_secs_f64()
+            );
 
-             let individual_rate = page_count as f64 / sequential_write_duration.as_secs_f64();
-             let batch_rate = batch_pages.len() as f64 / batch_write_duration.as_secs_f64();
-             println!("   Batch vs Individual write ratio: {:.2}x", batch_rate / individual_rate);
+            let individual_rate = page_count as f64 / sequential_write_duration.as_secs_f64();
+            let batch_rate = batch_pages.len() as f64 / batch_write_duration.as_secs_f64();
+            println!(
+                "   Batch vs Individual write ratio: {:.2}x",
+                batch_rate / individual_rate
+            );
 
-             println!("\n=== Performance Monitoring Complete ===");
+            println!("\n=== Performance Monitoring Complete ===");
 
-             // Verify all operations completed successfully
-             assert!(is_healthy || read_errors == 0, "Should be healthy or have no read errors");
-             assert_eq!(write_errors, 0, "Should have no write errors");
-         }
+            // Verify all operations completed successfully
+            assert!(
+                is_healthy || read_errors == 0,
+                "Should be healthy or have no read errors"
+            );
+            assert_eq!(write_errors, 0, "Should have no write errors");
+        }
     }
 
     // Resource management tests
@@ -2389,7 +2491,10 @@ mod tests {
             // Note: The current implementation doesn't actually increment num_writes
             // in write_page, so this test documents current behavior
             let final_writes = disk_manager.get_num_writes();
-            assert_eq!(initial_writes, final_writes, "Write count tracking implementation may need review");
+            assert_eq!(
+                initial_writes, final_writes,
+                "Write count tracking implementation may need review"
+            );
         }
 
         #[test]
@@ -2430,7 +2535,8 @@ mod tests {
                     .unwrap()
                     .to_string();
 
-                let disk_manager = FileDiskManager::new_with_defaults(db_path, log_path, buffer_size);
+                let disk_manager =
+                    FileDiskManager::new_with_defaults(db_path, log_path, buffer_size);
 
                 // Test basic operations with different buffer sizes
                 let test_data = [42u8; DB_PAGE_SIZE as usize];
@@ -2574,11 +2680,10 @@ mod tests {
                     }
                 });
 
-            mock.expect_read_page()
-                .returning(|_, buf| {
-                    buf[0] = 42;
-                    Ok(())
-                });
+            mock.expect_read_page().returning(|_, buf| {
+                buf[0] = 42;
+                Ok(())
+            });
 
             disk_manager.set_disk_io(Box::new(mock));
 
@@ -2592,7 +2697,11 @@ mod tests {
 
             // Read operations should work
             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
-            assert!(disk_manager.read_page_with_retry(0, &mut read_buffer).is_ok());
+            assert!(
+                disk_manager
+                    .read_page_with_retry(0, &mut read_buffer)
+                    .is_ok()
+            );
             assert_eq!(read_buffer[0], 42);
         }
 
@@ -2661,7 +2770,10 @@ mod tests {
 
             // Get cache statistics
             let (hits, misses, hit_ratio) = disk_manager.get_cache_stats();
-            println!("   Cache stats - Hits: {}, Misses: {}, Hit ratio: {:.2}%", hits, misses, hit_ratio);
+            println!(
+                "   Cache stats - Hits: {}, Misses: {}, Hit ratio: {:.2}%",
+                hits, misses, hit_ratio
+            );
 
             // Test sequential access pattern (should trigger prefetching)
             println!("\n3. Testing Sequential Access Optimization:");
@@ -2673,7 +2785,10 @@ mod tests {
             println!("   Sequential reads: {:?}", sequential_duration);
 
             // Verify optimizations are working
-            assert!(cached_read_time < first_read_time, "Cache should improve read performance");
+            assert!(
+                cached_read_time < first_read_time,
+                "Cache should improve read performance"
+            );
             assert!(hits > 0, "Should have cache hits");
             assert!(hit_ratio > 0.0, "Should have positive hit ratio");
 

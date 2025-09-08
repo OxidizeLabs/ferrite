@@ -1,12 +1,12 @@
-use crate::common::config::{Lsn, INVALID_LSN};
+use crate::common::config::{INVALID_LSN, Lsn};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::AsyncDiskManager;
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use log::{debug, error, trace, warn};
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Handle;
@@ -87,9 +87,16 @@ impl LogManager {
                 // Handle periodic flush if needed
                 let now = std::time::Instant::now();
                 if !records_to_flush.is_empty()
-                    && (now.duration_since(last_flush_time) >= flush_interval || records_to_flush.iter().any(|r| r.is_commit()))
+                    && (now.duration_since(last_flush_time) >= flush_interval
+                        || records_to_flush.iter().any(|r| r.is_commit()))
                 {
-                    Self::perform_flush_async(&state, &runtime_handle, records_to_flush, max_lsn_in_batch, "periodic");
+                    Self::perform_flush_async(
+                        &state,
+                        &runtime_handle,
+                        records_to_flush,
+                        max_lsn_in_batch,
+                        "periodic",
+                    );
                     last_flush_time = now;
                 }
 
@@ -104,8 +111,18 @@ impl LogManager {
                 final_records.push(record);
             }
             if !final_records.is_empty() {
-                let max_lsn = final_records.iter().map(|r| r.get_lsn()).max().unwrap_or(INVALID_LSN);
-                Self::perform_flush_async(&state, &runtime_handle, final_records, max_lsn, "shutdown");
+                let max_lsn = final_records
+                    .iter()
+                    .map(|r| r.get_lsn())
+                    .max()
+                    .unwrap_or(INVALID_LSN);
+                Self::perform_flush_async(
+                    &state,
+                    &runtime_handle,
+                    final_records,
+                    max_lsn,
+                    "shutdown",
+                );
             }
         });
 
@@ -269,12 +286,13 @@ impl LogManager {
     /// An optional LogRecord if reading and parsing was successful
     pub fn read_log_record(&self, offset: u64) -> Option<LogRecord> {
         debug!("Reading log record from offset {}", offset);
-        
+
         // Use the runtime handle to block on the async operation
         let disk_manager = Arc::clone(&self.state.disk_manager);
-        match self.runtime_handle.block_on(async move {
-            disk_manager.read_log(offset).await
-        }) {
+        match self
+            .runtime_handle
+            .block_on(async move { disk_manager.read_log(offset).await })
+        {
             Ok(bytes) => {
                 // Deserialize bytes into LogRecord
                 match LogRecord::from_bytes(&bytes) {
@@ -288,7 +306,10 @@ impl LogManager {
                         Some(record)
                     }
                     Err(e) => {
-                        warn!("Failed to deserialize log record at offset {}: {}", offset, e);
+                        warn!(
+                            "Failed to deserialize log record at offset {}: {}",
+                            offset, e
+                        );
                         None
                     }
                 }
@@ -341,9 +362,7 @@ mod tests {
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let log_manager = LogManager::new(disk_manager_arc.clone());
 
-            Self {
-                log_manager
-            }
+            Self { log_manager }
         }
     }
 
@@ -790,9 +809,9 @@ mod tests {
 
     /// Tests for threading and concurrency
     mod threading_tests {
-        use parking_lot::RwLock;
         use super::*;
         use crate::common::config::PageId;
+        use parking_lot::RwLock;
 
         #[tokio::test]
         async fn test_flush_thread_lifecycle() {
@@ -1007,7 +1026,10 @@ mod tests {
 
             // Check that persistent LSN has been updated
             let persistent_lsn = ctx.log_manager.get_persistent_lsn();
-            assert_ne!(persistent_lsn, INVALID_LSN, "Persistent LSN should be updated after buffer fills up");
+            assert_ne!(
+                persistent_lsn, INVALID_LSN,
+                "Persistent LSN should be updated after buffer fills up"
+            );
 
             ctx.log_manager.shut_down();
         }

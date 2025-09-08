@@ -3,8 +3,8 @@ use crate::common::exception::DBError;
 use crate::server::DatabaseResponse;
 use log::{debug, error, info, warn};
 use std::error::Error as StdError;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 

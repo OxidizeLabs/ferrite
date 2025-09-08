@@ -1,5 +1,5 @@
 //! Memory management utilities for the Async Disk Manager
-//! 
+//!
 //! This module contains memory management utilities, including NUMA-aware allocation.
 
 use std::alloc::{GlobalAlloc, Layout};
@@ -33,7 +33,8 @@ unsafe impl GlobalAlloc for NumaAllocator {
         unsafe {
             let ptr = std::alloc::System.alloc(layout);
             if !ptr.is_null() {
-                self.allocated_bytes.fetch_add(layout.size(), Ordering::Relaxed);
+                self.allocated_bytes
+                    .fetch_add(layout.size(), Ordering::Relaxed);
             }
             ptr
         }
@@ -42,7 +43,8 @@ unsafe impl GlobalAlloc for NumaAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe {
             std::alloc::System.dealloc(ptr, layout);
-            self.allocated_bytes.fetch_sub(layout.size(), Ordering::Relaxed);
+            self.allocated_bytes
+                .fetch_sub(layout.size(), Ordering::Relaxed);
         }
     }
 }
@@ -77,7 +79,8 @@ impl MemoryPool {
     }
 
     pub fn available_bytes(&self) -> usize {
-        self.total_size_bytes().saturating_sub(self.allocated_bytes())
+        self.total_size_bytes()
+            .saturating_sub(self.allocated_bytes())
     }
 }
 
@@ -89,7 +92,7 @@ mod tests {
     fn test_numa_allocator() {
         let allocator = NumaAllocator::new(0);
         assert_eq!(allocator.allocated_bytes(), 0);
-        
+
         // We can't easily test the actual allocation without using it as a global allocator
         // This is just a basic test of the API
     }

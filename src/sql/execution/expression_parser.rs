@@ -1,6 +1,6 @@
+use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::catalog::Catalog;
 use crate::common::config::TableOidT;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::aggregate_expression::{
@@ -74,7 +74,7 @@ use sqlparser::ast::{
     FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
     JoinOperator, ObjectName, ObjectNamePart, OrderByExpr, Query, Select, SelectItem, SetExpr,
     Subscript as SQLSubscript, TableFactor, TableObject, Value as SQLValue, ValueWithSpan,
-    WindowType
+    WindowType,
 };
 use sqlparser::tokenizer::{Location, Span};
 use std::sync::Arc;
@@ -337,85 +337,117 @@ impl ExpressionParser {
                         let right_type = right_expr.get_return_type().get_type();
 
                         // Check if types are compatible for comparison or can be cast
-                        let (types_compatible, cast_left_expr, cast_right_expr) = match (left_type, right_type) {
-                            // Same types are compatible
-                            (l, r) if l == r => (true, left_expr.clone(), right_expr.clone()),
-                            // Numeric types are compatible with each other
-                            (TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Float, 
-                             TypeId::TinyInt | TypeId::SmallInt | TypeId::Integer | TypeId::BigInt | TypeId::Decimal | TypeId::Float) => (true, left_expr.clone(), right_expr.clone()),
-                            // String types are compatible with each other
-                            (TypeId::VarChar | TypeId::Char, TypeId::VarChar | TypeId::Char) => (true, left_expr.clone(), right_expr.clone()),
-                            // Date/time types are compatible with each other
-                            (TypeId::Date | TypeId::Timestamp, TypeId::Date | TypeId::Timestamp) => (true, left_expr.clone(), right_expr.clone()),
-                            
-                            // Handle automatic type casting for literals
-                            // If right side is a literal/constant that can be cast to left column type
-                            (column_type, literal_type) => {
-                                if let Expression::Literal(literal) = right_expr.as_ref() {
-                                    // Try to cast the literal value to the column type
-                                    match literal.get_value().cast_to(column_type) {
-                                        Ok(cast_value) => {
-                                            let cast_right = Arc::new(Expression::Constant(
-                                                ConstantExpression::new(
-                                                    cast_value,
-                                                    Column::new("cast_literal", column_type),
-                                                    vec![]
-                                                )
-                                            ));
-                                            (true, left_expr.clone(), cast_right)
-                                        },
-                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
+                        let (types_compatible, cast_left_expr, cast_right_expr) =
+                            match (left_type, right_type) {
+                                // Same types are compatible
+                                (l, r) if l == r => (true, left_expr.clone(), right_expr.clone()),
+                                // Numeric types are compatible with each other
+                                (
+                                    TypeId::TinyInt
+                                    | TypeId::SmallInt
+                                    | TypeId::Integer
+                                    | TypeId::BigInt
+                                    | TypeId::Decimal
+                                    | TypeId::Float,
+                                    TypeId::TinyInt
+                                    | TypeId::SmallInt
+                                    | TypeId::Integer
+                                    | TypeId::BigInt
+                                    | TypeId::Decimal
+                                    | TypeId::Float,
+                                ) => (true, left_expr.clone(), right_expr.clone()),
+                                // String types are compatible with each other
+                                (
+                                    TypeId::VarChar | TypeId::Char,
+                                    TypeId::VarChar | TypeId::Char,
+                                ) => (true, left_expr.clone(), right_expr.clone()),
+                                // Date/time types are compatible with each other
+                                (
+                                    TypeId::Date | TypeId::Timestamp,
+                                    TypeId::Date | TypeId::Timestamp,
+                                ) => (true, left_expr.clone(), right_expr.clone()),
+
+                                // Handle automatic type casting for literals
+                                // If right side is a literal/constant that can be cast to left column type
+                                (column_type, literal_type) => {
+                                    if let Expression::Literal(literal) = right_expr.as_ref() {
+                                        // Try to cast the literal value to the column type
+                                        match literal.get_value().cast_to(column_type) {
+                                            Ok(cast_value) => {
+                                                let cast_right = Arc::new(Expression::Constant(
+                                                    ConstantExpression::new(
+                                                        cast_value,
+                                                        Column::new("cast_literal", column_type),
+                                                        vec![],
+                                                    ),
+                                                ));
+                                                (true, left_expr.clone(), cast_right)
+                                            }
+                                            Err(_) => {
+                                                (false, left_expr.clone(), right_expr.clone())
+                                            }
+                                        }
+                                    } else if let Expression::Constant(constant) =
+                                        right_expr.as_ref()
+                                    {
+                                        // Try to cast the constant value to the column type
+                                        match constant.get_value().cast_to(column_type) {
+                                            Ok(cast_value) => {
+                                                let cast_right = Arc::new(Expression::Constant(
+                                                    ConstantExpression::new(
+                                                        cast_value,
+                                                        Column::new("cast_constant", column_type),
+                                                        vec![],
+                                                    ),
+                                                ));
+                                                (true, left_expr.clone(), cast_right)
+                                            }
+                                            Err(_) => {
+                                                (false, left_expr.clone(), right_expr.clone())
+                                            }
+                                        }
+                                    } else if let Expression::Literal(literal) = left_expr.as_ref()
+                                    {
+                                        // Try to cast the left literal to the right column type
+                                        match literal.get_value().cast_to(literal_type) {
+                                            Ok(cast_value) => {
+                                                let cast_left = Arc::new(Expression::Constant(
+                                                    ConstantExpression::new(
+                                                        cast_value,
+                                                        Column::new("cast_literal", literal_type),
+                                                        vec![],
+                                                    ),
+                                                ));
+                                                (true, cast_left, right_expr.clone())
+                                            }
+                                            Err(_) => {
+                                                (false, left_expr.clone(), right_expr.clone())
+                                            }
+                                        }
+                                    } else if let Expression::Constant(constant) =
+                                        left_expr.as_ref()
+                                    {
+                                        // Try to cast the left constant to the right column type
+                                        match constant.get_value().cast_to(literal_type) {
+                                            Ok(cast_value) => {
+                                                let cast_left = Arc::new(Expression::Constant(
+                                                    ConstantExpression::new(
+                                                        cast_value,
+                                                        Column::new("cast_constant", literal_type),
+                                                        vec![],
+                                                    ),
+                                                ));
+                                                (true, cast_left, right_expr.clone())
+                                            }
+                                            Err(_) => {
+                                                (false, left_expr.clone(), right_expr.clone())
+                                            }
+                                        }
+                                    } else {
+                                        (false, left_expr.clone(), right_expr.clone())
                                     }
-                                } else if let Expression::Constant(constant) = right_expr.as_ref() {
-                                    // Try to cast the constant value to the column type
-                                    match constant.get_value().cast_to(column_type) {
-                                        Ok(cast_value) => {
-                                            let cast_right = Arc::new(Expression::Constant(
-                                                ConstantExpression::new(
-                                                    cast_value,
-                                                    Column::new("cast_constant", column_type),
-                                                    vec![]
-                                                )
-                                            ));
-                                            (true, left_expr.clone(), cast_right)
-                                        },
-                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
-                                    }
-                                } else if let Expression::Literal(literal) = left_expr.as_ref() {
-                                    // Try to cast the left literal to the right column type
-                                    match literal.get_value().cast_to(literal_type) {
-                                        Ok(cast_value) => {
-                                            let cast_left = Arc::new(Expression::Constant(
-                                                ConstantExpression::new(
-                                                    cast_value,
-                                                    Column::new("cast_literal", literal_type),
-                                                    vec![]
-                                                )
-                                            ));
-                                            (true, cast_left, right_expr.clone())
-                                        },
-                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
-                                    }
-                                } else if let Expression::Constant(constant) = left_expr.as_ref() {
-                                    // Try to cast the left constant to the right column type
-                                    match constant.get_value().cast_to(literal_type) {
-                                        Ok(cast_value) => {
-                                            let cast_left = Arc::new(Expression::Constant(
-                                                ConstantExpression::new(
-                                                    cast_value,
-                                                    Column::new("cast_constant", literal_type),
-                                                    vec![]
-                                                )
-                                            ));
-                                            (true, cast_left, right_expr.clone())
-                                        },
-                                        Err(_) => (false, left_expr.clone(), right_expr.clone())
-                                    }
-                                } else {
-                                    (false, left_expr.clone(), right_expr.clone())
                                 }
-                            },
-                        };
+                            };
 
                         if !types_compatible {
                             return Err(format!(
@@ -477,8 +509,7 @@ impl ExpressionParser {
             Expr::UnaryOp { op, expr } => {
                 let inner_expr = Arc::new(self.parse_expression(expr, schema)?);
                 Ok(Expression::UnaryOp(UnaryOpExpression::new(
-                    inner_expr,
-                    *op,
+                    inner_expr, *op,
                 )?))
             }
 
@@ -609,7 +640,10 @@ impl ExpressionParser {
             Expr::Case {
                 operand,
                 conditions,
-                else_result, case_token: _, end_token: _ } => {
+                else_result,
+                case_token: _,
+                end_token: _,
+            } => {
                 // Parse the base expression if present
                 let base_expr = match operand {
                     Some(expr) => Some(Arc::new(self.parse_expression(expr, schema)?)),
@@ -701,13 +735,11 @@ impl ExpressionParser {
                 let parsed_pattern = Arc::new(self.parse_expression(pattern, schema)?);
 
                 // Convert Option<Value> to Option<String>
-                let escape_string = escape_char.as_ref().and_then(|val| {
-                    match val {
-                        sqlparser::ast::Value::SingleQuotedString(s) => Some(s.clone()),
-                        sqlparser::ast::Value::DoubleQuotedString(s) => Some(s.clone()),
-                        sqlparser::ast::Value::EscapedStringLiteral(s) => Some(s.clone()),
-                        _ => None,
-                    }
+                let escape_string = escape_char.as_ref().and_then(|val| match val {
+                    sqlparser::ast::Value::SingleQuotedString(s) => Some(s.clone()),
+                    sqlparser::ast::Value::DoubleQuotedString(s) => Some(s.clone()),
+                    sqlparser::ast::Value::EscapedStringLiteral(s) => Some(s.clone()),
+                    _ => None,
                 });
 
                 Ok(Expression::Regex(RegexExpression::new(
@@ -1052,48 +1084,61 @@ impl ExpressionParser {
                 let expr = Arc::new(self.parse_expression(expr, schema)?);
                 let mut list_values = Vec::new();
                 let mut list_exprs = Vec::new();
-                
+
                 // Get the type of the expression we're comparing against
                 let expr_type = expr.get_return_type().get_type();
-                
+
                 // Parse each item in the list
                 for item in list {
                     let item_expr = self.parse_expression(item, schema)?;
                     let item_arc = Arc::new(item_expr.clone());
-                    
+
                     // For constant expressions, extract the actual value
                     if let Expression::Literal(literal_expr) = &item_expr {
                         let mut value = literal_expr.get_value().clone();
-                        
+
                         // If the types don't match, try to convert the value to the expression type
                         if value.get_type_id() != expr_type {
                             value = match (expr_type, value.get_type_id()) {
                                 (TypeId::Integer, TypeId::TinyInt) => {
                                     // Convert tinyint to integer
-                                    if let crate::types_db::value::Val::TinyInt(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::TinyInt(n) = value.get_val()
+                                    {
                                         let new_val = Value::new(*n as i32);
-                                        println!("DEBUG: Converted TinyInt({}) to Integer({})", n, *n as i32);
+                                        println!(
+                                            "DEBUG: Converted TinyInt({}) to Integer({})",
+                                            n, *n as i32
+                                        );
                                         new_val
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 (TypeId::Integer, TypeId::SmallInt) => {
                                     // Convert smallint to integer
-                                    if let crate::types_db::value::Val::SmallInt(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::SmallInt(n) =
+                                        value.get_val()
+                                    {
                                         let new_val = Value::new(*n as i32);
-                                        println!("DEBUG: Converted SmallInt({}) to Integer({})", n, *n as i32);
+                                        println!(
+                                            "DEBUG: Converted SmallInt({}) to Integer({})",
+                                            n, *n as i32
+                                        );
                                         new_val
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 (TypeId::Integer, TypeId::BigInt) => {
                                     // Convert bigint to integer if it fits
-                                    if let crate::types_db::value::Val::BigInt(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::BigInt(n) = value.get_val()
+                                    {
                                         if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!("DEBUG: Converted BigInt({}) to Integer({})", n, *n as i32);
+                                            println!(
+                                                "DEBUG: Converted BigInt({}) to Integer({})",
+                                                n, *n as i32
+                                            );
                                             new_val
                                         } else {
                                             value
@@ -1101,13 +1146,17 @@ impl ExpressionParser {
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 (TypeId::Integer, TypeId::Decimal) => {
                                     // Convert decimal to integer if it's a whole number
-                                    if let crate::types_db::value::Val::Decimal(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::Decimal(n) = value.get_val()
+                                    {
                                         if *n == (*n as i32) as f64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!("DEBUG: Converted Decimal({}) to Integer({})", n, *n as i32);
+                                            println!(
+                                                "DEBUG: Converted Decimal({}) to Integer({})",
+                                                n, *n as i32
+                                            );
                                             new_val
                                         } else {
                                             value
@@ -1115,48 +1164,68 @@ impl ExpressionParser {
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 // Add other type conversions as needed
-                                _ => value
+                                _ => value,
                             };
                         }
-                        
+
                         println!("DEBUG: Adding value to list: {:?}", value);
                         list_values.push(value);
                     } else if let Expression::Constant(const_expr) = &item_expr {
-                        println!("DEBUG: Found constant expression with value: {:?}", const_expr.get_value());
+                        println!(
+                            "DEBUG: Found constant expression with value: {:?}",
+                            const_expr.get_value()
+                        );
                         let mut value = const_expr.get_value().clone();
-                        
+
                         // If the types don't match, try to convert the value to the expression type
                         if value.get_type_id() != expr_type {
-                            println!("DEBUG: Converting from {:?} to {:?}", value.get_type_id(), expr_type);
+                            println!(
+                                "DEBUG: Converting from {:?} to {:?}",
+                                value.get_type_id(),
+                                expr_type
+                            );
                             value = match (expr_type, value.get_type_id()) {
                                 (TypeId::Integer, TypeId::TinyInt) => {
                                     // Convert tinyint to integer
-                                    if let crate::types_db::value::Val::TinyInt(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::TinyInt(n) = value.get_val()
+                                    {
                                         let new_val = Value::new(*n as i32);
-                                        println!("DEBUG: Converted TinyInt({}) to Integer({})", n, *n as i32);
+                                        println!(
+                                            "DEBUG: Converted TinyInt({}) to Integer({})",
+                                            n, *n as i32
+                                        );
                                         new_val
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 (TypeId::Integer, TypeId::SmallInt) => {
                                     // Convert smallint to integer
-                                    if let crate::types_db::value::Val::SmallInt(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::SmallInt(n) =
+                                        value.get_val()
+                                    {
                                         let new_val = Value::new(*n as i32);
-                                        println!("DEBUG: Converted SmallInt({}) to Integer({})", n, *n as i32);
+                                        println!(
+                                            "DEBUG: Converted SmallInt({}) to Integer({})",
+                                            n, *n as i32
+                                        );
                                         new_val
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 (TypeId::Integer, TypeId::BigInt) => {
                                     // Convert bigint to integer if it fits
-                                    if let crate::types_db::value::Val::BigInt(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::BigInt(n) = value.get_val()
+                                    {
                                         if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!("DEBUG: Converted BigInt({}) to Integer({})", n, *n as i32);
+                                            println!(
+                                                "DEBUG: Converted BigInt({}) to Integer({})",
+                                                n, *n as i32
+                                            );
                                             new_val
                                         } else {
                                             value
@@ -1164,13 +1233,17 @@ impl ExpressionParser {
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 (TypeId::Integer, TypeId::Decimal) => {
                                     // Convert decimal to integer if it's a whole number
-                                    if let crate::types_db::value::Val::Decimal(n) = value.get_val() {
+                                    if let crate::types_db::value::Val::Decimal(n) = value.get_val()
+                                    {
                                         if *n == (*n as i32) as f64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!("DEBUG: Converted Decimal({}) to Integer({})", n, *n as i32);
+                                            println!(
+                                                "DEBUG: Converted Decimal({}) to Integer({})",
+                                                n, *n as i32
+                                            );
                                             new_val
                                         } else {
                                             value
@@ -1178,12 +1251,12 @@ impl ExpressionParser {
                                     } else {
                                         value
                                     }
-                                },
+                                }
                                 // Add other type conversions as needed
-                                _ => value
+                                _ => value,
                             };
                         }
-                        
+
                         println!("DEBUG: Adding value to list: {:?}", value);
                         list_values.push(value);
                     } else {
@@ -1192,18 +1265,18 @@ impl ExpressionParser {
                         println!("DEBUG: Non-constant expression, adding NULL placeholder");
                         list_values.push(Value::new(crate::types_db::value::Val::Null));
                     }
-                    
+
                     list_exprs.push(item_arc);
                 }
-                
+
                 println!("DEBUG: Final list_values: {:?}", list_values);
-                
+
                 // Create a vector expression from the list using the new helper method
                 let list_expr = Arc::new(Expression::Constant(ConstantExpression::new_vector(
                     list_values,
                     list_exprs,
                 )));
-                
+
                 Ok(Expression::In(InExpression::new_list(
                     expr,
                     list_expr,
@@ -1250,13 +1323,11 @@ impl ExpressionParser {
                 pattern,
                 escape_char,
             } => {
-                let escape_char = escape_char.as_ref().and_then(|val| {
-                    match val {
-                        sqlparser::ast::Value::SingleQuotedString(s) => s.chars().next(),
-                        sqlparser::ast::Value::DoubleQuotedString(s) => s.chars().next(),
-                        sqlparser::ast::Value::EscapedStringLiteral(s) => s.chars().next(),
-                        _ => None,
-                    }
+                let escape_char = escape_char.as_ref().and_then(|val| match val {
+                    sqlparser::ast::Value::SingleQuotedString(s) => s.chars().next(),
+                    sqlparser::ast::Value::DoubleQuotedString(s) => s.chars().next(),
+                    sqlparser::ast::Value::EscapedStringLiteral(s) => s.chars().next(),
+                    _ => None,
                 });
                 Ok(Expression::Like(LikeExpression::new(
                     Arc::new(self.parse_expression(expr, schema)?),
@@ -1275,13 +1346,11 @@ impl ExpressionParser {
                 pattern,
                 escape_char,
             } => {
-                let escape_char = escape_char.as_ref().and_then(|val| {
-                    match val {
-                        sqlparser::ast::Value::SingleQuotedString(s) => s.chars().next(),
-                        sqlparser::ast::Value::DoubleQuotedString(s) => s.chars().next(),
-                        sqlparser::ast::Value::EscapedStringLiteral(s) => s.chars().next(),
-                        _ => None,
-                    }
+                let escape_char = escape_char.as_ref().and_then(|val| match val {
+                    sqlparser::ast::Value::SingleQuotedString(s) => s.chars().next(),
+                    sqlparser::ast::Value::DoubleQuotedString(s) => s.chars().next(),
+                    sqlparser::ast::Value::EscapedStringLiteral(s) => s.chars().next(),
+                    _ => None,
                 });
                 Ok(Expression::Like(LikeExpression::new(
                     Arc::new(self.parse_expression(expr, schema)?),
@@ -1957,10 +2026,7 @@ impl ExpressionParser {
         }
     }
 
-    pub fn prepare_table_scan(
-        &self,
-        select: &Select,
-    ) -> Result<(String, Schema, u64), String> {
+    pub fn prepare_table_scan(&self, select: &Select) -> Result<(String, Schema, u64), String> {
         debug!("Preparing table scan for select: {:?}", select);
         if select.from.len() != 1 {
             return Err("Only single table queries are supported".to_string());
@@ -2526,9 +2592,7 @@ impl ExpressionParser {
 
                 debug!(
                     "Checking column '{}': prefix='{}', suffix='{}'",
-                    col_name,
-                    prefix,
-                    suffix
+                    col_name, prefix, suffix
                 );
 
                 if prefix == table_alias && suffix == column_name {
@@ -2582,9 +2646,7 @@ impl ExpressionParser {
             if let Some(col_idx) = table_schema.get_column_index(column_name) {
                 debug!(
                     "Found column '{}' in table '{}' schema at index {}",
-                    column_name,
-                    table_alias,
-                    col_idx
+                    column_name, table_alias, col_idx
                 );
 
                 // Now find this column in the joined schema
@@ -2593,9 +2655,7 @@ impl ExpressionParser {
                     let col_name = col.get_name();
                     debug!(
                         "Checking if schema column '{}' matches table column '{}.{}'",
-                        col_name,
-                        table_alias,
-                        column_name
+                        col_name, table_alias, column_name
                     );
 
                     if col_name == column_name || col_name == qualified_name {
@@ -2616,8 +2676,7 @@ impl ExpressionParser {
             } else {
                 debug!(
                     "Column '{}' not found in table '{}' schema",
-                    column_name,
-                    table_alias
+                    column_name, table_alias
                 );
             }
         } else {
@@ -2843,54 +2902,52 @@ impl ExpressionParser {
                     if let Some(where_clause) = &select.selection
                         && let Expr::BinaryOp { left, op, right } = where_clause
                         && let Expr::Identifier(budget_ident) = left.as_ref()
-                        && budget_ident.value == "budget" && *op == BinaryOperator::Lt
-                        && let Expr::Value(_) = right.as_ref() {
-                            // This is the special case for our test
-                            return Ok((
-                                SubqueryType::InList,
-                                Column::new("id", TypeId::Integer),
-                            ));
-                        }
-                    
+                        && budget_ident.value == "budget"
+                        && *op == BinaryOperator::Lt
+                        && let Expr::Value(_) = right.as_ref()
+                    {
+                        // This is the special case for our test
+                        return Ok((SubqueryType::InList, Column::new("id", TypeId::Integer)));
+                    }
+
                     // Return InList type for ID columns in subqueries
                     return Ok((SubqueryType::InList, Column::new("id", TypeId::Integer)));
                 }
             }
-            
+
             // Check if it's an aggregate function
             return if let SelectItem::UnnamedExpr(Expr::Function(func)) = &select.projection[0] {
                 let func_name = self.extract_table_name(&func.name)?;
 
                 // Handle common aggregate functions
                 match func_name.to_uppercase().as_str() {
-                    "AVG" => {
-                        Ok((
-                            SubqueryType::Scalar,
-                            Column::new("subquery_result", TypeId::Decimal),
-                        ))
-                    }
+                    "AVG" => Ok((
+                        SubqueryType::Scalar,
+                        Column::new("subquery_result", TypeId::Decimal),
+                    )),
                     "SUM" => {
                         // Determine type based on argument
                         if let FunctionArguments::List(args) = &func.args
                             && !args.args.is_empty()
-                            && let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0] {
-                                    let arg_expr = self.parse_expression(expr, schema)?;
-                                    let arg_type = arg_expr.get_return_type().get_type();
+                            && let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0]
+                        {
+                            let arg_expr = self.parse_expression(expr, schema)?;
+                            let arg_type = arg_expr.get_return_type().get_type();
 
-                                    let return_type = match arg_type {
-                                        TypeId::Integer | TypeId::SmallInt | TypeId::TinyInt => {
-                                            TypeId::Integer
-                                        }
-                                        TypeId::BigInt => TypeId::BigInt,
-                                        TypeId::Decimal => TypeId::Decimal,
-                                        _ => TypeId::Decimal, // Default to decimal for other types
-                                    };
-
-                                    return Ok((
-                                        SubqueryType::Scalar,
-                                        Column::new("subquery_result", return_type),
-                                    ));
+                            let return_type = match arg_type {
+                                TypeId::Integer | TypeId::SmallInt | TypeId::TinyInt => {
+                                    TypeId::Integer
                                 }
+                                TypeId::BigInt => TypeId::BigInt,
+                                TypeId::Decimal => TypeId::Decimal,
+                                _ => TypeId::Decimal, // Default to decimal for other types
+                            };
+
+                            return Ok((
+                                SubqueryType::Scalar,
+                                Column::new("subquery_result", return_type),
+                            ));
+                        }
 
                         // Default to decimal if we can't determine the type
                         Ok((
@@ -2898,24 +2955,23 @@ impl ExpressionParser {
                             Column::new("subquery_result", TypeId::Decimal),
                         ))
                     }
-                    "COUNT" => {
-                        Ok((
-                            SubqueryType::Scalar,
-                            Column::new("subquery_result", TypeId::Integer),
-                        ))
-                    }
+                    "COUNT" => Ok((
+                        SubqueryType::Scalar,
+                        Column::new("subquery_result", TypeId::Integer),
+                    )),
                     "MIN" | "MAX" => {
                         // Determine type based on argument
                         if let FunctionArguments::List(args) = &func.args
                             && !args.args.is_empty()
-                            && let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0] {
-                                    let arg_expr = self.parse_expression(expr, schema)?;
-                                    let arg_type = arg_expr.get_return_type().get_type();
-                                    return Ok((
-                                        SubqueryType::Scalar,
-                                        Column::new("subquery_result", arg_type),
-                                    ));
-                                }
+                            && let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = &args.args[0]
+                        {
+                            let arg_expr = self.parse_expression(expr, schema)?;
+                            let arg_type = arg_expr.get_return_type().get_type();
+                            return Ok((
+                                SubqueryType::Scalar,
+                                Column::new("subquery_result", arg_type),
+                            ));
+                        }
 
                         // Default to integer if we can't determine the type
                         Ok((
@@ -2949,7 +3005,7 @@ impl ExpressionParser {
 
                 // Assume any single column non-aggregate subquery is likely to be used with IN
                 Ok((SubqueryType::InList, return_type))
-            }
+            };
         }
 
         // Default to InList type for non-scalar subqueries with multiple columns
@@ -2969,14 +3025,14 @@ impl ExpressionParser {
         let mut specifications = Vec::new();
         for order_expr in order_exprs {
             let parsed_expr = Arc::new(self.parse_expression(&order_expr.expr, schema)?);
-            
+
             // Extract sort direction from the OrderByExpr
             // asc: Option<bool> where None/Some(true) = ASC, Some(false) = DESC
             let direction = match order_expr.options.asc {
                 None | Some(true) => OrderDirection::Asc,
                 Some(false) => OrderDirection::Desc,
             };
-            
+
             let spec = OrderBySpec::new(parsed_expr, direction);
             specifications.push(spec);
         }
@@ -3115,7 +3171,7 @@ impl ExpressionParser {
     fn parse_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
         debug!("Parsing function: {:?}", func);
         let function_name = func.name.to_string().to_uppercase();
-        
+
         // Check if this function has an OVER clause, which makes it a window function
         if func.over.is_some() {
             // Determine specific window function type based on function name
@@ -3136,7 +3192,7 @@ impl ExpressionParser {
             };
             return self.parse_window_function(func, window_type, schema);
         }
-        
+
         // If no OVER clause, use the normal function type classification
         let function_type = function_types::get_function_type(&function_name);
 
@@ -3151,19 +3207,48 @@ impl ExpressionParser {
                 // Map from general window function type to specific window function type
                 let function_name = func.name.to_string().to_uppercase();
                 let specific_window_type = match (&window_type, function_name.as_str()) {
-                    (function_types::WindowFunctionType::Ranking, "ROW_NUMBER") => WindowFunctionType::RowNumber,
-                    (function_types::WindowFunctionType::Ranking, "RANK") => WindowFunctionType::Rank,
-                    (function_types::WindowFunctionType::Ranking, "DENSE_RANK") => WindowFunctionType::DenseRank,
-                    (function_types::WindowFunctionType::Analytic, "FIRST_VALUE") => WindowFunctionType::FirstValue,
-                    (function_types::WindowFunctionType::Analytic, "LAST_VALUE") => WindowFunctionType::LastValue,
-                    (function_types::WindowFunctionType::Analytic, "LEAD") => WindowFunctionType::Lead,
-                    (function_types::WindowFunctionType::Analytic, "LAG") => WindowFunctionType::Lag,
-                    (function_types::WindowFunctionType::Aggregate, "SUM") => WindowFunctionType::Sum,
-                    (function_types::WindowFunctionType::Aggregate, "MIN") => WindowFunctionType::Min,
-                    (function_types::WindowFunctionType::Aggregate, "MAX") => WindowFunctionType::Max,
-                    (function_types::WindowFunctionType::Aggregate, "COUNT") => WindowFunctionType::Count,
-                    (function_types::WindowFunctionType::Aggregate, "AVG") => WindowFunctionType::Average,
-                    _ => return Err(format!("Unsupported window function: {} with type {:?}", function_name, window_type)),
+                    (function_types::WindowFunctionType::Ranking, "ROW_NUMBER") => {
+                        WindowFunctionType::RowNumber
+                    }
+                    (function_types::WindowFunctionType::Ranking, "RANK") => {
+                        WindowFunctionType::Rank
+                    }
+                    (function_types::WindowFunctionType::Ranking, "DENSE_RANK") => {
+                        WindowFunctionType::DenseRank
+                    }
+                    (function_types::WindowFunctionType::Analytic, "FIRST_VALUE") => {
+                        WindowFunctionType::FirstValue
+                    }
+                    (function_types::WindowFunctionType::Analytic, "LAST_VALUE") => {
+                        WindowFunctionType::LastValue
+                    }
+                    (function_types::WindowFunctionType::Analytic, "LEAD") => {
+                        WindowFunctionType::Lead
+                    }
+                    (function_types::WindowFunctionType::Analytic, "LAG") => {
+                        WindowFunctionType::Lag
+                    }
+                    (function_types::WindowFunctionType::Aggregate, "SUM") => {
+                        WindowFunctionType::Sum
+                    }
+                    (function_types::WindowFunctionType::Aggregate, "MIN") => {
+                        WindowFunctionType::Min
+                    }
+                    (function_types::WindowFunctionType::Aggregate, "MAX") => {
+                        WindowFunctionType::Max
+                    }
+                    (function_types::WindowFunctionType::Aggregate, "COUNT") => {
+                        WindowFunctionType::Count
+                    }
+                    (function_types::WindowFunctionType::Aggregate, "AVG") => {
+                        WindowFunctionType::Average
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Unsupported window function: {} with type {:?}",
+                            function_name, window_type
+                        ));
+                    }
                 };
                 self.parse_window_function(func, specific_window_type, schema)
             }
@@ -3255,19 +3340,24 @@ impl ExpressionParser {
             "Parsing window function: {:?}, type: {:?}",
             func, window_type
         );
-        
+
         let function_name = func.name.to_string().to_uppercase();
         let args = self.parse_function_arguments(&func.args, schema)?;
-        
+
         // Check if this function has an OVER clause
         let over_clause = match &func.over {
             Some(window_spec) => window_spec,
-            None => return Err(format!("Window function {} requires an OVER clause", function_name)),
+            None => {
+                return Err(format!(
+                    "Window function {} requires an OVER clause",
+                    function_name
+                ));
+            }
         };
 
         // Parse the window specification to separate partition and order expressions
         let (partition_by, order_by) = self.parse_window_specification(over_clause, schema)?;
-        
+
         // Get the function expression - for most window functions, it's the first argument
         let function_expr = if args.is_empty() {
             // For functions like ROW_NUMBER() that don't take arguments, create a constant
@@ -3285,7 +3375,7 @@ impl ExpressionParser {
 
         // Import the WindowExpression
         use crate::sql::execution::expressions::window_expression::WindowExpression;
-        
+
         Ok(Expression::Window(WindowExpression::new(
             window_type,
             function_expr,
@@ -3295,11 +3385,7 @@ impl ExpressionParser {
         )))
     }
 
-    fn parse_window_specification(
-        &self,
-        spec: &WindowType,
-        schema: &Schema,
-    ) -> WindowSpecResult {
+    fn parse_window_specification(&self, spec: &WindowType, schema: &Schema) -> WindowSpecResult {
         debug!("Parsing window specification: {:?}", spec);
         let mut partition_by = Vec::new();
         let mut order_by = Vec::new();
@@ -3327,17 +3413,13 @@ impl ExpressionParser {
         Ok((partition_by, order_by))
     }
 
-
-
-    fn infer_window_return_type(
-        &self,
-        function_name: &str,
-    ) -> Result<Column, String> {
-        debug!("Inferring window return type for function: {}", function_name);
+    fn infer_window_return_type(&self, function_name: &str) -> Result<Column, String> {
+        debug!(
+            "Inferring window return type for function: {}",
+            function_name
+        );
         match function_name {
-            "ROW_NUMBER" | "RANK" | "DENSE_RANK" => {
-                Ok(Column::new(function_name, TypeId::Integer))
-            }
+            "ROW_NUMBER" | "RANK" | "DENSE_RANK" => Ok(Column::new(function_name, TypeId::Integer)),
             "COUNT" => Ok(Column::new(function_name, TypeId::BigInt)),
             "SUM" => Ok(Column::new(function_name, TypeId::BigInt)), // Default, should be inferred from argument
             "AVG" => Ok(Column::new(function_name, TypeId::Decimal)),
@@ -3489,10 +3571,13 @@ impl ExpressionParser {
                                 // Calculate the correct column index in the aggregation schema
                                 // The aggregation schema has: [group_by_columns..., aggregate_columns...]
                                 // We need to find how many group by columns there are to offset the aggregate index
-                                let group_by_count = aggregation_schema.get_column_count() - original_aggregates.len() as u32;
+                                let group_by_count = aggregation_schema.get_column_count()
+                                    - original_aggregates.len() as u32;
                                 let column_idx = group_by_count + agg_idx as u32;
-                                
-                                if let Some(agg_column) = aggregation_schema.get_column(column_idx as usize) {
+
+                                if let Some(agg_column) =
+                                    aggregation_schema.get_column(column_idx as usize)
+                                {
                                     return Ok(Expression::ColumnRef(ColumnRefExpression::new(
                                         0, // tuple_index
                                         column_idx as usize,
@@ -3500,10 +3585,15 @@ impl ExpressionParser {
                                         vec![],
                                     )));
                                 }
-                            } else if agg.get_children().len() == orig_agg_expr.get_children().len() {
+                            } else if agg.get_children().len() == orig_agg_expr.get_children().len()
+                            {
                                 // For other aggregates, check if the arguments match
                                 let mut args_match = true;
-                                for (arg1, arg2) in agg.get_children().iter().zip(orig_agg_expr.get_children().iter()) {
+                                for (arg1, arg2) in agg
+                                    .get_children()
+                                    .iter()
+                                    .zip(orig_agg_expr.get_children().iter())
+                                {
                                     // Simple equality check - this could be made more sophisticated
                                     if format!("{}", arg1) != format!("{}", arg2) {
                                         args_match = false;
@@ -3512,38 +3602,46 @@ impl ExpressionParser {
                                 }
                                 if args_match {
                                     // Calculate the correct column index in the aggregation schema
-                                    let group_by_count = aggregation_schema.get_column_count() - original_aggregates.len() as u32;
+                                    let group_by_count = aggregation_schema.get_column_count()
+                                        - original_aggregates.len() as u32;
                                     let column_idx = group_by_count + agg_idx as u32;
-                                    
-                                    if let Some(agg_column) = aggregation_schema.get_column(column_idx as usize) {
-                                        return Ok(Expression::ColumnRef(ColumnRefExpression::new(
-                                            0, // tuple_index
-                                            column_idx as usize,
-                                            agg_column.clone(),
-                                            vec![],
-                                        )));
+
+                                    if let Some(agg_column) =
+                                        aggregation_schema.get_column(column_idx as usize)
+                                    {
+                                        return Ok(Expression::ColumnRef(
+                                            ColumnRefExpression::new(
+                                                0, // tuple_index
+                                                column_idx as usize,
+                                                agg_column.clone(),
+                                                vec![],
+                                            ),
+                                        ));
                                     }
                                 }
                             }
                         }
                     }
                 }
-                
+
                 // If we couldn't find a match, return an error
-                Err(format!("Aggregate function {} not found in aggregation output", agg.get_function_name()))
+                Err(format!(
+                    "Aggregate function {} not found in aggregation output",
+                    agg.get_function_name()
+                ))
             }
             Expression::Comparison(comp) => {
                 let left = self.replace_aggregates_with_column_refs(
-                    comp.get_left(), 
-                    aggregation_schema, 
-                    original_aggregates
+                    comp.get_left(),
+                    aggregation_schema,
+                    original_aggregates,
                 )?;
                 let right = self.replace_aggregates_with_column_refs(
-                    comp.get_right(), 
-                    aggregation_schema, 
-                    original_aggregates
+                    comp.get_right(),
+                    aggregation_schema,
+                    original_aggregates,
                 )?;
-                
+
                 Ok(Expression::Comparison(ComparisonExpression::new(
                     Arc::new(left),
                     Arc::new(right),
@@ -3553,16 +3651,16 @@ impl ExpressionParser {
             }
             Expression::Logic(logic) => {
                 let left = self.replace_aggregates_with_column_refs(
-                    logic.get_left(), 
-                    aggregation_schema, 
-                    original_aggregates
+                    logic.get_left(),
+                    aggregation_schema,
+                    original_aggregates,
                 )?;
                 let right = self.replace_aggregates_with_column_refs(
-                    logic.get_right(), 
-                    aggregation_schema, 
-                    original_aggregates
+                    logic.get_right(),
+                    aggregation_schema,
+                    original_aggregates,
                 )?;
-                
+
                 Ok(Expression::Logic(LogicExpression::new(
                     Arc::new(left),
                     Arc::new(right),
@@ -3618,14 +3716,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
 
@@ -3641,7 +3747,7 @@ mod tests {
                 expression_parser,
             }
         }
-        
+
         pub fn expression_parser(&self) -> &ExpressionParser {
             &self.expression_parser
         }

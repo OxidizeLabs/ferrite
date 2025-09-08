@@ -121,7 +121,11 @@ impl AggregationExecutor {
                                 if agg_value.values[i].is_null() {
                                     agg_value.values[i] = arg_val;
                                 } else {
-                                    if arg_val.compare_less_than(&agg_value.values[i]) == CmpBool::CmpTrue { agg_value.values[i] = arg_val }
+                                    if arg_val.compare_less_than(&agg_value.values[i])
+                                        == CmpBool::CmpTrue
+                                    {
+                                        agg_value.values[i] = arg_val
+                                    }
                                 }
                             }
                         }
@@ -131,7 +135,11 @@ impl AggregationExecutor {
                                 if agg_value.values[i].is_null() {
                                     agg_value.values[i] = arg_val;
                                 } else {
-                                    if agg_value.values[i].compare_less_than(&arg_val) == CmpBool::CmpTrue { agg_value.values[i] = arg_val }
+                                    if agg_value.values[i].compare_less_than(&arg_val)
+                                        == CmpBool::CmpTrue
+                                    {
+                                        agg_value.values[i] = arg_val
+                                    }
                                 }
                             }
                         }
@@ -283,61 +291,71 @@ impl AbstractExecutor for AggregationExecutor {
 
         // Take the next group from the Vec
         if let Some((key, mut value)) = self.groups_to_return.pop() {
-            debug!("Processing group with key: {:?}, values: {:?}", key, value.values);
+            debug!(
+                "Processing group with key: {:?}, values: {:?}",
+                key, value.values
+            );
             // Process Average aggregates: divide sum by count
             for (i, agg_expr) in self.aggregate_exprs.iter().enumerate() {
                 if let Expression::Aggregate(agg) = agg_expr.as_ref()
-                    && let AggregationType::Avg = agg.get_agg_type() {
-                        debug!("Processing AVG aggregate at index {}", i);
-                        // Find the count for this average
-                        if let Some(&count) = self.avg_counts.get(&(key.clone(), i)) {
-                            debug!("Found count {} for group {:?}, aggregate {}", count, key, i);
-                            debug!("Current value: {:?}", value.values[i]);
-                            if count > 0 && !value.values[i].is_null() {
-                                // Convert sum to decimal and divide by count to get average
-                                let sum_as_decimal = match value.values[i].get_type_id() {
-                                    TypeId::Integer => {
-                                        let int_val = value.values[i].as_integer()?;
-                                        Value::new(int_val as f64)
+                    && let AggregationType::Avg = agg.get_agg_type()
+                {
+                    debug!("Processing AVG aggregate at index {}", i);
+                    // Find the count for this average
+                    if let Some(&count) = self.avg_counts.get(&(key.clone(), i)) {
+                        debug!("Found count {} for group {:?}, aggregate {}", count, key, i);
+                        debug!("Current value: {:?}", value.values[i]);
+                        if count > 0 && !value.values[i].is_null() {
+                            // Convert sum to decimal and divide by count to get average
+                            let sum_as_decimal = match value.values[i].get_type_id() {
+                                TypeId::Integer => {
+                                    let int_val = value.values[i].as_integer()?;
+                                    Value::new(int_val as f64)
+                                }
+                                TypeId::BigInt => {
+                                    let bigint_val = value.values[i].as_bigint()?;
+                                    Value::new(bigint_val as f64)
+                                }
+                                TypeId::Decimal => value.values[i].clone(),
+                                _ => {
+                                    debug!(
+                                        "Unexpected sum type for AVG: {:?}",
+                                        value.values[i].get_type_id()
+                                    );
+                                    Value::new(Val::Null)
+                                }
+                            };
+
+                            let count_value = Value::new(count as f64);
+                            debug!(
+                                "Dividing sum_as_decimal {:?} by count {:?}",
+                                sum_as_decimal, count_value
+                            );
+
+                            if !sum_as_decimal.is_null() {
+                                match sum_as_decimal.divide(&count_value) {
+                                    Ok(avg_result) => {
+                                        debug!("Division successful: {:?}", avg_result);
+                                        value.values[i] = avg_result;
                                     }
-                                    TypeId::BigInt => {
-                                        let bigint_val = value.values[i].as_bigint()?;
-                                        Value::new(bigint_val as f64)
+                                    Err(e) => {
+                                        debug!("Division failed: {}", e);
+                                        value.values[i] = Value::new(Val::Null);
                                     }
-                                    TypeId::Decimal => value.values[i].clone(),
-                                    _ => {
-                                        debug!("Unexpected sum type for AVG: {:?}", value.values[i].get_type_id());
-                                        Value::new(Val::Null)
-                                    }
-                                };
-                                
-                                let count_value = Value::new(count as f64);
-                                debug!("Dividing sum_as_decimal {:?} by count {:?}", sum_as_decimal, count_value);
-                                
-                                if !sum_as_decimal.is_null() {
-                                    match sum_as_decimal.divide(&count_value) {
-                                        Ok(avg_result) => {
-                                            debug!("Division successful: {:?}", avg_result);
-                                            value.values[i] = avg_result;
-                                        },
-                                        Err(e) => {
-                                            debug!("Division failed: {}", e);
-                                            value.values[i] = Value::new(Val::Null);
-                                        }
-                                    }
-                                } else {
-                                    debug!("Sum is null, setting average to NULL");
-                                    value.values[i] = Value::new(Val::Null);
                                 }
                             } else {
-                                debug!("Count is 0 or value is null, setting to NULL");
+                                debug!("Sum is null, setting average to NULL");
                                 value.values[i] = Value::new(Val::Null);
                             }
                         } else {
-                            debug!("No count found for group {:?}, aggregate {}", key, i);
+                            debug!("Count is 0 or value is null, setting to NULL");
                             value.values[i] = Value::new(Val::Null);
                         }
+                    } else {
+                        debug!("No count found for group {:?}, aggregate {}", key, i);
+                        value.values[i] = Value::new(Val::Null);
                     }
+                }
             }
 
             let mut values = Vec::new();
@@ -372,8 +390,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::column::Column;
     use crate::catalog::Catalog;
+    use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
@@ -417,14 +435,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());

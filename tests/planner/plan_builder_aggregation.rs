@@ -1,17 +1,20 @@
-use tkdb::sql::execution::expressions::abstract_expression::Expression;
-use tkdb::sql::execution::expressions::aggregate_expression::AggregationType;
-use tkdb::sql::execution::plans::abstract_plan::AbstractPlanNode;
-use tkdb::{buffer::buffer_pool_manager_async::BufferPoolManager, sql::execution::plans::abstract_plan::PlanNode};
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
-use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::types_db::type_id::TypeId;
+use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
+use tkdb::buffer::lru_k_replacer::LRUKReplacer;
+use tkdb::catalog::Catalog;
+use tkdb::sql::execution::expressions::abstract_expression::Expression;
+use tkdb::sql::execution::expressions::aggregate_expression::AggregationType;
+use tkdb::sql::execution::plans::abstract_plan::AbstractPlanNode;
+use tkdb::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
+use tkdb::sql::planner::query_planner::QueryPlanner;
 use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::common::logger::init_test_logger;
+use tkdb::types_db::type_id::TypeId;
+use tkdb::{
+    buffer::buffer_pool_manager_async::BufferPoolManager,
+    sql::execution::plans::abstract_plan::PlanNode,
+};
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -26,19 +29,37 @@ impl TestContext {
         const K: usize = 2;
 
         let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join(format!("{name}.db")).to_str().unwrap().to_string();
-        let log_path = temp_dir.path().join(format!("{name}.log")).to_str().unwrap().to_string();
+        let db_path = temp_dir
+            .path()
+            .join(format!("{name}.db"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join(format!("{name}.log"))
+            .to_str()
+            .unwrap()
+            .to_string();
 
-        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await.unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let disk_manager_arc = Arc::new(disk_manager);
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-        let bpm = Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
+        let bpm =
+            Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
-        let transaction_manager = Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+        let transaction_manager =
+            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
-        Self { catalog, planner, _temp_dir: temp_dir }
+        Self {
+            catalog,
+            planner,
+            _temp_dir: temp_dir,
+        }
     }
 
     // Helper to create a table and verify it was created successfully
@@ -97,8 +118,8 @@ impl TestContext {
         fixture.create_users();
         fixture
             .create_table(
-                "sales", 
-                "id INTEGER, region VARCHAR(255), product VARCHAR(255), amount DECIMAL, quantity INTEGER, sale_date VARCHAR(255)", 
+                "sales",
+                "id INTEGER, region VARCHAR(255), product VARCHAR(255), amount DECIMAL, quantity INTEGER, sale_date VARCHAR(255)",
                 false
             )
             .unwrap();
@@ -156,16 +177,22 @@ impl TestContext {
             assert_eq!(column.get_name(), name);
         }
     }
-
 }
 
 #[tokio::test]
 async fn aggregate_count_star() {
     let mut ctx = TestContext::new("planner_agg_count_star").await;
     ctx.create_users();
-    let plan = ctx.planner.create_logical_plan("SELECT COUNT(*) FROM users").unwrap();
+    let plan = ctx
+        .planner
+        .create_logical_plan("SELECT COUNT(*) FROM users")
+        .unwrap();
     match &plan.children[0].plan_type {
-        LogicalPlanType::Aggregate { aggregates, group_by, .. } => {
+        LogicalPlanType::Aggregate {
+            aggregates,
+            group_by,
+            ..
+        } => {
             assert_eq!(aggregates.len(), 1);
             assert_eq!(group_by.len(), 0);
         }
@@ -180,7 +207,11 @@ async fn group_by_with_aggregates() {
     let sql = "SELECT name, COUNT(*) as c FROM users GROUP BY name";
     let plan = ctx.planner.create_logical_plan(sql).unwrap();
     match &plan.children[0].plan_type {
-        LogicalPlanType::Aggregate { group_by, aggregates, schema } => {
+        LogicalPlanType::Aggregate {
+            group_by,
+            aggregates,
+            schema,
+        } => {
             assert_eq!(group_by.len(), 1);
             assert_eq!(aggregates.len(), 1);
             assert_eq!(schema.get_column_count(), 2);
@@ -510,8 +541,7 @@ async fn test_group_by_multiple_columns() {
     let mut fixture = TestContext::new("group_by_multiple_columns").await;
     fixture.create_sales_table();
 
-    let sql =
-        "SELECT region, product, SUM(amount), COUNT(*) FROM sales GROUP BY region, product";
+    let sql = "SELECT region, product, SUM(amount), COUNT(*) FROM sales GROUP BY region, product";
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
     match &plan.children[0].plan_type {
@@ -539,12 +569,10 @@ async fn test_group_by_with_where_clause() {
     // Should have projection -> aggregate -> filter -> table_scan
     match &plan.plan_type {
         LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
-            LogicalPlanType::Aggregate { .. } => {
-                match &plan.children[0].children[0].plan_type {
-                    LogicalPlanType::Filter { .. } => (),
-                    _ => panic!("Expected Filter under Aggregate"),
-                }
-            }
+            LogicalPlanType::Aggregate { .. } => match &plan.children[0].children[0].plan_type {
+                LogicalPlanType::Filter { .. } => (),
+                _ => panic!("Expected Filter under Aggregate"),
+            },
             _ => panic!("Expected Aggregate under Projection"),
         },
         _ => panic!("Expected Projection as root node"),
@@ -570,12 +598,10 @@ async fn test_having_with_different_aggregate_functions() {
         // Verify basic structure: Projection -> Filter (HAVING) -> Aggregate
         match &plan.plan_type {
             LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
-                LogicalPlanType::Filter { .. } => {
-                    match &plan.children[0].children[0].plan_type {
-                        LogicalPlanType::Aggregate { .. } => (),
-                        _ => panic!("Expected Aggregate under Filter for SQL: {}", sql),
-                    }
-                }
+                LogicalPlanType::Filter { .. } => match &plan.children[0].children[0].plan_type {
+                    LogicalPlanType::Aggregate { .. } => (),
+                    _ => panic!("Expected Aggregate under Filter for SQL: {}", sql),
+                },
                 _ => panic!("Expected Filter for HAVING clause for SQL: {}", sql),
             },
             _ => panic!("Expected Projection as root for SQL: {}", sql),
@@ -742,18 +768,17 @@ async fn test_aggregate_with_order_by() {
     let mut fixture = TestContext::new("aggregate_with_order_by").await;
     fixture.create_table("users", "id INTEGER, name VARCHAR(255), age INTEGER", false);
 
-    let sql = "SELECT name, COUNT(*) as user_count FROM users GROUP BY name ORDER BY user_count DESC";
+    let sql =
+        "SELECT name, COUNT(*) as user_count FROM users GROUP BY name ORDER BY user_count DESC";
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
     // Should have Sort -> Projection -> Aggregate structure
     match &plan.plan_type {
         LogicalPlanType::Sort { .. } => match &plan.children[0].plan_type {
-            LogicalPlanType::Projection { .. } => {
-                match &plan.children[0].children[0].plan_type {
-                    LogicalPlanType::Aggregate { .. } => (),
-                    _ => panic!("Expected Aggregate under Projection"),
-                }
-            }
+            LogicalPlanType::Projection { .. } => match &plan.children[0].children[0].plan_type {
+                LogicalPlanType::Aggregate { .. } => (),
+                _ => panic!("Expected Aggregate under Projection"),
+            },
             _ => panic!("Expected Projection under Sort"),
         },
         _ => panic!("Expected Sort as root node"),
@@ -824,7 +849,8 @@ async fn test_aggregates_with_different_data_types() {
     let mut fixture = TestContext::new("aggregates_different_types").await;
     fixture.create_sales_table();
 
-    let sql = "SELECT COUNT(id), SUM(amount), AVG(quantity), MIN(sale_date), MAX(product) FROM sales";
+    let sql =
+        "SELECT COUNT(id), SUM(amount), AVG(quantity), MIN(sale_date), MAX(product) FROM sales";
     let plan = fixture.planner.create_logical_plan(sql).unwrap();
 
     match &plan.children[0].plan_type {
@@ -840,8 +866,7 @@ async fn test_aggregates_with_different_data_types() {
                 (AggregationType::Max, TypeId::VarChar),
             ];
 
-            for (i, (expected_agg_type, _expected_return_type)) in
-                expected_types.iter().enumerate()
+            for (i, (expected_agg_type, _expected_return_type)) in expected_types.iter().enumerate()
             {
                 if let Expression::Aggregate(agg) = aggregates[i].as_ref() {
                     assert_eq!(*agg.get_agg_type(), *expected_agg_type);
@@ -885,7 +910,7 @@ async fn test_error_cases() {
         "SELECT COUNT() FROM users", // Missing argument for COUNT
         "SELECT SUM() FROM users",   // Missing argument for SUM
         "SELECT AVG(name) FROM users WHERE name IS NULL", // AVG on string (might be handled)
-        "SELECT name FROM users GROUP BY age",            // SELECT column not in GROUP BY
+        "SELECT name FROM users GROUP BY age", // SELECT column not in GROUP BY
     ];
 
     for sql in error_cases {
@@ -902,10 +927,10 @@ async fn test_group_by_with_qualified_names_and_aliases() {
 
     // Test the exact case that was failing - GROUP BY with qualified names and aliases
     let sql = "
-        SELECT e.name AS employee, d.name AS department, e.salary, COUNT(ep.project_id) AS project_count 
-        FROM employees e 
-        JOIN departments d ON e.department_id = d.id 
-        JOIN employee_projects ep ON e.id = ep.employee_id 
+        SELECT e.name AS employee, d.name AS department, e.salary, COUNT(ep.project_id) AS project_count
+        FROM employees e
+        JOIN departments d ON e.department_id = d.id
+        JOIN employee_projects ep ON e.id = ep.employee_id
         GROUP BY e.name, d.name, e.salary
     ";
 
@@ -935,7 +960,7 @@ async fn test_group_by_mixed_qualified_and_unqualified_with_aliases() {
     // Test mixing qualified and unqualified names with aliases
     let sql = "
         SELECT e.name AS emp_name, salary, COUNT(*) AS total_count
-        FROM employees e 
+        FROM employees e
         GROUP BY e.name, salary
     ";
 
@@ -964,9 +989,9 @@ async fn test_group_by_without_aliases_qualified_names() {
     // Test GROUP BY with qualified names but no explicit aliases in SELECT
     let sql = "
         SELECT e.name, d.name, COUNT(ep.project_id)
-        FROM employees e 
-        JOIN departments d ON e.department_id = d.id 
-        JOIN employee_projects ep ON e.id = ep.employee_id 
+        FROM employees e
+        JOIN departments d ON e.department_id = d.id
+        JOIN employee_projects ep ON e.id = ep.employee_id
         GROUP BY e.name, d.name
     ";
 
@@ -994,16 +1019,16 @@ async fn test_group_by_complex_qualified_expressions() {
 
     // Test with more complex qualified expressions and multiple aliases
     let sql = "
-        SELECT 
+        SELECT
             e.name AS employee_name,
             d.name AS dept_name,
             e.salary AS emp_salary,
             COUNT(ep.project_id) AS project_count,
             SUM(e.salary) AS total_salary,
             AVG(e.salary) AS avg_salary
-        FROM employees e 
-        JOIN departments d ON e.department_id = d.id 
-        JOIN employee_projects ep ON e.id = ep.employee_id 
+        FROM employees e
+        JOIN departments d ON e.department_id = d.id
+        JOIN employee_projects ep ON e.id = ep.employee_id
         GROUP BY e.name, d.name, e.salary
     ";
 
@@ -1035,8 +1060,8 @@ async fn test_group_by_error_case_column_not_in_group_by() {
     // Test error case - column in SELECT but not in GROUP BY should fail
     let sql = "
         SELECT e.name AS employee, d.name AS department, e.salary, e.id
-        FROM employees e 
-        JOIN departments d ON e.department_id = d.id 
+        FROM employees e
+        JOIN departments d ON e.department_id = d.id
         GROUP BY e.name, d.name, e.salary
     ";
 
@@ -1047,4 +1072,3 @@ async fn test_group_by_error_case_column_not_in_group_by() {
         "Query should fail because e.id is not in GROUP BY"
     );
 }
-

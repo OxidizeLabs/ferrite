@@ -1,6 +1,6 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
+use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
-use crate::storage::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 use std::any::Any;
 
 /// The header page for a B+ tree.
@@ -25,8 +25,7 @@ pub struct BPlusTreeHeaderPage {
     order: u32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[derive(bincode::Encode, bincode::Decode)]
+#[derive(Debug, Clone, PartialEq, bincode::Encode, bincode::Decode)]
 pub struct HeaderData {
     pub root_page_id: PageId,
     pub tree_height: u32,
@@ -138,10 +137,9 @@ impl BPlusTreeHeaderPage {
     /// Deserialize bytes into a header page
     pub fn deserialize(data: &[u8], page_id: PageId) -> Self {
         // Deserialize just the data fields
-        let (header_data, _): (HeaderData, usize) = bincode::decode_from_slice(
-            data, 
-            bincode::config::standard()
-        ).expect("Failed to deserialize BPlusTreeHeaderPage");
+        let (header_data, _): (HeaderData, usize) =
+            bincode::decode_from_slice(data, bincode::config::standard())
+                .expect("Failed to deserialize BPlusTreeHeaderPage");
 
         // Create a new page with the deserialized data
         let mut page = Self::new_with_options(page_id);
@@ -248,7 +246,7 @@ mod tests {
     use tempfile::TempDir;
 
     pub struct TestContext {
-        bpm: Arc<BufferPoolManager>
+        bpm: Arc<BufferPoolManager>,
     }
 
     impl TestContext {
@@ -273,25 +271,27 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
-            Self {
-                bpm
-            }
+            Self { bpm }
         }
     }
 
     #[cfg(test)]
     mod unit_tests {
-        use crate::common::config::{PageId, INVALID_PAGE_ID};
-        use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
+        use crate::common::config::{INVALID_PAGE_ID, PageId};
         use crate::storage::page::Page;
+        use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
 
         #[test]
         fn test_new_header_page_is_empty() {
@@ -505,10 +505,10 @@ mod tests {
 
     #[cfg(test)]
     mod integration_tests {
-        use crate::storage::page::page_guard::PageGuard;
-        use crate::storage::page::page_types::b_plus_tree_header_page::tests::TestContext;
-        use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
         use crate::storage::page::PageTrait;
+        use crate::storage::page::page_guard::PageGuard;
+        use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
+        use crate::storage::page::page_types::b_plus_tree_header_page::tests::TestContext;
 
         #[tokio::test]
         async fn test_header_page_in_buffer_pool() {
@@ -539,8 +539,7 @@ mod tests {
             };
 
             // Force a flush to ensure data is written to disk
-            bpm
-                .flush_page(header_page_id)
+            bpm.flush_page(header_page_id)
                 .expect("Failed to flush page");
 
             // Fetch and verify the header page

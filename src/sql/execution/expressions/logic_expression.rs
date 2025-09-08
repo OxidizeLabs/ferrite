@@ -126,18 +126,20 @@ impl LogicExpression {
 impl ExpressionOps for LogicExpression {
     fn evaluate(&self, tuple: &Tuple, schema: &Schema) -> Result<Value, ExpressionError> {
         use log::debug;
-        
+
         let lhs = self.left.evaluate(tuple, schema)?;
         let rhs = self.right.evaluate(tuple, schema)?;
-        
-        debug!("LogicExpression evaluate - lhs: {:?}, rhs: {:?}, logic_type: {:?}", 
-               lhs, rhs, self.logic_type);
-        
+
+        debug!(
+            "LogicExpression evaluate - lhs: {:?}, rhs: {:?}, logic_type: {:?}",
+            lhs, rhs, self.logic_type
+        );
+
         let comparison_result = self.perform_computation(&lhs, &rhs);
         let result = Value::new(comparison_result);
-        
+
         debug!("LogicExpression result: {:?}", result);
-        
+
         Ok(result)
     }
 
