@@ -1,11 +1,11 @@
-use super::operation_status::{OperationId, OperationStatus, OperationResult};
 use super::metrics::IOMetrics;
+use super::operation_status::{OperationId, OperationResult, OperationStatus};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{oneshot, RwLock, Mutex, broadcast};
+use tokio::sync::{broadcast, oneshot, Mutex, RwLock};
 use tokio::time::sleep;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Notification event for operation completion
 #[derive(Debug, Clone)]
@@ -585,9 +585,9 @@ impl Drop for CompletionTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::time::{sleep, timeout};
-    use std::collections::HashSet;
 
     #[tokio::test]
     async fn test_basic_operation_lifecycle() {

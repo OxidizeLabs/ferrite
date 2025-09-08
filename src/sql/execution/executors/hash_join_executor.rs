@@ -172,20 +172,20 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::catalog::Catalog;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::expressions::abstract_expression::Expression;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use sqlparser::ast::{JoinConstraint, JoinOperator};
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

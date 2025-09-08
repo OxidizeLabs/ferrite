@@ -5,8 +5,8 @@
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::io::{Result as IoResult, Error as IoError, ErrorKind};
 use std::time::Duration;
 
 /// Manages durability guarantees and sync policies

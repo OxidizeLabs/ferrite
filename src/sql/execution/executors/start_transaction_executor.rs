@@ -121,15 +121,15 @@ mod tests {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::Catalog;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use parking_lot::RwLock;
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

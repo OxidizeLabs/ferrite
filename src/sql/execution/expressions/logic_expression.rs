@@ -7,10 +7,10 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::CmpBool;
 use crate::types_db::value::{Val, Value};
+use log;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use log;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LogicType {

@@ -688,17 +688,17 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::catalog::Catalog;
     use crate::common::config::TableOidT;
+    use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::thread;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     /// Test context that holds shared components
     struct TestContext {
@@ -782,14 +782,6 @@ mod tests {
             self.txn_manager.register_table(txn_table_heap);
 
             (table_info.get_table_oidt(), table_heap)
-        }
-
-        fn create_test_tuple() -> Tuple {
-            let schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("value", TypeId::Integer),
-            ]);
-            Tuple::new(&[Value::new(1), Value::new(100)], &schema, RID::new(0, 0))
         }
 
         // New helper method to insert a tuple directly from values

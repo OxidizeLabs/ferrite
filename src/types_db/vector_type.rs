@@ -141,8 +141,7 @@ impl Type for VectorType {
                 Ok(Value::new(result))
             }
             Val::Integer(i) => {
-                let mut result = vec![];
-                result.push(Value::new(*i));
+                let result = vec![Value::new(*i)];
                 Ok(Value::new(result))
             }
             Val::Null => Ok(Value::new(Val::Null)),

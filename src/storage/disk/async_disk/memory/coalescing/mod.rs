@@ -6,5 +6,5 @@
 pub mod engine;
 pub mod size_analyzer;
 
-pub use engine::{CoalescingEngine, CoalesceResult, CleanupReason};
-pub use size_analyzer::{SizeAnalyzer, CoalescedSizeInfo, PageRange}; 
+pub use engine::{CleanupReason, CoalesceResult, CoalescingEngine};
+pub use size_analyzer::{CoalescedSizeInfo, PageRange, SizeAnalyzer};

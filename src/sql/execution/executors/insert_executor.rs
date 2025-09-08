@@ -1,5 +1,5 @@
 use crate::catalog::schema::Schema;
-use crate::common::config::{BATCH_INSERT_THRESHOLD};
+use crate::common::config::BATCH_INSERT_THRESHOLD;
 use crate::common::exception::DBError;
 use crate::common::performance_monitor::{record_insert_performance, record_query_execution};
 use crate::common::rid::RID;
@@ -376,8 +376,9 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::catalog::Catalog;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -386,12 +387,11 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use parking_lot::RwLock;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

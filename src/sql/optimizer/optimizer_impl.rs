@@ -1,5 +1,5 @@
-use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
+use crate::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};

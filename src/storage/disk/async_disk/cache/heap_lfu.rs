@@ -2,6 +2,8 @@
 // HEAP-BASED LFU CACHE IMPLEMENTATION
 // ==============================================
 
+use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
+use std::cmp::Reverse;
 /// # Heap-Based LFU Cache Implementation
 ///
 /// This is an alternative LFU cache implementation that uses a binary heap for O(log n) eviction
@@ -68,9 +70,7 @@
 /// - Simple, minimal overhead is preferred
 ///
 use std::collections::{BinaryHeap, HashMap};
-use std::cmp::Reverse;
 use std::hash::Hash;
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
 
 /// Heap-based LFU cache with O(log n) eviction operations.
 ///
@@ -341,9 +341,9 @@ where
 
 #[cfg(test)]
 mod heap_lfu_tests {
+    use super::*;
+    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
     use crate::storage::disk::async_disk::cache::lfu::LFUCache;
-use super::*;
-    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, MutableCache, LFUCacheTrait};
 
     #[test]
     fn test_heap_lfu_basic_operations() {

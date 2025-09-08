@@ -108,13 +108,13 @@ mod tests {
     use std::sync::Arc;
 
     mod helpers {
-        use tempfile::TempDir;
         use super::*;
         use crate::catalog::Catalog;
         use crate::common::logger::initialize_logger;
         use crate::sql::execution::plans::abstract_plan::PlanNode;
         use crate::sql::execution::transaction_context::TransactionContext;
         use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+        use tempfile::TempDir;
 
         pub fn create_test_schema() -> Schema {
             Schema::new(vec![

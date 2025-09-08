@@ -1,9 +1,9 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{get_type_size, CmpBool, Type};
+use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use bincode::{Encode, Decode};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, Decode)]
 pub enum Val {

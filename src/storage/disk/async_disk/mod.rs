@@ -19,6 +19,6 @@ pub mod memory;
 pub mod metrics;
 pub mod io;
 
+pub use config::DiskManagerConfig;
 // Re-export the main AsyncDiskManager for backward compatibility
 pub use manager::AsyncDiskManager;
-pub use config::DiskManagerConfig;

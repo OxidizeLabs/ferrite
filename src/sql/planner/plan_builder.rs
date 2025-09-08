@@ -1,8 +1,8 @@
 use super::logical_plan::{LogicalPlan, LogicalPlanType};
 use super::schema_manager::SchemaManager;
-use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
+use crate::catalog::Catalog;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::expression_parser::ExpressionParser;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};

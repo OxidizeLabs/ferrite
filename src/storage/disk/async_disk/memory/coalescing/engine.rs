@@ -3,11 +3,11 @@
 //! This module provides the core write coalescing functionality including
 //! adjacent page detection, cleanup management, and coalescing decisions.
 
+use super::size_analyzer::{CoalescedSizeInfo, SizeAnalyzer};
 use crate::common::config::PageId;
-use super::size_analyzer::{SizeAnalyzer, CoalescedSizeInfo};
 use std::collections::{HashMap, HashSet};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::time::{Duration, Instant};
-use std::io::{Result as IoResult, Error as IoError, ErrorKind};
 
 /// Result of coalescing operation  
 #[derive(Debug)]

@@ -3,14 +3,14 @@
 // This module handles the worker thread lifecycle and operation processing,
 // including worker spawning, shutdown, and operation execution coordination.
 
+use super::executor::IOOperationExecutor;
 use super::operations::IOOperation;
 use super::queue::IOQueueManager;
-use super::executor::IOOperationExecutor;
 use crate::storage::disk::async_disk::io::completion::CompletionTracker;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::task::JoinSet;
+use std::sync::Arc;
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 /// Worker task manager responsible for managing worker threads
 /// 
@@ -319,10 +319,10 @@ impl Drop for IOWorkerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::disk::async_disk::io::operations::{IOOperationType, priorities};
+    use crate::storage::disk::async_disk::io::operations::{priorities, IOOperationType};
+    use std::sync::Arc;
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
-    use std::sync::Arc;
     use tokio::sync::Mutex;
 
     async fn create_test_components() -> (IOQueueManager, IOOperationExecutor, CompletionTracker, String, String) {

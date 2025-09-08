@@ -6,9 +6,9 @@
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
 use std::collections::HashMap;
+use std::io::Result as IoResult;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use std::io::Result as IoResult;
 
 /// Statistics about the write buffer
 #[derive(Debug)]

@@ -3,19 +3,19 @@
 //! This module contains the CacheManager and related components for efficient page caching,
 //! prefetching, and data temperature management.
 
+use super::fifo::FIFOCache;
+use super::lfu::LFUCache;
+use super::lru_k::LRUKCache;
 use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait, LFUCacheTrait, LRUKCacheTrait};
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
-use crate::storage::disk::async_disk::prefetching::MLPrefetcher;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
+use crate::storage::disk::async_disk::prefetching::MLPrefetcher;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait, LFUCacheTrait, LRUKCacheTrait};
-use super::lru_k::LRUKCache;
-use super::lfu::LFUCache;
-use super::fifo::FIFOCache;
 
 /// Page data with metadata
 #[derive(Debug, Clone)]

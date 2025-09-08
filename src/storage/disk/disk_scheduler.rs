@@ -1,16 +1,12 @@
 use crate::common::config::PageId;
 use crate::storage::disk::disk_manager::FileDiskManager;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use log::{error, info, debug, trace};
+use log::{debug, error, info, trace};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
-
-// Type aliases for complex types
-type PageRequest = (PageId, Arc<RwLock<[u8; 4096]>>, mpsc::Sender<()>);
 
 // Define DiskRequest struct
 #[derive(Debug)]
@@ -21,37 +17,6 @@ pub struct DiskRequest {
     sender: mpsc::Sender<()>,
 }
 
-// PERFORMANCE OPTIMIZATION: Batch request structure
-#[derive(Debug)]
-pub struct BatchDiskRequest {
-    write_requests: Vec<PageRequest>,
-    read_requests: Vec<PageRequest>,
-}
-
-impl BatchDiskRequest {
-    fn new() -> Self {
-        Self {
-            write_requests: Vec::new(),
-            read_requests: Vec::new(),
-        }
-    }
-
-    fn add_request(&mut self, request: DiskRequest) {
-        if request.is_write {
-            self.write_requests.push((request.page_id, request.data, request.sender));
-        } else {
-            self.read_requests.push((request.page_id, request.data, request.sender));
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.write_requests.is_empty() && self.read_requests.is_empty()
-    }
-
-    fn total_requests(&self) -> usize {
-        self.write_requests.len() + self.read_requests.len()
-    }
-}
 
 // Define DiskScheduler struct
 #[derive(Debug)]
@@ -61,9 +26,6 @@ pub struct DiskScheduler {
     stop_flag: Arc<RwLock<bool>>,
     notifier: Sender<()>,
     worker_thread: Option<thread::JoinHandle<()>>,
-    // PERFORMANCE OPTIMIZATION: Batch processing state
-    batch_timeout: Duration,
-    last_batch_time: Arc<RwLock<Instant>>,
 }
 
 impl DiskScheduler {
@@ -77,8 +39,6 @@ impl DiskScheduler {
             stop_flag: Arc::clone(&stop_flag),
             notifier,
             worker_thread: None,
-            batch_timeout: Duration::from_secs(1),
-            last_batch_time: Arc::new(RwLock::new(Instant::now())),
         };
         scheduler.start_worker_thread(receiver);
         scheduler
@@ -108,49 +68,12 @@ impl DiskScheduler {
             );
         }
 
-        // Update last batch time
-        *self.last_batch_time.write() = Instant::now();
-
         // Notify the worker thread
         if let Err(err) = self.notifier.send(()) {
             debug!("Failed to send notification to worker thread: {:?}", err);
         } else {
             trace!("Notifier sent to worker thread");
         }
-    }
-
-    /// PERFORMANCE OPTIMIZATION: Process requests in batches for better I/O performance
-    fn process_batch_requests(&self, batch: BatchDiskRequest) {
-        let start_time = Instant::now();
-
-        // Process all write requests in batch
-        if !batch.write_requests.is_empty() {
-            debug!("Processing {} write requests in batch", batch.write_requests.len());
-
-            for (page_id, data, sender) in batch.write_requests {
-                let data_guard = data.write();
-                if let Err(e) = self.disk_manager.write_page(page_id, &data_guard) {
-                    error!("Batch write failed for page {}: {}", page_id, e);
-                }
-                let _ = sender.send(());
-            }
-        }
-
-        // Process all read requests in batch
-        if !batch.read_requests.is_empty() {
-            debug!("Processing {} read requests in batch", batch.read_requests.len());
-
-            for (page_id, data, sender) in batch.read_requests {
-                let mut data_guard = data.write();
-                if let Err(e) = self.disk_manager.read_page(page_id, &mut data_guard) {
-                    error!("Batch read failed for page {}: {}", page_id, e);
-                }
-                let _ = sender.send(());
-            }
-        }
-
-        let duration = start_time.elapsed();
-        debug!("Batch processing completed in {:?}", duration);
     }
 
     pub fn start_worker_thread(&mut self, receiver: Receiver<()>) {
@@ -260,10 +183,10 @@ impl DiskScheduler {
 mod tests {
     use super::*;
     use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk::DiskManagerConfig;
     use crate::storage::disk::disk_manager::MockDiskIO;
     use mockall::predicate::*;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::DiskManagerConfig;
 
     pub struct TestContext {
         disk_manager: Arc<FileDiskManager>,

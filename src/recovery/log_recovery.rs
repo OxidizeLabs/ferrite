@@ -1,13 +1,12 @@
-use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
 use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
+use crate::storage::disk::async_disk::AsyncDiskManager;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::storage::disk::async_disk::AsyncDiskManager;
 
 /// LogRecoveryManager is responsible for recovering the database from log records
 /// after a crash. It follows the ARIES recovery protocol:
@@ -16,7 +15,6 @@ use crate::storage::disk::async_disk::AsyncDiskManager;
 /// 3. Undo phase: Reverse actions of uncommitted transactions
 pub struct LogRecoveryManager {
     disk_manager: Arc<AsyncDiskManager>,
-    buffer_pool_manager: Arc<BufferPoolManager>,
     log_manager: Arc<RwLock<LogManager>>,
 }
 
@@ -42,12 +40,10 @@ impl LogRecoveryManager {
     /// A new `LogRecoveryManager` instance.
     pub fn new(
         disk_manager: Arc<AsyncDiskManager>,
-        buffer_pool_manager: Arc<BufferPoolManager>,
         log_manager: Arc<RwLock<LogManager>>,
     ) -> Self {
         Self {
             disk_manager,
-            buffer_pool_manager,
             log_manager,
         }
     }
@@ -494,30 +490,19 @@ impl DirtyPageTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
     use crate::common::rid::RID;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction::Transaction;
     use crate::recovery::wal_manager::WALManager;
+    use crate::storage::disk::async_disk::DiskManagerConfig;
     use crate::storage::table::tuple::Tuple;
     use std::thread::sleep;
     use std::time::Duration;
-    use chrono::Utc;
     use tempfile::TempDir;
-    use crate::catalog::Catalog;
-    use crate::common::logger::initialize_logger;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::async_disk::DiskManagerConfig;
 
     struct TestContext {
-        catalog: Arc<RwLock<Catalog>>,
-        transaction_context: Arc<TransactionContext>,
-        disk_manager: Arc<AsyncDiskManager>,
-        buffer_pool_manager: Arc<BufferPoolManager>,
-        log_manager: Arc<RwLock<LogManager>>,
         wal_manager: WALManager,
         recovery_manager: LogRecoveryManager,
         _temp_dir: TempDir,
@@ -526,8 +511,6 @@ mod tests {
     impl TestContext {
         pub async fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 10;
-            const K: usize = 2;
 
             // Create temporary directory
             let temp_dir = TempDir::new().unwrap();
@@ -547,46 +530,14 @@ mod tests {
             // Create disk components
             let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
-
-            let transaction_manager = Arc::new(TransactionManager::new());
-            let lock_manager = Arc::new(LockManager::new());
-
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                transaction_manager.clone(),
-            )));
-
-            // Create fresh transaction with unique ID
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let transaction = Arc::new(Transaction::new(
-                timestamp.parse::<u64>().unwrap_or(0), // Unique transaction ID
-                IsolationLevel::ReadUncommitted,
-            ));
-
-            let transaction_context = Arc::new(TransactionContext::new(
-                transaction,
-                lock_manager.clone(),
-                transaction_manager.clone(),
-            ));
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
 
             let wal_manager = WALManager::new(log_manager.clone());
 
-            let recovery_manager = LogRecoveryManager::new(disk_manager_arc.clone(), bpm.clone(), log_manager.clone());
+            let recovery_manager = LogRecoveryManager::new(disk_manager_arc.clone(), log_manager.clone());
 
             Self {
-                catalog,
-                transaction_context,
-                disk_manager: disk_manager_arc,
-                buffer_pool_manager: bpm.clone(),
-                log_manager,
                 wal_manager,
                 recovery_manager,
                 _temp_dir: temp_dir,

@@ -1,7 +1,7 @@
 use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::common::logger::initialize_logger;
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
-use crate::storage::disk::direct_io::{DirectIOConfig, open_direct_io};
+use crate::storage::disk::direct_io::{open_direct_io, DirectIOConfig};
 use log::{debug, error, info, trace, warn};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
@@ -16,18 +16,14 @@ use std::time::{Duration, Instant};
 use std::{fmt, thread};
 
 use parking_lot::{Mutex, RwLock};
-use tokio::task::JoinHandle;
 
 #[cfg(any(test, feature = "mocking"))]
 use mockall::automock;
 
-// PERFORMANCE OPTIMIZATION: Constants for optimized operations
-const WRITE_BUFFER_SIZE: usize = 1024 * 1024; // 1MB write buffer
 const READ_AHEAD_PAGES: usize = 8; // Number of pages to read ahead
 const BATCH_FLUSH_THRESHOLD: usize = 64; // Batch flush after N dirty pages
-const ASYNC_POOL_SIZE: usize = 4; // Number of async I/O workers
 
-// PERFORMANCE OPTIMIZATION: Write-ahead buffer for batching writes
+// Write-ahead buffer for batching writes
 #[derive(Debug)]
 pub struct WriteBuffer {
     pages: HashMap<PageId, [u8; DB_PAGE_SIZE as usize]>,
@@ -121,14 +117,13 @@ pub struct FileDiskManager {
     // PERFORMANCE OPTIMIZATION: Advanced caching and buffering
     write_buffer: Arc<RwLock<WriteBuffer>>,
     read_cache: Arc<RwLock<ReadAheadCache>>,
-    async_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
     background_flush_enabled: AtomicUsize, // 0 = disabled, 1 = enabled
     // Direct I/O configuration
     config: DiskManagerConfig,
     direct_io_config: DirectIOConfig,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct DiskMetrics {
     read_latency_ns: AtomicU64,
     write_latency_ns: AtomicU64,
@@ -353,7 +348,6 @@ impl FileDiskManager {
             // PERFORMANCE OPTIMIZATION: Initialize new performance components
             write_buffer: Arc::new(RwLock::new(WriteBuffer::new())),
             read_cache: Arc::new(RwLock::new(ReadAheadCache::new())),
-            async_handles: Arc::new(RwLock::new(Vec::new())),
             background_flush_enabled: AtomicUsize::new(1), // Enable by default
             // Direct I/O configuration
             config,

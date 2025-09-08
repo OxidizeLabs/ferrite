@@ -139,6 +139,7 @@ mod tests {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::page::PAGE_TYPE_OFFSET;
     use crate::storage::page::{BasicPage, PageTrait, PageType};
     use parking_lot::RwLock;
@@ -146,7 +147,6 @@ mod tests {
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>

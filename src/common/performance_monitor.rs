@@ -1,7 +1,7 @@
+use log::{debug, warn};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use log::{warn, debug};
-use std::collections::HashMap;
 
 /// Comprehensive performance metrics for database operations
 #[derive(Debug, Default)]

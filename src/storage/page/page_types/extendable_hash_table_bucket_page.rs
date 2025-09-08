@@ -276,13 +276,13 @@ mod basic_behavior {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
     use log::info;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use std::thread;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>

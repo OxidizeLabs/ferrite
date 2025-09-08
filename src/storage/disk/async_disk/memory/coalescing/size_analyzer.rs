@@ -5,7 +5,7 @@
 
 use crate::common::config::PageId;
 use std::collections::HashMap;
-use std::io::{Result as IoResult, Error as IoError, ErrorKind};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 
 /// Represents a contiguous range of pages for coalescing calculations
 #[derive(Debug, Clone, PartialEq, Eq)]

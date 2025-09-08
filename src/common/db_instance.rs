@@ -14,6 +14,7 @@ use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::execution_engine::ExecutionEngine;
 use crate::sql::execution::transaction_context::TransactionContext;
+use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::error;
@@ -22,10 +23,10 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DBConfig {
     pub db_filename: String,
     pub db_log_filename: String,
@@ -43,6 +44,7 @@ pub struct DBConfig {
 
 /// Main struct representing the DB database instance with generic disk manager type
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct DBInstance {
     buffer_pool_manager: Arc<BufferPoolManager>,
     catalog: Arc<RwLock<Catalog>>,
@@ -145,7 +147,6 @@ impl DBInstance {
             info!("Existing database and log files found, running recovery...");
             let recovery_manager = Arc::new(LogRecoveryManager::new(
                 disk_manager_arc.clone(),
-                buffer_pool_manager.clone(),
                 log_manager.clone(),
             ));
 
@@ -579,33 +580,6 @@ impl DBInstance {
         }
     }
 
-    // Private helper methods
-    async fn create_disk_manager(config: &DBConfig) -> Result<Arc<AsyncDiskManager>, DBError> {
-        let disk_manager = AsyncDiskManager::new(
-            config.db_filename.clone(),
-            config.db_log_filename.clone(),
-            DiskManagerConfig::default(),
-        ).await.map_err(|e| DBError::Io(format!("Failed to create disk manager: {}", e)))?;
-
-        Ok(Arc::new(disk_manager))
-    }
-
-
-    fn create_buffer_pool_manager(
-        config: &DBConfig,
-        disk_manager: &Arc<AsyncDiskManager>,
-    ) -> Result<Option<Arc<BufferPoolManager>>, DBError> {
-        let replacer = LRUKReplacer::new(config.lru_sample_size, config.lru_k);
-
-        let bpm = BufferPoolManager::new(
-            config.buffer_pool_size,
-            disk_manager.clone(),
-            Arc::new(RwLock::new(replacer)),
-        )?;
-
-        Ok(Some(Arc::new(bpm)))
-    }
-
     /// Add method to enable/disable debug output
     pub fn set_debug_mode(&mut self, enabled: bool) {
         self.debug_mode = enabled;
@@ -635,47 +609,6 @@ impl DBInstance {
         }
         if self.debug_mode {
             info!("Removed session for client {}", client_id);
-        }
-    }
-
-    async fn handle_prepare_statement(
-        &self,
-        sql: String,
-        session: &mut ClientSession,
-    ) -> Result<DatabaseResponse, DBError> {
-        // Parse SQL to validate and get parameter types
-        match self.execution_engine.lock().prepare_statement(&sql) {
-            Ok(param_types) => {
-                let stmt = PreparedStatement {
-                    sql,
-                    parameter_types: param_types,
-                };
-
-                let stmt_id = {
-                    let mut id = self.next_statement_id.lock();
-                    *id += 1;
-                    *id
-                };
-
-                self.prepared_statements.lock().insert(stmt_id, stmt);
-
-                if self.debug_mode {
-                    info!("Client {} prepared statement {}", session.id, stmt_id);
-                }
-
-                Ok(DatabaseResponse::Results(QueryResults {
-                    column_names: vec!["statement_id".to_string()],
-                    rows: vec![vec![Value::new(stmt_id as i32)]],
-                    messages: vec![],
-                }))
-            }
-            Err(e) => {
-                let error = format!("Failed to prepare statement: {}", e);
-                if self.debug_mode {
-                    error!("Client {}: {}", session.id, error);
-                }
-                Ok(DatabaseResponse::Error(error))
-            }
         }
     }
 

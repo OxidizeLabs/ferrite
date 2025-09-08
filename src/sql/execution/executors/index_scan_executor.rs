@@ -8,8 +8,8 @@ use crate::sql::execution::expressions::comparison_expression::ComparisonType;
 use crate::sql::execution::expressions::logic_expression::LogicType;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
-use crate::storage::index::IndexInfo;
 use crate::storage::index::index_iterator_mem::IndexIterator;
+use crate::storage::index::IndexInfo;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Val, Value};
@@ -422,9 +422,10 @@ mod index_scan_executor_tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::catalog::Catalog;
     use crate::common::config::{IndexOidT, TableOidT};
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -432,14 +433,13 @@ mod index_scan_executor_tests {
     use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::IndexType;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         execution_context: Arc<RwLock<ExecutionContext>>,

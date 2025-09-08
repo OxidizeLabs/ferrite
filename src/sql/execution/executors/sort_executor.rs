@@ -5,7 +5,7 @@ use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
-use crate::sql::execution::plans::sort_plan::{SortNode, OrderDirection};
+use crate::sql::execution::plans::sort_plan::{OrderDirection, SortNode};
 use crate::storage::table::tuple::Tuple;
 use log::{debug, error, trace};
 use parking_lot::RwLock;
@@ -180,8 +180,9 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::catalog::Catalog;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -192,12 +193,11 @@ mod tests {
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::sql::execution::plans::sort_plan::OrderBySpec;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;
     use crate::types_db::value::Value;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

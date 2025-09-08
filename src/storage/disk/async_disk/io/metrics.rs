@@ -1,6 +1,6 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use std::collections::VecDeque;
 use tokio::sync::RwLock;
 
 /// I/O operation metrics for monitoring and observability

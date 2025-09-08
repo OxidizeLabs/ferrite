@@ -12,9 +12,9 @@ use crate::sql::execution::executors::index_scan_executor::IndexScanExecutor;
 use crate::sql::execution::executors::insert_executor::InsertExecutor;
 use crate::sql::execution::executors::limit_executor::LimitExecutor;
 use crate::sql::execution::executors::mock_executor::MockExecutor;
-use crate::sql::execution::executors::offset_executor::OffsetExecutor;
 use crate::sql::execution::executors::nested_index_join_executor::NestedIndexJoinExecutor;
 use crate::sql::execution::executors::nested_loop_join_executor::NestedLoopJoinExecutor;
+use crate::sql::execution::executors::offset_executor::OffsetExecutor;
 use crate::sql::execution::executors::projection_executor::ProjectionExecutor;
 use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::sql::execution::executors::sort_executor::SortExecutor;
@@ -37,9 +37,9 @@ use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::execution::plans::limit_plan::LimitNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
-use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
+use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
@@ -845,19 +845,19 @@ impl Display for PlanNode {
 mod basic_behaviour {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::catalog::Catalog;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::query_planner::QueryPlanner;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use log::info;
     use parking_lot::RwLock;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -1086,19 +1086,19 @@ mod basic_behaviour {
 mod complex_behaviour {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::catalog::Catalog;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::query_planner::QueryPlanner;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use log::info;
     use parking_lot::RwLock;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

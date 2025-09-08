@@ -1,6 +1,6 @@
 use crate::types_db::value::{Val, Value};
+use bincode::{Decode, Encode};
 use std::hash::{Hash, Hasher};
-use bincode::{Encode, Decode};
 
 // Every possible SQL type ID
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Encode, Decode, Default)]
