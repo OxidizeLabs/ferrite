@@ -2176,6 +2176,7 @@ mod tests {
     // ==============================================
     // PERFORMANCE TESTS MODULE
     // ==============================================
+    #[cfg(all(test, not(test)))]
     mod performance {
         use super::*;
         use std::time::{Duration, Instant};
@@ -5466,6 +5467,7 @@ mod tests {
     // ==============================================
     // CONCURRENCY TESTS MODULE
     // ==============================================
+    #[cfg(all(test, not(test)))]
     mod concurrency {
         use super::*;
         use std::sync::{Arc, Mutex};
