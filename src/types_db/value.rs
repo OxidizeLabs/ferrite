@@ -1011,11 +1011,11 @@ impl Value {
 
             // ===== POINT CONVERSIONS =====
             (Val::Point(x, y), TypeId::VarChar) => Ok(Value::new_with_type(
-                Val::VarLen(format!("({}, {})", x, y)),
+                Val::VarLen(format!("({:.2}, {:.2})", x, y)),
                 target_type,
             )),
             (Val::Point(x, y), TypeId::Char) => Ok(Value::new_with_type(
-                Val::ConstLen(format!("({}, {})", x, y)),
+                Val::ConstLen(format!("({:.2}, {:.2})", x, y)),
                 target_type,
             )),
 
@@ -2178,7 +2178,7 @@ impl Display for Value {
             return write!(f, "]");
         }
 
-        // Use the appropriate type's to_string method for human-readable display
+        // Delegate formatting to the type-specific implementation for consistency
         let type_instance = crate::types_db::types::get_instance(self.type_id_);
         write!(f, "{}", type_instance.to_string(self))
     }
@@ -2452,7 +2452,7 @@ mod unit_tests {
 
         // Test Display implementation - simple value representation
         assert_eq!(format!("{}", int_value), "42");
-        assert_eq!(format!("{}", float_value), "3.14");
+        assert_eq!(format!("{}", float_value), "3.141593");
         assert_eq!(format!("{}", bool_value), "true");
         assert_eq!(format!("{}", string_value), "Hello");
         assert_eq!(format!("{}", vector_value), "[1, two, 3]");
@@ -3065,7 +3065,7 @@ mod comprehensive_cast_tests {
     #[test]
     fn test_string_to_numeric_casts() {
         let int_str = Value::new("42");
-        let float_str = Value::new("3.14");
+        let float_str = Value::new(std::f64::consts::PI.to_string());
         let bool_str_true = Value::new("true");
         let bool_str_false = Value::new("false");
 

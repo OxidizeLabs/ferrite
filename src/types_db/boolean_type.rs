@@ -54,7 +54,7 @@ impl Type for BooleanType {
 
     fn compare_less_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
-            Val::Boolean(r) => CmpBool::from(!*r), // false < true
+            Val::Boolean(_r) => CmpBool::CmpFalse,
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
