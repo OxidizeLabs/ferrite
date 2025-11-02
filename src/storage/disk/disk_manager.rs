@@ -822,10 +822,7 @@ impl FileDiskManager {
         let flush_count = pages_to_flush.len();
 
         // Convert to batch format
-        let batch_pages: Vec<_> = pages_to_flush
-            .into_iter()
-            .map(|(page_id, data)| (page_id, data))
-            .collect();
+        let batch_pages: Vec<_> = pages_to_flush.into_iter().collect();
 
         // Use the existing batch write method for efficiency
         let result = self.write_pages_batch(&batch_pages);
@@ -1244,6 +1241,7 @@ mod tests {
     mod async_tests {
         use super::*;
 
+        #[allow(clippy::await_holding_lock)]
         #[tokio::test]
         async fn test_async_operations() {
             let ctx = TestContext::new("test_async_operations");
@@ -1563,7 +1561,7 @@ mod tests {
             mock.expect_write_page().times(3).returning(move |_, _| {
                 let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
                 if current_attempt < 2 {
-                    Err(Error::new(ErrorKind::Other, "Temporary error"))
+                    Err(Error::other("Temporary error"))
                 } else {
                     Ok(())
                 }
@@ -1597,7 +1595,7 @@ mod tests {
                 .times(FileDiskManager::MAX_RETRIES as usize)
                 .returning(move |_, _| {
                     attempts_clone.fetch_add(1, Ordering::SeqCst);
-                    Err(Error::new(ErrorKind::Other, "Persistent error"))
+                    Err(Error::other("Persistent error"))
                 });
 
             // Set the mock implementation
@@ -1627,7 +1625,7 @@ mod tests {
             mock.expect_read_page().times(2).returning(move |_, buf| {
                 let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
                 if current_attempt == 0 {
-                    Err(Error::new(ErrorKind::Other, "Temporary read error"))
+                    Err(Error::other("Temporary read error"))
                 } else {
                     buf[0] = 42; // Set test data
                     Ok(())
@@ -1662,7 +1660,7 @@ mod tests {
             mock.expect_read_page().times(2).returning(move |_, buf| {
                 let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
                 if current_attempt == 0 {
-                    Err(Error::new(ErrorKind::Other, "Simulated read error"))
+                    Err(Error::other("Simulated read error"))
                 } else {
                     buf[0] = 42; // Set test data
                     Ok(())
@@ -1701,7 +1699,7 @@ mod tests {
             let mut mock = MockDiskIO::new();
             mock.expect_write_page()
                 .times(FileDiskManager::MAX_RETRIES as usize)
-                .returning(|_, _| Err(Error::new(ErrorKind::Other, "Temporary error")));
+                .returning(|_, _| Err(Error::other("Temporary error")));
 
             // Set the mock implementation
             disk_manager.set_disk_io(Box::new(mock));
@@ -2256,7 +2254,7 @@ mod tests {
                 .read_throughput_bytes
                 .load(Ordering::Relaxed);
 
-            let expected_bytes = (page_count as u64) * DB_PAGE_SIZE;
+            let expected_bytes = page_count * DB_PAGE_SIZE;
             assert_eq!(
                 final_write_throughput - initial_write_throughput,
                 expected_bytes,
@@ -2274,27 +2272,27 @@ mod tests {
             let ctx = TestContext::new("test_enhanced_performance_monitoring");
             let disk_manager = ctx.disk_manager.write();
 
-            println!("=== Enhanced Performance Monitoring Test ===");
+            log::info!("=== Enhanced Performance Monitoring Test ===");
 
             // Test different operation patterns and measure their performance
             let test_data = [42u8; DB_PAGE_SIZE as usize];
             let page_count = 100;
 
             // 1. Sequential Write Performance
-            println!("\n1. Testing Sequential Write Performance:");
+            log::info!("\n1. Testing Sequential Write Performance:");
             let start_time = Instant::now();
             for i in 0..page_count {
                 assert!(disk_manager.write_page(i, &test_data).is_ok());
             }
             let sequential_write_duration = start_time.elapsed();
-            println!(
+            log::info!(
                 "   Sequential writes: {:?} ({:.2} pages/sec)",
                 sequential_write_duration,
                 page_count as f64 / sequential_write_duration.as_secs_f64()
             );
 
             // 2. Sequential Read Performance
-            println!("\n2. Testing Sequential Read Performance:");
+            log::info!("\n2. Testing Sequential Read Performance:");
             let start_time = Instant::now();
             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
             for i in 0..page_count {
@@ -2302,14 +2300,14 @@ mod tests {
                 assert_eq!(read_buffer[0], 42);
             }
             let sequential_read_duration = start_time.elapsed();
-            println!(
+            log::info!(
                 "   Sequential reads: {:?} ({:.2} pages/sec)",
                 sequential_read_duration,
                 page_count as f64 / sequential_read_duration.as_secs_f64()
             );
 
             // 3. Random Access Pattern Performance
-            println!("\n3. Testing Random Access Pattern:");
+            log::info!("\n3. Testing Random Access Pattern:");
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
 
@@ -2325,14 +2323,14 @@ mod tests {
                 assert!(disk_manager.read_page(page_id, &mut read_buffer).is_ok());
             }
             let random_read_duration = start_time.elapsed();
-            println!(
+            log::info!(
                 "   Random reads: {:?} ({:.2} pages/sec)",
                 random_read_duration,
                 page_count as f64 / random_read_duration.as_secs_f64()
             );
 
             // 4. Batch Operation Performance
-            println!("\n4. Testing Batch Operation Performance:");
+            log::info!("\n4. Testing Batch Operation Performance:");
             let batch_pages: Vec<_> = (page_count..(page_count + 50))
                 .map(|i| {
                     let mut data = [0u8; DB_PAGE_SIZE as usize];
@@ -2344,7 +2342,7 @@ mod tests {
             let start_time = Instant::now();
             assert!(disk_manager.write_pages_batch(&batch_pages).is_ok());
             let batch_write_duration = start_time.elapsed();
-            println!(
+            log::info!(
                 "   Batch writes: {:?} ({:.2} pages/sec)",
                 batch_write_duration,
                 batch_pages.len() as f64 / batch_write_duration.as_secs_f64()
@@ -2354,14 +2352,14 @@ mod tests {
             let start_time = Instant::now();
             let batch_results = disk_manager.read_pages_batch(&batch_read_ids).unwrap();
             let batch_read_duration = start_time.elapsed();
-            println!(
+            log::info!(
                 "   Batch reads: {:?} ({:.2} pages/sec)",
                 batch_read_duration,
                 batch_results.len() as f64 / batch_read_duration.as_secs_f64()
             );
 
             // 5. Mixed Operation Performance
-            println!("\n5. Testing Mixed Operations:");
+            log::info!("\n5. Testing Mixed Operations:");
             let start_time = Instant::now();
             for i in 0..50 {
                 // Write
@@ -2378,14 +2376,14 @@ mod tests {
                 assert!(disk_manager.write_log(log_entry.as_bytes()).is_ok());
             }
             let mixed_duration = start_time.elapsed();
-            println!(
+            log::info!(
                 "   Mixed operations: {:?} ({:.2} ops/sec)",
                 mixed_duration,
                 150.0 / mixed_duration.as_secs_f64()
             ); // 50 writes + 50 reads + 50 logs
 
             // 6. Current Metrics Summary
-            println!("\n6. Current Metrics Summary:");
+            log::info!("\n6. Current Metrics Summary:");
             let read_throughput = disk_manager
                 .metrics
                 .read_throughput_bytes
@@ -2402,48 +2400,48 @@ mod tests {
             let read_errors = disk_manager.metrics.read_errors.load(Ordering::Relaxed);
             let write_errors = disk_manager.metrics.write_errors.load(Ordering::Relaxed);
 
-            println!(
+            log::info!(
                 "   Total read throughput: {:.2} MB",
                 read_throughput as f64 / 1_000_000.0
             );
-            println!(
+            log::info!(
                 "   Total write throughput: {:.2} MB",
                 write_throughput as f64 / 1_000_000.0
             );
-            println!(
+            log::info!(
                 "   Cumulative read latency: {:?}",
                 Duration::from_nanos(read_latency)
             );
-            println!(
+            log::info!(
                 "   Cumulative write latency: {:?}",
                 Duration::from_nanos(write_latency)
             );
-            println!("   Read errors: {}", read_errors);
-            println!("   Write errors: {}", write_errors);
+            log::info!("   Read errors: {}", read_errors);
+            log::info!("   Write errors: {}", write_errors);
 
             // 7. Health Check
-            println!("\n7. Health Check:");
+            log::info!("\n7. Health Check:");
             let is_healthy = disk_manager.check_health();
-            println!(
+            log::info!(
                 "   Disk Manager Health: {}",
                 if is_healthy { "HEALTHY" } else { "UNHEALTHY" }
             );
 
             // 8. Performance Comparison Summary
-            println!("\n8. Performance Comparison Summary:");
-            println!(
+            log::info!("\n8. Performance Comparison Summary:");
+            log::info!(
                 "   Sequential vs Random read ratio: {:.2}x",
                 random_read_duration.as_secs_f64() / sequential_read_duration.as_secs_f64()
             );
 
             let individual_rate = page_count as f64 / sequential_write_duration.as_secs_f64();
             let batch_rate = batch_pages.len() as f64 / batch_write_duration.as_secs_f64();
-            println!(
+            log::info!(
                 "   Batch vs Individual write ratio: {:.2}x",
                 batch_rate / individual_rate
             );
 
-            println!("\n=== Performance Monitoring Complete ===");
+            log::info!("\n=== Performance Monitoring Complete ===");
 
             // Verify all operations completed successfully
             assert!(
@@ -2674,7 +2672,7 @@ mod tests {
                 .returning(move |page_id, _| {
                     let current_attempt = attempts_clone.fetch_add(1, Ordering::SeqCst);
                     if page_id == 0 && current_attempt < 2 {
-                        Err(Error::new(ErrorKind::Other, "Temporary error"))
+                        Err(Error::other("Temporary error"))
                     } else {
                         Ok(())
                     }
@@ -2735,10 +2733,10 @@ mod tests {
             let ctx = TestContext::new("test_performance_optimizations");
             let disk_manager = ctx.disk_manager.write();
 
-            println!("=== Testing Performance Optimizations ===");
+            log::info!("=== Testing Performance Optimizations ===");
 
             // Test write buffering
-            println!("\n1. Testing Write Buffer Performance:");
+            log::info!("\n1. Testing Write Buffer Performance:");
             let start_time = Instant::now();
             for i in 0..100 {
                 let mut test_data = [0u8; DB_PAGE_SIZE as usize];
@@ -2746,13 +2744,13 @@ mod tests {
                 assert!(disk_manager.write_page(i, &test_data).is_ok());
             }
             let buffered_write_duration = start_time.elapsed();
-            println!("   Buffered writes: {:?}", buffered_write_duration);
+            log::info!("   Buffered writes: {:?}", buffered_write_duration);
 
             // Force flush and test
             assert!(disk_manager.flush_write_buffer().is_ok());
 
             // Test cache performance
-            println!("\n2. Testing Read Cache Performance:");
+            log::info!("\n2. Testing Read Cache Performance:");
             let start_time = Instant::now();
             let mut read_buffer = [0u8; DB_PAGE_SIZE as usize];
 
@@ -2765,24 +2763,26 @@ mod tests {
             assert!(disk_manager.read_page(0, &mut read_buffer).is_ok());
             let cached_read_time = cache_start.elapsed();
 
-            println!("   First read (miss): {:?}", first_read_time);
-            println!("   Cached read (hit): {:?}", cached_read_time);
+            log::info!("   First read (miss): {:?}", first_read_time);
+            log::info!("   Cached read (hit): {:?}", cached_read_time);
 
             // Get cache statistics
             let (hits, misses, hit_ratio) = disk_manager.get_cache_stats();
-            println!(
+            log::info!(
                 "   Cache stats - Hits: {}, Misses: {}, Hit ratio: {:.2}%",
-                hits, misses, hit_ratio
+                hits,
+                misses,
+                hit_ratio
             );
 
             // Test sequential access pattern (should trigger prefetching)
-            println!("\n3. Testing Sequential Access Optimization:");
+            log::info!("\n3. Testing Sequential Access Optimization:");
             let start_time = Instant::now();
             for i in 50..60 {
                 assert!(disk_manager.read_page(i, &mut read_buffer).is_ok());
             }
             let sequential_duration = start_time.elapsed();
-            println!("   Sequential reads: {:?}", sequential_duration);
+            log::info!("   Sequential reads: {:?}", sequential_duration);
 
             // Verify optimizations are working
             assert!(
@@ -2792,7 +2792,7 @@ mod tests {
             assert!(hits > 0, "Should have cache hits");
             assert!(hit_ratio > 0.0, "Should have positive hit ratio");
 
-            println!("\n=== Performance Optimization Tests Complete ===");
+            log::info!("\n=== Performance Optimization Tests Complete ===");
         }
     }
 }

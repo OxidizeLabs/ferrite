@@ -216,7 +216,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![Value::new(1), Value::new(10)], &schema, rid);
+        let tuple = Tuple::new(&[Value::new(1), Value::new(10)], &schema, rid);
         (tuple, schema)
     }
 

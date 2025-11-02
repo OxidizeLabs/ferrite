@@ -308,14 +308,9 @@ impl AbstractExecutor for InsertExecutor {
 
                 // Collect all values first to avoid borrowing conflicts
                 let mut all_values = Vec::new();
-                loop {
-                    match child.next()? {
-                        Some((tuple, _)) => {
-                            let values = tuple.get_values().clone();
-                            all_values.push(values);
-                        }
-                        None => break,
-                    }
+                while let Some((tuple, _)) = child.next()? {
+                    let values = tuple.get_values().clone();
+                    all_values.push(values);
                 }
 
                 // Now validate and insert each set of values

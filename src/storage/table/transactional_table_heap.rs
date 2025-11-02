@@ -14,7 +14,7 @@ use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::types::Type;
 use crate::types_db::value::Value;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -490,8 +490,18 @@ impl TransactionalTableHeap {
             .lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
             .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
+        // Ensure the tuple's metadata reflects the current transaction as creator
+        let mut fixed_meta = TupleMeta::new(txn.get_transaction_id());
+        fixed_meta.set_commit_timestamp(meta.get_commit_timestamp());
+        if meta.is_deleted() {
+            fixed_meta.set_deleted(true);
+        }
+        fixed_meta.set_undo_log_idx(meta.get_undo_log_idx());
+
         // Perform insert using internal method
-        let rid = self.table_heap.insert_tuple_internal(meta, tuple)?;
+        let rid = self
+            .table_heap
+            .insert_tuple_internal(Arc::new(fixed_meta), tuple)?;
 
         // Transaction bookkeeping
         txn.append_write_set(self.table_oid, rid);
@@ -652,7 +662,17 @@ impl TransactionalTableHeap {
                 txn.get_transaction_id()
             );
 
-            let undo_log = txn_manager.get_undo_log(undo_link.clone());
+            // Attempt to fetch the undo log; if missing, stop traversal
+            let undo_log = if let Some(log) = txn_manager.get_undo_log_optional(undo_link.clone()) {
+                log
+            } else {
+                warn!(
+                    "Missing undo log for link: txn={}, idx={}; stopping traversal",
+                    undo_link.prev_txn, undo_link.prev_log_idx
+                );
+                current_link = None;
+                continue;
+            };
             let undo_log_clone = undo_log.clone();
             log::debug!(
                 "Retrieved undo log: ts={}, is_deleted={}, prev_version: txn={}, idx={}",
@@ -1103,6 +1123,8 @@ mod tests {
 
             // Create transactional table heap
             let txn_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), 1));
+            // Register table with transaction manager so commits can update metadata
+            txn_manager.register_table(txn_heap.clone());
 
             Self {
                 txn_heap,

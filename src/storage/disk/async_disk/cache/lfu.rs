@@ -134,7 +134,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{
 ///     let mut cache = cache.lock().unwrap();
 ///     if cache.len() >= cache.capacity() {
 ///         // LFU eviction happens automatically on insert
-///         println!("Cache full, will evict LFU page");
+///         log::info!("Cache full, will evict LFU page");
 ///     }
 ///     cache.insert(page_id, data);
 /// }
@@ -155,7 +155,7 @@ use crate::storage::disk::async_disk::cache::cache_traits::{
 ///
 /// // Monitor LFU candidate
 /// if let Some((key, _value)) = cache.peek_lfu() {
-///     println!("Next item to be evicted: {:?}", key);
+///     log::info!("Next item to be evicted: {:?}", key);
 /// }
 /// ```
 ///
@@ -166,12 +166,12 @@ use crate::storage::disk::async_disk::cache::cache_traits::{
 /// // Measure operation performance
 /// let start = Instant::now();
 /// cache.insert("key", "value");
-/// println!("Insert took: {:?}", start.elapsed());
+/// log::info!("Insert took: {:?}", start.elapsed());
 ///
 /// // Avoid frequent LFU operations in hot paths
 /// let start = Instant::now();
 /// let lfu_item = cache.pop_lfu(); // O(n) operation!
-/// println!("LFU scan took: {:?}", start.elapsed());
+/// log::info!("LFU scan took: {:?}", start.elapsed());
 /// ```
 ///
 /// ## Implementation Notes
@@ -825,7 +825,6 @@ mod tests {
                 // Frequency should be very high but not overflow
                 let freq = cache.frequency(&"key1".to_string()).unwrap();
                 assert!(freq > 1000);
-                assert!(freq <= u64::MAX); // Should not overflow
 
                 // Test that increment_frequency doesn't panic with high values
                 let freq_before = cache.frequency(&"key1".to_string()).unwrap();
@@ -1278,12 +1277,12 @@ mod tests {
                 assert_eq!(peek_value_owned, pop_value);
 
                 // The popped item should be one of the low frequency items
-                assert!(pop_key == "low1".to_string() || pop_key == "low2".to_string());
+                assert!(pop_key == "low1" || pop_key == "low2");
                 assert_eq!(cache.len(), 3);
 
                 // Next pop should get the other low frequency item
                 let (second_key, _) = cache.pop_lfu().unwrap();
-                assert!(second_key == "low1".to_string() || second_key == "low2".to_string());
+                assert!(second_key == "low1" || second_key == "low2");
                 assert_ne!(pop_key, second_key); // Should be different
                 assert_eq!(cache.len(), 2);
 
@@ -1310,10 +1309,11 @@ mod tests {
                 assert_eq!(cache.frequency(&"c".to_string()), Some(1));
 
                 // Should be able to pop all three (order may vary)
-                let mut popped_keys = vec![];
-                popped_keys.push(cache.pop_lfu().unwrap().0);
-                popped_keys.push(cache.pop_lfu().unwrap().0);
-                popped_keys.push(cache.pop_lfu().unwrap().0);
+                let mut popped_keys = vec![
+                    cache.pop_lfu().unwrap().0,
+                    cache.pop_lfu().unwrap().0,
+                    cache.pop_lfu().unwrap().0,
+                ];
 
                 popped_keys.sort();
                 assert_eq!(
@@ -2051,7 +2051,7 @@ mod tests {
                     let test_keys = vec!["key1", "key2", "key3", "key4", "key5", "nonexistent"];
                     for key in test_keys {
                         let contains_result = cache.contains(&key.to_string());
-                        let get_result = cache.cache.get(key).is_some();
+                        let get_result = cache.cache.contains_key(key);
                         assert_eq!(contains_result, get_result);
                     }
                 };
@@ -2115,7 +2115,7 @@ mod tests {
                 verify_invariants(&cache);
 
                 // Test invariants after removals
-                let keys_to_remove: Vec<_> = cache.cache.keys().cloned().take(2).collect();
+                let keys_to_remove: Vec<_> = cache.cache.keys().take(2).cloned().collect();
                 for key in keys_to_remove {
                     cache.remove(&key);
                     verify_invariants(&cache);
@@ -2251,9 +2251,11 @@ mod tests {
 
                 // All patterns should have similar performance characteristics
                 // since HashMap lookup is O(1) average case
-                println!(
+                log::info!(
                     "Get performance - Uniform: {:?}, Skewed: {:?}, Concentrated: {:?}",
-                    uniform_duration, skewed_duration, concentrated_duration
+                    uniform_duration,
+                    skewed_duration,
+                    concentrated_duration
                 );
 
                 // Verify cache functionality wasn't broken
@@ -2329,9 +2331,11 @@ mod tests {
                 );
 
                 // Contains should be consistently fast regardless of hit/miss
-                println!(
+                log::info!(
                     "Contains performance - Existing: {:?}, Missing: {:?}, Mixed: {:?}",
-                    existing_keys_duration, missing_keys_duration, mixed_duration
+                    existing_keys_duration,
+                    missing_keys_duration,
+                    mixed_duration
                 );
 
                 // Verify cache wasn't modified by contains operations
@@ -2461,7 +2465,7 @@ mod tests {
                 );
 
                 // All frequency lookups should have similar performance (O(1) HashMap access)
-                println!(
+                log::info!(
                     "Frequency lookup performance - High: {:?}, Medium: {:?}, Low: {:?}, Freq-1: {:?}, Non-existent: {:?}",
                     high_freq_duration,
                     medium_freq_duration,
@@ -2626,7 +2630,7 @@ mod tests {
                     dynamic_cache_duration
                 );
 
-                println!(
+                log::info!(
                     "Peek LFU performance - Small: {:?}, Medium: {:?}, Large: {:?}, Varied: {:?}, Dynamic: {:?}",
                     small_cache_duration,
                     medium_cache_duration,
@@ -2792,7 +2796,7 @@ mod tests {
                     low_hit_ratio_duration
                 );
 
-                println!(
+                log::info!(
                     "Hit vs Miss performance - Pure hits: {:?}, Pure misses: {:?}, Mixed: {:?}, High hit ratio: {:?}, Low hit ratio: {:?}",
                     pure_hits_duration,
                     pure_misses_duration,
@@ -2832,7 +2836,7 @@ mod tests {
 
                 // Get should be slightly slower than contains for hits due to frequency updates
                 // but similar for misses since both fail at HashMap lookup
-                println!(
+                log::info!(
                     "Contains vs Get - Contains hits: {:?}, Contains misses: {:?}, Get hits: {:?}, Get misses: {:?}",
                     contains_hits_duration,
                     contains_misses_duration,
@@ -2872,9 +2876,11 @@ mod tests {
                 assert!(medium_miss_duration < Duration::from_millis(25));
                 assert!(large_miss_duration < Duration::from_millis(25));
 
-                println!(
+                log::info!(
                     "Miss performance across sizes - Small: {:?}, Medium: {:?}, Large: {:?}",
-                    small_miss_duration, medium_miss_duration, large_miss_duration
+                    small_miss_duration,
+                    medium_miss_duration,
+                    large_miss_duration
                 );
 
                 // Verify cache state integrity after all performance tests
@@ -2915,9 +2921,10 @@ mod tests {
                 let eviction_per_op = eviction_duration / eviction_count as u32;
 
                 // Eviction operations should be slower due to LFU finding
-                println!(
+                log::info!(
                     "Fill performance: {:?} per op, Eviction performance: {:?} per op",
-                    fill_per_op, eviction_per_op
+                    fill_per_op,
+                    eviction_per_op
                 );
 
                 // Performance assertions
@@ -2995,7 +3002,7 @@ mod tests {
                     );
                 }
 
-                println!("Eviction scaling: {:?}", eviction_times);
+                log::info!("Eviction scaling: {:?}", eviction_times);
             }
 
             #[test]
@@ -3113,13 +3120,13 @@ mod tests {
                     ops_per_second
                 );
 
-                println!("Batch insertion performance:");
-                println!("  Small batches: {:?}", small_batch_times);
-                println!("  Large batch: {:?}", large_batch_duration);
-                println!("  Small values: {:?}", small_value_duration);
-                println!("  Large values: {:?}", large_value_duration);
-                println!("  Mixed ops: {:?}", mixed_operations_duration);
-                println!("  Throughput: {:.2} ops/sec", ops_per_second);
+                log::info!("Batch insertion performance:");
+                log::info!("  Small batches: {:?}", small_batch_times);
+                log::info!("  Large batch: {:?}", large_batch_duration);
+                log::info!("  Small values: {:?}", small_value_duration);
+                log::info!("  Large values: {:?}", large_value_duration);
+                log::info!("  Mixed ops: {:?}", mixed_operations_duration);
+                log::info!("  Throughput: {:.2} ops/sec", ops_per_second);
 
                 // Test 6: Memory allocation impact during batch insertion
                 let mut allocation_cache = LFUCache::new(5000);
@@ -3148,7 +3155,7 @@ mod tests {
                     );
                 }
 
-                println!("  Progressive batches: {:?}", progressive_times);
+                log::info!("  Progressive batches: {:?}", progressive_times);
             }
 
             #[test]
@@ -3179,9 +3186,10 @@ mod tests {
                 let update_per_op = update_duration / update_count as u32;
 
                 // Updates should be faster since they don't require eviction logic
-                println!(
+                log::info!(
                     "New insertion: {:?} per op, Update: {:?} per op",
-                    new_per_op, update_per_op
+                    new_per_op,
+                    update_per_op
                 );
 
                 // Both should be fast, but updates might be slightly faster
@@ -3345,27 +3353,30 @@ mod tests {
                     );
                 }
 
-                println!("Update vs New Performance:");
-                println!(
+                log::info!("Update vs New Performance:");
+                log::info!(
                     "  New insertions: {:?} total, {:?} per op",
-                    new_insertion_duration, new_per_op
+                    new_insertion_duration,
+                    new_per_op
                 );
-                println!(
+                log::info!(
                     "  Updates: {:?} total, {:?} per op",
-                    update_duration, update_per_op
+                    update_duration,
+                    update_per_op
                 );
-                println!("  Mixed operations: {:?}", mixed_duration);
-                println!(
+                log::info!("  Mixed operations: {:?}", mixed_duration);
+                log::info!(
                     "  Frequency-based updates - High: {:?}, Medium: {:?}, Low: {:?}",
                     high_freq_update_duration,
                     medium_freq_update_duration,
                     low_freq_update_duration
                 );
-                println!(
+                log::info!(
                     "  Full cache - Updates: {:?}, New: {:?}",
-                    full_update_duration, full_new_duration
+                    full_update_duration,
+                    full_new_duration
                 );
-                println!("  Batch updates: {:?}", batch_update_times);
+                log::info!("  Batch updates: {:?}", batch_update_times);
 
                 // Verify functional correctness after performance tests
                 assert!(batch_cache.contains(&"batch_0".to_string()));
@@ -3602,15 +3613,15 @@ mod tests {
                     high_freq_duration
                 );
 
-                println!("Frequency tracking performance:");
-                println!("  Basic insertion: {:?}", insertion_with_tracking_duration);
-                println!("  Update tracking: {:?}", update_tracking_duration);
-                println!("  Eviction tracking: {:?}", eviction_tracking_duration);
-                println!("  Large scale: {:?}", large_scale_duration);
-                println!("  Mixed operations: {:?}", mixed_ops_duration);
-                println!("  Rapid insertion: {:?}", rapid_insertion_duration);
-                println!("  High frequency: {:?}", high_freq_duration);
-                println!("  Final frequency achieved: {}", final_frequency);
+                log::info!("Frequency tracking performance:");
+                log::info!("  Basic insertion: {:?}", insertion_with_tracking_duration);
+                log::info!("  Update tracking: {:?}", update_tracking_duration);
+                log::info!("  Eviction tracking: {:?}", eviction_tracking_duration);
+                log::info!("  Large scale: {:?}", large_scale_duration);
+                log::info!("  Mixed operations: {:?}", mixed_ops_duration);
+                log::info!("  Rapid insertion: {:?}", rapid_insertion_duration);
+                log::info!("  High frequency: {:?}", high_freq_duration);
+                log::info!("  Final frequency achieved: {}", final_frequency);
             }
         }
 
@@ -3777,12 +3788,12 @@ mod tests {
                     );
                 }
 
-                println!("LFU eviction performance:");
-                println!("  Basic eviction: {:?}", eviction_duration);
-                println!("  Size scaling: {:?}", eviction_times);
-                println!("  Uniform frequency: {:?}", uniform_eviction_duration);
-                println!("  Skewed frequency: {:?}", skewed_eviction_duration);
-                println!("  Consistency check: {:?}", eviction_durations);
+                log::info!("LFU eviction performance:");
+                log::info!("  Basic eviction: {:?}", eviction_duration);
+                log::info!("  Size scaling: {:?}", eviction_times);
+                log::info!("  Uniform frequency: {:?}", uniform_eviction_duration);
+                log::info!("  Skewed frequency: {:?}", skewed_eviction_duration);
+                log::info!("  Consistency check: {:?}", eviction_durations);
             }
 
             #[test]
@@ -4003,14 +4014,14 @@ mod tests {
                     empty_pop_duration
                 );
 
-                println!("pop_lfu performance:");
-                println!("  Basic pop operations: {:?}", pop_duration);
-                println!("  Size scaling: {:?}", pop_times);
-                println!("  Uniform frequency: {:?}", uniform_pop_duration);
-                println!("  Pop until empty: {:?}", empty_duration);
-                println!("  Skewed distribution: {:?}", skewed_pop_duration);
-                println!("  Consistency check: {:?}", pop_durations);
-                println!("  Empty cache: {:?}", empty_pop_duration);
+                log::info!("pop_lfu performance:");
+                log::info!("  Basic pop operations: {:?}", pop_duration);
+                log::info!("  Size scaling: {:?}", pop_times);
+                log::info!("  Uniform frequency: {:?}", uniform_pop_duration);
+                log::info!("  Pop until empty: {:?}", empty_duration);
+                log::info!("  Skewed distribution: {:?}", skewed_pop_duration);
+                log::info!("  Consistency check: {:?}", pop_durations);
+                log::info!("  Empty cache: {:?}", empty_pop_duration);
             }
 
             #[test]
@@ -4125,9 +4136,12 @@ mod tests {
 
                 // The key test: lower frequency items should be evicted more than higher frequency items
                 let total_old_remaining = group1_remaining + group2_remaining + group3_remaining;
-                println!(
+                log::info!(
                     "Group distribution - Group1 (freq=1): {}, Group2 (freq=3): {}, Group3 (freq=5): {}, Total old: {}",
-                    group1_remaining, group2_remaining, group3_remaining, total_old_remaining
+                    group1_remaining,
+                    group2_remaining,
+                    group3_remaining,
+                    total_old_remaining
                 );
 
                 // Test 3: Large number of items with identical frequency
@@ -4297,13 +4311,13 @@ mod tests {
                     worst_case_duration
                 );
 
-                println!("Same frequency eviction performance:");
-                println!("  All same frequency: {:?}", same_freq_duration);
-                println!("  Grouped frequencies: {:?}", grouped_eviction_duration);
-                println!("  Identical frequencies: {:?}", identical_duration);
-                println!("  Ratio scaling: {:?}", ratio_times);
-                println!("  Pattern eviction: {:?}", pattern_duration);
-                println!("  Worst case scenario: {:?}", worst_case_duration);
+                log::info!("Same frequency eviction performance:");
+                log::info!("  All same frequency: {:?}", same_freq_duration);
+                log::info!("  Grouped frequencies: {:?}", grouped_eviction_duration);
+                log::info!("  Identical frequencies: {:?}", identical_duration);
+                log::info!("  Ratio scaling: {:?}", ratio_times);
+                log::info!("  Pattern eviction: {:?}", pattern_duration);
+                log::info!("  Worst case scenario: {:?}", worst_case_duration);
             }
 
             #[test]
@@ -4605,15 +4619,15 @@ mod tests {
                     dense_eviction_duration
                 );
 
-                println!("Frequency distribution impact on eviction performance:");
-                println!("  Uniform distribution: {:?}", uniform_duration);
-                println!("  Normal distribution: {:?}", normal_duration);
-                println!("  Exponential distribution: {:?}", exponential_duration);
-                println!("  Zipf distribution: {:?}", zipf_duration);
-                println!("  Bimodal distribution: {:?}", bimodal_duration);
-                println!("  Dynamic distribution: {:?}", dynamic_duration);
-                println!("  Sparse frequencies: {:?}", sparse_eviction_duration);
-                println!("  Dense frequencies: {:?}", dense_eviction_duration);
+                log::info!("Frequency distribution impact on eviction performance:");
+                log::info!("  Uniform distribution: {:?}", uniform_duration);
+                log::info!("  Normal distribution: {:?}", normal_duration);
+                log::info!("  Exponential distribution: {:?}", exponential_duration);
+                log::info!("  Zipf distribution: {:?}", zipf_duration);
+                log::info!("  Bimodal distribution: {:?}", bimodal_duration);
+                log::info!("  Dynamic distribution: {:?}", dynamic_duration);
+                log::info!("  Sparse frequencies: {:?}", sparse_eviction_duration);
+                log::info!("  Dense frequencies: {:?}", dense_eviction_duration);
             }
         }
 
@@ -4691,7 +4705,7 @@ mod tests {
 
                 // Verify performance characteristics
                 for &(size, time) in results.iter() {
-                    println!(
+                    log::info!(
                         "Cache size: {}, Total insert time: {:?}, Avg per insert: {:?}",
                         size,
                         time,
@@ -4742,9 +4756,10 @@ mod tests {
                     assert_eq!(hit_count, lookup_count); // All should be hits
 
                     let avg_time_per_get = lookup_time / lookup_count as u32;
-                    println!(
+                    log::info!(
                         "Cache size: {}, Avg get time: {:?}",
-                        cache_size, avg_time_per_get
+                        cache_size,
+                        avg_time_per_get
                     );
 
                     // Get should be O(1) - allow up to 1µs per get on average (includes frequency increment)
@@ -4791,9 +4806,10 @@ mod tests {
                     let avg_time_per_pop = pop_time / pop_count as u32;
                     results.push((cache_size, avg_time_per_pop));
 
-                    println!(
+                    log::info!(
                         "Cache size: {}, Avg pop_lfu time: {:?}",
-                        cache_size, avg_time_per_pop
+                        cache_size,
+                        avg_time_per_pop
                     );
                 }
 
@@ -4846,9 +4862,10 @@ mod tests {
                     assert!(peek_results.iter().all(|&r| r == first_result));
 
                     let avg_time_per_peek = peek_time / peek_count as u32;
-                    println!(
+                    log::info!(
                         "Cache size: {}, Avg peek_lfu time: {:?}",
-                        cache_size, avg_time_per_peek
+                        cache_size,
+                        avg_time_per_peek
                     );
 
                     // peek_lfu is O(n), allow up to 1µs per cache entry (realistic for current implementation)
@@ -4905,10 +4922,10 @@ mod tests {
                     let avg_inc_time = inc_time / test_keys.len() as u32;
                     let avg_reset_time = reset_time / test_keys.len() as u32;
 
-                    println!("Cache size: {}", cache_size);
-                    println!("  Avg frequency() time: {:?}", avg_freq_time);
-                    println!("  Avg increment_frequency() time: {:?}", avg_inc_time);
-                    println!("  Avg reset_frequency() time: {:?}", avg_reset_time);
+                    log::info!("Cache size: {}", cache_size);
+                    log::info!("  Avg frequency() time: {:?}", avg_freq_time);
+                    log::info!("  Avg increment_frequency() time: {:?}", avg_inc_time);
+                    log::info!("  Avg reset_frequency() time: {:?}", avg_reset_time);
 
                     // All frequency operations should be O(1) - allow up to 5µs each (realistic for HashMap operations)
                     assert!(
@@ -4961,7 +4978,7 @@ mod tests {
                     assert_eq!(cache.len(), cache_size);
                     assert_eq!(cache.len(), pre_overfill_len); // No growth
 
-                    println!("Cache size: {}, Final length: {}", cache_size, cache.len());
+                    log::info!("Cache size: {}, Final length: {}", cache_size, cache.len());
                 }
             }
 
@@ -4985,12 +5002,12 @@ mod tests {
 
                 let theoretical_min_per_entry =
                     key_size + value_size + freq_size + hashmap_entry_overhead;
-                println!("Memory analysis:");
-                println!("  String key size: {} bytes", key_size);
-                println!("  i32 value size: {} bytes", value_size);
-                println!("  usize frequency size: {} bytes", freq_size);
-                println!("  HashMap overhead: {} bytes", hashmap_entry_overhead);
-                println!(
+                log::info!("Memory analysis:");
+                log::info!("  String key size: {} bytes", key_size);
+                log::info!("  i32 value size: {} bytes", value_size);
+                log::info!("  usize frequency size: {} bytes", freq_size);
+                log::info!("  HashMap overhead: {} bytes", hashmap_entry_overhead);
+                log::info!(
                     "  Theoretical minimum per entry: {} bytes",
                     theoretical_min_per_entry
                 );
@@ -5009,7 +5026,7 @@ mod tests {
                 }
 
                 assert_eq!(cache.len(), cache_size);
-                println!("  Cache filled to capacity: {} entries", cache.len());
+                log::info!("  Cache filled to capacity: {} entries", cache.len());
 
                 // ==============================================
                 // MEMORY LEAK DETECTION
@@ -5075,7 +5092,7 @@ mod tests {
                         // Verify cache is still functional
                         assert!(cache.peek_lfu().is_some() || cache.is_empty());
 
-                        println!("  Iteration {}: cache length = {}", i, cache.len());
+                        log::info!("  Iteration {}: cache length = {}", i, cache.len());
                     }
                 }
 
@@ -5086,7 +5103,7 @@ mod tests {
                     "Cache size changed unexpectedly after {} operations",
                     operations_count
                 );
-                println!(
+                log::info!(
                     "  Memory leak test passed: cache maintained size through {} operations",
                     operations_count
                 );
@@ -5096,7 +5113,7 @@ mod tests {
                 // ==============================================
 
                 // Test memory efficiency with fragmented access patterns
-                println!("  Testing memory fragmentation resistance...");
+                log::info!("  Testing memory fragmentation resistance...");
 
                 let fragmentation_cycles = 10;
                 for cycle in 0..fragmentation_cycles {
@@ -5136,7 +5153,7 @@ mod tests {
                     );
                 }
 
-                println!(
+                log::info!(
                     "  Fragmentation test passed: {} cycles completed",
                     fragmentation_cycles
                 );
@@ -5146,7 +5163,7 @@ mod tests {
                 // ==============================================
 
                 // Test with varying key sizes to check memory efficiency
-                println!("  Testing variable key size memory efficiency...");
+                log::info!("  Testing variable key size memory efficiency...");
 
                 let key_size_variants = vec![5, 20, 50, 100];
                 for &key_len in &key_size_variants {
@@ -5165,7 +5182,7 @@ mod tests {
                     assert!(test_cache.peek_lfu().is_some());
                     assert!(test_cache.pop_lfu().is_some());
 
-                    println!(
+                    log::info!(
                         "    Key length {}: {} entries managed successfully",
                         key_len,
                         test_cache.len()
@@ -5177,7 +5194,7 @@ mod tests {
                 // ==============================================
 
                 // Test that clearing the cache properly frees memory
-                println!("  Testing memory cleanup...");
+                log::info!("  Testing memory cleanup...");
 
                 let pre_clear_len = cache.len();
                 assert!(pre_clear_len > 0, "Cache should have items before clearing");
@@ -5208,7 +5225,7 @@ mod tests {
                 assert_eq!(cache.len(), 1);
                 assert_eq!(cache.get(&"post_clear_key".to_string()), Some(&42));
 
-                println!(
+                log::info!(
                     "  Memory cleanup test passed: cleared {} items, cache functional",
                     clear_count
                 );
@@ -5218,7 +5235,7 @@ mod tests {
                 // ==============================================
 
                 // Test memory efficiency at capacity boundaries
-                println!("  Testing capacity boundary behavior...");
+                log::info!("  Testing capacity boundary behavior...");
 
                 let boundary_cache_size = 50;
                 let mut boundary_cache = LFUCache::new(boundary_cache_size);
@@ -5242,9 +5259,10 @@ mod tests {
                     .filter(|&i| boundary_cache.contains(&format!("boundary_{}", i)))
                     .count();
 
-                println!(
+                log::info!(
                     "    Boundary items remaining: {}/{}",
-                    remaining_boundary_items, boundary_cache_size
+                    remaining_boundary_items,
+                    boundary_cache_size
                 );
                 assert!(
                     remaining_boundary_items < boundary_cache_size,
@@ -5255,20 +5273,20 @@ mod tests {
                 // FINAL SUMMARY
                 // ==============================================
 
-                println!("Memory efficiency test completed successfully:");
-                println!("  ✓ Theoretical memory calculations verified");
-                println!(
+                log::info!("Memory efficiency test completed successfully:");
+                log::info!("  ✓ Theoretical memory calculations verified");
+                log::info!(
                     "  ✓ Memory leak detection passed ({} operations)",
                     operations_count
                 );
-                println!(
+                log::info!(
                     "  ✓ Fragmentation resistance verified ({} cycles)",
                     fragmentation_cycles
                 );
-                println!("  ✓ Variable key size handling confirmed");
-                println!("  ✓ Memory cleanup verification passed");
-                println!("  ✓ Capacity boundary behavior validated");
-                println!("  → LFU cache demonstrates efficient memory management");
+                log::info!("  ✓ Variable key size handling confirmed");
+                log::info!("  ✓ Memory cleanup verification passed");
+                log::info!("  ✓ Capacity boundary behavior validated");
+                log::info!("  → LFU cache demonstrates efficient memory management");
             }
 
             // ==============================================
@@ -5295,9 +5313,10 @@ mod tests {
                     });
 
                     let avg_insert_time = insert_time / cache_size as u32;
-                    println!(
+                    log::info!(
                         "Key size: {} chars, Avg insert time: {:?}",
-                        key_size, avg_insert_time
+                        key_size,
+                        avg_insert_time
                     );
 
                     // Performance should degrade gracefully with larger keys
@@ -5362,10 +5381,11 @@ mod tests {
                 });
 
                 let avg_time_per_op = total_time / operation_count as u32;
-                println!("Mixed workload results: {:?}", results);
-                println!(
+                log::info!("Mixed workload results: {:?}", results);
+                log::info!(
                     "Total time: {:?}, Avg per operation: {:?}",
-                    total_time, avg_time_per_op
+                    total_time,
+                    avg_time_per_op
                 );
 
                 // Performance baseline - should complete mixed workload reasonably quickly
@@ -5404,7 +5424,7 @@ mod tests {
                 });
 
                 let avg_pop_time = pop_time / pop_count as u32;
-                println!(
+                log::info!(
                     "Worst-case pop_lfu time (uniform frequencies): {:?}",
                     avg_pop_time
                 );
@@ -5429,7 +5449,7 @@ mod tests {
                 });
 
                 let avg_peek_time = peek_time / peek_count as u32;
-                println!(
+                log::info!(
                     "Worst-case peek_lfu time (uniform frequencies): {:?}",
                     avg_peek_time
                 );
@@ -5867,9 +5887,13 @@ mod tests {
                     assert!(cache.peek_lfu().is_some());
                 }
 
-                println!(
+                log::info!(
                     "Mixed operations completed - Inserts: {}, Gets: {}, Removes: {}, Freq: {}, LFU: {}",
-                    inserts, gets, removes, freq_ops, lfu_ops
+                    inserts,
+                    gets,
+                    removes,
+                    freq_ops,
+                    lfu_ops
                 );
             }
 
@@ -6012,7 +6036,7 @@ mod tests {
                 // Verify cache is still functional
                 assert!(cache.peek_lfu().is_some());
 
-                println!(
+                log::info!(
                     "Eviction results - High freq preserved: {}, Medium: {}, Low: {}, New items: {}",
                     high_freq_preserved,
                     medium_freq_preserved,
@@ -6153,13 +6177,13 @@ mod tests {
                 // Verify basic operations still work
                 assert!(cache.peek_lfu().is_some() || cache.is_empty());
 
-                println!("Fairness test results:");
-                println!("  Total operations: {}", total_successes);
-                println!("  Average per thread: {:.1}", avg_successes);
-                println!("  Min: {}, Max: {}", min_successes, max_successes);
-                println!("  Standard deviation: {:.1}", std_dev);
-                println!("  Relative std dev: {:.3}", relative_std_dev);
-                println!("  Thread success counts: {:?}", *counts);
+                log::info!("Fairness test results:");
+                log::info!("  Total operations: {}", total_successes);
+                log::info!("  Average per thread: {:.1}", avg_successes);
+                log::info!("  Min: {}, Max: {}", min_successes, max_successes);
+                log::info!("  Standard deviation: {:.1}", std_dev);
+                log::info!("  Relative std dev: {:.3}", relative_std_dev);
+                log::info!("  Thread success counts: {:?}", *counts);
             }
         }
 
@@ -6292,15 +6316,15 @@ mod tests {
                     conflict_rate
                 );
 
-                println!("High contention test completed in {:?}", duration);
-                println!("  Successful operations: {}", total_successes);
-                println!(
+                log::info!("High contention test completed in {:?}", duration);
+                log::info!("  Successful operations: {}", total_successes);
+                log::info!(
                     "  Lock conflicts: {} ({:.1}%)",
                     total_conflicts,
                     conflict_rate * 100.0
                 );
-                println!("  Hot keys preserved: {}/{}", hot_keys_present, hot_keys);
-                println!(
+                log::info!("  Hot keys preserved: {}/{}", hot_keys_present, hot_keys);
+                log::info!(
                     "  Average hot key frequency: {:.1}",
                     total_hot_frequency as f64 / hot_keys_present.max(1) as f64
                 );
@@ -6419,15 +6443,15 @@ mod tests {
                     ops_per_sec
                 );
 
-                println!("Cache thrashing test completed in {:?}", duration);
-                println!("  Total insertions: {}", total_insertions);
-                println!("  Total evictions: {}", total_evictions);
-                println!(
+                log::info!("Cache thrashing test completed in {:?}", duration);
+                log::info!("  Total insertions: {}", total_insertions);
+                log::info!("  Total evictions: {}", total_evictions);
+                log::info!(
                     "  Eviction rate: {:.1}%",
                     total_evictions as f64 / total_insertions as f64 * 100.0
                 );
-                println!("  Recent items preserved: {}", recent_items);
-                println!("  Throughput: {:.0} ops/sec", ops_per_sec);
+                log::info!("  Recent items preserved: {}", recent_items);
+                log::info!("  Throughput: {:.0} ops/sec", ops_per_sec);
             }
 
             #[test]
@@ -6601,15 +6625,15 @@ mod tests {
                     ops_per_sec
                 );
 
-                println!(
+                log::info!(
                     "Long running stability test completed in {:?}",
                     actual_duration
                 );
-                println!("  Total operations: {}", total_operations);
-                println!("  Operations/sec: {:.0}", ops_per_sec);
-                println!("  Errors: {} ({:.3}%)", total_errors, error_rate * 100.0);
-                println!("  Baseline items surviving: {}/100", baseline_survivors);
-                println!("  Final cache size: {}/200", cache.len());
+                log::info!("  Total operations: {}", total_operations);
+                log::info!("  Operations/sec: {:.0}", ops_per_sec);
+                log::info!("  Errors: {} ({:.3}%)", total_errors, error_rate * 100.0);
+                log::info!("  Baseline items surviving: {}/100", baseline_survivors);
+                log::info!("  Final cache size: {}/200", cache.len());
             }
 
             #[test]
@@ -6761,14 +6785,14 @@ mod tests {
                     ops_per_sec
                 );
 
-                println!("Memory pressure test completed in {:?}", duration);
-                println!("  Total operations: {}", total_ops);
-                println!("  Operations/sec: {:.0}", ops_per_sec);
-                println!(
+                log::info!("Memory pressure test completed in {:?}", duration);
+                log::info!("  Total operations: {}", total_ops);
+                log::info!("  Operations/sec: {:.0}", ops_per_sec);
+                log::info!(
                     "  Final memory usage: {:.1} MB",
                     final_memory as f64 / 1024.0 / 1024.0
                 );
-                println!("  Cache utilization: {}/{}", cache.len(), cache.capacity());
+                log::info!("  Cache utilization: {}/{}", cache.len(), cache.capacity());
             }
 
             #[test]
@@ -6902,12 +6926,12 @@ mod tests {
                     persistent_survivors
                 );
 
-                println!(
+                log::info!(
                     "Rapid thread creation/destruction test completed in {:?}",
                     duration
                 );
-                println!("  Total operations: {}", total_ops);
-                println!("  Persistent items surviving: {}/50", persistent_survivors);
+                log::info!("  Total operations: {}", total_ops);
+                log::info!("  Persistent items surviving: {}/50", persistent_survivors);
             }
 
             #[test]
@@ -7090,17 +7114,17 @@ mod tests {
                 // Some recent burst items should survive
                 assert!(burst_survivors > 0, "Some burst items should survive");
 
-                println!("Burst load test completed");
-                println!("  Burst operations completed: {}", total_burst_ops);
-                println!(
+                log::info!("Burst load test completed");
+                log::info!("  Burst operations completed: {}", total_burst_ops);
+                log::info!(
                     "  Background operations during burst: {}",
                     total_background_ops
                 );
-                println!(
+                log::info!(
                     "  Baseline items surviving burst: {}/75",
                     baseline_survivors
                 );
-                println!("  Recent burst items surviving: {}", burst_survivors);
+                log::info!("  Recent burst items surviving: {}", burst_survivors);
             }
 
             #[test]
@@ -7123,7 +7147,7 @@ mod tests {
                     }
                 }
 
-                println!("Starting gradual load increase test...");
+                log::info!("Starting gradual load increase test...");
 
                 // Gradually increase load
                 for phase in 1..=max_threads {
@@ -7224,9 +7248,12 @@ mod tests {
                     assert_eq!(cache_state.1, 100, "Capacity should remain constant");
                     assert!(cache_state.0 <= 100, "Cache should not exceed capacity");
 
-                    println!(
+                    log::info!(
                         "Phase {} ({} threads): {} ops, {:.0} ops/sec",
-                        phase, phase, phase_ops, phase_throughput
+                        phase,
+                        phase,
+                        phase_ops,
+                        phase_throughput
                     );
                 }
 
@@ -7279,14 +7306,14 @@ mod tests {
                 }
 
                 let total_ops = total_operations.load(Ordering::Relaxed);
-                println!("Gradual load increase test completed");
-                println!("  Total operations: {}", total_ops);
-                println!(
+                log::info!("Gradual load increase test completed");
+                log::info!("  Total operations: {}", total_ops);
+                log::info!(
                     "  Throughput degradation: {:.1}%",
                     throughput_degradation * 100.0
                 );
-                println!("  Initial items surviving: {}/50", initial_survivors);
-                println!(
+                log::info!("  Initial items surviving: {}/50", initial_survivors);
+                log::info!(
                     "  Average initial item frequency: {:.1}",
                     if initial_survivors > 0 {
                         total_initial_frequency as f64 / initial_survivors as f64
@@ -7316,7 +7343,7 @@ mod tests {
                 ];
 
                 for (dist_name, dist_type) in distributions {
-                    println!("Testing {} distribution...", dist_name);
+                    log::info!("Testing {} distribution...", dist_name);
 
                     // Clear cache for each distribution test
                     {
@@ -7476,9 +7503,11 @@ mod tests {
                                 .filter_map(|i| cache.frequency(&format!("base_{}", i)))
                                 .sum();
 
-                            println!(
+                            log::info!(
                                 "    Light Zipfian debug: hot keys (0-14) surviving: {}/15, their total freq: {}, top 20% ratio: {:.2}",
-                                hot_survivors, hot_freq, top_20_ratio
+                                hot_survivors,
+                                hot_freq,
+                                top_20_ratio
                             );
 
                             assert!(
@@ -7508,9 +7537,11 @@ mod tests {
                                 .filter_map(|i| cache.frequency(&format!("base_{}", i)))
                                 .sum();
 
-                            println!(
+                            log::info!(
                                 "    Heavy Zipfian debug: super-hot keys surviving: {}/5, their total freq: {}, top 10% ratio: {:.2}",
-                                super_hot_survivors, super_hot_freq, top_10_ratio
+                                super_hot_survivors,
+                                super_hot_freq,
+                                top_10_ratio
                             );
 
                             assert!(
@@ -7544,9 +7575,14 @@ mod tests {
 
                     total_operations.fetch_add(dist_ops, Ordering::Relaxed);
 
-                    println!(
+                    log::info!(
                         "  {} distribution: {} ops, {:.0} ops/sec, freq range: {}-{} (avg: {:.1})",
-                        dist_name, dist_ops, dist_throughput, min_freq, max_freq, avg_freq
+                        dist_name,
+                        dist_ops,
+                        dist_throughput,
+                        min_freq,
+                        max_freq,
+                        avg_freq
                     );
                 }
 
@@ -7572,12 +7608,12 @@ mod tests {
                     );
                 }
 
-                println!("Frequency distribution stress test completed");
-                println!(
+                log::info!("Frequency distribution stress test completed");
+                log::info!(
                     "  Total operations across all distributions: {}",
                     final_total
                 );
-                println!("  All distributions handled successfully");
+                log::info!("  All distributions handled successfully");
             }
 
             #[test]
@@ -7759,12 +7795,12 @@ mod tests {
 
                 // Debug: Check cache state immediately after threads complete
                 let cache_len = cache.lock().unwrap().len();
-                println!(
+                log::info!(
                     "DEBUG: Cache length after all operations: {}/100",
                     cache_len
                 );
-                println!("DEBUG: Total operations completed: {}", total_ops);
-                println!("DEBUG: Total evictions recorded: {}", total_evictions);
+                log::info!("DEBUG: Total operations completed: {}", total_ops);
+                log::info!("DEBUG: Total evictions recorded: {}", total_evictions);
 
                 // Debug frequency distribution
                 {
@@ -7783,9 +7819,11 @@ mod tests {
                         sample_filler_freq = freq;
                     }
 
-                    println!(
+                    log::info!(
                         "DEBUG: Sample frequencies - T1: {}, T3: {}, Filler: {}",
-                        sample_tier1_freq, sample_tier3_freq, sample_filler_freq
+                        sample_tier1_freq,
+                        sample_tier3_freq,
+                        sample_filler_freq
                     );
 
                     // Count what types of items are in the cache
@@ -7793,7 +7831,6 @@ mod tests {
                     let mut tier2_count = 0;
                     let mut tier3_count = 0;
                     let mut filler_count = 0;
-                    let mut stress_count = 0;
 
                     for i in 0..10 {
                         if cache_guard.contains(&format!("tier1_{}", i)) {
@@ -7818,11 +7855,15 @@ mod tests {
 
                     // Count stress items (harder to count exactly, so approximate)
                     let total_accounted = tier1_count + tier2_count + tier3_count + filler_count;
-                    stress_count = cache_guard.len() - total_accounted;
+                    let stress_count = cache_guard.len() - total_accounted;
 
-                    println!(
+                    log::info!(
                         "DEBUG: Cache composition - T1:{}, T2:{}, T3:{}, Filler:{}, Stress:{}",
-                        tier1_count, tier2_count, tier3_count, filler_count, stress_count
+                        tier1_count,
+                        tier2_count,
+                        tier3_count,
+                        filler_count,
+                        stress_count
                     );
                 }
 
@@ -7926,15 +7967,15 @@ mod tests {
                     avg_tier1_freq
                 );
 
-                println!("LFU eviction stress test completed in {:?}", duration);
-                println!("  Total operations: {}", total_ops);
-                println!("  Total evictions: {}", total_evictions);
-                println!(
+                log::info!("LFU eviction stress test completed in {:?}", duration);
+                log::info!("  Total operations: {}", total_ops);
+                log::info!("  Total evictions: {}", total_evictions);
+                log::info!(
                     "  Frequency violations: {} ({:.2}%)",
                     total_violations,
                     violation_rate * 100.0
                 );
-                println!(
+                log::info!(
                     "  Tier survivors: T1={}/10 ({:.1}%), T2={}/20 ({:.1}%), T3={}/15 ({:.1}%)",
                     tier1_survivors,
                     tier1_survival_rate * 100.0,
@@ -7943,8 +7984,8 @@ mod tests {
                     tier3_survivors,
                     tier3_survival_rate * 100.0
                 );
-                println!("  Average tier 1 frequency: {:.1}", avg_tier1_freq);
-                println!("  Throughput: {:.0} ops/sec", ops_per_sec);
+                log::info!("  Average tier 1 frequency: {:.1}", avg_tier1_freq);
+                log::info!("  Throughput: {:.0} ops/sec", ops_per_sec);
             }
         }
     }

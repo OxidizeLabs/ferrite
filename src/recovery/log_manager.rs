@@ -125,13 +125,7 @@ impl LogManager {
                 );
             }
         });
-
-        // Store the thread handle, handle potential mutex poisoning gracefully
-        if let Ok(mut flush_thread) = self.state.flush_thread.lock() {
-            *flush_thread = Some(thread);
-        } else {
-            error!("Failed to acquire flush thread mutex - it may be poisoned");
-        }
+        std::mem::drop(thread);
     }
 
     /// Perform a flush of the records to disk and update the persistent LSN
@@ -151,7 +145,7 @@ impl LogManager {
         let flush_reason = flush_reason.to_string();
 
         // Use spawn_blocking to run the async operation in the background thread
-        let _ = runtime_handle.spawn(async move {
+        let handle = runtime_handle.spawn(async move {
             // Write each record to disk
             for record in records {
                 if let Err(e) = disk_manager.write_log(&record).await {
@@ -172,6 +166,7 @@ impl LogManager {
                 );
             }
         });
+        std::mem::drop(handle);
     }
 
     pub fn shut_down(&mut self) {

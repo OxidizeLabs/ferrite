@@ -971,7 +971,6 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
  *    - Proper ownership with Arc and cloning where needed
  *    - Follows Rust naming conventions and patterns
  */
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1214,7 +1213,7 @@ mod tests {
 
         let result = evaluator.evaluate(&left_tuple, &right_tuple);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[test]
@@ -1226,7 +1225,7 @@ mod tests {
 
         let result = evaluator.evaluate(&left_tuple, &right_tuple);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[test]
@@ -1243,7 +1242,7 @@ mod tests {
 
         let result = evaluator.evaluate(&left_tuple, &right_tuple);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false); // Null should be treated as false
+        assert!(!result.unwrap()); // Null should be treated as false
     }
 
     #[test]
@@ -1257,7 +1256,7 @@ mod tests {
 
         let result = evaluator.evaluate(&left_tuple, &right_tuple);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false); // Non-boolean should be treated as false
+        assert!(!result.unwrap()); // Non-boolean should be treated as false
     }
 
     // =============================================================================
@@ -1619,7 +1618,7 @@ mod tests {
             RID::new(0, 0),
         ));
         let right_tuple = Arc::new(Tuple::new(
-            &[Value::new(1000i64), Value::new(3.14)],
+            &[Value::new(1000i64), Value::new(std::f64::consts::PI)],
             &right_schema,
             RID::new(0, 0),
         ));
@@ -1632,7 +1631,7 @@ mod tests {
         assert_eq!(*values[1].get_val(), Val::VarLen("test".to_string()));
         assert_eq!(*values[2].get_val(), Val::Boolean(true));
         assert_eq!(*values[3].get_val(), Val::BigInt(1000));
-        assert_eq!(*values[4].get_val(), Val::Decimal(3.14));
+        assert_eq!(*values[4].get_val(), Val::Decimal(std::f64::consts::PI));
     }
 
     // =============================================================================
@@ -1900,9 +1899,8 @@ mod tests {
             let result = evaluator.evaluate(&left_tuple, &right_tuple);
 
             assert!(result.is_ok(), "Predicate evaluation should not fail");
-            assert_eq!(
-                result.unwrap(),
-                expected,
+            assert!(
+                result.unwrap() == expected,
                 "Predicate evaluation result mismatch"
             );
         }

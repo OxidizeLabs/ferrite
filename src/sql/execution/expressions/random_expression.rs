@@ -152,7 +152,7 @@ mod tests {
         for _ in 0..10 {
             let result = expr.evaluate(&tuple, &schema).unwrap();
             let value = result.as_decimal().unwrap();
-            assert!(value >= 0.0 && value < 1.0);
+            assert!((0.0..1.0).contains(&value));
         }
     }
 

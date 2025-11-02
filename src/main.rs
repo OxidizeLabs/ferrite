@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use env_logger::Builder;

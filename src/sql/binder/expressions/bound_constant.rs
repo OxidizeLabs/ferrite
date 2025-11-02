@@ -84,8 +84,8 @@ mod unit_tests {
         let bool_constant = BoundConstant::new(true);
         assert_eq!(bool_constant.to_string(), "true");
 
-        let float_constant = BoundConstant::new(3.14);
-        assert_eq!(float_constant.to_string(), "3.14");
+        let float_constant = BoundConstant::new(std::f64::consts::PI);
+        assert_eq!(float_constant.to_string(), "3.141592653589793");
 
         let int_vector_constant = BoundConstant::new_vector(vec![1, 2, 3]);
         assert!(

@@ -192,9 +192,9 @@ mod tests {
     fn create_test_tuple() -> (Tuple, Schema) {
         let schema = create_test_schema();
         let values = vec![
-            Value::new(42),            // int_col
-            Value::new("test string"), // str_col
-            Value::new(3.14),          // dec_col
+            Value::new(42),                   // int_col
+            Value::new("test string"),        // str_col
+            Value::new(std::f64::consts::PI), // dec_col
         ];
         let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         (tuple, schema)

@@ -311,9 +311,7 @@ impl<
         }
 
         // If key >= the last key, go to the rightmost pointer
-        if self.values.len() > self.keys.len() {
-            Some(self.values[self.values.len() - 1])
-        } else if !self.values.is_empty() {
+        if !self.values.is_empty() {
             Some(self.values[self.values.len() - 1])
         } else {
             None
@@ -1212,15 +1210,15 @@ mod tests {
             int_comparator,
         );
 
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
 
         // Create a page with keys [20, 40, 60]
         assert!(page.insert_key_value(40, 400));
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
         assert!(page.insert_key_value(20, 200));
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
         assert!(page.insert_key_value(60, 600));
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
 
         // Test finding index for existing keys
         assert_eq!(page.find_key_index(&20), 0);

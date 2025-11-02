@@ -1978,13 +1978,10 @@ impl LogicalPlanBuilder {
         show_options: &ShowStatementOptions,
     ) -> Result<Box<LogicalPlan>, String> {
         // Try to extract schema name from the options if available
-        let schema_name = match &show_options.show_in {
-            Some(in_clause) => {
-                // Extract from IN clause if specified
-                Some(in_clause.to_string())
-            }
-            None => None,
-        };
+        let schema_name = show_options
+            .show_in
+            .as_ref()
+            .map(|in_clause| in_clause.to_string());
 
         // Log options that are currently not fully implemented
         if *history {

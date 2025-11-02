@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -44,5 +46,4 @@ impl AsyncTestContext {
 async fn async_basic_page_operations() {
     let _ctx = AsyncTestContext::new("async_basic_page_operations").await;
     // Placeholder: exercise new_page/fetch_page briefly via storage TablePage in unit tests
-    assert!(true);
 }

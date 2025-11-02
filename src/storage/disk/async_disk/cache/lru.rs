@@ -1548,15 +1548,15 @@ mod tests {
                 // Get values one at a time (get() requires mutable borrow)
                 let val1 = cache.get(&1);
                 assert!(val1.is_some());
-                assert!(Arc::ptr_eq(&val1.unwrap(), &shared_value));
+                assert!(Arc::ptr_eq(val1.unwrap(), &shared_value));
 
                 let val2 = cache.get(&2);
                 assert!(val2.is_some());
-                assert!(Arc::ptr_eq(&val2.unwrap(), &shared_value));
+                assert!(Arc::ptr_eq(val2.unwrap(), &shared_value));
 
                 let val3 = cache.get(&3);
                 assert!(val3.is_some());
-                assert!(Arc::ptr_eq(&val3.unwrap(), &shared_value));
+                assert!(Arc::ptr_eq(val3.unwrap(), &shared_value));
             }
 
             #[test]
@@ -1631,7 +1631,7 @@ mod tests {
 
                 let result2 = cache.insert(1, Arc::clone(&value));
                 assert!(result2.is_some());
-                assert!(Arc::ptr_eq(&result2.unwrap(), &value));
+                assert!(Arc::ptr_eq(result2.as_ref().unwrap(), &value));
 
                 // Should still only have one entry
                 assert_eq!(cache.len(), 1);
@@ -1639,7 +1639,7 @@ mod tests {
 
                 // Value should be the same Arc instance
                 let retrieved = cache.get(&1);
-                assert!(Arc::ptr_eq(&retrieved.unwrap(), &value));
+                assert!(Arc::ptr_eq(retrieved.unwrap(), &value));
             }
 
             #[test]
@@ -1785,7 +1785,7 @@ mod tests {
                 assert!(old1.is_none());
 
                 let retrieved1 = cache.get(&1);
-                assert!(Arc::ptr_eq(&retrieved1.unwrap(), &value));
+                assert!(Arc::ptr_eq(retrieved1.as_ref().unwrap(), &value));
 
                 // insert creates new Arc
                 let old2 = cache.insert(2, 200);
@@ -3524,7 +3524,7 @@ mod tests {
                 // One item from random access phase might survive depending on pattern
                 // Verify at least the most recently accessed items are handled correctly
                 let (lru_key, _) = cache.peek_lru().unwrap();
-                assert!(cache.recency_rank(&lru_key).unwrap() == 3);
+                assert!(cache.recency_rank(lru_key).unwrap() == 3);
 
                 // Phase 4: Mix of new insertions and accesses to existing items
                 cache.get(&7); // Access most recent
@@ -3980,7 +3980,7 @@ mod tests {
                 // Steady state operations - every insert causes eviction
                 let steady_state_items = [5, 6, 7, 8, 9, 10];
                 for &item in &steady_state_items {
-                    let old_lru = cache.peek_lru().unwrap().0.clone();
+                    let old_lru = *cache.peek_lru().unwrap().0;
                     cache.insert(item, Arc::new(item * 100));
 
                     // Should maintain capacity
@@ -4332,7 +4332,7 @@ mod tests {
 
                 // Verify operations still work correctly
                 let (lru_key, _) = cache.peek_lru().unwrap();
-                assert!(cache.recency_rank(&lru_key).is_some());
+                assert!(cache.recency_rank(lru_key).is_some());
 
                 // Test efficiency of evictions with large cache
                 let start_len = cache.len();
@@ -4412,7 +4412,7 @@ mod tests {
 
                 // Peek LRU
                 let (lru_key, _) = cache.peek_lru().unwrap();
-                let lru_rank = cache.recency_rank(&lru_key).unwrap();
+                let lru_rank = cache.recency_rank(lru_key).unwrap();
                 assert_eq!(lru_rank, cache.len() - 1);
 
                 // Copy key before pop to avoid borrow issues

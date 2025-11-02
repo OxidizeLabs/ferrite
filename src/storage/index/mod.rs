@@ -5,12 +5,6 @@ pub mod generic_key;
 mod index_impl;
 pub mod index_iterator_mem;
 pub mod int_comparator;
-pub mod linear_probe_hash_table_index;
-pub mod stl_comparator_wrapper;
-pub mod stl_equal_wrapper;
-pub mod stl_hash_wrapper;
-pub mod stl_ordered;
-pub mod stl_unordered;
 pub mod types;
 
 pub use index_impl::*;

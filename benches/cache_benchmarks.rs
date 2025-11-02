@@ -1,3 +1,7 @@
+#![allow(clippy::all, warnings)]
+
+fn main() {}
+
 // use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 // use tkdb::storage::disk::async_disk::cache::fifo::FIFOCache;
 // use tkdb::storage::disk::async_disk::cache::cache_traits::CoreCache;

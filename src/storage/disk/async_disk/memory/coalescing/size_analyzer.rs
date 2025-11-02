@@ -274,7 +274,7 @@ impl SizeAnalyzer {
         let alignment_per_range = page_ranges.len() * CACHE_LINE_SIZE;
 
         // Additional page alignment if needed
-        let page_alignment_overhead = if data_size % PAGE_ALIGNMENT != 0 {
+        let page_alignment_overhead = if !data_size.is_multiple_of(PAGE_ALIGNMENT) {
             PAGE_ALIGNMENT - (data_size % PAGE_ALIGNMENT)
         } else {
             0

@@ -2497,7 +2497,7 @@ mod tests {
             } => {
                 assert_eq!(schema, s);
                 assert_eq!(table_name, "users");
-                assert_eq!(if_not_exists, false);
+                assert!(!if_not_exists);
             }
             _ => panic!("Expected CreateTable plan"),
         }
@@ -2758,7 +2758,7 @@ mod tests {
                 assert_eq!(table_name, "users");
                 assert_eq!(index_name, "users_id_idx");
                 assert_eq!(key_attrs, k);
-                assert_eq!(if_not_exists, false);
+                assert!(!if_not_exists);
             }
             _ => panic!("Expected CreateIndex plan"),
         }
@@ -3322,7 +3322,7 @@ mod tests {
         let plan = LogicalPlan::start_transaction(
             isolation_level,
             read_only,
-            transaction_modifier.clone(),
+            transaction_modifier,
             statements.clone(),
             None, // Convert to None for now since we don't have proper ExceptionWhen conversion
             has_end_keyword,
@@ -3357,8 +3357,8 @@ mod tests {
                 end,
                 modifier,
             } => {
-                assert_eq!(false, *chain);
-                assert_eq!(false, *end);
+                assert!(!(*chain));
+                assert!(!(*end));
                 assert!(modifier.is_none());
             }
             _ => panic!("Expected Commit plan"),
@@ -3575,11 +3575,11 @@ mod tests {
                 external,
             } => {
                 assert_eq!(schema_name, *sn);
-                assert_eq!(*terse, false);
-                assert_eq!(*history, false);
-                assert_eq!(*extended, false);
-                assert_eq!(*full, false);
-                assert_eq!(*external, false);
+                assert!(!(*terse));
+                assert!(!(*history));
+                assert!(!(*extended));
+                assert!(!(*full));
+                assert!(!(*external));
             }
             _ => panic!("Expected ShowTables plan"),
         }
@@ -3604,11 +3604,11 @@ mod tests {
                 external,
             } => {
                 assert_eq!(schema_name, *sn);
-                assert_eq!(*terse, true);
-                assert_eq!(*history, true);
-                assert_eq!(*extended, true);
-                assert_eq!(*full, true);
-                assert_eq!(*external, true);
+                assert!(*terse);
+                assert!(*history);
+                assert!(*extended);
+                assert!(*full);
+                assert!(*external);
             }
             _ => panic!("Expected ShowTables plan with options"),
         }
@@ -3658,8 +3658,8 @@ mod tests {
             } => {
                 assert_eq!(table_name, *tn);
                 assert_eq!(schema_name, *sn);
-                assert_eq!(*extended, false);
-                assert_eq!(*full, false);
+                assert!(!(*extended));
+                assert!(!(*full));
             }
             _ => panic!("Expected ShowColumns plan"),
         }
@@ -3683,7 +3683,7 @@ mod tests {
         let chain = true;
         let end = false;
         let modifier = Some(TransactionModifier::Deferred);
-        let plan = LogicalPlan::commit_transaction(chain, end, modifier.clone());
+        let plan = LogicalPlan::commit_transaction(chain, end, modifier);
 
         match &plan.plan_type {
             LogicalPlanType::Commit {

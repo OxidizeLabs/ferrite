@@ -1,3 +1,5 @@
+#![allow(dead_code, clippy::unnecessary_map_or, clippy::collapsible_if)]
+
 use sqllogictest::{DB, DBOutput, DefaultColumnType};
 use std::error::Error;
 use std::fs;

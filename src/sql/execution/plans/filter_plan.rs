@@ -531,7 +531,7 @@ mod tests {
                     let predicate = Expression::Comparison(ComparisonExpression::new(
                         create_column_ref(&schema, col1_idx),
                         create_column_ref(&schema, col2_idx),
-                        comp_type.clone(),
+                        *comp_type,
                         vec![],
                     ));
 
@@ -751,7 +751,7 @@ mod tests {
             let (filter_node, _) = create_test_filter_node();
             let basic_str = format!("{}", filter_node);
 
-            println!("Basic display: {}", basic_str);
+            log::info!("Basic display: {}", basic_str);
             assert!(basic_str.contains("Filter WHERE (value > 25)"));
         }
 
@@ -760,7 +760,7 @@ mod tests {
             let (filter_node, _) = create_test_filter_node();
             let detailed_str = format!("{:#}", filter_node);
 
-            println!("Detailed display: {}", detailed_str);
+            log::info!("Detailed display: {}", detailed_str);
             assert!(detailed_str.contains("→ Filter"));
             assert!(detailed_str.contains("(Col#0.1 > Constant(25))"));
             assert!(detailed_str.contains("Schema:"));
@@ -773,7 +773,7 @@ mod tests {
             let plan_node = PlanNode::Filter(filter_node);
             let node_string = plan_node.to_string();
 
-            println!("Plan node string: {}", node_string);
+            log::info!("Plan node string: {}", node_string);
             assert!(node_string.contains("Filter WHERE (value > 25)"));
         }
 

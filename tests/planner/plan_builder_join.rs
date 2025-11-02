@@ -1,3 +1,5 @@
+#![allow(clippy::all, unused_must_use, unused_variables, dead_code)]
+
 use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use sqlparser::ast::JoinOperator;

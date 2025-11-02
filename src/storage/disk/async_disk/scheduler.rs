@@ -218,10 +218,10 @@ mod tests {
         }
 
         let mut counts = vec![0usize; 3];
-        for worker_id in 0..3 {
+        for (worker_id, item) in counts.iter_mut().enumerate().take(3) {
             let rx = scheduler.get_worker_receiver(worker_id);
             while let Ok(_task) = rx.try_recv() {
-                counts[worker_id] += 1;
+                *item += 1;
             }
         }
 

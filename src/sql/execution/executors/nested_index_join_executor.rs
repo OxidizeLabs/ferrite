@@ -97,24 +97,19 @@ impl NestedIndexJoinExecutor {
         // Updated to handle Result type from child executors
         // If we have a current right executor, try to get next tuple from it
         if let Some(executor) = &mut self.current_right_executor {
-            loop {
-                if let Ok(Some(tuple_and_rid)) = executor.next() {
-                    let right_rid = tuple_and_rid.1;
-                    // Skip if we've already processed this right tuple for the current left tuple
-                    if self.processed_right_rids.contains(&right_rid) {
-                        debug!("Skipping already processed RID: {:?}", right_rid);
-                        continue; // Skip to next tuple
-                    }
-
-                    // Add the RID to processed list
-                    debug!("Adding RID to processed list: {:?}", right_rid);
-                    self.processed_right_rids.push(right_rid);
-
-                    return Ok(Some(tuple_and_rid));
-                } else {
-                    // No more tuples from this executor
-                    break;
+            while let Ok(Some(tuple_and_rid)) = executor.next() {
+                let right_rid = tuple_and_rid.1;
+                // Skip if we've already processed this right tuple for the current left tuple
+                if self.processed_right_rids.contains(&right_rid) {
+                    debug!("Skipping already processed RID: {:?}", right_rid);
+                    continue; // Skip to next tuple
                 }
+
+                // Add the RID to processed list
+                debug!("Adding RID to processed list: {:?}", right_rid);
+                self.processed_right_rids.push(right_rid);
+
+                return Ok(Some(tuple_and_rid));
             }
             // If we get here, exhausted the executor
             self.current_right_executor = None;
@@ -774,7 +769,7 @@ mod tests {
         // Should have 2 matching rows (id=1 and id=2)
         debug!("Total join results: {}", results.len());
 
-        if results.len() == 0 {
+        if results.is_empty() {
             debug!(
                 "ERROR: No join results produced! This suggests an issue with the join execution."
             );

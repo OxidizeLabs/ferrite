@@ -163,7 +163,7 @@ mod tests {
     }
 
     fn create_empty_tuple(schema: &Schema) -> Tuple {
-        Tuple::new(&*vec![], &schema, RID::new(0, 0))
+        Tuple::new(&[], schema, RID::new(0, 0))
     }
 
     #[test]

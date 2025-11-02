@@ -423,7 +423,7 @@ mod tests {
     mod edge_cases {
         use super::*;
         use crate::common::config::DB_PAGE_SIZE;
-        use std::io::{Error, ErrorKind};
+        use std::io::Error;
 
         #[test]
         fn empty_queue_handling() {
@@ -474,7 +474,7 @@ mod tests {
             let mut mock_disk_io = MockDiskIO::new();
             mock_disk_io
                 .expect_write_page()
-                .returning(|_, _| Err(Error::new(ErrorKind::Other, "Simulated disk error")));
+                .returning(|_, _| Err(Error::other("Simulated disk error")));
 
             ctx.set_mock_disk_io(mock_disk_io);
 

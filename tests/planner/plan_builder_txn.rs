@@ -65,7 +65,7 @@ async fn start_transaction_with_access_mode() {
     let builder = LogicalPlanBuilder::new(context.catalog.clone());
     let modes = vec![TransactionMode::AccessMode(TransactionAccessMode::ReadOnly)];
     let plan = builder
-        .build_start_transaction_plan(&modes, &true, &None, &None, &vec![], &None, &false)
+        .build_start_transaction_plan(&modes, &true, &None, &None, &[], &None, &false)
         .unwrap();
     match plan.plan_type {
         LogicalPlanType::StartTransaction { read_only, .. } => assert!(read_only),
@@ -82,7 +82,7 @@ async fn start_transaction_with_isolation_level() {
         TransactionIsolationLevel::Serializable,
     )];
     let plan = builder
-        .build_start_transaction_plan(&modes, &true, &None, &None, &vec![], &None, &false)
+        .build_start_transaction_plan(&modes, &true, &None, &None, &[], &None, &false)
         .unwrap();
     match plan.plan_type {
         LogicalPlanType::StartTransaction {

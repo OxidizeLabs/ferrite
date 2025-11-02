@@ -498,14 +498,9 @@ mod tests {
 
         // Count tuples
         let mut tuple_count = 0;
-        loop {
-            match executor.next().unwrap() {
-                Some((tuple, _rid)) => {
-                    tuple_count += 1;
-                    assert_eq!(tuple.get_values().len(), 3);
-                }
-                None => break,
-            }
+        while let Some((tuple, _rid)) = executor.next().unwrap() {
+            tuple_count += 1;
+            assert_eq!(tuple.get_values().len(), 3);
         }
 
         assert_eq!(tuple_count, 3);

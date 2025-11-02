@@ -120,12 +120,10 @@ impl AggregationExecutor {
                             if !arg_val.is_null() {
                                 if agg_value.values[i].is_null() {
                                     agg_value.values[i] = arg_val;
-                                } else {
-                                    if arg_val.compare_less_than(&agg_value.values[i])
-                                        == CmpBool::CmpTrue
-                                    {
-                                        agg_value.values[i] = arg_val
-                                    }
+                                } else if arg_val.compare_less_than(&agg_value.values[i])
+                                    == CmpBool::CmpTrue
+                                {
+                                    agg_value.values[i] = arg_val
                                 }
                             }
                         }
@@ -134,12 +132,10 @@ impl AggregationExecutor {
                             if !arg_val.is_null() {
                                 if agg_value.values[i].is_null() {
                                     agg_value.values[i] = arg_val;
-                                } else {
-                                    if agg_value.values[i].compare_less_than(&arg_val)
-                                        == CmpBool::CmpTrue
-                                    {
-                                        agg_value.values[i] = arg_val
-                                    }
+                                } else if agg_value.values[i].compare_less_than(&arg_val)
+                                    == CmpBool::CmpTrue
+                                {
+                                    agg_value.values[i] = arg_val
                                 }
                             }
                         }

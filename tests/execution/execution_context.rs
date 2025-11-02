@@ -1,3 +1,5 @@
+#![allow(clippy::assertions_on_constants, clippy::nonminimal_bool)]
+
 use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;

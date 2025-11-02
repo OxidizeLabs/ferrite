@@ -297,7 +297,7 @@ mod tests {
 
         match cloned_expr.as_ref() {
             Expression::Exists(e) => {
-                assert_eq!(e.negated, false);
+                assert!(!e.negated);
                 assert_eq!(e.return_type.get_name(), "exists");
 
                 // Verify the child was replaced
