@@ -350,491 +350,218 @@ where
 
 #[cfg(test)]
 mod tests {
+    mod basic_behavior {
 
-    // ==============================================
-    // CORRECTNESS TESTS MODULE
-    // ==============================================
-    mod correctness {
-        // Basic LRU-K Behavior Tests
-        mod basic_behavior {
-
-            #[test]
-            fn test_basic_lru_k_insertion_and_retrieval() {
-                // TODO: Test basic insertion and retrieval
-            }
-
-            #[test]
-            fn test_lru_k_eviction_order() {
-                // TODO: Test that LRU-K eviction prioritizes items with fewer than K accesses
-            }
-
-            #[test]
-            fn test_capacity_enforcement() {
-                // TODO: Test that cache never exceeds capacity
-            }
-
-            #[test]
-            fn test_update_existing_key() {
-                // TODO: Test updating existing key updates access history
-            }
-
-            #[test]
-            fn test_access_history_tracking() {
-                // TODO: Test that access history is correctly tracked and updated
-            }
-
-            #[test]
-            fn test_k_value_behavior() {
-                // TODO: Test behavior with different K values
-            }
-
-            #[test]
-            fn test_key_operations_consistency() {
-                // TODO: Test consistency between contains, get, and len operations
-            }
-
-            #[test]
-            fn test_timestamp_ordering() {
-                // TODO: Test that timestamps are correctly ordered for eviction decisions
-            }
+        #[test]
+        fn test_basic_lru_k_insertion_and_retrieval() {
+            // TODO: Test basic insertion and retrieval
         }
 
-        // Edge Cases Tests
-        mod edge_cases {
-
-            #[test]
-            fn test_empty_cache_operations() {
-                // TODO: Test operations on empty cache
-            }
-
-            #[test]
-            fn test_single_item_cache() {
-                // TODO: Test cache with capacity of 1
-            }
-
-            #[test]
-            fn test_zero_capacity_cache() {
-                // TODO: Test cache with capacity of 0
-            }
-
-            #[test]
-            fn test_k_equals_one() {
-                // TODO: Test LRU-K with K=1 (should behave like LRU)
-            }
-
-            #[test]
-            fn test_k_larger_than_capacity() {
-                // TODO: Test LRU-K when K > capacity
-            }
-
-            #[test]
-            fn test_same_key_rapid_accesses() {
-                // TODO: Test rapid repeated accesses to the same key
-            }
-
-            #[test]
-            fn test_duplicate_key_insertion() {
-                // TODO: Test inserting the same key multiple times
-            }
-
-            #[test]
-            fn test_large_cache_operations() {
-                // TODO: Test operations on large capacity cache
-            }
-
-            #[test]
-            fn test_access_history_overflow() {
-                // TODO: Test that access history doesn't grow beyond K
-            }
+        #[test]
+        fn test_lru_k_eviction_order() {
+            // TODO: Test that LRU-K eviction prioritizes items with fewer than K accesses
         }
 
-        // LRU-K-Specific Operations Tests
-        mod lru_k_operations {
-
-            #[test]
-            fn test_pop_lru_k_basic() {
-                // TODO: Test basic pop_lru_k functionality
-            }
-
-            #[test]
-            fn test_peek_lru_k_basic() {
-                // TODO: Test basic peek_lru_k functionality
-            }
-
-            #[test]
-            fn test_k_value_retrieval() {
-                // TODO: Test k_value() method accuracy
-            }
-
-            #[test]
-            fn test_access_history_retrieval() {
-                // TODO: Test access_history() method functionality
-            }
-
-            #[test]
-            fn test_access_count() {
-                // TODO: Test access_count() method accuracy
-            }
-
-            #[test]
-            fn test_k_distance() {
-                // TODO: Test k_distance() calculation
-            }
-
-            #[test]
-            fn test_touch_functionality() {
-                // TODO: Test touch() method for updating access history
-            }
-
-            #[test]
-            fn test_k_distance_rank() {
-                // TODO: Test k_distance_rank() calculation
-            }
-
-            #[test]
-            fn test_pop_lru_k_empty_cache() {
-                // TODO: Test pop_lru_k on empty cache
-            }
-
-            #[test]
-            fn test_peek_lru_k_empty_cache() {
-                // TODO: Test peek_lru_k on empty cache
-            }
-
-            #[test]
-            fn test_lru_k_tie_breaking() {
-                // TODO: Test behavior when multiple items have same K-distance
-            }
-
-            #[test]
-            fn test_access_history_after_removal() {
-                // TODO: Test that access history is cleaned up after removal
-            }
-
-            #[test]
-            fn test_access_history_after_clear() {
-                // TODO: Test that all access history is reset after clear
-            }
+        #[test]
+        fn test_capacity_enforcement() {
+            // TODO: Test that cache never exceeds capacity
         }
 
-        // State Consistency Tests
-        mod state_consistency {
+        #[test]
+        fn test_update_existing_key() {
+            // TODO: Test updating existing key updates access history
+        }
 
-            #[test]
-            fn test_cache_access_history_consistency() {
-                // TODO: Test that cache and access history stay in sync
-            }
+        #[test]
+        fn test_access_history_tracking() {
+            // TODO: Test that access history is correctly tracked and updated
+        }
 
-            #[test]
-            fn test_len_consistency() {
-                // TODO: Test that len() always matches actual number of items
-            }
+        #[test]
+        fn test_k_value_behavior() {
+            // TODO: Test behavior with different K values
+        }
 
-            #[test]
-            fn test_capacity_consistency() {
-                // TODO: Test that capacity never changes and is respected
-            }
+        #[test]
+        fn test_key_operations_consistency() {
+            // TODO: Test consistency between contains, get, and len operations
+        }
 
-            #[test]
-            fn test_clear_resets_all_state() {
-                // TODO: Test that clear() resets all internal state
-            }
-
-            #[test]
-            fn test_remove_consistency() {
-                // TODO: Test that remove operations maintain consistency
-            }
-
-            #[test]
-            fn test_eviction_consistency() {
-                // TODO: Test that evictions maintain consistency
-            }
-
-            #[test]
-            fn test_access_history_update_on_get() {
-                // TODO: Test that get() updates access history correctly
-            }
-
-            #[test]
-            fn test_invariants_after_operations() {
-                // TODO: Test that all invariants hold after various operations
-            }
-
-            #[test]
-            fn test_k_distance_calculation_consistency() {
-                // TODO: Test that K-distance calculations are consistent
-            }
-
-            #[test]
-            fn test_timestamp_consistency() {
-                // TODO: Test that timestamps are always increasing
-            }
+        #[test]
+        fn test_timestamp_ordering() {
+            // TODO: Test that timestamps are correctly ordered for eviction decisions
         }
     }
 
-    // ==============================================
-    // PERFORMANCE TESTS MODULE
-    // ==============================================
-    mod performance {
+    // Edge Cases Tests
+    mod edge_cases {
 
-        // Lookup Performance Tests
-        mod lookup_performance {
-
-            #[test]
-            fn test_get_performance_with_history_updates() {
-                // TODO: Test get() performance with access history tracking overhead
-            }
-
-            #[test]
-            fn test_contains_performance() {
-                // TODO: Test contains() method performance
-            }
-
-            #[test]
-            fn test_access_history_lookup_performance() {
-                // TODO: Test access_history() method performance
-            }
-
-            #[test]
-            fn test_k_distance_calculation_performance() {
-                // TODO: Test k_distance() calculation performance
-            }
-
-            #[test]
-            fn test_peek_lru_k_performance() {
-                // TODO: Test peek_lru_k() performance with large cache
-            }
-
-            #[test]
-            fn test_cache_hit_vs_miss_performance() {
-                // TODO: Compare performance of cache hits vs misses
-            }
-
-            #[test]
-            fn test_touch_performance() {
-                // TODO: Test touch() method performance
-            }
-
-            #[test]
-            fn test_k_distance_rank_performance() {
-                // TODO: Test k_distance_rank() calculation performance
-            }
+        #[test]
+        fn test_empty_cache_operations() {
+            // TODO: Test operations on empty cache
         }
 
-        // Insertion Performance Tests
-        mod insertion_performance {
-
-            #[test]
-            fn test_insertion_performance_with_eviction() {
-                // TODO: Test insertion performance when eviction is triggered
-            }
-
-            #[test]
-            fn test_batch_insertion_performance() {
-                // TODO: Test performance of multiple sequential insertions
-            }
-
-            #[test]
-            fn test_update_vs_new_insertion_performance() {
-                // TODO: Compare performance of updating vs new insertions
-            }
-
-            #[test]
-            fn test_insertion_with_history_tracking() {
-                // TODO: Test overhead of access history maintenance during insertion
-            }
-
-            #[test]
-            fn test_history_update_performance() {
-                // TODO: Test performance of access history updates
-            }
-
-            #[test]
-            fn test_timestamp_generation_overhead() {
-                // TODO: Test overhead of timestamp generation
-            }
+        #[test]
+        fn test_single_item_cache() {
+            // TODO: Test cache with capacity of 1
         }
 
-        // Eviction Performance Tests
-        mod eviction_performance {
-
-            #[test]
-            fn test_lru_k_eviction_performance() {
-                // TODO: Test performance of finding and evicting LRU-K item
-            }
-
-            #[test]
-            fn test_pop_lru_k_performance() {
-                // TODO: Test pop_lru_k() method performance
-            }
-
-            #[test]
-            fn test_eviction_with_varying_k_values() {
-                // TODO: Test eviction performance with different K values
-            }
-
-            #[test]
-            fn test_eviction_with_large_histories() {
-                // TODO: Test eviction performance when access histories are large
-            }
-
-            #[test]
-            fn test_victim_selection_performance() {
-                // TODO: Test performance of victim selection algorithm
-            }
+        #[test]
+        fn test_zero_capacity_cache() {
+            // TODO: Test cache with capacity of 0
         }
 
-        // Memory Efficiency Tests
-        mod memory_efficiency {
+        #[test]
+        fn test_k_equals_one() {
+            // TODO: Test LRU-K with K=1 (should behave like LRU)
+        }
 
-            #[test]
-            fn test_memory_overhead_of_history_tracking() {
-                // TODO: Test memory overhead of maintaining access history
-            }
+        #[test]
+        fn test_k_larger_than_capacity() {
+            // TODO: Test LRU-K when K > capacity
+        }
 
-            #[test]
-            fn test_memory_usage_growth() {
-                // TODO: Test memory usage as cache fills up
-            }
+        #[test]
+        fn test_same_key_rapid_accesses() {
+            // TODO: Test rapid repeated accesses to the same key
+        }
 
-            #[test]
-            fn test_memory_cleanup_after_eviction() {
-                // TODO: Test that memory is properly cleaned up after evictions
-            }
+        #[test]
+        fn test_duplicate_key_insertion() {
+            // TODO: Test inserting the same key multiple times
+        }
 
-            #[test]
-            fn test_large_value_memory_handling() {
-                // TODO: Test memory efficiency with large values
-            }
+        #[test]
+        fn test_large_cache_operations() {
+            // TODO: Test operations on large capacity cache
+        }
 
-            #[test]
-            fn test_access_history_memory_efficiency() {
-                // TODO: Test memory efficiency of access history storage
-            }
-
-            #[test]
-            fn test_memory_scaling_with_k() {
-                // TODO: Test how memory usage scales with different K values
-            }
+        #[test]
+        fn test_access_history_overflow() {
+            // TODO: Test that access history doesn't grow beyond K
         }
     }
 
-    // ==============================================
-    // CONCURRENCY TESTS MODULE
-    // ==============================================
-    mod concurrency {
+    // LRU-K-Specific Operations Tests
+    mod lru_k_operations {
 
-        // Thread Safety Tests
-        mod thread_safety {
-
-            #[test]
-            fn test_concurrent_insertions() {
-                // TODO: Test multiple threads inserting concurrently
-            }
-
-            #[test]
-            fn test_concurrent_gets() {
-                // TODO: Test multiple threads getting values concurrently
-            }
-
-            #[test]
-            fn test_concurrent_history_operations() {
-                // TODO: Test concurrent access history and touch operations
-            }
-
-            #[test]
-            fn test_concurrent_lru_k_operations() {
-                // TODO: Test concurrent pop_lru_k and peek_lru_k operations
-            }
-
-            #[test]
-            fn test_mixed_concurrent_operations() {
-                // TODO: Test mixed read/write operations across threads
-            }
-
-            #[test]
-            fn test_concurrent_eviction_scenarios() {
-                // TODO: Test eviction behavior with concurrent access
-            }
-
-            #[test]
-            fn test_thread_fairness() {
-                // TODO: Test that no thread is starved under high contention
-            }
-
-            #[test]
-            fn test_concurrent_timestamp_generation() {
-                // TODO: Test concurrent timestamp generation and ordering
-            }
-
-            #[test]
-            fn test_concurrent_access_history_updates() {
-                // TODO: Test concurrent updates to access histories
-            }
+        #[test]
+        fn test_pop_lru_k_basic() {
+            // TODO: Test basic pop_lru_k functionality
         }
 
-        // Stress Testing
-        mod stress_testing {
+        #[test]
+        fn test_peek_lru_k_basic() {
+            // TODO: Test basic peek_lru_k functionality
+        }
 
-            #[test]
-            fn test_high_contention_scenario() {
-                // TODO: Test many threads accessing same small set of keys
-            }
+        #[test]
+        fn test_k_value_retrieval() {
+            // TODO: Test k_value() method accuracy
+        }
 
-            #[test]
-            fn test_cache_thrashing_scenario() {
-                // TODO: Test rapid insertions causing constant evictions
-            }
+        #[test]
+        fn test_access_history_retrieval() {
+            // TODO: Test access_history() method functionality
+        }
 
-            #[test]
-            fn test_long_running_stability() {
-                // TODO: Test stability over extended periods with continuous load
-            }
+        #[test]
+        fn test_access_count() {
+            // TODO: Test access_count() method accuracy
+        }
 
-            #[test]
-            fn test_memory_pressure_scenario() {
-                // TODO: Test behavior with large cache and memory-intensive operations
-            }
+        #[test]
+        fn test_k_distance() {
+            // TODO: Test k_distance() calculation
+        }
 
-            #[test]
-            fn test_rapid_thread_creation_destruction() {
-                // TODO: Test with threads being created and destroyed rapidly
-            }
+        #[test]
+        fn test_touch_functionality() {
+            // TODO: Test touch() method for updating access history
+        }
 
-            #[test]
-            fn test_burst_load_handling() {
-                // TODO: Test handling of sudden burst loads
-            }
+        #[test]
+        fn test_k_distance_rank() {
+            // TODO: Test k_distance_rank() calculation
+        }
 
-            #[test]
-            fn test_gradual_load_increase() {
-                // TODO: Test behavior as load gradually increases
-            }
+        #[test]
+        fn test_pop_lru_k_empty_cache() {
+            // TODO: Test pop_lru_k on empty cache
+        }
 
-            #[test]
-            fn test_access_pattern_stress() {
-                // TODO: Test stress scenarios with various access patterns
-            }
+        #[test]
+        fn test_peek_lru_k_empty_cache() {
+            // TODO: Test peek_lru_k on empty cache
+        }
 
-            #[test]
-            fn test_lru_k_eviction_under_stress() {
-                // TODO: Test LRU-K eviction correctness under high stress
-            }
+        #[test]
+        fn test_lru_k_tie_breaking() {
+            // TODO: Test behavior when multiple items have same K-distance
+        }
 
-            #[test]
-            fn test_timestamp_stress() {
-                // TODO: Test timestamp generation under stress conditions
-            }
+        #[test]
+        fn test_access_history_after_removal() {
+            // TODO: Test that access history is cleaned up after removal
+        }
 
-            #[test]
-            fn test_varying_k_values_stress() {
-                // TODO: Test stress scenarios with different K values
-            }
+        #[test]
+        fn test_access_history_after_clear() {
+            // TODO: Test that all access history is reset after clear
+        }
+    }
 
-            #[test]
-            fn test_access_history_stress() {
-                // TODO: Test access history management under stress
-            }
+    // State Consistency Tests
+    mod state_consistency {
+
+        #[test]
+        fn test_cache_access_history_consistency() {
+            // TODO: Test that cache and access history stay in sync
+        }
+
+        #[test]
+        fn test_len_consistency() {
+            // TODO: Test that len() always matches actual number of items
+        }
+
+        #[test]
+        fn test_capacity_consistency() {
+            // TODO: Test that capacity never changes and is respected
+        }
+
+        #[test]
+        fn test_clear_resets_all_state() {
+            // TODO: Test that clear() resets all internal state
+        }
+
+        #[test]
+        fn test_remove_consistency() {
+            // TODO: Test that remove operations maintain consistency
+        }
+
+        #[test]
+        fn test_eviction_consistency() {
+            // TODO: Test that evictions maintain consistency
+        }
+
+        #[test]
+        fn test_access_history_update_on_get() {
+            // TODO: Test that get() updates access history correctly
+        }
+
+        #[test]
+        fn test_invariants_after_operations() {
+            // TODO: Test that all invariants hold after various operations
+        }
+
+        #[test]
+        fn test_k_distance_calculation_consistency() {
+            // TODO: Test that K-distance calculations are consistent
+        }
+
+        #[test]
+        fn test_timestamp_consistency() {
+            // TODO: Test that timestamps are always increasing
         }
     }
 }
