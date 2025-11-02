@@ -28,7 +28,7 @@ impl ConstantExpression {
     pub fn get_value(&self) -> &Value {
         &self.value
     }
-    
+
     // Helper method to create a vector constant from literal values
     pub fn new_vector(values: Vec<Value>, children: Vec<Arc<Expression>>) -> Self {
         let vector_value = Value::new_vector(values);
@@ -117,7 +117,7 @@ mod tests {
         let column = Column::new("test", TypeId::Integer);
         let expr = ConstantExpression::new(value.clone(), column, vec![]);
 
-        let dummy_tuple = Tuple::new(&*vec![], &Schema::new(vec![]), RID::new(0, 0));
+        let dummy_tuple = Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0));
         let dummy_schema = Schema::new(vec![]);
 
         // Test basic evaluation

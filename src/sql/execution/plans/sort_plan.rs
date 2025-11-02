@@ -6,8 +6,9 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 /// Represents the sort order direction for ORDER BY clauses
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OrderDirection {
+    #[default]
     Asc,
     Desc,
 }
@@ -18,15 +19,9 @@ impl OrderDirection {
         matches!(self, OrderDirection::Asc)
     }
 
-    /// Returns true if this is descending order  
+    /// Returns true if this is descending order
     pub fn is_descending(&self) -> bool {
         matches!(self, OrderDirection::Desc)
-    }
-}
-
-impl Default for OrderDirection {
-    fn default() -> Self {
-        OrderDirection::Asc
     }
 }
 
@@ -99,7 +94,7 @@ impl SortNode {
             .into_iter()
             .map(|expr| OrderBySpec::new(expr, OrderDirection::Asc))
             .collect();
-        
+
         Self {
             output_schema,
             order_bys: order_specs,
@@ -211,7 +206,10 @@ mod tests {
 
         assert_eq!(sort_node.get_output_schema(), &schema);
         assert_eq!(sort_node.get_order_bys().len(), 1);
-        assert_eq!(sort_node.get_order_bys()[0].get_direction(), OrderDirection::Asc);
+        assert_eq!(
+            sort_node.get_order_bys()[0].get_direction(),
+            OrderDirection::Asc
+        );
         assert_eq!(sort_node.get_children().len(), 0);
         assert_eq!(sort_node.get_type(), PlanType::Sort);
     }
@@ -248,9 +246,9 @@ mod tests {
         assert!(!OrderDirection::Asc.is_descending());
         assert!(!OrderDirection::Desc.is_ascending());
         assert!(OrderDirection::Desc.is_descending());
-        
+
         assert_eq!(OrderDirection::default(), OrderDirection::Asc);
-        
+
         assert_eq!(format!("{}", OrderDirection::Asc), "ASC");
         assert_eq!(format!("{}", OrderDirection::Desc), "DESC");
     }
@@ -263,12 +261,12 @@ mod tests {
             Column::new("id", TypeId::Integer),
             vec![],
         )));
-        
+
         let spec = OrderBySpec::new(expr.clone(), OrderDirection::Desc);
-        
+
         assert_eq!(spec.get_expression(), &expr);
         assert_eq!(spec.get_direction(), OrderDirection::Desc);
-        
+
         let display_str = format!("{}", spec);
         assert!(display_str.contains("DESC"));
     }

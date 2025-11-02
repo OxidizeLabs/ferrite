@@ -1,13 +1,12 @@
-use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
-use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
+use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
+use crate::storage::disk::async_disk::AsyncDiskManager;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::storage::disk::async_disk::AsyncDiskManager;
 
 /// LogRecoveryManager is responsible for recovering the database from log records
 /// after a crash. It follows the ARIES recovery protocol:
@@ -16,7 +15,6 @@ use crate::storage::disk::async_disk::AsyncDiskManager;
 /// 3. Undo phase: Reverse actions of uncommitted transactions
 pub struct LogRecoveryManager {
     disk_manager: Arc<AsyncDiskManager>,
-    buffer_pool_manager: Arc<BufferPoolManager>,
     log_manager: Arc<RwLock<LogManager>>,
 }
 
@@ -40,14 +38,9 @@ impl LogRecoveryManager {
     ///
     /// # Returns
     /// A new `LogRecoveryManager` instance.
-    pub fn new(
-        disk_manager: Arc<AsyncDiskManager>,
-        buffer_pool_manager: Arc<BufferPoolManager>,
-        log_manager: Arc<RwLock<LogManager>>,
-    ) -> Self {
+    pub fn new(disk_manager: Arc<AsyncDiskManager>, log_manager: Arc<RwLock<LogManager>>) -> Self {
         Self {
             disk_manager,
-            buffer_pool_manager,
             log_manager,
         }
     }
@@ -163,7 +156,7 @@ impl LogRecoveryManager {
     /// - `start_redo_lsn`: The LSN to start redo from
     fn redo_log(
         &self,
-        txn_table: &mut TxnTable,
+        _txn_table: &mut TxnTable,
         dirty_page_table: &mut DirtyPageTable,
         start_redo_lsn: Lsn,
     ) -> Result<(), String> {
@@ -339,21 +332,14 @@ impl LogRecoveryManager {
         match record.get_log_record_type() {
             LogRecordType::Insert | LogRecordType::Update => {
                 // Get RID from record and extract page ID
-                if let Some(rid) = record.get_insert_rid().or(record.get_update_rid()) {
-                    Some(rid.get_page_id())
-                } else {
-                    None
-                }
+                record
+                    .get_insert_rid()
+                    .or(record.get_update_rid())
+                    .map(|rid| rid.get_page_id())
             }
             LogRecordType::MarkDelete
             | LogRecordType::ApplyDelete
-            | LogRecordType::RollbackDelete => {
-                if let Some(rid) = record.get_delete_rid() {
-                    Some(rid.get_page_id())
-                } else {
-                    None
-                }
-            }
+            | LogRecordType::RollbackDelete => record.get_delete_rid().map(|rid| rid.get_page_id()),
             LogRecordType::NewPage => {
                 // For new page records, the page ID is directly accessible
                 record.get_page_id().copied()
@@ -369,7 +355,7 @@ impl LogRecoveryManager {
     fn redo_record(&self, record: &LogRecord) -> Result<(), String> {
         match record.get_log_record_type() {
             LogRecordType::Insert => {
-                if let (Some(rid), Some(tuple)) =
+                if let (Some(rid), Some(_tuple)) =
                     (record.get_insert_rid(), record.get_insert_tuple())
                 {
                     debug!("Redoing INSERT for RID {:?}", rid);
@@ -377,7 +363,7 @@ impl LogRecoveryManager {
                 }
             }
             LogRecordType::Update => {
-                if let (Some(rid), Some(tuple)) =
+                if let (Some(rid), Some(_tuple)) =
                     (record.get_update_rid(), record.get_update_tuple())
                 {
                     debug!("Redoing UPDATE for RID {:?}", rid);
@@ -424,7 +410,8 @@ impl LogRecoveryManager {
     /// # Parameters
     /// - `record`: The update log record to undo
     fn undo_update(&self, record: &LogRecord) -> Result<(), String> {
-        if let (Some(rid), Some(old_tuple)) = (record.get_update_rid(), record.get_original_tuple())
+        if let (Some(rid), Some(_old_tuple)) =
+            (record.get_update_rid(), record.get_original_tuple())
         {
             debug!("Undoing UPDATE for RID {:?}", rid);
             // In a real implementation, we would restore the original tuple
@@ -437,7 +424,7 @@ impl LogRecoveryManager {
     /// # Parameters
     /// - `record`: The delete log record to undo
     fn undo_delete(&self, record: &LogRecord) -> Result<(), String> {
-        if let (Some(rid), Some(tuple)) = (record.get_delete_rid(), record.get_delete_tuple()) {
+        if let (Some(rid), Some(_tuple)) = (record.get_delete_rid(), record.get_delete_tuple()) {
             debug!("Undoing DELETE for RID {:?}", rid);
             // In a real implementation, we would restore the deleted tuple
         }
@@ -502,30 +489,19 @@ impl DirtyPageTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
     use crate::common::rid::RID;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction::Transaction;
     use crate::recovery::wal_manager::WALManager;
+    use crate::storage::disk::async_disk::DiskManagerConfig;
     use crate::storage::table::tuple::Tuple;
     use std::thread::sleep;
     use std::time::Duration;
-    use chrono::Utc;
     use tempfile::TempDir;
-    use crate::catalog::catalog::Catalog;
-    use crate::common::logger::initialize_logger;
-    use crate::concurrency::lock_manager::LockManager;
-    use crate::concurrency::transaction_manager::TransactionManager;
-    use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::disk::async_disk::DiskManagerConfig;
 
     struct TestContext {
-        catalog: Arc<RwLock<Catalog>>,
-        transaction_context: Arc<TransactionContext>,
-        disk_manager: Arc<AsyncDiskManager>,
-        buffer_pool_manager: Arc<BufferPoolManager>,
-        log_manager: Arc<RwLock<LogManager>>,
         wal_manager: WALManager,
         recovery_manager: LogRecoveryManager,
         _temp_dir: TempDir,
@@ -534,8 +510,6 @@ mod tests {
     impl TestContext {
         pub async fn new(name: &str) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 10;
-            const K: usize = 2;
 
             // Create temporary directory
             let temp_dir = TempDir::new().unwrap();
@@ -553,48 +527,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
-
-            let transaction_manager = Arc::new(TransactionManager::new());
-            let lock_manager = Arc::new(LockManager::new());
-
-            let catalog = Arc::new(RwLock::new(Catalog::new(
-                bpm.clone(),
-                transaction_manager.clone(),
-            )));
-
-            // Create fresh transaction with unique ID
-            let timestamp = Utc::now().format("%Y%m%d%H%M%S%f").to_string();
-            let transaction = Arc::new(Transaction::new(
-                timestamp.parse::<u64>().unwrap_or(0), // Unique transaction ID
-                IsolationLevel::ReadUncommitted,
-            ));
-
-            let transaction_context = Arc::new(TransactionContext::new(
-                transaction,
-                lock_manager.clone(),
-                transaction_manager.clone(),
-            ));
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
 
             let wal_manager = WALManager::new(log_manager.clone());
 
-            let recovery_manager = LogRecoveryManager::new(disk_manager_arc.clone(), bpm.clone(), log_manager.clone());
+            let recovery_manager =
+                LogRecoveryManager::new(disk_manager_arc.clone(), log_manager.clone());
 
             Self {
-                catalog,
-                transaction_context,
-                disk_manager: disk_manager_arc,
-                buffer_pool_manager: bpm.clone(),
-                log_manager,
                 wal_manager,
                 recovery_manager,
                 _temp_dir: temp_dir,
@@ -620,7 +568,6 @@ mod tests {
 
         /// Simulate a crash by stopping all active processes and destroying the context
         pub fn simulate_crash(&self) {
-
             // Force a flush of all log records by writing a commit record
             // Commit records in the WAL will trigger a flush
             let flush_txn = self.create_test_transaction(999);
@@ -646,7 +593,7 @@ mod tests {
             assert!(result.is_ok(), "Recovery should succeed on empty log");
 
             // Analyze the log directly to check results
-            let (txn_table, dirty_page_table, start_redo_lsn) =
+            let (txn_table, dirty_page_table, _start_redo_lsn) =
                 ctx.recovery_manager.analyze_log().unwrap();
 
             // Verify no active transactions found
@@ -895,7 +842,7 @@ mod tests {
                 .write_update_record(&txn2, rid2, old_tuple2, new_tuple2);
             txn2.set_prev_lsn(update_lsn2);
 
-            let abort_lsn2 = ctx.wal_manager.write_abort_record(&txn2);
+            let _abort_lsn2 = ctx.wal_manager.write_abort_record(&txn2);
 
             // Transaction 3: Incomplete (simulating crash during execution)
             let txn3 = ctx.create_test_transaction(3);

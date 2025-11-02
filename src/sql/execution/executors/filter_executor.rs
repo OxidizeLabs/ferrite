@@ -153,15 +153,15 @@ impl FilterExecutor {
                         let mut count = 0;
 
                         for t in &self.group_tuples {
-                            if let Ok(val) = col_expr.evaluate(t, schema) {
-                                if !val.is_null() {
-                                    if let Some(ref mut sum) = sum_val {
-                                        *sum = sum.add(&val).unwrap_or_else(|_| sum.clone());
-                                    } else {
-                                        sum_val = Some(val);
-                                    }
-                                    count += 1;
+                            if let Ok(val) = col_expr.evaluate(t, schema)
+                                && !val.is_null()
+                            {
+                                if let Some(ref mut sum) = sum_val {
+                                    *sum = sum.add(&val).unwrap_or_else(|_| sum.clone());
+                                } else {
+                                    sum_val = Some(val);
                                 }
+                                count += 1;
                             }
                         }
 
@@ -203,15 +203,15 @@ impl FilterExecutor {
                         let mut min_val: Option<Value> = None;
 
                         for t in &self.group_tuples {
-                            if let Ok(val) = col_expr.evaluate(t, schema) {
-                                if !val.is_null() {
-                                    if let Some(ref min) = min_val {
-                                        if matches!(val.compare_less_than(min), CmpBool::CmpTrue) {
-                                            min_val = Some(val);
-                                        }
-                                    } else {
+                            if let Ok(val) = col_expr.evaluate(t, schema)
+                                && !val.is_null()
+                            {
+                                if let Some(ref min) = min_val {
+                                    if matches!(val.compare_less_than(min), CmpBool::CmpTrue) {
                                         min_val = Some(val);
                                     }
+                                } else {
+                                    min_val = Some(val);
                                 }
                             }
                         }
@@ -223,16 +223,15 @@ impl FilterExecutor {
                         let mut max_val: Option<Value> = None;
 
                         for t in &self.group_tuples {
-                            if let Ok(val) = col_expr.evaluate(t, schema) {
-                                if !val.is_null() {
-                                    if let Some(ref max) = max_val {
-                                        if matches!(val.compare_greater_than(max), CmpBool::CmpTrue)
-                                        {
-                                            max_val = Some(val);
-                                        }
-                                    } else {
+                            if let Ok(val) = col_expr.evaluate(t, schema)
+                                && !val.is_null()
+                            {
+                                if let Some(ref max) = max_val {
+                                    if matches!(val.compare_greater_than(max), CmpBool::CmpTrue) {
                                         max_val = Some(val);
                                     }
+                                } else {
+                                    max_val = Some(val);
                                 }
                             }
                         }
@@ -257,7 +256,7 @@ impl FilterExecutor {
 
         // Create a tuple with just the aggregate value for evaluation
         let agg_schema = Schema::new(vec![agg_expr.get_return_type().clone()]);
-        let agg_tuple = Tuple::new(&vec![agg_value], &agg_schema, RID::new(0, 0));
+        let agg_tuple = Tuple::new(&[agg_value], &agg_schema, RID::new(0, 0));
 
         // Now evaluate the predicate on this aggregate tuple
         let predicate = filter_expr.get_predicate();
@@ -373,8 +372,9 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -391,14 +391,13 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -429,14 +428,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());

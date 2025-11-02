@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct ArrayType;
 
+impl Default for ArrayType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArrayType {
     pub fn new() -> Self {
         ArrayType
@@ -51,11 +57,8 @@ impl Type for ArrayType {
     fn compare_less_than_equals(&self, other: &Value) -> CmpBool {
         match other.get_val() {
             Val::Array(r) => {
-                if r.is_empty() {
-                    CmpBool::CmpTrue
-                } else {
-                    CmpBool::CmpTrue
-                }
+                let _ = r; // length doesn't affect result here
+                CmpBool::CmpTrue
             }
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -65,11 +68,8 @@ impl Type for ArrayType {
     fn compare_greater_than(&self, other: &Value) -> CmpBool {
         match other.get_val() {
             Val::Array(r) => {
-                if r.is_empty() {
-                    CmpBool::CmpFalse
-                } else {
-                    CmpBool::CmpFalse
-                }
+                let _ = r; // length doesn't affect result here
+                CmpBool::CmpFalse
             }
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,

@@ -1,0 +1,65 @@
+# Simple Type Table Creation Tests
+
+# Test basic table creation with different types
+statement ok
+CREATE TABLE users (
+    id INTEGER,
+    name VARCHAR,
+    age SMALLINT,
+    email VARCHAR,
+    is_active BOOLEAN,
+    created_at TIMESTAMP
+);
+
+# Test creating table with numeric types
+statement ok
+CREATE TABLE products (
+    id INTEGER,
+    name VARCHAR,
+    price DECIMAL,
+    quantity SMALLINT,
+    weight DECIMAL,
+    category VARCHAR
+);
+
+# Test creating table with all simple types
+statement ok
+CREATE TABLE simple_types (
+    bool_field BOOLEAN,
+    tiny_int_field TINYINT,
+    small_int_field SMALLINT,
+    int_field INTEGER,
+    big_int_field BIGINT,
+    decimal_field DECIMAL,
+    timestamp_field TIMESTAMP,
+    varchar_field VARCHAR,
+    char_field CHAR
+);
+
+# Test creating table with mixed simple types
+statement ok
+CREATE TABLE mixed_simple (
+    id INTEGER,
+    name VARCHAR,
+    age SMALLINT,
+    salary DECIMAL,
+    hire_date TIMESTAMP,
+    is_manager BOOLEAN,
+    department VARCHAR
+);
+
+# Error Cases
+
+# Test duplicate table creation
+statement error
+CREATE TABLE users (id INTEGER);
+
+# Test invalid column type
+statement error
+CREATE TABLE invalid_table (
+    id INVALID_TYPE
+);
+
+# Test creating table with empty column list
+statement error
+CREATE TABLE empty_table ();

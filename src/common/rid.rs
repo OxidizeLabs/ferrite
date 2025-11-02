@@ -1,7 +1,7 @@
-use crate::common::config::{PageId, INVALID_PAGE_ID};
+use crate::common::config::{INVALID_PAGE_ID, PageId};
+use bincode::{Decode, Encode};
 use std::fmt;
 use std::hash::Hash;
-use bincode::{Decode, Encode};
 
 /// Represents a Record ID (RID) in the table.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, Decode)]

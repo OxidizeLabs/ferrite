@@ -1,5 +1,5 @@
 use crate::common::config::PageId;
-use crate::storage::page::page::{Page, PageTrait, PageType};
+use crate::storage::page::{Page, PageTrait, PageType};
 use log::trace;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::Arc;
@@ -139,17 +139,17 @@ mod tests {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
-    use crate::storage::page::page::PAGE_TYPE_OFFSET;
-    use crate::storage::page::page::{BasicPage, PageTrait, PageType};
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::page::PAGE_TYPE_OFFSET;
+    use crate::storage::page::{BasicPage, PageTrait, PageType};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     pub struct TestContext {
-        bpm: Arc<BufferPoolManager>
+        bpm: Arc<BufferPoolManager>,
     }
 
     impl TestContext {
@@ -174,17 +174,19 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
-            Self {
-                bpm
-            }
+            Self { bpm }
         }
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {

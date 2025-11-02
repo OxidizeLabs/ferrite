@@ -1,14 +1,14 @@
 //! Write buffer management with compression support
-//! 
+//!
 //! This module handles the core write buffering functionality including
 //! compression, size tracking, and buffer capacity management.
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
 use std::collections::HashMap;
+use std::io::Result as IoResult;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use std::io::Result as IoResult;
 
 /// Statistics about the write buffer
 #[derive(Debug)]
@@ -66,13 +66,14 @@ impl BufferManager {
         };
 
         // Calculate size change for buffer size tracking
-        let old_size = self.buffer.buffer.get(&page_id).map(|d| d.len()).unwrap_or(0);
+        let old_size = self
+            .buffer
+            .buffer
+            .get(&page_id)
+            .map(|d| d.len())
+            .unwrap_or(0);
         let new_size = final_data.len();
-        let size_delta = if new_size > old_size { 
-            new_size - old_size 
-        } else { 
-            0 
-        };
+        let size_delta = new_size.saturating_sub(old_size);
 
         // Check if adding this write would exceed buffer capacity
         let current_size = self.buffer.buffer_size_bytes.load(Ordering::Relaxed);
@@ -83,7 +84,9 @@ impl BufferManager {
         // Add the write to buffer
         let was_new = !self.buffer.buffer.contains_key(&page_id);
         self.buffer.buffer.insert(page_id, final_data);
-        self.buffer.buffer_size_bytes.fetch_add(size_delta, Ordering::Relaxed);
+        self.buffer
+            .buffer_size_bytes
+            .fetch_add(size_delta, Ordering::Relaxed);
 
         if was_new {
             self.buffer.dirty_pages.fetch_add(1, Ordering::Relaxed);
@@ -95,7 +98,7 @@ impl BufferManager {
     /// Drains all buffered writes and resets buffer state
     pub fn drain_buffer(&mut self) -> Vec<(PageId, Vec<u8>)> {
         let pages = self.buffer.buffer.drain().collect();
-        
+
         // Reset buffer state
         self.buffer.dirty_pages.store(0, Ordering::Relaxed);
         self.buffer.buffer_size_bytes.store(0, Ordering::Relaxed);
@@ -139,7 +142,8 @@ impl BufferManager {
         } else {
             0.0
         };
-        let compression_ratio = self.buffer.compression_ratio.load(Ordering::Relaxed) as f64 / 10000.0;
+        let compression_ratio =
+            self.buffer.compression_ratio.load(Ordering::Relaxed) as f64 / 10000.0;
         let time_since_last_flush = self.buffer.last_flush.elapsed();
 
         WriteBufferStats {
@@ -208,11 +212,11 @@ mod tests {
     fn test_buffer_write_basic() {
         let mut buffer_manager = BufferManager::new(1024 * 1024, false);
         let data = vec![1, 2, 3, 4];
-        
+
         let result = buffer_manager.buffer_write(1, data.clone());
         assert!(result.is_ok());
         assert!(result.unwrap());
-        
+
         assert!(!buffer_manager.is_empty());
         assert_eq!(buffer_manager.dirty_page_count(), 1);
         assert_eq!(buffer_manager.buffer_size_bytes(), data.len());
@@ -222,7 +226,7 @@ mod tests {
     fn test_buffer_full_rejection() {
         let mut buffer_manager = BufferManager::new(10, false); // Very small buffer
         let large_data = vec![0u8; 20]; // Larger than buffer
-        
+
         let result = buffer_manager.buffer_write(1, large_data);
         assert!(result.is_ok());
         assert!(!result.unwrap()); // Should return false (buffer full)
@@ -231,12 +235,12 @@ mod tests {
     #[test]
     fn test_buffer_drain() {
         let mut buffer_manager = BufferManager::new(1024, false);
-        
+
         buffer_manager.buffer_write(1, vec![1, 2, 3, 4]).unwrap();
         buffer_manager.buffer_write(2, vec![5, 6, 7, 8]).unwrap();
-        
+
         assert_eq!(buffer_manager.dirty_page_count(), 2);
-        
+
         let drained = buffer_manager.drain_buffer();
         assert_eq!(drained.len(), 2);
         assert!(buffer_manager.is_empty());
@@ -248,7 +252,7 @@ mod tests {
     fn test_buffer_stats() {
         let mut buffer_manager = BufferManager::new(1024, true);
         buffer_manager.buffer_write(1, vec![1, 2, 3, 4]).unwrap();
-        
+
         let stats = buffer_manager.get_stats();
         assert_eq!(stats.dirty_pages, 1);
         assert!(stats.buffer_size_bytes > 0);
@@ -259,12 +263,12 @@ mod tests {
     #[test]
     fn test_overwrite_same_page() {
         let mut buffer_manager = BufferManager::new(1024, false);
-        
+
         buffer_manager.buffer_write(1, vec![1, 2, 3, 4]).unwrap();
         assert_eq!(buffer_manager.dirty_page_count(), 1);
-        
+
         // Overwrite same page
         buffer_manager.buffer_write(1, vec![5, 6, 7, 8]).unwrap();
         assert_eq!(buffer_manager.dirty_page_count(), 1); // Should still be 1
     }
-} 
+}

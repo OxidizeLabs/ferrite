@@ -201,7 +201,7 @@ mod tests {
 
         let left_tuple = create_test_tuple();
         let right_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("Engineering")],
+            &[Value::new(1), Value::new("Engineering")],
             &right_schema,
             RID::new(2, 1),
         );
@@ -297,7 +297,7 @@ mod tests {
 
         match cloned_expr.as_ref() {
             Expression::Exists(e) => {
-                assert_eq!(e.negated, false);
+                assert!(!e.negated);
                 assert_eq!(e.return_type.get_name(), "exists");
 
                 // Verify the child was replaced

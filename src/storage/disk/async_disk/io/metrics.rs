@@ -1,6 +1,6 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use std::collections::VecDeque;
 use tokio::sync::RwLock;
 
 /// I/O operation metrics for monitoring and observability
@@ -16,7 +16,7 @@ pub struct IOMetrics {
     // Performance metrics
     total_bytes_read: AtomicU64,
     total_bytes_written: AtomicU64,
-    
+
     // Timing metrics (in microseconds for better precision)
     total_duration_micros: AtomicU64,
     min_duration_micros: AtomicU64,
@@ -24,11 +24,11 @@ pub struct IOMetrics {
 
     // Current state
     pending_operations: AtomicUsize,
-    
+
     // Recent operation times for calculating rolling averages
     recent_durations: RwLock<VecDeque<Duration>>,
     max_recent_samples: usize,
-    
+
     // Start time for calculating rates
     start_time: Instant,
 }
@@ -67,21 +67,29 @@ impl IOMetrics {
     }
 
     /// Records the completion of an I/O operation
-    pub async fn record_operation_complete(&self, duration: Duration, bytes_transferred: u64, is_read: bool) {
+    pub async fn record_operation_complete(
+        &self,
+        duration: Duration,
+        bytes_transferred: u64,
+        is_read: bool,
+    ) {
         self.completed_operations.fetch_add(1, Ordering::Relaxed);
         self.pending_operations.fetch_sub(1, Ordering::Relaxed);
-        
+
         // Update byte counters
         if is_read {
-            self.total_bytes_read.fetch_add(bytes_transferred, Ordering::Relaxed);
+            self.total_bytes_read
+                .fetch_add(bytes_transferred, Ordering::Relaxed);
         } else {
-            self.total_bytes_written.fetch_add(bytes_transferred, Ordering::Relaxed);
+            self.total_bytes_written
+                .fetch_add(bytes_transferred, Ordering::Relaxed);
         }
-        
+
         // Update timing metrics
         let duration_micros = duration.as_micros() as u64;
-        self.total_duration_micros.fetch_add(duration_micros, Ordering::Relaxed);
-        
+        self.total_duration_micros
+            .fetch_add(duration_micros, Ordering::Relaxed);
+
         // Update min/max (using compare_exchange loops for atomicity)
         let mut current_min = self.min_duration_micros.load(Ordering::Relaxed);
         while current_min > duration_micros {
@@ -95,7 +103,7 @@ impl IOMetrics {
                 Err(new_min) => current_min = new_min,
             }
         }
-        
+
         let mut current_max = self.max_duration_micros.load(Ordering::Relaxed);
         while current_max < duration_micros {
             match self.max_duration_micros.compare_exchange_weak(
@@ -108,7 +116,7 @@ impl IOMetrics {
                 Err(new_max) => current_max = new_max,
             }
         }
-        
+
         // Update recent durations for rolling average
         let mut recent = self.recent_durations.write().await;
         recent.push_back(duration);
@@ -181,7 +189,7 @@ impl IOMetrics {
         if total_ops == 0 {
             return Duration::from_micros(0);
         }
-        
+
         let total_micros = self.total_duration_micros.load(Ordering::Relaxed);
         Duration::from_micros(total_micros / total_ops)
     }
@@ -207,7 +215,7 @@ impl IOMetrics {
         if recent.is_empty() {
             return Duration::from_micros(0);
         }
-        
+
         let total: Duration = recent.iter().sum();
         total / recent.len() as u32
     }
@@ -218,7 +226,7 @@ impl IOMetrics {
         if elapsed == 0.0 {
             return 0.0;
         }
-        
+
         self.completed_operations.load(Ordering::Relaxed) as f64 / elapsed
     }
 
@@ -228,8 +236,8 @@ impl IOMetrics {
         if elapsed == 0.0 {
             return 0.0;
         }
-        
-        let total_bytes = self.total_bytes_read.load(Ordering::Relaxed) 
+
+        let total_bytes = self.total_bytes_read.load(Ordering::Relaxed)
             + self.total_bytes_written.load(Ordering::Relaxed);
         total_bytes as f64 / elapsed
     }
@@ -240,7 +248,7 @@ impl IOMetrics {
         if total_ops == 0 {
             return 100.0;
         }
-        
+
         let successful_ops = self.completed_operations.load(Ordering::Relaxed);
         (successful_ops as f64 / total_ops as f64) * 100.0
     }
@@ -258,8 +266,8 @@ impl IOMetrics {
         self.min_duration_micros.store(u64::MAX, Ordering::Relaxed);
         self.max_duration_micros.store(0, Ordering::Relaxed);
         self.pending_operations.store(0, Ordering::Relaxed);
-        
+
         let mut recent = self.recent_durations.write().await;
         recent.clear();
     }
-} 
+}

@@ -6,6 +6,12 @@ use crate::types_db::value::{Val, Value};
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct JSONType;
 
+impl Default for JSONType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JSONType {
     pub fn new() -> Self {
         JSONType

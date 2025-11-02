@@ -65,12 +65,12 @@ impl ExpressionOps for AllExpression {
         // Compare left value with ALL right values
         for right_val in right_values {
             let result = match &self.compare_op {
-                BinaryOperator::Eq => left_val.compare_equals(&right_val),
-                BinaryOperator::NotEq => left_val.compare_not_equals(&right_val),
-                BinaryOperator::Gt => left_val.compare_greater_than(&right_val),
-                BinaryOperator::GtEq => left_val.compare_greater_than_equals(&right_val),
-                BinaryOperator::Lt => left_val.compare_less_than(&right_val),
-                BinaryOperator::LtEq => left_val.compare_less_than_equals(&right_val),
+                BinaryOperator::Eq => left_val.compare_equals(right_val),
+                BinaryOperator::NotEq => left_val.compare_not_equals(right_val),
+                BinaryOperator::Gt => left_val.compare_greater_than(right_val),
+                BinaryOperator::GtEq => left_val.compare_greater_than_equals(right_val),
+                BinaryOperator::Lt => left_val.compare_less_than(right_val),
+                BinaryOperator::LtEq => left_val.compare_less_than_equals(right_val),
                 _ => {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "Unsupported operator for ALL: {:?}",
@@ -129,12 +129,12 @@ impl ExpressionOps for AllExpression {
         // Compare left value with ALL right values
         for right_val in right_values {
             let result = match &self.compare_op {
-                BinaryOperator::Eq => left_val.compare_equals(&right_val),
-                BinaryOperator::NotEq => left_val.compare_not_equals(&right_val),
-                BinaryOperator::Gt => left_val.compare_greater_than(&right_val),
-                BinaryOperator::GtEq => left_val.compare_greater_than_equals(&right_val),
-                BinaryOperator::Lt => left_val.compare_less_than(&right_val),
-                BinaryOperator::LtEq => left_val.compare_less_than_equals(&right_val),
+                BinaryOperator::Eq => left_val.compare_equals(right_val),
+                BinaryOperator::NotEq => left_val.compare_not_equals(right_val),
+                BinaryOperator::Gt => left_val.compare_greater_than(right_val),
+                BinaryOperator::GtEq => left_val.compare_greater_than_equals(right_val),
+                BinaryOperator::Lt => left_val.compare_less_than(right_val),
+                BinaryOperator::LtEq => left_val.compare_less_than_equals(right_val),
                 _ => {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "Unsupported operator for ALL: {:?}",
@@ -216,7 +216,7 @@ mod tests {
             Column::new("value", TypeId::Integer),
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![Value::new(1), Value::new(10)], &schema, rid);
+        let tuple = Tuple::new(&[Value::new(1), Value::new(10)], &schema, rid);
         (tuple, schema)
     }
 

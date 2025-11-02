@@ -1,4 +1,4 @@
-use crate::common::config::{TableOidT, TxnId, INVALID_TXN_ID};
+use crate::common::config::{INVALID_TXN_ID, TableOidT, TxnId};
 use crate::common::exception::LockError;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::IsolationLevel;
@@ -6,8 +6,8 @@ use crate::concurrency::transaction::{Transaction, TransactionState};
 use parking_lot::lock_api::MutexGuard;
 use parking_lot::{Condvar, Mutex, RawMutex};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, thread};
 
 /// [LOCK_NOTE]
@@ -87,7 +87,6 @@ use std::{fmt, thread};
 /// If a lock is granted to a transaction, the lock manager should update its lock sets appropriately (check `transaction.rs`).
 ///
 /// Consider which type of lock to directly apply on the table when implementing the executor later.
-
 /// [UNLOCK_NOTE]
 ///
 /// # General Behavior
@@ -249,6 +248,12 @@ impl LockRequest {
     }
 }
 
+impl Default for LockRequestQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LockRequestQueue {
     /// Creates a new `LockRequestQueue`.
     pub fn new() -> Self {
@@ -295,7 +300,7 @@ impl LockRequestQueue {
                     (mode1, mode2) if mode1 == mode2 => true,
                     // Invalid upgrade
                     _ => false,
-                }
+                };
             }
         }
 
@@ -369,6 +374,12 @@ impl LockRequestQueue {
     }
 }
 
+impl Default for DeadlockDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeadlockDetector {
     pub fn new() -> Self {
         Self {
@@ -381,7 +392,7 @@ impl DeadlockDetector {
 
     pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
         let mut waits_for = self.waits_for.lock();
-        waits_for.entry(t1).or_insert_with(Vec::new).push(t2);
+        waits_for.entry(t1).or_default().push(t2);
     }
 
     pub fn remove_edge(&self, t1: TxnId) {
@@ -436,17 +447,17 @@ impl DeadlockDetector {
         let mut on_path = HashSet::new();
 
         for &txn_id in waits_for.keys() {
-            if !visited.contains(&txn_id) {
-                if Self::dfs_cycle(
+            if !visited.contains(&txn_id)
+                && Self::dfs_cycle(
                     txn_id,
                     waits_for,
                     &mut visited,
                     &mut path,
                     &mut on_path,
                     abort_txn,
-                ) {
-                    return true;
-                }
+                )
+            {
+                return true;
             }
         }
         false
@@ -475,10 +486,10 @@ impl DeadlockDetector {
                         .unwrap_or(&next);
                     return true;
                 }
-                if !visited.contains(&next) {
-                    if Self::dfs_cycle(next, waits_for, visited, path, on_path, abort_txn) {
-                        return true;
-                    }
+                if !visited.contains(&next)
+                    && Self::dfs_cycle(next, waits_for, visited, path, on_path, abort_txn)
+                {
+                    return true;
                 }
             }
         }
@@ -486,6 +497,12 @@ impl DeadlockDetector {
         path.pop();
         on_path.remove(&curr);
         false
+    }
+}
+
+impl Default for LockStateManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -632,7 +649,8 @@ impl LockStateManager {
         let mut i = 0;
         while i < queue.request_queue.len() {
             let request = queue.request_queue[i].clone();
-            if !request.lock().is_granted() && queue.compatible_with_existing_locks(&request.lock()) {
+            if !request.lock().is_granted() && queue.compatible_with_existing_locks(&request.lock())
+            {
                 request.lock().granted = true;
                 // Don't increment i since we want to check the next request
             } else {
@@ -647,7 +665,7 @@ impl LockStateManager {
         let txn_locks = self.txn_lock_sets.lock();
         txn_locks
             .get(&txn_id)
-            .map_or(false, |state| state.table_locks.contains(&oid))
+            .is_some_and(|state| state.table_locks.contains(&oid))
     }
 
     /// Gets all row locks held by a transaction on a table
@@ -703,6 +721,12 @@ impl LockCompatibilityChecker {
             // Handle symmetric cases
             //(a, b) => Self::are_compatible(b, a),
         }
+    }
+}
+
+impl Default for LockValidator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -788,6 +812,12 @@ impl LockValidator {
             txn.set_state(TransactionState::Shrinking);
         }
         Ok(())
+    }
+}
+
+impl Default for LockManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1090,11 +1120,11 @@ impl LockManager {
     }
 
     pub fn check_deadlock(&self, txn: Arc<Transaction>) -> Result<bool, LockError> {
-        if let Some(abort_txn) = self.deadlock_detector.get_and_clear_abort_txn() {
-            if abort_txn == txn.get_transaction_id() {
-                txn.set_state(TransactionState::Aborted);
-                return Ok(true);
-            }
+        if let Some(abort_txn) = self.deadlock_detector.get_and_clear_abort_txn()
+            && abort_txn == txn.get_transaction_id()
+        {
+            txn.set_state(TransactionState::Aborted);
+            return Ok(true);
         }
         Ok(false)
     }
@@ -1161,8 +1191,8 @@ mod tests {
     use super::*;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
-    use parking_lot::lock_api::MutexGuard;
     use parking_lot::RawMutex;
+    use parking_lot::lock_api::MutexGuard;
 
     pub struct TestContext {
         lock_manager: Arc<Mutex<LockManager>>,
@@ -1196,7 +1226,7 @@ mod tests {
 
         #[test]
         fn test_lock_compatibility_matrix() {
-            let lock_modes = vec![
+            let lock_modes = [
                 LockMode::IntentionShared,
                 LockMode::IntentionExclusive,
                 LockMode::Shared,

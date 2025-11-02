@@ -152,7 +152,7 @@ mod tests {
             Column::new("col2", TypeId::VarChar),
         ]);
         let tuple = Tuple::new(
-            &vec![Value::new(42), Value::new("test")],
+            &[Value::new(42), Value::new("test")],
             &schema,
             Default::default(),
         );

@@ -1,7 +1,7 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
-use crate::common::config::{PageId, Timestamp, TxnId, INVALID_TXN_ID};
+use crate::common::config::{INVALID_TXN_ID, PageId, Timestamp, TxnId};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{
@@ -15,13 +15,19 @@ use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 #[derive(Debug)]
 pub struct PageVersionInfo {
     // Stores previous version info for all slots
     prev_link: RwLock<HashMap<RID, UndoLink>>,
+}
+
+impl Default for PageVersionInfo {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PageVersionInfo {
@@ -62,6 +68,12 @@ struct TransactionManagerState {
 pub struct TransactionManager {
     next_txn_id: Arc<AtomicU64>,
     state: Arc<TransactionManagerState>,
+}
+
+impl Default for TransactionManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TransactionManager {
@@ -149,26 +161,26 @@ impl TransactionManager {
     ///
     /// PERFORMANCE OPTIMIZATION: Now truly async - no more blocking on async operations!
     pub async fn commit(&self, txn: Arc<Transaction>, bpm: Arc<BufferPoolManager>) -> bool {
-        log::debug!("COMMIT: Starting commit for transaction {}", txn.get_transaction_id());
+        log::debug!(
+            "COMMIT: Starting commit for transaction {}",
+            txn.get_transaction_id()
+        );
 
         let current_state = txn.get_state();
-        if current_state != TransactionState::Running && current_state != TransactionState::Tainted {
+        if current_state != TransactionState::Running && current_state != TransactionState::Tainted
+        {
             panic!("txn not in running / tainted state");
         }
 
-        // Update transaction state
-        txn.set_state(TransactionState::Committed);
-        txn.set_commit_ts(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs());
+        // Use logical watermark-based commit to set commit_ts and update running set
+        {
+            let mut running_txns = self.state.running_txns.write();
+            txn.commit(&mut running_txns);
+        }
 
-        // Remove from running transactions and add to committed transactions
+        // Update transaction map after commit
         {
             let mut txn_map = self.state.txn_map.write();
-            let mut running_txns = self.state.running_txns.write();
-
-            running_txns.remove_txn(txn.read_ts());
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
 
@@ -189,10 +201,12 @@ impl TransactionManager {
                         // Only mark tuples created/modified by this transaction
                         if meta.get_creator_txn_id() == txn.get_transaction_id() {
                             meta.set_commit_timestamp(txn.commit_ts());
-                            if let Err(e) = page.update_tuple_meta(&meta, &rid) {
+                            if let Err(e) = page.update_tuple_meta(meta, &rid) {
                                 log::error!(
                                     "Failed to update commit timestamp for RID {:?} in table {}: {}",
-                                    rid, table_oid, e
+                                    rid,
+                                    table_oid,
+                                    e
                                 );
                             }
                         }
@@ -230,18 +244,30 @@ impl TransactionManager {
         }
 
         // CRITICAL FIX: First flush dirty pages from buffer pool to disk
-        log::debug!("COMMIT: Flushing all dirty pages from buffer pool for transaction {}", txn.get_transaction_id());
+        log::debug!(
+            "COMMIT: Flushing all dirty pages from buffer pool for transaction {}",
+            txn.get_transaction_id()
+        );
         if let Err(e) = bpm.flush_dirty_pages_batch_async(bpm.get_pool_size()).await {
-            log::error!("Failed to flush dirty pages during transaction commit: {}", e);
+            log::error!(
+                "Failed to flush dirty pages during transaction commit: {}",
+                e
+            );
             return false;
         }
 
         // PERFORMANCE OPTIMIZATION: Use native async - no more blocking!
         if let Err(e) = bpm.get_disk_manager().force_flush_all().await {
-            log::error!("Failed to force flush all writes after transaction commit: {}", e);
+            log::error!(
+                "Failed to force flush all writes after transaction commit: {}",
+                e
+            );
             return false;
         }
-        log::debug!("Force flushed all writes to disk for txn {}", txn.get_transaction_id());
+        log::debug!(
+            "Force flushed all writes to disk for txn {}",
+            txn.get_transaction_id()
+        );
 
         true
     }
@@ -310,13 +336,13 @@ impl TransactionManager {
                             "ABORT: Restoring deleted tuple with original RID {:?}",
                             original_rid
                         );
-                        
+
                         // Create metadata for the restored tuple
                         let mut meta = TupleMeta::new(undo_link.prev_txn);
                         meta.set_commit_timestamp(undo_log.ts);
                         meta.set_deleted(false); // Explicitly set to false for restored tuples
                         meta.set_undo_log_idx(undo_link.prev_log_idx);
-                        
+
                         // For deleted tuples, we need a different approach
                         // First get the page directly to bypass the deletion check
                         if let Some(page_guard) = table_heap
@@ -327,21 +353,36 @@ impl TransactionManager {
                             // First update the metadata to unmark the deletion
                             {
                                 let mut page = page_guard.write();
-                                if let Err(e) = page.update_tuple_meta(&meta, &original_rid) {
-                                    log::error!("Failed to update tuple metadata during restore: {}", e);
+                                if let Err(e) = page.update_tuple_meta(meta, &original_rid) {
+                                    log::error!(
+                                        "Failed to update tuple metadata during restore: {}",
+                                        e
+                                    );
                                     continue;
                                 }
-                                log::debug!("Successfully updated tuple metadata to unmark deletion");
+                                log::debug!(
+                                    "Successfully updated tuple metadata to unmark deletion"
+                                );
                             }
-                            
+
                             // Now that the tuple is no longer marked as deleted, we can restore its data
-                            if let Err(e) = table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, original_rid) {
+                            if let Err(e) = table_heap.rollback_tuple(
+                                Arc::from(meta),
+                                &undo_log.tuple,
+                                original_rid,
+                            ) {
                                 log::error!("Failed to restore deleted tuple data: {}", e);
                             } else {
-                                log::debug!("Successfully restored deleted tuple at RID {:?}", original_rid);
+                                log::debug!(
+                                    "Successfully restored deleted tuple at RID {:?}",
+                                    original_rid
+                                );
                             }
                         } else {
-                            log::error!("Failed to fetch page for deleted tuple restoration: page_id={}", original_rid.get_page_id());
+                            log::error!(
+                                "Failed to fetch page for deleted tuple restoration: page_id={}",
+                                original_rid.get_page_id()
+                            );
                         }
                     } else {
                         // Regular update rollback
@@ -357,7 +398,8 @@ impl TransactionManager {
                             rid,
                             undo_log.tuple
                         );
-                        if let Err(e) = table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, rid)
+                        if let Err(e) =
+                            table_heap.rollback_tuple(Arc::from(meta), &undo_log.tuple, rid)
                         {
                             log::error!("Failed to rollback tuple: {}", e);
                         } else {
@@ -390,10 +432,10 @@ impl TransactionManager {
                         .fetch_page::<TablePage>(rid.get_page_id())
                     {
                         let mut page = page_guard.write();
-                        if let Ok((_, _)) = page.get_tuple(&rid, true) {
-                            if let Err(e) = page.update_tuple_meta(&meta, &rid) {
-                                log::error!("Failed to mark tuple as deleted: {}", e);
-                            }
+                        if let Ok((_, _)) = page.get_tuple(&rid, true)
+                            && let Err(e) = page.update_tuple_meta(meta, &rid)
+                        {
+                            log::error!("Failed to mark tuple as deleted: {}", e);
                         }
                     }
                 }
@@ -488,8 +530,8 @@ impl TransactionManager {
     pub fn update_tuple(
         &self,
         table_heap: &TableHeap,
-        meta: &TupleMeta,
-        tuple: &mut Tuple,
+        _meta: &TupleMeta,
+        _tuple: &mut Tuple,
         rid: RID,
         txn_ctx: Option<Arc<TransactionContext>>,
     ) -> Result<(), String> {
@@ -497,10 +539,10 @@ impl TransactionManager {
         let txn = txn_ctx.as_ref().map(|ctx| ctx.get_transaction());
 
         // Check if transaction is in a valid state
-        if let Some(txn) = &txn {
-            if txn.get_state() != TransactionState::Running {
-                return Err("Transaction not in running state".to_string());
-            }
+        if let Some(txn) = &txn
+            && txn.get_state() != TransactionState::Running
+        {
+            return Err("Transaction not in running state".to_string());
         }
 
         // If successful, update transaction's write set
@@ -678,17 +720,17 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::config::TableOidT;
+    use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::thread;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-    use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-    use crate::sql::execution::transaction_context::TransactionContext;
 
     /// Test context that holds shared components
     struct TestContext {
@@ -717,15 +759,14 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
 
             // Create a buffer pool
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(10, 2)));
-            let buffer_pool = Arc::new(BufferPoolManager::new(
-                10,
-                Arc::from(disk_manager.unwrap()),
-                replacer,
-            ).unwrap());
+            let buffer_pool = Arc::new(
+                BufferPoolManager::new(10, Arc::from(disk_manager.unwrap()), replacer).unwrap(),
+            );
 
             // Create a transaction manager with its own lock manager
             let txn_manager = Arc::new(TransactionManager::new());
@@ -772,14 +813,6 @@ mod tests {
             self.txn_manager.register_table(txn_table_heap);
 
             (table_info.get_table_oidt(), table_heap)
-        }
-
-        fn create_test_tuple() -> Tuple {
-            let schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("value", TypeId::Integer),
-            ]);
-            Tuple::new(&[Value::new(1), Value::new(100)], &schema, RID::new(0, 0))
         }
 
         // New helper method to insert a tuple directly from values
@@ -913,7 +946,8 @@ mod tests {
             // Commit transaction
             assert!(
                 ctx.txn_manager()
-                    .commit(txn.clone(), ctx.buffer_pool_manager()).await
+                    .commit(txn.clone(), ctx.buffer_pool_manager())
+                    .await
             );
             assert_eq!(txn.get_state(), TransactionState::Committed);
 
@@ -934,7 +968,8 @@ mod tests {
                 );
                 // Clean up and return early
                 ctx.txn_manager()
-                    .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                    .commit(verify_txn, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
@@ -947,7 +982,8 @@ mod tests {
 
             // Cleanup
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -997,7 +1033,7 @@ mod tests {
             let verify_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let verify_ctx = Arc::new(TransactionContext::new(
+            let _verify_ctx = Arc::new(TransactionContext::new(
                 verify_txn.clone(),
                 ctx.lock_manager(),
                 ctx.txn_manager(),
@@ -1010,13 +1046,15 @@ mod tests {
             if result.is_ok() {
                 log::debug!("Warning: Expected error reading aborted tuple but got success");
                 ctx.txn_manager()
-                    .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                    .commit(verify_txn, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
             // Cleanup
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -1095,7 +1133,7 @@ mod tests {
 
             // Try to update with txn2 before txn1 commits - should fail
             let values = vec![Value::new(1), Value::new(200)];
-            let mut tuple_update = Tuple::new(&*values, &schema, rid);
+            let mut tuple_update = Tuple::new(&values, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
@@ -1106,7 +1144,11 @@ mod tests {
             assert!(update_result.is_err(), "Update should fail before commit");
 
             // Commit txn1
-            assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn1, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Now txn2 should succeed in updating
             let update_result = txn_table_heap.update_tuple(
@@ -1126,7 +1168,9 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+            ctx.txn_manager()
+                .commit(txn2, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -1188,8 +1232,14 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager());
-            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+            let _ = ctx
+                .txn_manager()
+                .commit(txn1, ctx.buffer_pool_manager())
+                .await;
+            let _ = ctx
+                .txn_manager()
+                .commit(txn2, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -1234,7 +1284,8 @@ mod tests {
             // Commit the setup transaction
             assert!(
                 ctx.txn_manager()
-                    .commit(setup_txn, ctx.buffer_pool_manager()).await
+                    .commit(setup_txn, ctx.buffer_pool_manager())
+                    .await
             );
 
             // Start a transaction with REPEATABLE READ isolation
@@ -1255,7 +1306,8 @@ mod tests {
                     first_read.err()
                 );
                 ctx.txn_manager()
-                    .commit(reader_txn, ctx.buffer_pool_manager()).await;
+                    .commit(reader_txn, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
@@ -1274,11 +1326,11 @@ mod tests {
 
             // Modify the tuple
             let new_values = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple = Tuple::new(&new_values, &schema, rid);
+            let update_tuple = Tuple::new(&new_values, &schema, rid);
 
             match txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn.get_transaction_id()),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 modifier_ctx,
             ) {
@@ -1286,7 +1338,8 @@ mod tests {
                     // Commit the modification
                     assert!(
                         ctx.txn_manager()
-                            .commit(modifier_txn, ctx.buffer_pool_manager()).await
+                            .commit(modifier_txn, ctx.buffer_pool_manager())
+                            .await
                     );
 
                     // In REPEATABLE READ, second read should still see the original values
@@ -1324,8 +1377,10 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager()
-                .commit(reader_txn, ctx.buffer_pool_manager());
+            let _ = ctx
+                .txn_manager()
+                .commit(reader_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -1382,11 +1437,15 @@ mod tests {
             );
 
             // Commit txn1
-            assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn1, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Now txn2 should be able to see the tuple
             let read_after_commit = txn_table_heap.get_tuple(rid, txn_ctx2.clone());
-            if let Ok((meta, tuple)) = read_after_commit {
+            if let Ok((_meta, tuple)) = read_after_commit {
                 assert_eq!(tuple.get_values(), values.as_slice());
             } else {
                 log::debug!(
@@ -1414,7 +1473,9 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+            ctx.txn_manager()
+                .commit(txn2, ctx.buffer_pool_manager())
+                .await;
         }
     }
 
@@ -1468,7 +1529,7 @@ mod tests {
             let setup_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let setup_txn_id = setup_txn.get_transaction_id();
+            let _setup_txn_id = setup_txn.get_transaction_id();
             let setup_ctx = Arc::new(TransactionContext::new(
                 setup_txn.clone(),
                 ctx.lock_manager(),
@@ -1502,7 +1563,8 @@ mod tests {
             // Commit the setup transaction
             assert!(
                 ctx.txn_manager()
-                    .commit(setup_txn, ctx.buffer_pool_manager()).await
+                    .commit(setup_txn, ctx.buffer_pool_manager())
+                    .await
             );
 
             // Create shared resources for threads
@@ -1530,11 +1592,20 @@ mod tests {
                 let reader_buffer_pool = buffer_pool.clone();
                 let reader_lock_manager = lock_manager.clone();
                 let reader_table_heap = table_heap_arc.clone();
-                let reader_schema = schema_arc.clone();
+                let _reader_schema = schema_arc.clone();
                 let reader_rids = rids_arc.clone();
                 let reader_barrier = barrier.clone();
 
                 let handle = thread::spawn(move || {
+                    // Create a Tokio runtime for this thread to handle async operations
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            log::error!("Reader {} failed to create runtime: {}", i, e);
+                            return 0;
+                        }
+                    };
+
                     // Wait for all threads to be ready
                     reader_barrier.wait();
 
@@ -1572,8 +1643,8 @@ mod tests {
                         }
                     }
 
-                    // Commit the reader transaction
-                    reader_txn_manager.commit(txn, reader_buffer_pool);
+                    // Commit the reader transaction using the runtime
+                    let _ = rt.block_on(reader_txn_manager.commit(txn, reader_buffer_pool));
 
                     successful_reads
                 });
@@ -1588,11 +1659,20 @@ mod tests {
                 let writer_lock_manager = lock_manager.clone();
                 let writer_table_heap = table_heap_arc.clone();
                 let writer_schema = schema_arc.clone();
-                let writer_rids = rids_arc.clone();
+                let _writer_rids = rids_arc.clone();
                 let writer_barrier = barrier.clone();
                 let writer_rid = rids_arc[i];
 
                 let handle = thread::spawn(move || {
+                    // Create a Tokio runtime for this thread to handle async operations
+                    let rt = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            log::error!("Writer {} failed to create runtime: {}", i, e);
+                            return 0;
+                        }
+                    };
+
                     // Wait for all threads to be ready
                     writer_barrier.wait();
 
@@ -1635,8 +1715,8 @@ mod tests {
                         return 0;
                     }
 
-                    // Commit the transaction
-                    writer_txn_manager.commit(txn, writer_buffer_pool);
+                    // Commit the transaction using the runtime
+                    let _ = rt.block_on(writer_txn_manager.commit(txn, writer_buffer_pool));
 
                     1
                 });
@@ -1647,10 +1727,12 @@ mod tests {
             // Collect results from all threads
             let results: Vec<_> = handles
                 .into_iter()
-                .map(|h| h.join().unwrap_or_else(|_| {
-                    log::debug!("Warning: Thread panicked");
-                    0
-                }))
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        log::debug!("Warning: Thread panicked");
+                        0
+                    })
+                })
                 .collect();
 
             // Verify that at least some operations succeeded
@@ -1680,7 +1762,7 @@ mod tests {
             let setup_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let setup_txn_id = setup_txn.get_transaction_id();
+            let _setup_txn_id = setup_txn.get_transaction_id();
             let setup_ctx = Arc::new(TransactionContext::new(
                 setup_txn.clone(),
                 ctx.lock_manager(),
@@ -1715,7 +1797,8 @@ mod tests {
             // Commit the setup transaction
             assert!(
                 ctx.txn_manager()
-                    .commit(setup_txn, ctx.buffer_pool_manager()).await
+                    .commit(setup_txn, ctx.buffer_pool_manager())
+                    .await
             );
 
             // Create shared resources for threads
@@ -1831,7 +1914,10 @@ mod tests {
                         }
 
                         // Commit the transaction
-                        if updater_txn_manager.commit(txn, updater_buffer_pool.clone()).await {
+                        if updater_txn_manager
+                            .commit(txn, updater_buffer_pool.clone())
+                            .await
+                        {
                             successful_updates += 1;
                         } else {
                             log::debug!(
@@ -1920,7 +2006,8 @@ mod tests {
 
             // Cleanup
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -1942,7 +2029,7 @@ mod tests {
             let setup_txn = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let setup_txn_id = setup_txn.get_transaction_id();
+            let _setup_txn_id = setup_txn.get_transaction_id();
             let setup_ctx = Arc::new(TransactionContext::new(
                 setup_txn.clone(),
                 ctx.lock_manager(),
@@ -1990,7 +2077,8 @@ mod tests {
             // Commit the setup transaction
             assert!(
                 ctx.txn_manager()
-                    .commit(setup_txn, ctx.buffer_pool_manager()).await
+                    .commit(setup_txn, ctx.buffer_pool_manager())
+                    .await
             );
 
             log::debug!("Setup complete for deadlock detection test");
@@ -2069,11 +2157,11 @@ mod tests {
                     };
 
                     let new_values = vec![Value::new(id), Value::new(300)];
-                    let mut update_tuple = Tuple::new(&new_values, &t1_schema, t1_rid2);
+                    let update_tuple = Tuple::new(&new_values, &t1_schema, t1_rid2);
 
                     let update_result = t1_table_heap.update_tuple(
                         &TupleMeta::new(txn1.get_transaction_id()),
-                        &mut update_tuple,
+                        &update_tuple,
                         t1_rid2,
                         txn_ctx1.clone(),
                     );
@@ -2153,7 +2241,7 @@ mod tests {
                     // Update resource A
                     let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
-                    let id = match values.get(0) {
+                    let id = match values.first() {
                         Some(value) => value.as_integer().unwrap_or_else(|_| 1),
                         None => 1, // Default value if extraction fails
                     };
@@ -2289,7 +2377,9 @@ mod tests {
                     "Skipping test_undo_log_creation: update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+                ctx.txn_manager()
+                    .commit(txn, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
@@ -2320,7 +2410,10 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+            let _ = ctx
+                .txn_manager()
+                .commit(txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -2366,11 +2459,11 @@ mod tests {
 
             // Update the tuple to trigger undo log creation
             let new_values = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple = Tuple::new(&new_values, &schema, rid);
+            let update_tuple = Tuple::new(&new_values, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn_id),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 txn_ctx.clone(),
             );
@@ -2380,7 +2473,9 @@ mod tests {
                     "Skipping test_undo_log_application: update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+                ctx.txn_manager()
+                    .commit(txn, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
@@ -2397,7 +2492,9 @@ mod tests {
                     "Warning: Failed to read updated tuple: {:?}",
                     after_update.err()
                 );
-                ctx.txn_manager().commit(txn, ctx.buffer_pool_manager());
+                ctx.txn_manager()
+                    .commit(txn, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
@@ -2433,7 +2530,8 @@ mod tests {
 
             // Cleanup
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -2478,7 +2576,11 @@ mod tests {
             };
 
             // Commit the first transaction
-            assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn1, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Second transaction creates the second version
             let txn2 = ctx
@@ -2506,12 +2608,19 @@ mod tests {
                     "Skipping part of test_multiple_versions: second update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager());
+                let _ = ctx
+                    .txn_manager()
+                    .commit(txn2, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
             // Commit the second transaction
-            assert!(ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn2, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Third transaction creates the third version
             let txn3 = ctx
@@ -2539,7 +2648,10 @@ mod tests {
                     "Skipping part of test_multiple_versions: third update failed: {:?}",
                     update_result.err()
                 );
-                ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager());
+                let _ = ctx
+                    .txn_manager()
+                    .commit(txn3, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
@@ -2571,8 +2683,14 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager());
-            ctx.txn_manager().commit(txn4, ctx.buffer_pool_manager());
+            let _ = ctx
+                .txn_manager()
+                .commit(txn3, ctx.buffer_pool_manager())
+                .await;
+            let _ = ctx
+                .txn_manager()
+                .commit(txn4, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -2616,7 +2734,11 @@ mod tests {
             };
 
             // Commit txn1
-            assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn1, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Create multiple versions with several transactions
             for i in 0..3 {
@@ -2630,11 +2752,11 @@ mod tests {
                 ));
 
                 let values = vec![Value::new(1), Value::new(100 + (i + 1) * 100)];
-                let mut update_tuple = Tuple::new(&values, &schema, rid);
+                let update_tuple = Tuple::new(&values, &schema, rid);
 
                 let update_result = txn_table_heap.update_tuple(
                     &TupleMeta::new(txn.get_transaction_id()),
-                    &mut update_tuple,
+                    &update_tuple,
                     rid,
                     txn_ctx.clone(),
                 );
@@ -2650,7 +2772,11 @@ mod tests {
                 }
 
                 // Commit the transaction
-                assert!(ctx.txn_manager().commit(txn, ctx.buffer_pool_manager()).await);
+                assert!(
+                    ctx.txn_manager()
+                        .commit(txn, ctx.buffer_pool_manager())
+                        .await
+                );
             }
 
             // Before garbage collection
@@ -2695,7 +2821,8 @@ mod tests {
 
             // Cleanup
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -2739,7 +2866,11 @@ mod tests {
                 }
             };
 
-            assert!(ctx.txn_manager().commit(txn0, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn0, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Create a chain of transactions, each updating the same tuple
             const CHAIN_DEPTH: usize = 10;
@@ -2763,10 +2894,10 @@ mod tests {
                 values.push(txn_values.clone());
 
                 // Update the tuple, creating a new undo log entry
-                let mut update_tuple = Tuple::new(&txn_values, &schema, rid);
+                let update_tuple = Tuple::new(&txn_values, &schema, rid);
                 let update_result = txn_table_heap.update_tuple(
                     &TupleMeta::new(txn.get_transaction_id()),
-                    &mut update_tuple,
+                    &update_tuple,
                     rid,
                     txn_ctx.clone(),
                 );
@@ -2850,7 +2981,8 @@ mod tests {
 
             // Cleanup
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -2944,7 +3076,7 @@ mod tests {
 
                     let update_result = worker_table_heap.update_tuple(
                         &TupleMeta::new(txn.get_transaction_id()),
-                        &mut update_tuple,
+                        &update_tuple,
                         worker_rid,
                         txn_ctx.clone(),
                     );
@@ -2966,7 +3098,8 @@ mod tests {
                     let should_commit = i % 2 == 0;
 
                     if should_commit {
-                        let commit_result = worker_txn_manager.commit(txn, worker_buffer_pool).await;
+                        let commit_result =
+                            worker_txn_manager.commit(txn, worker_buffer_pool).await;
                         if !commit_result {
                             log::debug!("Worker {} failed to commit", i);
                             return false;
@@ -3006,7 +3139,7 @@ mod tests {
 
                 if let Ok((_, tuple)) = result {
                     let value = match tuple.get_values().get(1) {
-                        Some(value) => value.as_integer().unwrap_or_else(|_| -1),
+                        Some(value) => value.as_integer().unwrap_or(-1),
                         None => -1,
                     };
 
@@ -3035,7 +3168,8 @@ mod tests {
             }
 
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -3079,11 +3213,11 @@ mod tests {
 
             // Update the same tuple in the same transaction
             let new_values1 = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple1 = Tuple::new(&new_values1, &schema, rid1);
+            let update_tuple1 = Tuple::new(&new_values1, &schema, rid1);
 
             let update_result1 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn1.get_transaction_id()),
-                &mut update_tuple1,
+                &update_tuple1,
                 rid1,
                 txn_ctx1.clone(),
             );
@@ -3098,7 +3232,11 @@ mod tests {
             }
 
             // Commit transaction
-            assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn1, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Case 2: Attempt to update a tuple that has been deleted
             let txn2 = ctx
@@ -3135,11 +3273,11 @@ mod tests {
 
             // Attempt to update the deleted tuple
             let new_values2 = vec![Value::new(2), Value::new(200)];
-            let mut update_tuple2 = Tuple::new(&new_values2, &schema, rid2);
+            let update_tuple2 = Tuple::new(&new_values2, &schema, rid2);
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
-                &mut update_tuple2,
+                &update_tuple2,
                 rid2,
                 txn_ctx2.clone(),
             );
@@ -3155,7 +3293,11 @@ mod tests {
             }
 
             // Commit transaction
-            assert!(ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn2, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // Case 3: Cascading aborts scenario
             let txn3a = ctx
@@ -3198,7 +3340,7 @@ mod tests {
             // This should fail or be blocked since txn3a hasn't committed yet
             let update_result3 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn3b.get_transaction_id()),
-                &mut update_tuple3,
+                &update_tuple3,
                 rid3,
                 txn_ctx3b.clone(),
             );
@@ -3277,7 +3419,8 @@ mod tests {
             // Commit setup transaction
             assert!(
                 ctx.txn_manager()
-                    .commit(setup_txn, ctx.buffer_pool_manager()).await
+                    .commit(setup_txn, ctx.buffer_pool_manager())
+                    .await
             );
 
             // Configuration for stress test
@@ -3388,12 +3531,12 @@ mod tests {
 
                         // Create updated tuple with incremented counter
                         let new_values = vec![Value::new(1), Value::new(counter + 1)];
-                        let mut update_tuple = Tuple::new(&new_values, &thread_schema, rid);
+                        let update_tuple = Tuple::new(&new_values, &thread_schema, rid);
 
                         // Update tuple, creating undo log
                         let update_result = thread_table.update_tuple(
                             &TupleMeta::new(txn.get_transaction_id()),
-                            &mut update_tuple,
+                            &update_tuple,
                             rid,
                             txn_ctx.clone(),
                         );
@@ -3449,7 +3592,7 @@ mod tests {
 
             // Wait for all threads to complete
             for handle in handles {
-                let _ = handle.await.unwrap();
+                handle.await.unwrap();
             }
 
             // Check final state
@@ -3466,7 +3609,7 @@ mod tests {
 
             if let Ok((_, tuple)) = final_read {
                 let counter = match tuple.get_values().get(1) {
-                    Some(value) => value.as_integer().unwrap_or_else(|_| -1),
+                    Some(value) => value.as_integer().unwrap_or(-1),
                     None => -1,
                 };
 
@@ -3500,7 +3643,8 @@ mod tests {
 
             // Cleanup
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
     }
 
@@ -3518,7 +3662,7 @@ mod tests {
             let txn1 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn1_id = txn1.get_transaction_id();
+            let _txn1_id = txn1.get_transaction_id();
             let txn1_read_ts = txn1.read_ts();
 
             // The watermark should still be the initial value because only one transaction exists
@@ -3532,7 +3676,7 @@ mod tests {
             let txn2 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn2_id = txn2.get_transaction_id();
+            let _txn2_id = txn2.get_transaction_id();
             let txn2_read_ts = txn2.read_ts();
 
             // The watermark should still be the minimum of all active transaction timestamps
@@ -3544,7 +3688,11 @@ mod tests {
             );
 
             // Commit the first transaction
-            assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await);
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn1, ctx.buffer_pool_manager())
+                    .await
+            );
 
             // The watermark should now be the minimum of txn2's timestamp
             let watermark_after_commit = ctx.txn_manager().get_watermark();
@@ -3604,7 +3752,8 @@ mod tests {
                     // Commit the transaction
                     assert!(
                         ctx.txn_manager()
-                            .commit(txn2.clone(), ctx.buffer_pool_manager()).await
+                            .commit(txn2.clone(), ctx.buffer_pool_manager())
+                            .await
                     );
                     assert_eq!(
                         txn2.get_state(),
@@ -3657,7 +3806,7 @@ mod tests {
             let txn4 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
                 .unwrap();
-            let txn4_id = txn4.get_transaction_id();
+            let _txn4_id = txn4.get_transaction_id();
 
             // Try to set state to Tainted (might not be supported in all implementations)
             txn4.set_state(TransactionState::Tainted);
@@ -3718,7 +3867,11 @@ mod tests {
 
             // Commit the transaction
             if rid1.is_some() {
-                assert!(ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await);
+                assert!(
+                    ctx.txn_manager()
+                        .commit(txn1, ctx.buffer_pool_manager())
+                        .await
+                );
             }
 
             // 2. Start a transaction that will be "interrupted" by system restart
@@ -3764,12 +3917,12 @@ mod tests {
             // we'll test that after "recovery":
 
             // 1. We can still access committed data from before the "crash"
-            if let Some(rid) = rid1 {
+            if let Some(_rid) = rid1 {
                 // Create a transaction context
                 let new_txn = new_ctx
                     .begin_transaction(IsolationLevel::ReadCommitted)
                     .unwrap();
-                let new_txn_ctx = Arc::new(TransactionContext::new(
+                let _new_txn_ctx = Arc::new(TransactionContext::new(
                     new_txn.clone(),
                     new_ctx.lock_manager(),
                     new_ctx.txn_manager(),
@@ -3785,11 +3938,12 @@ mod tests {
                 // Clean up
                 new_ctx
                     .txn_manager()
-                    .commit(new_txn, new_ctx.buffer_pool_manager()).await;
+                    .commit(new_txn, new_ctx.buffer_pool_manager())
+                    .await;
             }
 
             // 2. Uncommitted changes from interrupted transactions should be rolled back
-            if let Some(rid) = rid2 {
+            if let Some(_rid) = rid2 {
                 // In a real recovery scenario, the system would detect txn2 as interrupted
                 // and roll back its changes, making rid2 either invisible or reset to a prior state
                 log::debug!("In a real recovery test: Uncommitted changes would be rolled back");
@@ -3892,7 +4046,9 @@ mod tests {
             }
 
             // Commit the transaction and verify visibility for READ_COMMITTED
-            ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await;
+            ctx.txn_manager()
+                .commit(txn1, ctx.buffer_pool_manager())
+                .await;
 
             // Now the tuple should be visible to READ_COMMITTED
             let result = txn_table_heap.get_tuple(rid, txn_ctx3.clone());
@@ -3902,8 +4058,12 @@ mod tests {
             );
 
             // Cleanup
-            ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await;
-            ctx.txn_manager().commit(txn3, ctx.buffer_pool_manager()).await;
+            ctx.txn_manager()
+                .commit(txn2, ctx.buffer_pool_manager())
+                .await;
+            ctx.txn_manager()
+                .commit(txn3, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -3950,7 +4110,8 @@ mod tests {
 
             // Commit setup transaction
             ctx.txn_manager()
-                .commit(setup_txn, ctx.buffer_pool_manager()).await;
+                .commit(setup_txn, ctx.buffer_pool_manager())
+                .await;
 
             // ----- Test READ_COMMITTED (allows non-repeatable reads) -----
 
@@ -3967,7 +4128,7 @@ mod tests {
             // First read
             let first_read_rc = txn_table_heap.get_tuple(rid, txn_ctx_rc.clone());
             assert!(first_read_rc.is_ok(), "First read should succeed");
-            let (_, first_tuple_rc) = first_read_rc.unwrap();
+            let (_, _first_tuple_rc) = first_read_rc.unwrap();
 
             // Start another transaction to modify the tuple
             let modifier_txn = ctx
@@ -3985,7 +4146,7 @@ mod tests {
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn.get_transaction_id()),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 modifier_ctx,
             );
@@ -3998,7 +4159,8 @@ mod tests {
             } else {
                 // Commit the modification
                 ctx.txn_manager()
-                    .commit(modifier_txn, ctx.buffer_pool_manager()).await;
+                    .commit(modifier_txn, ctx.buffer_pool_manager())
+                    .await;
 
                 // Second read with READ_COMMITTED - should see the new value (non-repeatable read)
                 let second_read_rc = txn_table_heap.get_tuple(rid, txn_ctx_rc.clone());
@@ -4047,7 +4209,7 @@ mod tests {
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn2.get_transaction_id()),
-                &mut update_tuple2,
+                &update_tuple2,
                 rid,
                 modifier_ctx2,
             );
@@ -4060,7 +4222,8 @@ mod tests {
             } else {
                 // Commit the modification
                 ctx.txn_manager()
-                    .commit(modifier_txn2, ctx.buffer_pool_manager()).await;
+                    .commit(modifier_txn2, ctx.buffer_pool_manager())
+                    .await;
 
                 // Second read with REPEATABLE_READ - should still see the original value
                 let second_read_rr = txn_table_heap.get_tuple(rid, txn_ctx_rr.clone());
@@ -4080,8 +4243,12 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn_rc, ctx.buffer_pool_manager()).await;
-            ctx.txn_manager().commit(txn_rr, ctx.buffer_pool_manager()).await;
+            ctx.txn_manager()
+                .commit(txn_rc, ctx.buffer_pool_manager())
+                .await;
+            ctx.txn_manager()
+                .commit(txn_rr, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -4128,7 +4295,8 @@ mod tests {
 
             // Commit setup transaction
             ctx.txn_manager()
-                .commit(setup_txn, ctx.buffer_pool_manager()).await;
+                .commit(setup_txn, ctx.buffer_pool_manager())
+                .await;
 
             // Start a transaction with REPEATABLE_READ
             let txn_rr = ctx
@@ -4193,14 +4361,19 @@ mod tests {
 
             if rid2.is_none() {
                 // Skip the rest of the test if insertion failed
-                ctx.txn_manager().commit(txn_rr, ctx.buffer_pool_manager()).await;
-                ctx.txn_manager().commit(txn_s, ctx.buffer_pool_manager()).await;
+                ctx.txn_manager()
+                    .commit(txn_rr, ctx.buffer_pool_manager())
+                    .await;
+                ctx.txn_manager()
+                    .commit(txn_s, ctx.buffer_pool_manager())
+                    .await;
                 return;
             }
 
             // Commit the insert transaction
             ctx.txn_manager()
-                .commit(insert_txn, ctx.buffer_pool_manager()).await;
+                .commit(insert_txn, ctx.buffer_pool_manager())
+                .await;
 
             // Second scans - check if we see the new tuple
             let mut scan_count_rr_2 = 0;
@@ -4240,8 +4413,12 @@ mod tests {
             }
 
             // Cleanup
-            ctx.txn_manager().commit(txn_rr, ctx.buffer_pool_manager()).await;
-            ctx.txn_manager().commit(txn_s, ctx.buffer_pool_manager()).await;
+            ctx.txn_manager()
+                .commit(txn_rr, ctx.buffer_pool_manager())
+                .await;
+            ctx.txn_manager()
+                .commit(txn_s, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -4304,7 +4481,8 @@ mod tests {
 
             // Commit setup transaction
             ctx.txn_manager()
-                .commit(setup_txn, ctx.buffer_pool_manager()).await;
+                .commit(setup_txn, ctx.buffer_pool_manager())
+                .await;
 
             // Start two serializable transactions
             let txn1 = ctx.begin_transaction(IsolationLevel::Serializable).unwrap();
@@ -4345,7 +4523,7 @@ mod tests {
 
             let update_result1 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn1.get_transaction_id()),
-                &mut update_tuple1,
+                &update_tuple1,
                 rid1,
                 txn_ctx1.clone(),
             );
@@ -4356,7 +4534,7 @@ mod tests {
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
-                &mut update_tuple2,
+                &update_tuple2,
                 rid2,
                 txn_ctx2.clone(),
             );
@@ -4367,14 +4545,18 @@ mod tests {
 
             // Try to commit both transactions
             let commit1_success = if update1_success {
-                ctx.txn_manager().commit(txn1, ctx.buffer_pool_manager()).await
+                ctx.txn_manager()
+                    .commit(txn1, ctx.buffer_pool_manager())
+                    .await
             } else {
                 ctx.txn_manager().abort(txn1);
                 false
             };
 
             let commit2_success = if update2_success {
-                ctx.txn_manager().commit(txn2, ctx.buffer_pool_manager()).await
+                ctx.txn_manager()
+                    .commit(txn2, ctx.buffer_pool_manager())
+                    .await
             } else {
                 ctx.txn_manager().abort(txn2);
                 false
@@ -4433,7 +4615,8 @@ mod tests {
             }
 
             ctx.txn_manager()
-                .commit(verify_txn, ctx.buffer_pool_manager()).await;
+                .commit(verify_txn, ctx.buffer_pool_manager())
+                .await;
         }
 
         #[tokio::test]
@@ -4442,11 +4625,18 @@ mod tests {
 
             // Create a test table and transaction
             let (table_oid, table_heap) = ctx.create_test_table();
-            let txn = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+            let txn = ctx
+                .txn_manager
+                .begin(IsolationLevel::ReadCommitted)
+                .unwrap();
 
             // Insert a test tuple - handle potential error
             let values = [Value::new(1), Value::new(100)];
-            let rid = match ctx.insert_tuple_from_values(&table_heap, txn.get_transaction_id(), &values) {
+            let rid = match ctx.insert_tuple_from_values(
+                &table_heap,
+                txn.get_transaction_id(),
+                &values,
+            ) {
                 Ok(rid) => rid,
                 Err(e) => {
                     // Skip the test if insertion fails
@@ -4460,16 +4650,19 @@ mod tests {
             };
 
             // Commit the first transaction to make the tuple visible
-            ctx.txn_manager.commit(txn.clone(), ctx.buffer_pool.clone()).await;
+            ctx.txn_manager
+                .commit(txn.clone(), ctx.buffer_pool.clone())
+                .await;
 
             // Start a new transaction for delete operation
-            let delete_txn = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+            let delete_txn = ctx
+                .txn_manager
+                .begin(IsolationLevel::ReadCommitted)
+                .unwrap();
 
             // Create a transactional table heap
-            let txn_table_heap = Arc::new(TransactionalTableHeap::new(
-                table_heap.clone(),
-                table_oid,
-            ));
+            let txn_table_heap =
+                Arc::new(TransactionalTableHeap::new(table_heap.clone(), table_oid));
 
             // Create transaction context
             let txn_ctx = Arc::new(TransactionContext::new(
@@ -4489,7 +4682,10 @@ mod tests {
             ctx.txn_manager.abort(delete_txn.clone());
 
             // Start a new transaction for verification
-            let verify_txn = ctx.txn_manager.begin(IsolationLevel::ReadCommitted).unwrap();
+            let verify_txn = ctx
+                .txn_manager
+                .begin(IsolationLevel::ReadCommitted)
+                .unwrap();
             let verify_ctx = Arc::new(TransactionContext::new(
                 verify_txn.clone(),
                 ctx.lock_manager.clone(),
@@ -4498,12 +4694,25 @@ mod tests {
 
             // Verify the tuple is restored (not deleted)
             let (meta, tuple) = txn_table_heap.get_tuple(rid, verify_ctx.clone()).unwrap();
-            assert!(!meta.is_deleted(), "Tuple should be restored after rollback");
-            assert_eq!(tuple.get_value(0).to_string(), "1", "Tuple value should be restored");
-            assert_eq!(tuple.get_value(1).to_string(), "100", "Tuple value should be restored");
+            assert!(
+                !meta.is_deleted(),
+                "Tuple should be restored after rollback"
+            );
+            assert_eq!(
+                tuple.get_value(0).to_string(),
+                "1",
+                "Tuple value should be restored"
+            );
+            assert_eq!(
+                tuple.get_value(1).to_string(),
+                "100",
+                "Tuple value should be restored"
+            );
 
             // Clean up
-            ctx.txn_manager.commit(verify_txn, ctx.buffer_pool.clone()).await;
+            ctx.txn_manager
+                .commit(verify_txn, ctx.buffer_pool.clone())
+                .await;
         }
     }
 }

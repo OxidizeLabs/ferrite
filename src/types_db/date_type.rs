@@ -7,6 +7,12 @@ use chrono::NaiveDate;
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct DateType;
 
+impl Default for DateType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DateType {
     pub fn new() -> Self {
         DateType

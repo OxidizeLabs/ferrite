@@ -79,7 +79,7 @@ impl AbstractExecutor for TableScanExecutor {
                     error!("Iterator not initialized");
                     Err(DBError::Execution("Iterator not initialized".to_string()))
                 }
-            }
+            };
         }
     }
 
@@ -97,19 +97,19 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -140,14 +140,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -168,11 +176,7 @@ mod tests {
         }
     }
 
-    fn create_test_values(
-        id: i32,
-        name: &str,
-        age: i32,
-    ) -> (TupleMeta, Vec<Value>) {
+    fn create_test_values(id: i32, name: &str, age: i32) -> (TupleMeta, Vec<Value>) {
         let values = vec![
             Value::new(id),
             Value::new(name.to_string()),
@@ -203,7 +207,7 @@ mod tests {
 
         // Insert test data
         let table_heap = table_info.get_table_heap();
-        let test_data = vec![(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
+        let test_data = [(1, "Alice", 25), (2, "Bob", 30), (3, "Charlie", 35)];
 
         for (id, name, age) in test_data.iter() {
             let (meta, values) = create_test_values(*id, name, *age);

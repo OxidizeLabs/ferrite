@@ -1,7 +1,7 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
 use crate::storage::index::types::{KeyComparator, KeyType};
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId};
+use crate::storage::page::{Page, PageTrait, PageType, PageTypeId};
 use std::any::Any;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
@@ -220,7 +220,7 @@ where
 
     pub fn get_min_size(&self) -> usize {
         // B+ tree common practice is to keep at least half full
-        (self.max_size + 1) / 2
+        self.max_size.div_ceil(2)
     }
 
     pub fn serialize(&self, buffer: &mut [u8]) {
@@ -240,10 +240,9 @@ where
         cursor += max_size_bytes.len();
 
         // Write next_page_id
-        let next_page_id_bytes = bincode::encode_to_vec(
-            &self.next_page_id, 
-            bincode::config::standard()
-        ).expect("Failed to serialize next_page_id");
+        let next_page_id_bytes =
+            bincode::encode_to_vec(self.next_page_id, bincode::config::standard())
+                .expect("Failed to serialize next_page_id");
         let next_page_id_len = next_page_id_bytes.len() as u32;
         buffer[cursor..cursor + 4].copy_from_slice(&next_page_id_len.to_ne_bytes());
         cursor += 4;
@@ -254,20 +253,16 @@ where
         for i in 0..self.size {
             // This is a simplified approach and assumes KeyType and ValueType can be serialized
             // In a real implementation, you might need type-specific serialization logic
-            let key_bytes = bincode::encode_to_vec(
-                &self.keys[i], 
-                bincode::config::standard()
-            ).expect("Failed to serialize key");
+            let key_bytes = bincode::encode_to_vec(&self.keys[i], bincode::config::standard())
+                .expect("Failed to serialize key");
             let key_len = key_bytes.len() as u32;
             buffer[cursor..cursor + 4].copy_from_slice(&key_len.to_ne_bytes());
             cursor += 4;
             buffer[cursor..cursor + key_bytes.len()].copy_from_slice(&key_bytes);
             cursor += key_bytes.len();
 
-            let value_bytes = bincode::encode_to_vec(
-                &self.values[i], 
-                bincode::config::standard()
-            ).expect("Failed to serialize value");
+            let value_bytes = bincode::encode_to_vec(&self.values[i], bincode::config::standard())
+                .expect("Failed to serialize value");
             let value_len = value_bytes.len() as u32;
             buffer[cursor..cursor + 4].copy_from_slice(&value_len.to_ne_bytes());
             cursor += 4;
@@ -298,8 +293,9 @@ where
         cursor += 4;
         let (next_page_id, _): (Option<PageId>, _) = bincode::decode_from_slice(
             &buffer[cursor..cursor + next_page_id_len],
-            bincode::config::standard()
-        ).expect("Failed to deserialize next_page_id");
+            bincode::config::standard(),
+        )
+        .expect("Failed to deserialize next_page_id");
         self.next_page_id = next_page_id;
         cursor += next_page_id_len;
 
@@ -319,8 +315,9 @@ where
             cursor += 4;
             let (key, _): (K, _) = bincode::decode_from_slice(
                 &buffer[cursor..cursor + key_len],
-                bincode::config::standard()
-            ).expect("Failed to deserialize key");
+                bincode::config::standard(),
+            )
+            .expect("Failed to deserialize key");
             cursor += key_len;
 
             let mut value_len_bytes = [0u8; 4];
@@ -329,8 +326,9 @@ where
             cursor += 4;
             let (value, _): (V, _) = bincode::decode_from_slice(
                 &buffer[cursor..cursor + value_len],
-                bincode::config::standard()
-            ).expect("Failed to deserialize value");
+                bincode::config::standard(),
+            )
+            .expect("Failed to deserialize value");
             cursor += value_len;
 
             self.keys.push(key);

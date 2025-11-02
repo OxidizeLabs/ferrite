@@ -143,27 +143,22 @@ impl AbstractExecutor for DeleteExecutor {
 
         // Process all tuples from child executor (scan/filter)
         if let Some(ref mut child) = self.child_executor {
-            loop {
-                match child.next()? {
-                    Some((_tuple, rid)) => {
-                        debug!("Processing tuple for deletion with RID {:?}", rid);
+            while let Some((_tuple, rid)) = child.next()? {
+                debug!("Processing tuple for deletion with RID {:?}", rid);
 
-                        // Delete the tuple from the table
-                        match transactional_table_heap.delete_tuple(rid, txn_context.clone()) {
-                            Ok(_) => {
-                                delete_count += 1;
-                                trace!(
-                                    "Successfully deleted tuple #{} with RID {:?}",
-                                    delete_count, rid
-                                );
-                            }
-                            Err(e) => {
-                                error!("Failed to delete tuple with RID {:?}: {}", rid, e);
-                                return Err(DBError::Execution(format!("Delete failed: {}", e)));
-                            }
-                        }
+                // Delete the tuple from the table
+                match transactional_table_heap.delete_tuple(rid, txn_context.clone()) {
+                    Ok(_) => {
+                        delete_count += 1;
+                        trace!(
+                            "Successfully deleted tuple #{} with RID {:?}",
+                            delete_count, rid
+                        );
                     }
-                    None => break,
+                    Err(e) => {
+                        error!("Failed to delete tuple with RID {:?}: {}", rid, e);
+                        return Err(DBError::Execution(format!("Delete failed: {}", e)));
+                    }
                 }
             }
         } else {
@@ -206,20 +201,20 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -251,14 +246,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -363,7 +366,7 @@ mod tests {
 
         for (id, value) in test_data {
             let values = vec![Value::new(id), Value::new(value)];
-            
+
             txn_table_heap
                 .insert_tuple_from_values(values, &schema, ctx.transaction_context.clone())
                 .expect("Failed to insert tuple");
@@ -372,7 +375,7 @@ mod tests {
         // Verify initial table state
         let mut initial_count = 0;
         let mut table_iter = txn_table_heap.make_iterator(Some(ctx.transaction_context.clone()));
-        while let Some((meta, tuple)) = table_iter.next() {
+        for (meta, tuple) in &mut table_iter {
             if !meta.is_deleted() {
                 initial_count += 1;
                 let id = tuple.get_value(0);
@@ -409,7 +412,8 @@ mod tests {
         // Commit the transaction after deletes
         let txn_ctx = execution_context.read().get_transaction_context();
         ctx.transaction_manager
-            .commit(txn_ctx.get_transaction(), ctx.bpm.clone()).await;
+            .commit(txn_ctx.get_transaction(), ctx.bpm.clone())
+            .await;
 
         // Create new transaction for verification
         let verify_txn_ctx = ctx.create_transaction(IsolationLevel::ReadCommitted);
@@ -418,7 +422,7 @@ mod tests {
         let mut remaining_count = 0;
         let mut table_iter = txn_table_heap.make_iterator(Some(verify_txn_ctx.clone()));
 
-        while let Some((meta, tuple)) = table_iter.next() {
+        for (meta, tuple) in &mut table_iter {
             // Only count non-deleted tuples
             if !meta.is_deleted() {
                 remaining_count += 1;
@@ -435,6 +439,7 @@ mod tests {
 
         // Clean up - commit verification transaction
         ctx.transaction_manager
-            .commit(verify_txn_ctx.get_transaction(), ctx.bpm.clone()).await;
+            .commit(verify_txn_ctx.get_transaction(), ctx.bpm.clone())
+            .await;
     }
 }

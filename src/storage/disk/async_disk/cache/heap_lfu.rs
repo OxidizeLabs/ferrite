@@ -2,6 +2,10 @@
 // HEAP-BASED LFU CACHE IMPLEMENTATION
 // ==============================================
 
+use crate::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LFUCacheTrait, MutableCache,
+};
+use std::cmp::Reverse;
 /// # Heap-Based LFU Cache Implementation
 ///
 /// This is an alternative LFU cache implementation that uses a binary heap for O(log n) eviction
@@ -68,9 +72,7 @@
 /// - Simple, minimal overhead is preferred
 ///
 use std::collections::{BinaryHeap, HashMap};
-use std::cmp::Reverse;
 use std::hash::Hash;
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LFUCacheTrait, MutableCache};
 
 /// Heap-based LFU cache with O(log n) eviction operations.
 ///
@@ -169,12 +171,12 @@ where
     /// Returns the current minimum frequency key, or None if cache is empty.
     fn pop_lfu_internal(&mut self) -> Option<(K, u64)> {
         while let Some(Reverse((heap_freq, key))) = self.freq_heap.peek() {
-            if let Some(&current_freq) = self.frequencies.get(key) {
-                if *heap_freq == current_freq {
-                    // This is a valid (non-stale) entry
-                    let Reverse((freq, key)) = self.freq_heap.pop().unwrap();
-                    return Some((key, freq));
-                }
+            if let Some(&current_freq) = self.frequencies.get(key)
+                && *heap_freq == current_freq
+            {
+                // This is a valid (non-stale) entry
+                let Reverse((freq, key)) = self.freq_heap.pop().unwrap();
+                return Some((key, freq));
             }
 
             // This entry is stale (key doesn't exist or frequency changed)
@@ -342,9 +344,11 @@ where
 
 #[cfg(test)]
 mod heap_lfu_tests {
+    use super::*;
+    use crate::storage::disk::async_disk::cache::cache_traits::{
+        CoreCache, LFUCacheTrait, MutableCache,
+    };
     use crate::storage::disk::async_disk::cache::lfu::LFUCache;
-use super::*;
-    use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, MutableCache, LFUCacheTrait};
 
     #[test]
     fn test_heap_lfu_basic_operations() {
@@ -419,7 +423,7 @@ use super::*;
         cache.insert("high".to_string(), 3);
 
         // Create frequency differences
-        cache.get(&"med".to_string());  // med freq = 2
+        cache.get(&"med".to_string()); // med freq = 2
         cache.get(&"high".to_string()); // high freq = 2
         cache.get(&"high".to_string()); // high freq = 3
 

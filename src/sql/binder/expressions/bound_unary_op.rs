@@ -37,7 +37,7 @@ impl BoundExpression for BoundUnaryOp {
 
     fn clone_box(&self) -> Box<dyn BoundExpression> {
         Box::new(Self {
-            op: self.op.clone(),
+            op: self.op,
             expr: self.expr.clone_box(),
         })
     }

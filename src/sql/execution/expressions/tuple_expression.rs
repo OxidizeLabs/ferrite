@@ -116,7 +116,7 @@ mod tests {
             vec![],
         )));
         let const3 = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(3.14),
+            Value::new(std::f64::consts::PI),
             Column::new("const3", TypeId::Decimal),
             vec![],
         )));
@@ -136,7 +136,7 @@ mod tests {
                 assert_eq!(values.len(), 3);
                 assert_eq!(values[0], Value::new(1));
                 assert_eq!(values[1], Value::new("test"));
-                assert_eq!(values[2], Value::new(3.14));
+                assert_eq!(values[2], Value::new(std::f64::consts::PI));
             }
             _ => panic!("Expected Vector value"),
         }

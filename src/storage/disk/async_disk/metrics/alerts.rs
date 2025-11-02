@@ -1,13 +1,20 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+// Type alias for complex handler type
+type AlertHandler = Box<dyn Fn(&Alert) + Send + Sync>;
+
 /// Enhanced alerting system with multiple channels
 pub struct AlertingSystem {
-    alert_handlers: Vec<Box<dyn Fn(&Alert) + Send + Sync>>,
+    alert_handlers: Vec<AlertHandler>,
     alert_cooldown: HashMap<String, Instant>,
+    #[allow(dead_code)]
     active_alerts: HashMap<String, Alert>,
+    #[allow(dead_code)]
     alert_history: Vec<Alert>,
+    #[allow(dead_code)]
     escalation_rules: Vec<EscalationRule>,
+    #[allow(dead_code)]
     notification_channels: Vec<NotificationChannel>,
 }
 
@@ -98,6 +105,12 @@ pub struct AlertSummary {
     pub title: String,
     pub timestamp: Instant,
     pub acknowledged: bool,
+}
+
+impl Default for AlertingSystem {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AlertingSystem {

@@ -1,12 +1,12 @@
 //! Durability management and sync policy enforcement
-//! 
+//!
 //! This module handles durability guarantees, WAL management,
 //! and fsync policy enforcement for write operations.
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::io::{Result as IoResult, Error as IoError, ErrorKind};
 use std::time::Duration;
 
 /// Manages durability guarantees and sync policies
@@ -78,25 +78,25 @@ impl DurabilityManager {
                 // Sync durability - ensure data reaches disk
                 result.sync_performed = self.should_sync_pages(pages)?;
                 result.wal_written = self.wal_enabled;
-                
+
                 if result.sync_performed {
                     self.pending_syncs.fetch_add(pages.len(), Ordering::Relaxed);
                 }
-                
+
                 Ok(result)
             }
             DurabilityLevel::Durable => {
                 // Full durability - sync to disk and WAL
                 result.sync_performed = true;
                 result.wal_written = self.wal_enabled;
-                
+
                 // In a real implementation, this would perform actual fsync
                 self.perform_sync(pages)?;
-                
+
                 if self.wal_enabled {
                     self.write_wal_entries(pages)?;
                 }
-                
+
                 self.pending_syncs.fetch_add(pages.len(), Ordering::Relaxed);
                 Ok(result)
             }
@@ -122,26 +122,26 @@ impl DurabilityManager {
         // 1. Group pages by file
         // 2. Call fsync() on each file descriptor
         // 3. Handle any sync errors appropriately
-        
+
         // For this example, we'll just simulate the operation
         if pages.is_empty() {
             return Err(IoError::new(ErrorKind::InvalidInput, "No pages to sync"));
         }
-        
+
         Ok(())
     }
 
     /// Writes WAL entries for the pages
-    fn write_wal_entries(&self, pages: &[(PageId, Vec<u8>)]) -> IoResult<()> {
+    fn write_wal_entries(&self, _pages: &[(PageId, Vec<u8>)]) -> IoResult<()> {
         if !self.wal_enabled {
             return Ok(());
         }
-        
+
         // In a real implementation, this would:
         // 1. Create WAL entries for each page
         // 2. Write them to the WAL file
         // 3. Ensure WAL is synced before data pages
-        
+
         // For this example, we'll just simulate
         Ok(())
     }
@@ -188,7 +188,6 @@ impl DurabilityManager {
 
     /// Estimates the sync overhead for a given set of pages
     pub fn estimate_sync_overhead(&self, pages: &[(PageId, Vec<u8>)]) -> IoResult<Duration> {
-        
         if pages.is_empty() {
             return Ok(Duration::ZERO);
         }
@@ -226,11 +225,7 @@ mod tests {
 
     #[test]
     fn test_durability_manager_creation() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::OnFlush,
-            DurabilityLevel::Sync,
-            true,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Sync, true);
 
         assert_eq!(*manager.fsync_policy(), FsyncPolicy::OnFlush);
         assert_eq!(*manager.durability_level(), DurabilityLevel::Sync);
@@ -240,11 +235,7 @@ mod tests {
 
     #[test]
     fn test_apply_durability_none() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::Never,
-            DurabilityLevel::None,
-            false,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::Never, DurabilityLevel::None, false);
 
         let pages = vec![(1, vec![1, 2, 3, 4])];
         let result = manager.apply_durability(&pages).unwrap();
@@ -257,11 +248,7 @@ mod tests {
 
     #[test]
     fn test_apply_durability_buffer() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::Never,
-            DurabilityLevel::Buffer,
-            true,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::Never, DurabilityLevel::Buffer, true);
 
         let pages = vec![(1, vec![1, 2, 3, 4]), (2, vec![5, 6, 7, 8])];
         let result = manager.apply_durability(&pages).unwrap();
@@ -274,11 +261,7 @@ mod tests {
 
     #[test]
     fn test_apply_durability_sync() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::OnFlush,
-            DurabilityLevel::Sync,
-            true,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Sync, true);
 
         let pages = vec![(1, vec![1, 2, 3, 4])];
         let result = manager.apply_durability(&pages).unwrap();
@@ -292,11 +275,7 @@ mod tests {
 
     #[test]
     fn test_apply_durability_durable() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::OnFlush,
-            DurabilityLevel::Durable,
-            true,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Durable, true);
 
         let pages = vec![(1, vec![1, 2, 3, 4])];
         let result = manager.apply_durability(&pages).unwrap();
@@ -309,11 +288,7 @@ mod tests {
 
     #[test]
     fn test_apply_durability_empty_pages() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::OnFlush,
-            DurabilityLevel::Durable,
-            true,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Durable, true);
 
         let pages = vec![];
         let result = manager.apply_durability(&pages).unwrap();
@@ -325,11 +300,7 @@ mod tests {
 
     #[test]
     fn test_configuration_updates() {
-        let mut manager = DurabilityManager::new(
-            FsyncPolicy::Never,
-            DurabilityLevel::None,
-            false,
-        );
+        let mut manager = DurabilityManager::new(FsyncPolicy::Never, DurabilityLevel::None, false);
 
         manager.set_fsync_policy(FsyncPolicy::OnFlush);
         assert_eq!(*manager.fsync_policy(), FsyncPolicy::OnFlush);
@@ -343,11 +314,7 @@ mod tests {
 
     #[test]
     fn test_pending_syncs_tracking() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::OnFlush,
-            DurabilityLevel::Sync,
-            false,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Sync, false);
 
         assert_eq!(manager.pending_syncs(), 0);
 
@@ -364,11 +331,7 @@ mod tests {
 
     #[test]
     fn test_estimate_sync_overhead() {
-        let manager = DurabilityManager::new(
-            FsyncPolicy::OnFlush,
-            DurabilityLevel::Durable,
-            true,
-        );
+        let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Durable, true);
 
         // Empty pages
         let empty_pages = vec![];
@@ -383,21 +346,15 @@ mod tests {
 
     #[test]
     fn test_should_sync_pages_policies() {
-        let never_manager = DurabilityManager::new(
-            FsyncPolicy::Never,
-            DurabilityLevel::Sync,
-            false,
-        );
+        let never_manager =
+            DurabilityManager::new(FsyncPolicy::Never, DurabilityLevel::Sync, false);
 
-        let on_flush_manager = DurabilityManager::new(
-            FsyncPolicy::OnFlush,
-            DurabilityLevel::Sync,
-            false,
-        );
+        let on_flush_manager =
+            DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Sync, false);
 
         let pages = vec![(1, vec![1, 2, 3, 4])];
 
         assert!(!never_manager.should_sync_pages(&pages).unwrap());
         assert!(on_flush_manager.should_sync_pages(&pages).unwrap());
     }
-} 
+}

@@ -6,6 +6,12 @@ pub struct IntComparator {
     _marker: PhantomData<()>,
 }
 
+impl Default for IntComparator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IntComparator {
     pub fn new() -> Self {
         Self {

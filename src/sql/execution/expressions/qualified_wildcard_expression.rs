@@ -117,11 +117,11 @@ impl ExpressionOps for QualifiedWildcardExpression {
         // Check if there's at least one column in the schema that matches this qualifier
         let mut found_match = false;
         for i in 0..schema.get_column_count() {
-            if let Some(column) = schema.get_column(i as usize) {
-                if column.get_name().starts_with(&prefix) {
-                    found_match = true;
-                    break;
-                }
+            if let Some(column) = schema.get_column(i as usize)
+                && column.get_name().starts_with(&prefix)
+            {
+                found_match = true;
+                break;
             }
         }
 
@@ -138,7 +138,7 @@ impl ExpressionOps for QualifiedWildcardExpression {
 
 impl Display for QualifiedWildcardExpression {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}", self.qualifier.join("."), "*")
+        write!(f, "{}.*", self.qualifier.join("."))
     }
 }
 
@@ -207,12 +207,12 @@ mod tests {
         ]);
 
         let left_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("John")],
+            &[Value::new(1), Value::new("John")],
             &left_schema,
             RID::new(0, 0),
         );
         let right_tuple = Tuple::new(
-            &vec![Value::new(25), Value::new("data")],
+            &[Value::new(25), Value::new("data")],
             &right_schema,
             RID::new(0, 0),
         );

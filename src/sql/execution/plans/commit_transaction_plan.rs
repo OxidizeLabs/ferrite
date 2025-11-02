@@ -165,8 +165,8 @@ mod tests {
         // Test that we can convert back and forth
         match &plan_enum {
             PlanNode::CommitTransaction(inner_node) => {
-                assert_eq!(inner_node.is_chain(), true);
-                assert_eq!(inner_node.is_end(), true);
+                assert!(inner_node.is_chain());
+                assert!(inner_node.is_end());
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
                 assert!(inner_node.get_children().is_empty());
             }
@@ -194,7 +194,7 @@ mod tests {
         let plan_enum = PlanNode::CommitTransaction(plan_node);
 
         // Simulate what explain_internal would do
-        let indent = "  ".repeat(1); // Indent level 1
+        let indent = "  ".to_string(); // Indent level 1
         let mut result = String::new();
 
         match &plan_enum {

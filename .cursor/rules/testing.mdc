@@ -1,9 +1,6 @@
 ---
-description: Testing strategies and guidelines for TKDB components
-globs: []
-alwaysApply: false
+alwaysApply: true
 ---
-
 # Testing Guidelines
 
 Comprehensive testing strategy for database components requiring both correctness and performance validation.
@@ -23,16 +20,16 @@ Comprehensive testing strategy for database components requiring both correctnes
 mod tests {
     use super::*;
     use mockall::predicate::*;
-    
+
     #[test]
     fn test_buffer_pool_fetch_page() {
         let mut buffer_pool = BufferPool::new(10);
         let page_id = PageId::new(1);
-        
+
         // Test successful page fetch
         let page = buffer_pool.fetch_page(page_id).unwrap();
         assert!(page.is_pinned());
-        
+
         // Test page pinning behavior
         assert_eq!(buffer_pool.get_pin_count(page_id), 1);
     }
@@ -60,13 +57,13 @@ mod tests {
 #[tokio::test]
 async fn test_sql_execution_pipeline() {
     let db = TestDatabase::new().await;
-    
+
     // Create table
     db.execute("CREATE TABLE users (id INT, name VARCHAR(50))").await?;
-    
+
     // Insert data
     db.execute("INSERT INTO users VALUES (1, 'Alice')").await?;
-    
+
     // Query data
     let result = db.query("SELECT * FROM users WHERE id = 1").await?;
     assert_eq!(result.len(), 1);
@@ -96,7 +93,7 @@ async fn test_concurrent_transactions() {
             txn.commit().await
         })
     }).collect::<Vec<_>>();
-    
+
     // All transactions should complete successfully
     for handle in handles {
         handle.await??;

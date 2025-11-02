@@ -387,7 +387,7 @@ mod tests {
 
             // Check constant value (active)
             if let Val::Boolean(active) = values[2].get_val() {
-                assert_eq!(*active, true);
+                assert!(*active);
             } else {
                 panic!("Expected Boolean value for active");
             }

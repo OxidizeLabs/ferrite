@@ -648,7 +648,7 @@ mod tests {
     fn test_single_index_access() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test positive index
         let idx_expr = Arc::new(Expression::Literal(
@@ -685,7 +685,7 @@ mod tests {
     fn test_range_access() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test range with both bounds
         let start_expr = Arc::new(Expression::Literal(
@@ -722,7 +722,7 @@ mod tests {
     fn test_range_with_negative_indices() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         let start_expr = Arc::new(Expression::Literal(
             LiteralValueExpression::new(sqlparser::ast::Value::Number("-3".to_string(), false))
@@ -757,7 +757,7 @@ mod tests {
     fn test_error_cases() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test index out of bounds
         let idx_expr = Arc::new(Expression::Literal(
@@ -800,7 +800,7 @@ mod tests {
     fn test_empty_ranges() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test range with no bounds (full slice)
         let subscript_expr = SubscriptExpression::new(
@@ -815,9 +815,9 @@ mod tests {
         let result = subscript_expr.evaluate(&tuple, &schema).unwrap();
         match result.get_val() {
             Val::Vector(v) => {
-                assert_eq!(v.len(), 5);
-                for i in 0..5 {
-                    assert_eq!(v[i], Value::new(i as i32 + 1));
+                assert!(v.len() == 5);
+                for (i, item) in v.iter().enumerate().take(5) {
+                    assert_eq!(*item, Value::new(i as i32 + 1));
                 }
             }
             _ => panic!("Expected vector result"),
@@ -868,7 +868,7 @@ mod tests {
     fn test_single_index_edge_cases() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test index 0 (first element)
         let idx_expr = Arc::new(Expression::Literal(
@@ -914,7 +914,7 @@ mod tests {
     fn test_different_integer_types() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test with TinyInt (value that fits in i8)
         let idx_expr = Arc::new(Expression::Literal(
@@ -966,7 +966,7 @@ mod tests {
     fn test_range_edge_cases() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test range with only start bound
         let start_expr = Arc::new(Expression::Literal(
@@ -1071,7 +1071,7 @@ mod tests {
     fn test_range_beyond_bounds() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test range that extends beyond vector length
         let start_expr = Arc::new(Expression::Literal(
@@ -1134,7 +1134,7 @@ mod tests {
             vec![],
         )));
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test single index on empty vector
         let idx_expr = Arc::new(Expression::Literal(
@@ -1187,7 +1187,7 @@ mod tests {
             vec![],
         )));
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test index 0
         let idx_expr = Arc::new(Expression::Literal(
@@ -1235,7 +1235,7 @@ mod tests {
     fn test_negative_index_error_cases() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test negative index beyond vector length (-6 for 5-element vector)
         let idx_expr = Arc::new(Expression::Literal(
@@ -1272,7 +1272,7 @@ mod tests {
     fn test_mixed_negative_positive_ranges() {
         let vec_expr = create_test_vector();
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test range from negative to positive index
         let start_expr = Arc::new(Expression::Literal(
@@ -1331,7 +1331,7 @@ mod tests {
     #[test]
     fn test_large_vector() {
         // Create a larger vector to test performance and edge cases
-        let large_vec_data: Vec<Value> = (0..1000).map(|i| Value::new(i)).collect();
+        let large_vec_data: Vec<Value> = (0..1000).map(Value::new).collect();
         let large_vec = Value::new_vector(large_vec_data);
         let vec_expr = Arc::new(Expression::Constant(ConstantExpression::new(
             large_vec,
@@ -1339,7 +1339,7 @@ mod tests {
             vec![],
         )));
         let schema = create_test_schema();
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test accessing middle element
         let idx_expr = Arc::new(Expression::Literal(

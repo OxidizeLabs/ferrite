@@ -1,3 +1,4 @@
+#![allow(clippy::items_after_test_module)]
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -314,12 +315,12 @@ mod tests {
     #[test]
     fn test_ceil_floor_basic() -> Result<(), ExpressionError> {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test ceiling
         let ceil_expr = CeilFloorExpression::new(
             CeilFloorOperation::Ceil,
-            create_decimal_expr(3.14),
+            create_decimal_expr(std::f64::consts::PI),
             None,
             None,
         )
@@ -330,7 +331,7 @@ mod tests {
         // Test floor
         let floor_expr = CeilFloorExpression::new(
             CeilFloorOperation::Floor,
-            create_decimal_expr(3.14),
+            create_decimal_expr(std::f64::consts::PI),
             None,
             None,
         )
@@ -344,12 +345,12 @@ mod tests {
     #[test]
     fn test_ceil_floor_with_scale() -> Result<(), ExpressionError> {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test ceiling with scale 1
         let ceil_expr = CeilFloorExpression::new(
             CeilFloorOperation::Ceil,
-            create_decimal_expr(3.14),
+            create_decimal_expr(std::f64::consts::PI),
             Some(create_scale_expr(1)),
             None,
         )
@@ -360,7 +361,7 @@ mod tests {
         // Test floor with scale 1
         let floor_expr = CeilFloorExpression::new(
             CeilFloorOperation::Floor,
-            create_decimal_expr(3.14),
+            create_decimal_expr(std::f64::consts::PI),
             Some(create_scale_expr(1)),
             None,
         )
@@ -374,7 +375,7 @@ mod tests {
     #[test]
     fn test_ceil_floor_edge_cases() -> Result<(), ExpressionError> {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test with integer input
         let ceil_expr = CeilFloorExpression::new(
@@ -429,7 +430,7 @@ mod tests {
         // Test invalid scale type
         let expr = CeilFloorExpression::new(
             CeilFloorOperation::Ceil,
-            create_decimal_expr(3.14),
+            create_decimal_expr(std::f64::consts::PI),
             Some(Arc::new(Expression::Constant(ConstantExpression::new(
                 Value::new("not a number"),
                 Column::new("scale", TypeId::VarChar),

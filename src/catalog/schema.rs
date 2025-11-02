@@ -1,8 +1,8 @@
 use crate::catalog::column::Column;
+use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
-use bincode::{Decode, Encode};
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct Schema {
@@ -44,7 +44,7 @@ impl Schema {
         }
     }
 
-    pub fn copy_schema(from: &Schema, attrs: &Vec<usize>) -> Schema {
+    pub fn copy_schema(from: &Schema, attrs: &[usize]) -> Schema {
         let columns: Vec<Column> = attrs.iter().map(|&i| from.columns[i].clone()).collect();
         Schema {
             columns,
@@ -274,9 +274,9 @@ impl AsRef<Schema> for Schema {
 
 #[cfg(test)]
 mod unit_tests {
-    use bincode::config;
-use super::*;
+    use super::*;
     use crate::types_db::type_id::TypeId;
+    use bincode::config;
 
     #[test]
     fn schema_serialization() {
@@ -288,7 +288,8 @@ use super::*;
 
         let config = config::standard();
         let serialized = bincode::encode_to_vec(&schema, config).unwrap();
-        let (deserialized, _): (Schema, usize) = bincode::decode_from_slice(&serialized, config).unwrap();
+        let (deserialized, _): (Schema, usize) =
+            bincode::decode_from_slice(&serialized, config).unwrap();
 
         assert_eq!(schema, deserialized);
     }
@@ -354,7 +355,7 @@ use super::*;
         let original_schema = Schema::new(original_columns);
 
         // Copy only id and age columns
-        let copied_schema = Schema::copy_schema(&original_schema, &vec![0, 2]);
+        let copied_schema = Schema::copy_schema(&original_schema, &[0, 2]);
 
         assert_eq!(copied_schema.get_column_count(), 2);
         assert_eq!(copied_schema.get_column(0).unwrap().get_name(), "id");
@@ -442,7 +443,8 @@ use super::*;
         // Test that primary keys are preserved during serialization
         let config = config::standard();
         let serialized = bincode::encode_to_vec(&schema, config).unwrap();
-        let (deserialized, _): (Schema, usize) = bincode::decode_from_slice(&serialized, config).unwrap();
+        let (deserialized, _): (Schema, usize) =
+            bincode::decode_from_slice(&serialized, config).unwrap();
 
         assert_eq!(
             schema.get_primary_key_columns(),
@@ -461,14 +463,14 @@ use super::*;
         original_schema.set_primary_key_columns(vec![0, 2]);
 
         // Test that primary keys are preserved when copying schema
-        let copied_schema = Schema::copy_schema(&original_schema, &vec![0, 1, 2]);
+        let copied_schema = Schema::copy_schema(&original_schema, &[0, 1, 2]);
         assert_eq!(
             original_schema.get_primary_key_columns(),
             copied_schema.get_primary_key_columns()
         );
 
         // Test that primary keys are preserved when copying subset of columns
-        let partial_schema = Schema::copy_schema(&original_schema, &vec![0, 2]);
+        let partial_schema = Schema::copy_schema(&original_schema, &[0, 2]);
         assert_eq!(
             original_schema.get_primary_key_columns(),
             partial_schema.get_primary_key_columns()

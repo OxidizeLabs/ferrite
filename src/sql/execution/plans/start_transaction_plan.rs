@@ -208,7 +208,7 @@ mod tests {
                     inner_node.get_isolation_level(),
                     &Some(IsolationLevel::Serializable)
                 );
-                assert_eq!(inner_node.is_read_only(), true);
+                assert!(inner_node.is_read_only());
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
                 assert!(inner_node.get_children().is_empty());
             }
@@ -236,7 +236,7 @@ mod tests {
         let plan_enum = PlanNode::StartTransaction(plan_node);
 
         // Simulate what explain_internal would do
-        let indent = "  ".repeat(1); // Indent level 1
+        let indent = "  ".to_string(); // Indent level 1
         let mut result = String::new();
 
         match &plan_enum {

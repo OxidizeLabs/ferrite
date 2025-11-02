@@ -94,18 +94,18 @@ mod tests {
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
     use crate::sql::execution::expressions::mock_expression::MockExpression;
     use crate::sql::execution::plans::table_scan_plan::TableScanNode;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::table_heap::{TableHeap, TableInfo};
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
-        bpm: Arc<BufferPoolManager>
+        bpm: Arc<BufferPoolManager>,
     }
 
     impl TestContext {
@@ -130,17 +130,19 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
-            Self {
-                bpm
-            }
+            Self { bpm }
         }
     }
     fn create_mock_table_scan(ctx: &TestContext, name: &str, schema: Schema) -> PlanNode {

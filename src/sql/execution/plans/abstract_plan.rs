@@ -12,9 +12,9 @@ use crate::sql::execution::executors::index_scan_executor::IndexScanExecutor;
 use crate::sql::execution::executors::insert_executor::InsertExecutor;
 use crate::sql::execution::executors::limit_executor::LimitExecutor;
 use crate::sql::execution::executors::mock_executor::MockExecutor;
-use crate::sql::execution::executors::offset_executor::OffsetExecutor;
 use crate::sql::execution::executors::nested_index_join_executor::NestedIndexJoinExecutor;
 use crate::sql::execution::executors::nested_loop_join_executor::NestedLoopJoinExecutor;
+use crate::sql::execution::executors::offset_executor::OffsetExecutor;
 use crate::sql::execution::executors::projection_executor::ProjectionExecutor;
 use crate::sql::execution::executors::seq_scan_executor::SeqScanExecutor;
 use crate::sql::execution::executors::sort_executor::SortExecutor;
@@ -37,9 +37,9 @@ use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::execution::plans::limit_plan::LimitNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
-use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
+use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
@@ -127,21 +127,15 @@ pub trait AbstractPlanNode: Display {
 
 impl AbstractPlanNode for PlanNode {
     fn get_output_schema(&self) -> &Schema {
-        match self {
-            _ => self.as_abstract_plan_node().get_output_schema(),
-        }
+        self.as_abstract_plan_node().get_output_schema()
     }
 
     fn get_children(&self) -> &Vec<PlanNode> {
-        match self {
-            _ => self.as_abstract_plan_node().get_children(),
-        }
+        self.as_abstract_plan_node().get_children()
     }
 
     fn get_type(&self) -> PlanType {
-        match self {
-            _ => self.as_abstract_plan_node().get_type(),
-        }
+        self.as_abstract_plan_node().get_type()
     }
 }
 
@@ -617,19 +611,10 @@ impl PlanNode {
                 context,
                 Arc::new(node.clone()),
             ))),
-            PlanNode::IndexScan(node) => {
-                let child_plan = node
-                    .get_children()
-                    .first()
-                    .ok_or_else(|| "Filter node must have a child".to_string())?;
-                let child_executor = child_plan.create_executor(context.clone())?;
-
-                Ok(Box::new(IndexScanExecutor::new(
-                    child_executor,
-                    context,
-                    Arc::new(node.clone()),
-                )))
-            }
+            PlanNode::IndexScan(node) => Ok(Box::new(IndexScanExecutor::new(
+                context,
+                Arc::new(node.clone()),
+            ))),
             PlanNode::Values(node) => Ok(Box::new(ValuesExecutor::new(
                 context,
                 Arc::new(node.clone()),
@@ -860,19 +845,19 @@ impl Display for PlanNode {
 mod basic_behaviour {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::query_planner::QueryPlanner;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use log::info;
     use parking_lot::RwLock;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -902,14 +887,22 @@ mod basic_behaviour {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -1101,19 +1094,19 @@ mod basic_behaviour {
 mod complex_behaviour {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::planner::query_planner::QueryPlanner;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use log::info;
     use parking_lot::RwLock;
     use std::error::Error;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -1143,14 +1136,22 @@ mod complex_behaviour {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
 

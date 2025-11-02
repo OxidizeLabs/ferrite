@@ -1,7 +1,7 @@
 use crate::recovery::log_record::{LogRecord, LogRecordType};
+use crate::storage::disk::async_disk::AsyncDiskManager;
 use log::{debug, warn};
 use std::sync::Arc;
-use crate::storage::disk::async_disk::AsyncDiskManager;
 use tokio::runtime::Handle;
 
 /// `LogIterator` provides a robust way to iterate through log records in a log file.
@@ -69,9 +69,8 @@ impl LogIterator {
             let offset = self.current_offset;
 
             match tokio::task::block_in_place(|| {
-                self.runtime_handle.block_on(async move {
-                    disk_manager.read_log(offset).await
-                })
+                self.runtime_handle
+                    .block_on(async move { disk_manager.read_log(offset).await })
             }) {
                 Ok(bytes) => {
                     // Deserialize bytes into LogRecord
@@ -203,14 +202,14 @@ impl LogIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::config::{Lsn, TxnId, INVALID_LSN};
+    use crate::common::config::{INVALID_LSN, Lsn, TxnId};
+    use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
+    use crate::storage::disk::async_disk::DiskManagerConfig;
     use std::fs;
     use std::path::Path;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::DiskManagerConfig;
 
     struct TestContext {
         log_path: String,

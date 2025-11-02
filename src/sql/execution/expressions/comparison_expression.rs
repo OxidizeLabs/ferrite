@@ -114,7 +114,9 @@ impl ComparisonExpression {
                     ComparisonType::LessThan => lhs.compare_less_than(&cast_rhs),
                     ComparisonType::LessThanOrEqual => lhs.compare_less_than_equals(&cast_rhs),
                     ComparisonType::GreaterThan => lhs.compare_greater_than(&cast_rhs),
-                    ComparisonType::GreaterThanOrEqual => lhs.compare_greater_than_equals(&cast_rhs),
+                    ComparisonType::GreaterThanOrEqual => {
+                        lhs.compare_greater_than_equals(&cast_rhs)
+                    }
                     ComparisonType::IsNotNull => unreachable!(),
                 };
                 return Ok(cast_result);
@@ -296,8 +298,8 @@ mod unit_tests {
         ]);
         let rid = RID::new(0, 0);
 
-        let left_tuple = Tuple::new(&*vec![Value::new(5), Value::new(10)], &schema, rid);
-        let right_tuple = Tuple::new(&*vec![Value::new(10), Value::new(15)], &schema, rid);
+        let left_tuple = Tuple::new(&[Value::new(5), Value::new(10)], &schema, rid);
+        let right_tuple = Tuple::new(&[Value::new(10), Value::new(15)], &schema, rid);
 
         let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0, // tuple_index

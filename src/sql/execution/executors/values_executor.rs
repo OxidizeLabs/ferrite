@@ -61,7 +61,7 @@ impl AbstractExecutor for ValuesExecutor {
         match row_clone.evaluate(schema) {
             Ok(values) => {
                 // Create tuple with evaluated values
-                let tuple = Arc::new(Tuple::new(values, &schema, RID::default()));
+                let tuple = Arc::new(Tuple::new(values, schema, RID::default()));
 
                 // Advance to next row
                 self.current_row += 1;
@@ -108,13 +108,13 @@ mod tests {
     use std::sync::Arc;
 
     mod helpers {
-        use tempfile::TempDir;
         use super::*;
-        use crate::catalog::catalog::Catalog;
+        use crate::catalog::Catalog;
         use crate::common::logger::initialize_logger;
         use crate::sql::execution::plans::abstract_plan::PlanNode;
         use crate::sql::execution::transaction_context::TransactionContext;
         use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+        use tempfile::TempDir;
 
         pub fn create_test_schema() -> Schema {
             Schema::new(vec![
@@ -184,14 +184,22 @@ mod tests {
                     .to_string();
 
                 // Create disk components
-                let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+                let disk_manager = AsyncDiskManager::new(
+                    db_path.clone(),
+                    log_path.clone(),
+                    DiskManagerConfig::default(),
+                )
+                .await;
                 let disk_manager_arc = Arc::new(disk_manager.unwrap());
                 let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-                let bpm = Arc::new(BufferPoolManager::new(
-                    BUFFER_POOL_SIZE,
-                    disk_manager_arc.clone(),
-                    replacer.clone(),
-                ).unwrap());
+                let bpm = Arc::new(
+                    BufferPoolManager::new(
+                        BUFFER_POOL_SIZE,
+                        disk_manager_arc.clone(),
+                        replacer.clone(),
+                    )
+                    .unwrap(),
+                );
 
                 // Create transaction manager and lock manager first
                 let transaction_manager = Arc::new(TransactionManager::new());
@@ -328,10 +336,13 @@ mod tests {
                 assert_eq!(tuple.get_value(0), Value::new(i));
             }
 
-            test_ctx.transaction_manager().commit(
-                test_ctx.transaction_context().get_transaction().clone(),
-                test_ctx.buffer_pool_manager().clone(),
-            ).await;
+            test_ctx
+                .transaction_manager()
+                .commit(
+                    test_ctx.transaction_context().get_transaction().clone(),
+                    test_ctx.buffer_pool_manager().clone(),
+                )
+                .await;
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();
@@ -388,10 +399,13 @@ mod tests {
             assert!(executor.next().is_ok());
 
             // Commit transaction
-            test_ctx.transaction_manager().commit(
-                test_ctx.transaction_context().get_transaction().clone(),
-                test_ctx.buffer_pool_manager().clone(),
-            ).await;
+            test_ctx
+                .transaction_manager()
+                .commit(
+                    test_ctx.transaction_context().get_transaction().clone(),
+                    test_ctx.buffer_pool_manager().clone(),
+                )
+                .await;
 
             {
                 let txn = test_ctx.transaction_context().get_transaction().clone();

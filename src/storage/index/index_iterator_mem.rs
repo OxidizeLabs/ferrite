@@ -200,12 +200,8 @@ impl IndexIterator {
         {
             let tree_guard = self.tree.read();
             if let Some(end) = &self.end_key {
-                self.current_batch.append(
-                    tree_guard
-                        .scan_range(&seek_key, &end, true)
-                        .unwrap()
-                        .as_mut(),
-                );
+                self.current_batch
+                    .append(tree_guard.scan_range(seek_key, end, true).unwrap().as_mut());
             }
         } // tree_guard is dropped here
 
@@ -230,7 +226,7 @@ mod test_utils {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
-    use crate::storage::index::index::{IndexInfo, IndexType};
+    use crate::storage::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -248,7 +244,7 @@ mod test_utils {
 
     pub fn create_tuple(id: i32, value: &str, schema: &Schema) -> Arc<Tuple> {
         let values = vec![Value::new(id), Value::new(value)];
-        Arc::new(Tuple::new(&values, &schema, RID::new(0, 0)))
+        Arc::new(Tuple::new(&values, schema, RID::new(0, 0)))
     }
 
     pub fn create_test_metadata(table_name: String, index_name: String) -> IndexInfo {
@@ -279,7 +275,7 @@ mod tests {
     use super::test_utils::*;
     use super::*;
     use crate::common::logger::initialize_logger;
-    use crate::storage::index::index::Index;
+    use crate::storage::index::Index;
 
     #[test]
     fn test_iterator_basic() {

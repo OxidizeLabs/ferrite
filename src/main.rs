@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)]
+
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use env_logger::Builder;
@@ -6,7 +8,7 @@ use rustyline::DefaultEditor;
 use std::error;
 use std::sync::Arc;
 use tkdb::cli::CLI;
-use tkdb::client::client::DatabaseClient;
+use tkdb::client::DatabaseClient;
 use tkdb::common::db_instance::{DBConfig, DBInstance};
 use tkdb::common::exception::DBError;
 use tkdb::common::logger::initialize_logger;
@@ -164,7 +166,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
 
                 // Create and format table if there are columns/rows
                 if !results.column_names.is_empty() {
-                    use prettytable::{format, Cell, Row, Table};
+                    use prettytable::{Cell, Row, Table, format};
                     let mut table = Table::new();
 
                     // Set table format with clean borders and proper alignment
@@ -240,5 +242,6 @@ async fn run_cli() -> Result<(), Box<dyn error::Error>> {
 
     let cli = CLI::new().await;
 
-    Ok(cli.unwrap().run().await.unwrap())
+    let _: () = cli.unwrap().run().await.unwrap();
+    Ok(())
 }

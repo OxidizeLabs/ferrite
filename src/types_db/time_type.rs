@@ -7,6 +7,12 @@ use chrono::NaiveTime;
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]
 pub struct TimeType;
 
+impl Default for TimeType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimeType {
     pub fn new() -> Self {
         TimeType
@@ -14,7 +20,7 @@ impl TimeType {
 
     /// Convert a time value to a NaiveTime
     fn as_naive_time(seconds_from_midnight: i32) -> Option<NaiveTime> {
-        if seconds_from_midnight < 0 || seconds_from_midnight >= 24 * 60 * 60 {
+        if !(0..24 * 60 * 60).contains(&seconds_from_midnight) {
             None
         } else {
             let hours = seconds_from_midnight / 3600;

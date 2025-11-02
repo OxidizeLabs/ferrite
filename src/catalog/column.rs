@@ -1,9 +1,9 @@
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
+use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
-use bincode::{Encode, Decode};
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub struct Column {
@@ -19,6 +19,21 @@ pub struct Column {
     foreign_key: Option<ForeignKeyConstraint>, // FOREIGN KEY constraint
     precision: Option<u8>,                     // For DECIMAL/NUMERIC types: total number of digits
     scale: Option<u8>, // For DECIMAL/NUMERIC types: number of digits after decimal point
+}
+
+/// Parameters for creating a column from SQL type information
+pub struct ColumnSqlInfo {
+    pub column_name: String,
+    pub column_type: TypeId,
+    pub length: Option<usize>,
+    pub precision: Option<u8>,
+    pub scale: Option<u8>,
+    pub is_primary_key: bool,
+    pub is_not_null: bool,
+    pub is_unique: bool,
+    pub check_constraint: Option<String>,
+    pub default_value: Option<Value>,
+    pub foreign_key: Option<ForeignKeyConstraint>,
 }
 
 /// Foreign key constraint information
@@ -183,7 +198,7 @@ impl Column {
             TypeId::Point => 16,
         }
     }
-    
+
     /// Create a new column with default parameters
     pub fn new(column_name: &str, column_type: TypeId) -> Self {
         ColumnBuilder::new(column_name, column_type).build()
@@ -243,6 +258,7 @@ impl Column {
     }
 
     /// Create a column from SQL type information with all parameters
+    #[allow(clippy::too_many_arguments)]
     pub fn from_sql_info(
         column_name: &str,
         column_type: TypeId,
@@ -772,7 +788,7 @@ mod unit_tests {
 
     #[test]
     fn test_column_type_transitions() {
-        let types = vec![
+        let types = [
             TypeId::Boolean,
             TypeId::TinyInt,
             TypeId::SmallInt,
@@ -826,7 +842,8 @@ mod unit_tests {
     fn test_serialization_consistency() {
         let original = Column::new("test", TypeId::Integer);
         let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
-        let (deserialized, _): (Column, usize) = bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
+        let (deserialized, _): (Column, usize) =
+            bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
 
         assert_eq!(original, deserialized);
         assert_eq!(original.get_name(), deserialized.get_name());
@@ -890,7 +907,8 @@ mod unit_tests {
     fn test_primary_key_serialization() {
         let original = Column::new_primary_key("id", TypeId::Integer);
         let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
-        let (deserialized, _): (Column, usize) = bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
+        let (deserialized, _): (Column, usize) =
+            bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
 
         assert!(deserialized.is_primary_key());
         assert_eq!(original.get_name(), deserialized.get_name());

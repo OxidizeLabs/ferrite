@@ -1,5 +1,5 @@
 //! SIMD-optimized data processing utilities
-//! 
+//!
 //! This module contains SIMD-optimized functions for data processing.
 
 /// SIMD-optimized data processing utilities
@@ -34,7 +34,7 @@ impl SimdProcessor {
         let remainder = len % 8;
         if remainder > 0 {
             let start = chunks * 8;
-            return &a[start..] == &b[start..];
+            return a[start..] == b[start..];
         }
 
         true
@@ -100,7 +100,7 @@ mod tests {
         let a = vec![1u8; 1024];
         let b = vec![1u8; 1024];
         let c = vec![2u8; 1024];
-        
+
         assert!(SimdProcessor::fast_memcmp(&a, &b));
         assert!(!SimdProcessor::fast_memcmp(&a, &c));
     }
@@ -110,7 +110,7 @@ mod tests {
         let zeros = vec![0u8; 1024];
         let non_zeros = vec![0u8; 1023];
         let non_zeros = [non_zeros, vec![1u8]].concat();
-        
+
         assert!(SimdProcessor::is_zero_page(&zeros));
         assert!(!SimdProcessor::is_zero_page(&non_zeros));
     }
@@ -119,7 +119,7 @@ mod tests {
     fn test_fast_checksum() {
         let data = vec![1u8; 1024];
         let checksum = SimdProcessor::fast_checksum(&data);
-        
+
         assert_ne!(checksum, 0);
     }
 }

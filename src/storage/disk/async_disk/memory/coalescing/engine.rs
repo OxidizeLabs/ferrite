@@ -1,15 +1,15 @@
 //! Write coalescing engine
-//! 
+//!
 //! This module provides the core write coalescing functionality including
 //! adjacent page detection, cleanup management, and coalescing decisions.
 
+use super::size_analyzer::{CoalescedSizeInfo, SizeAnalyzer};
 use crate::common::config::PageId;
-use super::size_analyzer::{SizeAnalyzer, CoalescedSizeInfo};
 use std::collections::{HashMap, HashSet};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::time::{Duration, Instant};
-use std::io::{Result as IoResult, Error as IoError, ErrorKind};
 
-/// Result of coalescing operation  
+/// Result of coalescing operation
 #[derive(Debug)]
 pub enum CoalesceResult {
     /// No coalescing performed, return original data
@@ -75,12 +75,19 @@ impl CoalescingEngine {
     }
 
     /// Attempts to coalesce a write with pending writes (simplified for reliability)
-    pub fn try_coalesce_write(&mut self, page_id: PageId, data: Vec<u8>) -> IoResult<CoalesceResult> {
+    pub fn try_coalesce_write(
+        &mut self,
+        page_id: PageId,
+        data: Vec<u8>,
+    ) -> IoResult<CoalesceResult> {
         // Input validation
         if data.is_empty() {
-            return Err(IoError::new(ErrorKind::InvalidInput, "Cannot coalesce empty data"));
+            return Err(IoError::new(
+                ErrorKind::InvalidInput,
+                "Cannot coalesce empty data",
+            ));
         }
-        
+
         // Simplified approach - just check if we already have this page
         if let Some(_existing_data) = self.pending_writes.get(&page_id) {
             // Same page - merge the writes (newer data wins)
@@ -89,36 +96,37 @@ impl CoalescingEngine {
             *self.access_frequencies.entry(page_id).or_insert(0) += 1;
             return Ok(CoalesceResult::Merged(data));
         }
-        
+
         // New page - just add it (skip complex coalescing logic for now)
         self.pending_writes.insert(page_id, data.clone());
         self.write_timestamps.insert(page_id, Instant::now());
         self.access_frequencies.insert(page_id, 1);
-        
+
         // Simple cleanup if we have too many pending writes
         if self.pending_writes.len() > self.max_coalesce_size {
             self.simple_cleanup();
         }
-        
+
         Ok(CoalesceResult::NoCoalesce(data))
     }
-    
+
     /// Simple cleanup that removes oldest entries
     fn simple_cleanup(&mut self) {
         if self.pending_writes.len() <= self.max_coalesce_size {
             return;
         }
-        
+
         // Find oldest entries and remove them
         let target_size = self.max_coalesce_size / 2; // Keep only half
-        let mut oldest_pages: Vec<_> = self.write_timestamps
+        let mut oldest_pages: Vec<_> = self
+            .write_timestamps
             .iter()
             .map(|(&page_id, &timestamp)| (page_id, timestamp))
             .collect();
-        
+
         // Sort by timestamp (oldest first)
         oldest_pages.sort_by_key(|(_, timestamp)| *timestamp);
-        
+
         // Remove oldest entries until we reach target size
         let to_remove = self.pending_writes.len().saturating_sub(target_size);
         for (page_id, _) in oldest_pages.into_iter().take(to_remove) {
@@ -126,7 +134,7 @@ impl CoalescingEngine {
             self.write_timestamps.remove(&page_id);
             self.access_frequencies.remove(&page_id);
         }
-        
+
         self.last_cleanup = Instant::now();
     }
 
@@ -137,12 +145,12 @@ impl CoalescingEngine {
         if now.duration_since(self.last_cleanup) < MIN_CLEANUP_INTERVAL {
             return Ok(());
         }
-        
+
         let mut expired_pages = Vec::new();
         let mut cleaned_by_time = 0usize;
         let mut cleaned_by_memory = 0usize;
         let mut cleaned_by_access = 0usize;
-        
+
         // Phase 1: Time-based expiration - Remove writes older than coalesce window
         for (&page_id, &timestamp) in &self.write_timestamps {
             if now.duration_since(timestamp) > self.coalesce_window {
@@ -150,12 +158,12 @@ impl CoalescingEngine {
                 cleaned_by_time += 1;
             }
         }
-        
+
         // Phase 2: Memory pressure detection and handling
         let max_pending_writes = self.calculate_max_pending_writes();
         let current_memory_usage = self.calculate_memory_usage();
         let memory_pressure = self.detect_memory_pressure(current_memory_usage);
-        
+
         if memory_pressure > 0.8 || self.pending_writes.len() > max_pending_writes {
             // Under high memory pressure, be more aggressive
             let target_reduction = if memory_pressure > 0.9 {
@@ -163,44 +171,50 @@ impl CoalescingEngine {
             } else {
                 self.pending_writes.len().saturating_sub(max_pending_writes)
             };
-            
-            let memory_candidates = self.select_memory_pressure_candidates(
-                target_reduction,
-                &expired_pages
-            );
-            
+
+            let memory_candidates =
+                self.select_memory_pressure_candidates(target_reduction, &expired_pages);
+
             cleaned_by_memory = memory_candidates.len();
-            expired_pages.extend(memory_candidates.into_iter().map(|p| (p, CleanupReason::MemoryPressure)));
+            expired_pages.extend(
+                memory_candidates
+                    .into_iter()
+                    .map(|p| (p, CleanupReason::MemoryPressure)),
+            );
         }
-        
+
         // Phase 3: Access pattern-based cleanup for rarely accessed pages
         if expired_pages.len() < max_pending_writes / 4 {
             let access_candidates = self.select_low_access_candidates(
                 max_pending_writes / 8, // Clean up to 12.5% based on access patterns
-                &expired_pages
+                &expired_pages,
             );
-            
+
             cleaned_by_access = access_candidates.len();
-            expired_pages.extend(access_candidates.into_iter().map(|p| (p, CleanupReason::LowAccess)));
+            expired_pages.extend(
+                access_candidates
+                    .into_iter()
+                    .map(|p| (p, CleanupReason::LowAccess)),
+            );
         }
-        
+
         // Phase 4: Execute cleanup with proper bookkeeping
         let mut total_data_size_freed = 0usize;
         let mut pages_by_reason = HashMap::new();
-        
+
         for (page_id, reason) in expired_pages {
             if let Some(data) = self.pending_writes.remove(&page_id) {
                 total_data_size_freed += data.len();
                 self.write_timestamps.remove(&page_id);
                 self.access_frequencies.remove(&page_id);
-                
+
                 *pages_by_reason.entry(reason).or_insert(0usize) += 1;
             }
         }
-        
+
         // Update cleanup timestamp
         self.last_cleanup = now;
-        
+
         // Phase 5: Store cleanup metrics for monitoring and adaptive behavior
         self.last_cleanup_metrics = CleanupMetrics {
             cleaned_by_time,
@@ -209,26 +223,28 @@ impl CoalescingEngine {
             total_data_size_freed,
             cleanup_timestamp: Some(now),
         };
-        
+
         // Phase 6: Maintain data structure integrity
         self.validate_coalescing_state()?;
-        
+
         // Phase 7: Log cleanup metrics (in production, this would go to metrics system)
         if total_data_size_freed > 0 {
             #[cfg(debug_assertions)]
             {
-                println!("Cleanup completed: {} bytes freed, {} by time, {} by memory, {} by access", 
-                    total_data_size_freed, cleaned_by_time, cleaned_by_memory, cleaned_by_access);
+                println!(
+                    "Cleanup completed: {} bytes freed, {} by time, {} by memory, {} by access",
+                    total_data_size_freed, cleaned_by_time, cleaned_by_memory, cleaned_by_access
+                );
             }
         }
-        
+
         Ok(())
     }
 
     /// Finds adjacent pages that can be coalesced with the given page
     pub fn find_adjacent_pages(&self, page_id: PageId) -> Vec<PageId> {
         let mut adjacent = Vec::new();
-        
+
         // Look for immediately adjacent pages (page_id ± 1, ± 2, etc.)
         for offset in 1..=4 {
             // Check previous pages (with underflow protection)
@@ -238,36 +254,42 @@ impl CoalescingEngine {
                     adjacent.push(prev_page);
                 }
             }
-            
+
             // Check next pages (with overflow protection)
-            if let Some(next_page) = page_id.checked_add(offset) {
-                if self.pending_writes.contains_key(&next_page) {
-                    adjacent.push(next_page);
-                }
+            if let Some(next_page) = page_id.checked_add(offset)
+                && self.pending_writes.contains_key(&next_page)
+            {
+                adjacent.push(next_page);
             }
         }
-        
+
         // Sort by page_id for consistent ordering
         adjacent.sort_unstable();
         adjacent
     }
 
     /// Merges adjacent writes into a coalesced write
-    fn merge_adjacent_writes(&mut self, page_id: PageId, data: Vec<u8>, adjacent_pages: Vec<PageId>) -> IoResult<Vec<u8>> {
+    #[allow(dead_code)]
+    fn merge_adjacent_writes(
+        &mut self,
+        page_id: PageId,
+        data: Vec<u8>,
+        adjacent_pages: Vec<PageId>,
+    ) -> IoResult<Vec<u8>> {
         let now = Instant::now();
-        
+
         // Remove adjacent pages from pending writes (they're being coalesced)
         for adj_page in adjacent_pages {
             self.pending_writes.remove(&adj_page);
             self.write_timestamps.remove(&adj_page);
             self.access_frequencies.remove(&adj_page);
         }
-        
+
         // Add the current page with tracking
         self.pending_writes.insert(page_id, data.clone());
         self.write_timestamps.insert(page_id, now);
         self.access_frequencies.insert(page_id, 1);
-        
+
         Ok(data)
     }
 
@@ -279,65 +301,77 @@ impl CoalescingEngine {
         }
         (current_usage as f64) / (max_usage as f64)
     }
-    
+
     /// Calculates current memory usage of pending writes
     fn calculate_memory_usage(&self) -> usize {
         self.pending_writes.values().map(|data| data.len()).sum()
     }
-    
+
     /// Selects candidates for cleanup under memory pressure
-    fn select_memory_pressure_candidates(&self, target_count: usize, already_selected: &[(PageId, CleanupReason)]) -> Vec<PageId> {
-        let already_selected_set: HashSet<_> = 
-            already_selected.iter().map(|(id, _)| *id).collect();
-        
+    fn select_memory_pressure_candidates(
+        &self,
+        target_count: usize,
+        already_selected: &[(PageId, CleanupReason)],
+    ) -> Vec<PageId> {
+        let already_selected_set: HashSet<_> = already_selected.iter().map(|(id, _)| *id).collect();
+
         // Create a priority list: older writes + larger data + lower access frequency
-        let mut candidates: Vec<_> = self.pending_writes
+        let mut candidates: Vec<_> = self
+            .pending_writes
             .iter()
             .filter(|&(&page_id, _)| !already_selected_set.contains(&page_id))
             .map(|(&page_id, data)| {
-                let age = self.write_timestamps.get(&page_id)
+                let age = self
+                    .write_timestamps
+                    .get(&page_id)
                     .map(|&ts| ts.elapsed().as_millis() as f64)
                     .unwrap_or(0.0);
                 let size = data.len() as f64;
                 let access_freq = *self.access_frequencies.get(&page_id).unwrap_or(&1) + 1;
                 let access_penalty = 1.0 / (access_freq as f64);
-                
+
                 // Higher score = higher priority for cleanup
                 let priority_score = age * 0.4 + size * 0.4 + access_penalty * 0.2;
                 (page_id, priority_score)
             })
             .collect();
-        
+
         // Sort by priority score (descending)
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        
-        candidates.into_iter()
+
+        candidates
+            .into_iter()
             .take(target_count)
             .map(|(page_id, _)| page_id)
             .collect()
     }
-    
+
     /// Selects candidates with low access patterns for cleanup
-    fn select_low_access_candidates(&self, target_count: usize, already_selected: &[(PageId, CleanupReason)]) -> Vec<PageId> {
-        let already_selected_set: HashSet<_> = 
-            already_selected.iter().map(|(id, _)| *id).collect();
-        
-        let mut candidates: Vec<_> = self.access_frequencies
+    fn select_low_access_candidates(
+        &self,
+        target_count: usize,
+        already_selected: &[(PageId, CleanupReason)],
+    ) -> Vec<PageId> {
+        let already_selected_set: HashSet<_> = already_selected.iter().map(|(id, _)| *id).collect();
+
+        let mut candidates: Vec<_> = self
+            .access_frequencies
             .iter()
             .filter(|&(&page_id, _)| !already_selected_set.contains(&page_id))
             .filter(|&(&page_id, _)| self.pending_writes.contains_key(&page_id))
             .map(|(&page_id, &freq)| (page_id, freq))
             .collect();
-        
+
         // Sort by access frequency (ascending - least accessed first)
         candidates.sort_by_key(|(_, freq)| *freq);
-        
-        candidates.into_iter()
+
+        candidates
+            .into_iter()
             .take(target_count)
             .map(|(page_id, _)| page_id)
             .collect()
     }
-    
+
     /// Validates the internal consistency of coalescing data structures
     fn validate_coalescing_state(&self) -> IoResult<()> {
         // Ensure all data structures are in sync
@@ -345,39 +379,39 @@ impl CoalescingEngine {
             if !self.write_timestamps.contains_key(&page_id) {
                 return Err(IoError::new(
                     ErrorKind::InvalidData,
-                    format!("Missing timestamp for page {}", page_id)
+                    format!("Missing timestamp for page {}", page_id),
                 ));
             }
             if !self.access_frequencies.contains_key(&page_id) {
                 return Err(IoError::new(
                     ErrorKind::InvalidData,
-                    format!("Missing access frequency for page {}", page_id)
+                    format!("Missing access frequency for page {}", page_id),
                 ));
             }
         }
-        
+
         // Check for orphaned timestamps or frequencies
         for &page_id in self.write_timestamps.keys() {
             if !self.pending_writes.contains_key(&page_id) {
                 return Err(IoError::new(
                     ErrorKind::InvalidData,
-                    format!("Orphaned timestamp for page {}", page_id)
+                    format!("Orphaned timestamp for page {}", page_id),
                 ));
             }
         }
-        
+
         for &page_id in self.access_frequencies.keys() {
             if !self.pending_writes.contains_key(&page_id) {
                 return Err(IoError::new(
                     ErrorKind::InvalidData,
-                    format!("Orphaned access frequency for page {}", page_id)
+                    format!("Orphaned access frequency for page {}", page_id),
                 ));
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Calculates the maximum number of pending writes to maintain
     fn calculate_max_pending_writes(&self) -> usize {
         // Dynamic calculation based on coalesce_window and max_coalesce_size
@@ -386,8 +420,16 @@ impl CoalescingEngine {
     }
 
     /// Gets detailed size analysis for coalescing decisions
-    pub fn get_coalescing_size_analysis(&self, adjacent_pages: &[PageId], new_data: &[u8]) -> CoalescedSizeInfo {
-        self.size_analyzer.calculate_detailed_coalesced_size(adjacent_pages, new_data, &self.pending_writes)
+    pub fn get_coalescing_size_analysis(
+        &self,
+        adjacent_pages: &[PageId],
+        new_data: &[u8],
+    ) -> CoalescedSizeInfo {
+        self.size_analyzer.calculate_detailed_coalesced_size(
+            adjacent_pages,
+            new_data,
+            &self.pending_writes,
+        )
     }
 
     /// Gets statistics about the coalescing engine
@@ -463,7 +505,7 @@ mod tests {
     fn test_try_coalesce_write_first_write() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
         let data = vec![1, 2, 3, 4];
-        
+
         let result = engine.try_coalesce_write(1, data.clone()).unwrap();
         match result {
             CoalesceResult::NoCoalesce(returned_data) => {
@@ -471,7 +513,7 @@ mod tests {
             }
             _ => panic!("Expected NoCoalesce result"),
         }
-        
+
         assert_eq!(engine.pending_writes.len(), 1);
         assert!(engine.pending_writes.contains_key(&1));
     }
@@ -481,10 +523,10 @@ mod tests {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
         let first_data = vec![1, 2, 3, 4];
         let second_data = vec![5, 6, 7, 8];
-        
+
         // First write
         engine.try_coalesce_write(1, first_data).unwrap();
-        
+
         // Second write to same page should merge
         let result = engine.try_coalesce_write(1, second_data.clone()).unwrap();
         match result {
@@ -493,7 +535,7 @@ mod tests {
             }
             _ => panic!("Expected Merged result"),
         }
-        
+
         assert_eq!(engine.pending_writes.len(), 1);
         assert_eq!(engine.pending_writes.get(&1), Some(&second_data));
     }
@@ -501,20 +543,20 @@ mod tests {
     #[test]
     fn test_find_adjacent_pages() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         // Set up some pending writes
         engine.pending_writes.insert(1, vec![1]);
         engine.pending_writes.insert(3, vec![3]);
         engine.pending_writes.insert(4, vec![4]);
         engine.pending_writes.insert(5, vec![5]);
         engine.pending_writes.insert(10, vec![10]);
-        
+
         // Test finding adjacent pages for page 2
         let adjacent = engine.find_adjacent_pages(2);
         assert!(adjacent.contains(&1));
         assert!(adjacent.contains(&3));
         assert!(!adjacent.contains(&10)); // Too far
-        
+
         // Test finding adjacent pages for page 4
         let adjacent = engine.find_adjacent_pages(4);
         assert!(adjacent.contains(&3));
@@ -524,20 +566,20 @@ mod tests {
     #[test]
     fn test_cleanup_expired_writes_rate_limiting() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         // Add some writes
         engine.try_coalesce_write(1, vec![1, 2, 3, 4]).unwrap();
-        
+
         let now = Instant::now();
-        
+
         // First cleanup should work
         let result = engine.cleanup_expired_writes(now);
         assert!(result.is_ok());
-        
+
         // Immediate second cleanup should be rate limited (no error, just early return)
         let result = engine.cleanup_expired_writes(now);
         assert!(result.is_ok());
-        
+
         // Data should still be there (wasn't cleaned due to rate limiting)
         assert_eq!(engine.pending_writes.len(), 1);
     }
@@ -545,11 +587,11 @@ mod tests {
     #[test]
     fn test_detect_memory_pressure() {
         let engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         // Test with no usage
         let pressure = engine.detect_memory_pressure(0);
         assert_eq!(pressure, 0.0);
-        
+
         // Test with some usage
         let half_usage = engine.max_coalesce_size * 4096 / 2;
         let pressure = engine.detect_memory_pressure(half_usage);
@@ -559,11 +601,11 @@ mod tests {
     #[test]
     fn test_calculate_memory_usage() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         // Add some writes with known sizes
         engine.pending_writes.insert(1, vec![0u8; 100]);
         engine.pending_writes.insert(2, vec![0u8; 200]);
-        
+
         let usage = engine.calculate_memory_usage();
         assert_eq!(usage, 300); // 100 + 200 bytes
     }
@@ -571,10 +613,10 @@ mod tests {
     #[test]
     fn test_validate_coalescing_state_valid() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         // Add a write normally (should be valid)
         engine.try_coalesce_write(1, vec![1, 2, 3, 4]).unwrap();
-        
+
         let result = engine.validate_coalescing_state();
         assert!(result.is_ok());
     }
@@ -582,11 +624,11 @@ mod tests {
     #[test]
     fn test_get_stats() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         // Add some writes with non-adjacent pages to avoid coalescing
         engine.try_coalesce_write(1, vec![1, 2, 3, 4]).unwrap();
         engine.try_coalesce_write(10, vec![5, 6, 7, 8]).unwrap();
-        
+
         let stats = engine.get_stats();
         assert_eq!(stats.pending_writes, 2);
         assert!(stats.total_data_size > 0);
@@ -596,7 +638,7 @@ mod tests {
     #[test]
     fn test_update_config() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         engine.update_config(Duration::from_millis(200), 128);
         assert_eq!(engine.coalesce_window, Duration::from_millis(200));
         assert_eq!(engine.max_coalesce_size, 128);
@@ -605,17 +647,17 @@ mod tests {
     #[test]
     fn test_clear_all() {
         let mut engine = CoalescingEngine::new(Duration::from_millis(100), 64);
-        
+
         // Add some writes with non-adjacent pages to avoid coalescing
         engine.try_coalesce_write(1, vec![1, 2, 3, 4]).unwrap();
         engine.try_coalesce_write(10, vec![5, 6, 7, 8]).unwrap();
-        
+
         assert_eq!(engine.pending_writes.len(), 2);
-        
+
         engine.clear_all();
-        
+
         assert!(engine.pending_writes.is_empty());
         assert!(engine.write_timestamps.is_empty());
         assert!(engine.access_frequencies.is_empty());
     }
-} 
+}

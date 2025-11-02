@@ -20,12 +20,12 @@ use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
 use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::execution::plans::limit_plan::LimitNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
-use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::nested_index_join_plan::NestedIndexJoinNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
+use crate::sql::execution::plans::offset_plan::OffsetNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
-use crate::sql::execution::plans::sort_plan::{SortNode, OrderBySpec};
+use crate::sql::execution::plans::sort_plan::{OrderBySpec, SortNode};
 use crate::sql::execution::plans::topn_per_group_plan::TopNPerGroupNode;
 use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
@@ -42,7 +42,7 @@ use std::thread_local;
 
 // Add thread-local variable for tracking recursion depth
 thread_local! {
-    static RECURSION_DEPTH: Cell<usize> = Cell::new(0);
+    static RECURSION_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 #[derive(Debug, Clone)]
@@ -1043,9 +1043,14 @@ impl LogicalPlan {
     ) -> Box<Self> {
         let sort_specifications = sort_expressions
             .into_iter()
-            .map(|expr| OrderBySpec::new(expr, crate::sql::execution::plans::sort_plan::OrderDirection::Asc))
+            .map(|expr| {
+                OrderBySpec::new(
+                    expr,
+                    crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+                )
+            })
             .collect();
-        
+
         Self::sort(sort_specifications, schema, input)
     }
 
@@ -1064,10 +1069,7 @@ impl LogicalPlan {
     }
 
     pub fn distinct(schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
-        Box::new(Self::new(
-            LogicalPlanType::Distinct { schema },
-            vec![input],
-        ))
+        Box::new(Self::new(LogicalPlanType::Distinct { schema }, vec![input]))
     }
 
     pub fn top_n(
@@ -1095,9 +1097,14 @@ impl LogicalPlan {
     ) -> Box<Self> {
         let sort_specifications = sort_expressions
             .into_iter()
-            .map(|expr| OrderBySpec::new(expr, crate::sql::execution::plans::sort_plan::OrderDirection::Asc))
+            .map(|expr| {
+                OrderBySpec::new(
+                    expr,
+                    crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+                )
+            })
             .collect();
-        
+
         Self::top_n(k, sort_specifications, schema, input)
     }
 
@@ -1129,9 +1136,14 @@ impl LogicalPlan {
     ) -> Box<Self> {
         let sort_specifications = sort_expressions
             .into_iter()
-            .map(|expr| OrderBySpec::new(expr, crate::sql::execution::plans::sort_plan::OrderDirection::Asc))
+            .map(|expr| {
+                OrderBySpec::new(
+                    expr,
+                    crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+                )
+            })
             .collect();
-        
+
         Self::top_n_per_group(k, sort_specifications, groups, schema, input)
     }
 
@@ -1863,7 +1875,7 @@ impl<'a> PlanConverter<'a> {
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
                     let (left_keys, right_keys, fixed_predicate) =
-                        match extract_join_keys(&predicate) {
+                        match extract_join_keys(predicate) {
                             Ok((l, r, p)) => (l, r, p),
                             Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                         };
@@ -1891,7 +1903,7 @@ impl<'a> PlanConverter<'a> {
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
                     let (left_keys, right_keys, fixed_predicate) =
-                        match extract_join_keys(&predicate) {
+                        match extract_join_keys(predicate) {
                             Ok((l, r, p)) => (l, r, p),
                             Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                         };
@@ -1919,7 +1931,7 @@ impl<'a> PlanConverter<'a> {
                 } else {
                     // Extract join key expressions and fixed predicate from the original predicate
                     let (left_keys, right_keys, fixed_predicate) =
-                        match extract_join_keys(&predicate) {
+                        match extract_join_keys(predicate) {
                             Ok((l, r, p)) => (l, r, p),
                             Err(e) => return Err(format!("Failed to extract join keys: {}", e)),
                         };
@@ -1967,7 +1979,7 @@ impl<'a> PlanConverter<'a> {
                     .iter()
                     .map(|spec| spec.get_expression().clone())
                     .collect();
-                    
+
                 Ok(PlanNode::TopN(TopNNode::new(
                     schema.clone(),
                     sort_expressions,
@@ -1987,7 +1999,7 @@ impl<'a> PlanConverter<'a> {
                     .iter()
                     .map(|spec| spec.get_expression().clone())
                     .collect();
-                    
+
                 Ok(PlanNode::TopNPerGroup(TopNPerGroupNode::new(
                     *k,
                     sort_expressions,
@@ -2059,7 +2071,7 @@ impl<'a> PlanConverter<'a> {
                 // Create a StartTransaction plan node instead of a CommandResult
                 Ok(PlanNode::StartTransaction(
                     crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode::new(
-                        isolation_level.clone(),
+                        *isolation_level,
                         *read_only,
                     )
                 ))
@@ -2236,9 +2248,9 @@ impl<'a> PlanConverter<'a> {
                 Ok(PlanNode::CommandResult(format!("USE {}", db_name)))
             }
 
-            LogicalPlanType::Distinct { schema } => {
-                Ok(PlanNode::Distinct(DistinctNode::new(schema.clone()).with_children(child_plans)))
-            }
+            LogicalPlanType::Distinct { schema } => Ok(PlanNode::Distinct(
+                DistinctNode::new(schema.clone()).with_children(child_plans),
+            )),
 
             LogicalPlanType::Explain { plan } => {
                 // Create a recursive explain plan
@@ -2259,9 +2271,7 @@ impl LogicalToPhysical for LogicalPlan {
 
 impl Display for LogicalPlan {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            _ => write!(f, "{:#?}", self),
-        }
+        write!(f, "{:#?}", self)
     }
 }
 
@@ -2423,12 +2433,10 @@ fn extract_join_keys(
         }
 
         // Step 2.3: Error for unsupported expression types
-        _ => {
-            Err(format!(
-                "Unsupported join predicate expression type: {:?}",
-                predicate
-            ))
-        }
+        _ => Err(format!(
+            "Unsupported join predicate expression type: {:?}",
+            predicate
+        )),
     }
 }
 
@@ -2489,7 +2497,7 @@ mod tests {
             } => {
                 assert_eq!(schema, s);
                 assert_eq!(table_name, "users");
-                assert_eq!(if_not_exists, false);
+                assert!(!if_not_exists);
             }
             _ => panic!("Expected CreateTable plan"),
         }
@@ -2750,7 +2758,7 @@ mod tests {
                 assert_eq!(table_name, "users");
                 assert_eq!(index_name, "users_id_idx");
                 assert_eq!(key_attrs, k);
-                assert_eq!(if_not_exists, false);
+                assert!(!if_not_exists);
             }
             _ => panic!("Expected CreateIndex plan"),
         }
@@ -3069,7 +3077,10 @@ mod tests {
             vec![],
         )));
 
-        let sort_specifications = vec![OrderBySpec::new(sort_expr.clone(), crate::sql::execution::plans::sort_plan::OrderDirection::Asc)];
+        let sort_specifications = vec![OrderBySpec::new(
+            sort_expr.clone(),
+            crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+        )];
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
 
         let sort_plan = LogicalPlan::sort(sort_specifications.clone(), schema.clone(), scan_plan);
@@ -3120,10 +3131,14 @@ mod tests {
             vec![],
         )));
 
-        let sort_specifications = vec![OrderBySpec::new(sort_expr.clone(), crate::sql::execution::plans::sort_plan::OrderDirection::Asc)];
+        let sort_specifications = vec![OrderBySpec::new(
+            sort_expr.clone(),
+            crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+        )];
         let scan_plan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
 
-        let top_n_plan = LogicalPlan::top_n(5, sort_specifications.clone(), schema.clone(), scan_plan);
+        let top_n_plan =
+            LogicalPlan::top_n(5, sort_specifications.clone(), schema.clone(), scan_plan);
 
         match top_n_plan.plan_type {
             LogicalPlanType::TopN {
@@ -3163,7 +3178,10 @@ mod tests {
             vec![],
         )));
 
-        let sort_specifications = vec![OrderBySpec::new(sort_expr.clone(), crate::sql::execution::plans::sort_plan::OrderDirection::Asc)];
+        let sort_specifications = vec![OrderBySpec::new(
+            sort_expr.clone(),
+            crate::sql::execution::plans::sort_plan::OrderDirection::Asc,
+        )];
         let groups = vec![group_expr.clone()];
         let scan_plan = LogicalPlan::table_scan("products".to_string(), schema.clone(), 1);
 
@@ -3295,7 +3313,7 @@ mod tests {
             modifier: None,
             end: false,
         }];
-        let exception_statements = Some(vec![Statement::Rollback {
+        let _exception_statements = Some(vec![Statement::Rollback {
             chain: false,
             savepoint: None,
         }]);
@@ -3304,7 +3322,7 @@ mod tests {
         let plan = LogicalPlan::start_transaction(
             isolation_level,
             read_only,
-            transaction_modifier.clone(),
+            transaction_modifier,
             statements.clone(),
             None, // Convert to None for now since we don't have proper ExceptionWhen conversion
             has_end_keyword,
@@ -3316,7 +3334,7 @@ mod tests {
                 read_only: ro,
                 transaction_modifier: tm,
                 statements: stmts,
-                exception_statements: ex_stmts,
+                exception_statements: _ex_stmts,
                 has_end_keyword: hek,
             } => {
                 assert_eq!(isolation_level, *level);
@@ -3339,8 +3357,8 @@ mod tests {
                 end,
                 modifier,
             } => {
-                assert_eq!(false, *chain);
-                assert_eq!(false, *end);
+                assert!(!(*chain));
+                assert!(!(*end));
                 assert!(modifier.is_none());
             }
             _ => panic!("Expected Commit plan"),
@@ -3557,11 +3575,11 @@ mod tests {
                 external,
             } => {
                 assert_eq!(schema_name, *sn);
-                assert_eq!(*terse, false);
-                assert_eq!(*history, false);
-                assert_eq!(*extended, false);
-                assert_eq!(*full, false);
-                assert_eq!(*external, false);
+                assert!(!(*terse));
+                assert!(!(*history));
+                assert!(!(*extended));
+                assert!(!(*full));
+                assert!(!(*external));
             }
             _ => panic!("Expected ShowTables plan"),
         }
@@ -3586,11 +3604,11 @@ mod tests {
                 external,
             } => {
                 assert_eq!(schema_name, *sn);
-                assert_eq!(*terse, true);
-                assert_eq!(*history, true);
-                assert_eq!(*extended, true);
-                assert_eq!(*full, true);
-                assert_eq!(*external, true);
+                assert!(*terse);
+                assert!(*history);
+                assert!(*extended);
+                assert!(*full);
+                assert!(*external);
             }
             _ => panic!("Expected ShowTables plan with options"),
         }
@@ -3640,8 +3658,8 @@ mod tests {
             } => {
                 assert_eq!(table_name, *tn);
                 assert_eq!(schema_name, *sn);
-                assert_eq!(*extended, false);
-                assert_eq!(*full, false);
+                assert!(!(*extended));
+                assert!(!(*full));
             }
             _ => panic!("Expected ShowColumns plan"),
         }
@@ -3665,7 +3683,7 @@ mod tests {
         let chain = true;
         let end = false;
         let modifier = Some(TransactionModifier::Deferred);
-        let plan = LogicalPlan::commit_transaction(chain, end, modifier.clone());
+        let plan = LogicalPlan::commit_transaction(chain, end, modifier);
 
         match &plan.plan_type {
             LogicalPlanType::Commit {
@@ -3918,7 +3936,7 @@ mod test_extract_join_keys {
         // Create a comparison with wrong number of children (should be handled gracefully)
         let left_col = create_column_ref(0, 0, "a.id");
         let right_col = create_column_ref(0, 1, "b.id");
-        
+
         // Create comparison with only one child (malformed)
         let malformed_comp = Arc::new(Expression::Comparison(ComparisonExpression::new(
             left_col.clone(),
@@ -3957,7 +3975,7 @@ mod test_extract_join_keys {
         // Test various inequality operators
         let test_cases = vec![
             (ComparisonType::NotEqual, "not equal"),
-            (ComparisonType::LessThan, "less than"), 
+            (ComparisonType::LessThan, "less than"),
             (ComparisonType::LessThanOrEqual, "less than or equal"),
             (ComparisonType::GreaterThanOrEqual, "greater than or equal"),
         ];
@@ -3995,7 +4013,10 @@ mod test_extract_join_keys {
         let scenarios = vec![
             ("schema1.table1.col1", "schema2.table2.col2"),
             ("t1.very_long_column_name", "t2.another_long_name"),
-            ("Table_With_Underscores.Column_Name", "AnotherTable.AnotherColumn"),
+            (
+                "Table_With_Underscores.Column_Name",
+                "AnotherTable.AnotherColumn",
+            ),
         ];
 
         for (left_name, right_name) in scenarios {
@@ -4004,7 +4025,12 @@ mod test_extract_join_keys {
             let predicate = create_comparison(left_col, right_col, ComparisonType::Equal);
 
             let result = extract_join_keys(&predicate);
-            assert!(result.is_ok(), "Failed for column names: {} = {}", left_name, right_name);
+            assert!(
+                result.is_ok(),
+                "Failed for column names: {} = {}",
+                left_name,
+                right_name
+            );
 
             let (left_keys, right_keys, _) = result.unwrap();
             assert_eq!(left_keys.len(), 1);
@@ -4035,7 +4061,7 @@ mod test_extract_join_keys {
 
         // Create nested structure: pred2 AND pred3
         let nested_and = create_logic(pred2, pred3, LogicType::And);
-        
+
         // Create final structure: pred1 AND (pred2 AND pred3)
         let final_pred = create_logic(pred1, nested_and, LogicType::And);
 
@@ -4050,11 +4076,11 @@ mod test_extract_join_keys {
     fn test_special_d_id_variations() {
         // Test variations of the special "d.id" case
         let test_cases = vec![
-            ("d.id", true),      // Should be fixed to index 0
-            ("D.ID", false),     // Case sensitive - should not be fixed
+            ("d.id", true),          // Should be fixed to index 0
+            ("D.ID", false),         // Case sensitive - should not be fixed
             ("d.identifier", false), // Different column name - should not be fixed
-            ("dept.id", false),  // Different table alias - should not be fixed
-            ("td.id", false),    // Different table alias - should not be fixed
+            ("dept.id", false),      // Different table alias - should not be fixed
+            ("td.id", false),        // Different table alias - should not be fixed
         ];
 
         for (col_name, should_fix) in test_cases {
@@ -4068,7 +4094,7 @@ mod test_extract_join_keys {
                 if let Expression::ColumnRef(right) = comp.get_children()[1].as_ref() {
                     let expected_index = if should_fix { 0 } else { 5 };
                     assert_eq!(
-                        right.get_column_index(), 
+                        right.get_column_index(),
                         expected_index,
                         "Column {} should {} have its index fixed to 0",
                         col_name,
@@ -4092,19 +4118,23 @@ mod test_extract_join_keys {
                 vec![create_column_ref(0, 0, "a.id")],
                 Column::new("count", TypeId::Integer),
                 "COUNT".to_string(),
-            )
+            ),
         ));
 
         let result = extract_join_keys(&agg_expr);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Unsupported join predicate expression type"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Unsupported join predicate expression type")
+        );
     }
 
     #[test]
     fn test_tuple_index_preservation() {
         // Test that original tuple indices are correctly transformed to 0 and 1
         let scenarios = vec![
-            (0, 0, 0, 1), // Standard case
+            (0, 0, 0, 1),  // Standard case
             (5, 10, 0, 1), // Higher original indices should still become 0 and 1
             (2, 3, 0, 1),  // Mid-range indices
         ];
