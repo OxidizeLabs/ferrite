@@ -143,27 +143,22 @@ impl AbstractExecutor for DeleteExecutor {
 
         // Process all tuples from child executor (scan/filter)
         if let Some(ref mut child) = self.child_executor {
-            loop {
-                match child.next()? {
-                    Some((_tuple, rid)) => {
-                        debug!("Processing tuple for deletion with RID {:?}", rid);
+            while let Some((_tuple, rid)) = child.next()? {
+                debug!("Processing tuple for deletion with RID {:?}", rid);
 
-                        // Delete the tuple from the table
-                        match transactional_table_heap.delete_tuple(rid, txn_context.clone()) {
-                            Ok(_) => {
-                                delete_count += 1;
-                                trace!(
-                                    "Successfully deleted tuple #{} with RID {:?}",
-                                    delete_count, rid
-                                );
-                            }
-                            Err(e) => {
-                                error!("Failed to delete tuple with RID {:?}: {}", rid, e);
-                                return Err(DBError::Execution(format!("Delete failed: {}", e)));
-                            }
-                        }
+                // Delete the tuple from the table
+                match transactional_table_heap.delete_tuple(rid, txn_context.clone()) {
+                    Ok(_) => {
+                        delete_count += 1;
+                        trace!(
+                            "Successfully deleted tuple #{} with RID {:?}",
+                            delete_count, rid
+                        );
                     }
-                    None => break,
+                    Err(e) => {
+                        error!("Failed to delete tuple with RID {:?}: {}", rid, e);
+                        return Err(DBError::Execution(format!("Delete failed: {}", e)));
+                    }
                 }
             }
         } else {
@@ -380,7 +375,7 @@ mod tests {
         // Verify initial table state
         let mut initial_count = 0;
         let mut table_iter = txn_table_heap.make_iterator(Some(ctx.transaction_context.clone()));
-        while let Some((meta, tuple)) = table_iter.next() {
+        for (meta, tuple) in &mut table_iter {
             if !meta.is_deleted() {
                 initial_count += 1;
                 let id = tuple.get_value(0);
@@ -427,7 +422,7 @@ mod tests {
         let mut remaining_count = 0;
         let mut table_iter = txn_table_heap.make_iterator(Some(verify_txn_ctx.clone()));
 
-        while let Some((meta, tuple)) = table_iter.next() {
+        for (meta, tuple) in &mut table_iter {
             // Only count non-deleted tuples
             if !meta.is_deleted() {
                 remaining_count += 1;

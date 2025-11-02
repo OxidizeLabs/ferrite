@@ -73,11 +73,7 @@ impl BufferManager {
             .map(|d| d.len())
             .unwrap_or(0);
         let new_size = final_data.len();
-        let size_delta = if new_size > old_size {
-            new_size - old_size
-        } else {
-            0
-        };
+        let size_delta = new_size.saturating_sub(old_size);
 
         // Check if adding this write would exceed buffer capacity
         let current_size = self.buffer.buffer_size_bytes.load(Ordering::Relaxed);

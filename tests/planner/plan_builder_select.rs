@@ -1,3 +1,5 @@
+#![allow(clippy::single_match)]
+
 use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;

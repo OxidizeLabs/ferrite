@@ -270,7 +270,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], &schema, rid);
+        let tuple = Tuple::new(&[], &schema, rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(false));
@@ -292,7 +292,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], &schema, rid);
+        let tuple = Tuple::new(&[], &schema, rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(true));
@@ -314,7 +314,7 @@ mod unit_tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], &schema, rid);
+        let tuple = Tuple::new(&[], &schema, rid);
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::from(Null));

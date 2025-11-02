@@ -147,7 +147,7 @@ mod tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], &schema, rid);
+        let tuple = Tuple::new(&[], &schema, rid);
 
         let result = expr
             .evaluate(&tuple, &schema)
@@ -172,7 +172,7 @@ mod tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], &schema, rid);
+        let tuple = Tuple::new(&[], &schema, rid);
 
         let result = expr
             .evaluate(&tuple, &schema)
@@ -204,7 +204,7 @@ mod tests {
 
         let schema = Schema::new(vec![]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![], &schema, rid);
+        let tuple = Tuple::new(&[], &schema, rid);
 
         let result = outer_array
             .evaluate(&tuple, &schema)

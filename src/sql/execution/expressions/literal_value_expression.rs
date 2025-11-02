@@ -189,7 +189,7 @@ mod tests {
 
         let float_expr =
             LiteralValueExpression::new(SQLValue::Number("3.14".to_string(), false)).unwrap();
-        assert_eq!(float_expr.get_value(), &Value::new(3.14));
+        assert_eq!(float_expr.get_value(), &Value::new(std::f64::consts::PI));
         assert_eq!(float_expr.get_return_type().get_type(), TypeId::Decimal);
 
         // Test string literals
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn test_evaluate() {
         let schema = Schema::new(vec![Column::new("test", TypeId::Integer)]);
-        let tuple = Tuple::new(&*vec![Value::new(1)], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[Value::new(1)], &schema, RID::new(0, 0));
 
         // Create and evaluate a literal expression
         let expr = LiteralValueExpression::new(SQLValue::Number("42".to_string(), false)).unwrap();

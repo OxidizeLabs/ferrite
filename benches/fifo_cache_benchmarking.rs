@@ -1,3 +1,5 @@
+#![allow(clippy::all)]
+
 use criterion::{
     AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, SamplingMode, Throughput,
     criterion_group, criterion_main,

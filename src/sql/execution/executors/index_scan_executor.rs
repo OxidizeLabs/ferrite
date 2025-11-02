@@ -598,7 +598,7 @@ mod index_scan_executor_tests {
 
                 // Insert using transactional table heap
                 let rid = txn_table_heap
-                    .insert_tuple_from_values(values, &schema, transaction_context.clone())
+                    .insert_tuple_from_values(values, schema, transaction_context.clone())
                     .unwrap();
 
                 // Insert into index
@@ -661,7 +661,7 @@ mod index_scan_executor_tests {
         let mut count = 0;
         while let Ok(Some((tuple, _))) = executor.next() {
             count += 1;
-            println!("Got tuple: {:?}", tuple);
+            log::debug!("Got tuple: {:?}", tuple);
         }
         assert_eq!(count, 10);
     }
@@ -752,12 +752,11 @@ mod index_scan_executor_tests {
         for i in &[3, 7] {
             let mut iterator = txn_table_heap.make_iterator(Some(txn_ctx.clone()));
 
-            while let Some((_, tuple)) = iterator.next() {
+            for (_, tuple) in &mut iterator {
                 let id = tuple.get_value(0).compare_equals(&Value::new(*i));
                 let rid = tuple.get_rid();
 
                 if id == CmpBool::CmpTrue {
-                    // Use delete_tuple instead of manually setting deleted flag
                     let _ = txn_table_heap.delete_tuple(rid, txn_ctx.clone());
                     break;
                 }
@@ -766,12 +765,8 @@ mod index_scan_executor_tests {
 
         // Commit the transaction that performed the deletes
         let txn_manager = txn_ctx.get_transaction_manager();
-        txn_manager
-            .commit(
-                txn_ctx.get_transaction(),
-                context.read().get_buffer_pool_manager(),
-            )
-            .await;
+        let bpm = context.read().get_buffer_pool_manager();
+        txn_manager.commit(txn_ctx.get_transaction(), bpm).await;
 
         // Create new transaction for scanning with new execution context
         let scan_txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
@@ -862,7 +857,7 @@ mod index_scan_executor_tests {
 
             // Delete tuples with IDs 3 and 7
             let mut iterator = table_heap.make_iterator(Some(transaction_context.clone()));
-            while let Some((meta, mut tuple)) = iterator.next() {
+            for (meta, tuple) in &mut iterator {
                 // Store both id and rid before any mutable borrows
                 let id = tuple.get_value(0).as_integer().unwrap();
                 let rid = tuple.get_rid();
@@ -874,7 +869,7 @@ mod index_scan_executor_tests {
 
                     let _ = table_heap.update_tuple(
                         &new_meta,
-                        &mut tuple,
+                        &tuple,
                         rid, // Use the stored rid
                         transaction_context.clone(),
                     );

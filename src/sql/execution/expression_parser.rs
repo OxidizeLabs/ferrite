@@ -1105,9 +1105,10 @@ impl ExpressionParser {
                                     if let crate::types_db::value::Val::TinyInt(n) = value.get_val()
                                     {
                                         let new_val = Value::new(*n as i32);
-                                        println!(
-                                            "DEBUG: Converted TinyInt({}) to Integer({})",
-                                            n, *n as i32
+                                        log::debug!(
+                                            "Converted TinyInt({}) to Integer({})",
+                                            n,
+                                            *n as i32
                                         );
                                         new_val
                                     } else {
@@ -1120,9 +1121,10 @@ impl ExpressionParser {
                                         value.get_val()
                                     {
                                         let new_val = Value::new(*n as i32);
-                                        println!(
-                                            "DEBUG: Converted SmallInt({}) to Integer({})",
-                                            n, *n as i32
+                                        log::debug!(
+                                            "Converted SmallInt({}) to Integer({})",
+                                            n,
+                                            *n as i32
                                         );
                                         new_val
                                     } else {
@@ -1135,9 +1137,10 @@ impl ExpressionParser {
                                     {
                                         if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!(
-                                                "DEBUG: Converted BigInt({}) to Integer({})",
-                                                n, *n as i32
+                                            log::debug!(
+                                                "Converted BigInt({}) to Integer({})",
+                                                n,
+                                                *n as i32
                                             );
                                             new_val
                                         } else {
@@ -1153,9 +1156,10 @@ impl ExpressionParser {
                                     {
                                         if *n == (*n as i32) as f64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!(
-                                                "DEBUG: Converted Decimal({}) to Integer({})",
-                                                n, *n as i32
+                                            log::debug!(
+                                                "Converted Decimal({}) to Integer({})",
+                                                n,
+                                                *n as i32
                                             );
                                             new_val
                                         } else {
@@ -1170,19 +1174,19 @@ impl ExpressionParser {
                             };
                         }
 
-                        println!("DEBUG: Adding value to list: {:?}", value);
+                        log::debug!("Adding value to list: {:?}", value);
                         list_values.push(value);
                     } else if let Expression::Constant(const_expr) = &item_expr {
-                        println!(
-                            "DEBUG: Found constant expression with value: {:?}",
+                        log::debug!(
+                            "Found constant expression with value: {:?}",
                             const_expr.get_value()
                         );
                         let mut value = const_expr.get_value().clone();
 
                         // If the types don't match, try to convert the value to the expression type
                         if value.get_type_id() != expr_type {
-                            println!(
-                                "DEBUG: Converting from {:?} to {:?}",
+                            log::debug!(
+                                "Converting from {:?} to {:?}",
                                 value.get_type_id(),
                                 expr_type
                             );
@@ -1192,9 +1196,10 @@ impl ExpressionParser {
                                     if let crate::types_db::value::Val::TinyInt(n) = value.get_val()
                                     {
                                         let new_val = Value::new(*n as i32);
-                                        println!(
-                                            "DEBUG: Converted TinyInt({}) to Integer({})",
-                                            n, *n as i32
+                                        log::debug!(
+                                            "Converted TinyInt({}) to Integer({})",
+                                            n,
+                                            *n as i32
                                         );
                                         new_val
                                     } else {
@@ -1207,9 +1212,10 @@ impl ExpressionParser {
                                         value.get_val()
                                     {
                                         let new_val = Value::new(*n as i32);
-                                        println!(
-                                            "DEBUG: Converted SmallInt({}) to Integer({})",
-                                            n, *n as i32
+                                        log::debug!(
+                                            "Converted SmallInt({}) to Integer({})",
+                                            n,
+                                            *n as i32
                                         );
                                         new_val
                                     } else {
@@ -1222,9 +1228,10 @@ impl ExpressionParser {
                                     {
                                         if *n >= i32::MIN as i64 && *n <= i32::MAX as i64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!(
-                                                "DEBUG: Converted BigInt({}) to Integer({})",
-                                                n, *n as i32
+                                            log::debug!(
+                                                "Converted BigInt({}) to Integer({})",
+                                                n,
+                                                *n as i32
                                             );
                                             new_val
                                         } else {
@@ -1240,9 +1247,10 @@ impl ExpressionParser {
                                     {
                                         if *n == (*n as i32) as f64 {
                                             let new_val = Value::new(*n as i32);
-                                            println!(
-                                                "DEBUG: Converted Decimal({}) to Integer({})",
-                                                n, *n as i32
+                                            log::debug!(
+                                                "Converted Decimal({}) to Integer({})",
+                                                n,
+                                                *n as i32
                                             );
                                             new_val
                                         } else {
@@ -1257,19 +1265,19 @@ impl ExpressionParser {
                             };
                         }
 
-                        println!("DEBUG: Adding value to list: {:?}", value);
+                        log::debug!("Adding value to list: {:?}", value);
                         list_values.push(value);
                     } else {
                         // For non-constant expressions, we'll need to evaluate them at runtime
                         // For now, add a placeholder NULL value
-                        println!("DEBUG: Non-constant expression, adding NULL placeholder");
+                        log::debug!("Non-constant expression, adding NULL placeholder");
                         list_values.push(Value::new(crate::types_db::value::Val::Null));
                     }
 
                     list_exprs.push(item_arc);
                 }
 
-                println!("DEBUG: Final list_values: {:?}", list_values);
+                log::debug!("Final list_values: {:?}", list_values);
 
                 // Create a vector expression from the list using the new helper method
                 let list_expr = Arc::new(Expression::Constant(ConstantExpression::new_vector(
@@ -2278,6 +2286,7 @@ impl ExpressionParser {
     }
 
     /// Process a join constraint to create a join predicate
+    #[allow(dead_code)]
     fn process_join_constraint(
         &self,
         constraint: &JoinConstraint,
@@ -3432,6 +3441,7 @@ impl ExpressionParser {
     }
 
     /// Helper method to check if an expression contains aggregate functions
+    #[allow(clippy::only_used_in_recursion)]
     fn contains_aggregate(&self, expr: &Expression) -> bool {
         match expr {
             Expression::Aggregate(_) => true,
@@ -3553,6 +3563,7 @@ impl ExpressionParser {
 
     /// Replace aggregate functions in HAVING clause expressions with column references
     /// to the pre-computed aggregate values from the aggregation output schema
+    #[allow(clippy::only_used_in_recursion)]
     pub fn replace_aggregates_with_column_refs(
         &self,
         expr: &Expression,
@@ -4387,10 +4398,11 @@ mod tests {
         let schema = ctx.setup_test_schema();
 
         // Create a second test schema
-        let mut columns = Vec::new();
-        columns.push(Column::new("id", TypeId::Integer));
-        columns.push(Column::new("name", TypeId::VarChar));
-        columns.push(Column::new("department", TypeId::VarChar));
+        let columns = vec![
+            Column::new("id", TypeId::Integer),
+            Column::new("name", TypeId::VarChar),
+            Column::new("department", TypeId::VarChar),
+        ];
         let second_schema = Schema::new(columns);
 
         // Test INNER JOIN with ON constraint

@@ -337,7 +337,7 @@ mod tests {
             CaseExpression::new(None, vec![when_expr], vec![then_expr], Some(else_expr)).unwrap();
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = case.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new(42));
@@ -365,7 +365,7 @@ mod tests {
             CaseExpression::new(Some(base_expr), vec![when_expr], vec![then_expr], None).unwrap();
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = case.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result, Value::new("match"));
@@ -387,7 +387,7 @@ mod tests {
         let case = CaseExpression::new(None, vec![when_expr], vec![then_expr], None).unwrap();
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = case.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_val(), &Val::Null);

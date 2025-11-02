@@ -2697,8 +2697,8 @@ mod tests {
         );
 
         assert_eq!(mapped.len(), 50);
-        for i in 0..50 {
-            assert_eq!(mapped[i], crate::types_db::value::Value::from(i as i32));
+        for (i, v) in mapped.iter().enumerate().take(50) {
+            assert_eq!(*v, crate::types_db::value::Value::from(i as i32));
         }
 
         // Test schema compatibility with large schemas

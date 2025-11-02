@@ -172,21 +172,15 @@ impl TransactionManager {
             panic!("txn not in running / tainted state");
         }
 
-        // Update transaction state
-        txn.set_state(TransactionState::Committed);
-        txn.set_commit_ts(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        );
+        // Use logical watermark-based commit to set commit_ts and update running set
+        {
+            let mut running_txns = self.state.running_txns.write();
+            txn.commit(&mut running_txns);
+        }
 
-        // Remove from running transactions and add to committed transactions
+        // Update transaction map after commit
         {
             let mut txn_map = self.state.txn_map.write();
-            let mut running_txns = self.state.running_txns.write();
-
-            running_txns.remove_txn(txn.read_ts());
             txn_map.insert(txn.get_transaction_id(), txn.clone());
         }
 
@@ -1139,7 +1133,7 @@ mod tests {
 
             // Try to update with txn2 before txn1 commits - should fail
             let values = vec![Value::new(1), Value::new(200)];
-            let mut tuple_update = Tuple::new(&*values, &schema, rid);
+            let mut tuple_update = Tuple::new(&values, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
@@ -1332,11 +1326,11 @@ mod tests {
 
             // Modify the tuple
             let new_values = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple = Tuple::new(&new_values, &schema, rid);
+            let update_tuple = Tuple::new(&new_values, &schema, rid);
 
             match txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn.get_transaction_id()),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 modifier_ctx,
             ) {
@@ -2163,11 +2157,11 @@ mod tests {
                     };
 
                     let new_values = vec![Value::new(id), Value::new(300)];
-                    let mut update_tuple = Tuple::new(&new_values, &t1_schema, t1_rid2);
+                    let update_tuple = Tuple::new(&new_values, &t1_schema, t1_rid2);
 
                     let update_result = t1_table_heap.update_tuple(
                         &TupleMeta::new(txn1.get_transaction_id()),
-                        &mut update_tuple,
+                        &update_tuple,
                         t1_rid2,
                         txn_ctx1.clone(),
                     );
@@ -2247,7 +2241,7 @@ mod tests {
                     // Update resource A
                     let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
-                    let id = match values.get(0) {
+                    let id = match values.first() {
                         Some(value) => value.as_integer().unwrap_or_else(|_| 1),
                         None => 1, // Default value if extraction fails
                     };
@@ -2465,11 +2459,11 @@ mod tests {
 
             // Update the tuple to trigger undo log creation
             let new_values = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple = Tuple::new(&new_values, &schema, rid);
+            let update_tuple = Tuple::new(&new_values, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn_id),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 txn_ctx.clone(),
             );
@@ -2758,11 +2752,11 @@ mod tests {
                 ));
 
                 let values = vec![Value::new(1), Value::new(100 + (i + 1) * 100)];
-                let mut update_tuple = Tuple::new(&values, &schema, rid);
+                let update_tuple = Tuple::new(&values, &schema, rid);
 
                 let update_result = txn_table_heap.update_tuple(
                     &TupleMeta::new(txn.get_transaction_id()),
-                    &mut update_tuple,
+                    &update_tuple,
                     rid,
                     txn_ctx.clone(),
                 );
@@ -2900,10 +2894,10 @@ mod tests {
                 values.push(txn_values.clone());
 
                 // Update the tuple, creating a new undo log entry
-                let mut update_tuple = Tuple::new(&txn_values, &schema, rid);
+                let update_tuple = Tuple::new(&txn_values, &schema, rid);
                 let update_result = txn_table_heap.update_tuple(
                     &TupleMeta::new(txn.get_transaction_id()),
-                    &mut update_tuple,
+                    &update_tuple,
                     rid,
                     txn_ctx.clone(),
                 );
@@ -3082,7 +3076,7 @@ mod tests {
 
                     let update_result = worker_table_heap.update_tuple(
                         &TupleMeta::new(txn.get_transaction_id()),
-                        &mut update_tuple,
+                        &update_tuple,
                         worker_rid,
                         txn_ctx.clone(),
                     );
@@ -3145,7 +3139,7 @@ mod tests {
 
                 if let Ok((_, tuple)) = result {
                     let value = match tuple.get_values().get(1) {
-                        Some(value) => value.as_integer().unwrap_or_else(|_| -1),
+                        Some(value) => value.as_integer().unwrap_or(-1),
                         None => -1,
                     };
 
@@ -3219,11 +3213,11 @@ mod tests {
 
             // Update the same tuple in the same transaction
             let new_values1 = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple1 = Tuple::new(&new_values1, &schema, rid1);
+            let update_tuple1 = Tuple::new(&new_values1, &schema, rid1);
 
             let update_result1 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn1.get_transaction_id()),
-                &mut update_tuple1,
+                &update_tuple1,
                 rid1,
                 txn_ctx1.clone(),
             );
@@ -3279,11 +3273,11 @@ mod tests {
 
             // Attempt to update the deleted tuple
             let new_values2 = vec![Value::new(2), Value::new(200)];
-            let mut update_tuple2 = Tuple::new(&new_values2, &schema, rid2);
+            let update_tuple2 = Tuple::new(&new_values2, &schema, rid2);
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
-                &mut update_tuple2,
+                &update_tuple2,
                 rid2,
                 txn_ctx2.clone(),
             );
@@ -3346,7 +3340,7 @@ mod tests {
             // This should fail or be blocked since txn3a hasn't committed yet
             let update_result3 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn3b.get_transaction_id()),
-                &mut update_tuple3,
+                &update_tuple3,
                 rid3,
                 txn_ctx3b.clone(),
             );
@@ -3537,12 +3531,12 @@ mod tests {
 
                         // Create updated tuple with incremented counter
                         let new_values = vec![Value::new(1), Value::new(counter + 1)];
-                        let mut update_tuple = Tuple::new(&new_values, &thread_schema, rid);
+                        let update_tuple = Tuple::new(&new_values, &thread_schema, rid);
 
                         // Update tuple, creating undo log
                         let update_result = thread_table.update_tuple(
                             &TupleMeta::new(txn.get_transaction_id()),
-                            &mut update_tuple,
+                            &update_tuple,
                             rid,
                             txn_ctx.clone(),
                         );
@@ -3598,7 +3592,7 @@ mod tests {
 
             // Wait for all threads to complete
             for handle in handles {
-                let _ = handle.await.unwrap();
+                handle.await.unwrap();
             }
 
             // Check final state
@@ -3615,7 +3609,7 @@ mod tests {
 
             if let Ok((_, tuple)) = final_read {
                 let counter = match tuple.get_values().get(1) {
-                    Some(value) => value.as_integer().unwrap_or_else(|_| -1),
+                    Some(value) => value.as_integer().unwrap_or(-1),
                     None => -1,
                 };
 
@@ -4152,7 +4146,7 @@ mod tests {
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn.get_transaction_id()),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 modifier_ctx,
             );
@@ -4215,7 +4209,7 @@ mod tests {
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn2.get_transaction_id()),
-                &mut update_tuple2,
+                &update_tuple2,
                 rid,
                 modifier_ctx2,
             );
@@ -4529,7 +4523,7 @@ mod tests {
 
             let update_result1 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn1.get_transaction_id()),
-                &mut update_tuple1,
+                &update_tuple1,
                 rid1,
                 txn_ctx1.clone(),
             );
@@ -4540,7 +4534,7 @@ mod tests {
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
-                &mut update_tuple2,
+                &update_tuple2,
                 rid2,
                 txn_ctx2.clone(),
             );

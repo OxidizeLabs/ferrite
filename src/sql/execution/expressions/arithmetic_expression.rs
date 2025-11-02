@@ -986,7 +986,7 @@ mod basic_functionality {
             Column::new("col2", TypeId::Decimal),
         ]);
         let rid = RID::new(0, 0);
-        let tuple = Tuple::new(&*vec![Value::new(5), Value::new(2.5)], &schema, rid);
+        let tuple = Tuple::new(&[Value::new(5), Value::new(2.5)], &schema, rid);
 
         let col1 = Arc::new(Expression::ColumnRef(ColumnRefExpression::new(
             0,
@@ -1773,7 +1773,7 @@ mod mixed_type_operations {
 
         // Test Float + Decimal
         let float_val = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new_with_type(Val::Float(3.14), TypeId::Float),
+            Value::new_with_type(Val::Float(std::f32::consts::PI), TypeId::Float),
             Column::new("const", TypeId::Float),
             vec![],
         )));
@@ -1961,7 +1961,7 @@ mod invalid_operations {
             vec![],
         )));
         let decimal_val = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(3.14),
+            Value::new(std::f64::consts::PI),
             Column::new("const", TypeId::Decimal),
             vec![],
         )));
@@ -2096,7 +2096,7 @@ mod invalid_operations {
 
         // Test Null / Decimal
         let decimal_val = Arc::new(Expression::Constant(ConstantExpression::new(
-            Value::new(3.14),
+            Value::new(std::f64::consts::PI),
             Column::new("const", TypeId::Decimal),
             vec![],
         )));
@@ -2736,10 +2736,10 @@ mod boundary_conditions {
             (Value::new(12345), TypeId::Integer),
             (Value::new(987654321i64), TypeId::BigInt),
             (
-                Value::new_with_type(Val::Float(3.14), TypeId::Float),
+                Value::new_with_type(Val::Float(std::f32::consts::PI), TypeId::Float),
                 TypeId::Float,
             ),
-            (Value::new(2.718), TypeId::Decimal),
+            (Value::new(std::f64::consts::E), TypeId::Decimal),
         ];
 
         for (test_val, type_id) in test_values {
@@ -3175,10 +3175,10 @@ mod error_scenarios {
             (Value::new(1000), Value::new(0)),
             (Value::new(10000i64), Value::new(0i64)),
             (
-                Value::new_with_type(Val::Float(3.14), TypeId::Float),
+                Value::new_with_type(Val::Float(std::f32::consts::PI), TypeId::Float),
                 Value::new_with_type(Val::Float(0.0), TypeId::Float),
             ),
-            (Value::new(2.718), Value::new(0.0)),
+            (Value::new(std::f64::consts::E), Value::new(0.0)),
         ];
 
         for (numerator, denominator) in test_cases {

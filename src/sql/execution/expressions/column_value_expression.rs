@@ -132,7 +132,7 @@ impl ExpressionOps for ColumnRefExpression {
 
     fn validate(&self, schema: &Schema) -> Result<(), ExpressionError> {
         // Check if the column index is within bounds of the schema
-        println!(
+        trace!(
             "ColumnRefExpression::validate - column_index: {}, schema columns: {}",
             self.column_index,
             schema.get_column_count()
@@ -140,7 +140,7 @@ impl ExpressionOps for ColumnRefExpression {
 
         if self.column_index >= schema.get_column_count() as usize {
             let error = ExpressionError::InvalidColumnIndex(self.column_index);
-            println!(
+            trace!(
                 "ColumnRefExpression::validate - column index out of bounds, returning: {:?}",
                 error
             );
@@ -150,7 +150,7 @@ impl ExpressionOps for ColumnRefExpression {
         // Get the column from schema and verify type matches
         let schema_column = schema.get_column(self.column_index).ok_or_else(|| {
             let error = ExpressionError::InvalidColumnIndex(self.column_index);
-            println!(
+            trace!(
                 "ColumnRefExpression::validate - column not found, returning: {:?}",
                 error
             );
@@ -162,14 +162,14 @@ impl ExpressionOps for ColumnRefExpression {
                 expected: self.ret_type.get_type(),
                 actual: schema_column.get_type(),
             };
-            println!(
+            trace!(
                 "ColumnRefExpression::validate - type mismatch, returning: {:?}",
                 error
             );
             return Err(error);
         }
 
-        println!("ColumnRefExpression::validate - validation successful");
+        trace!("ColumnRefExpression::validate - validation successful");
         Ok(())
     }
 }
@@ -222,7 +222,7 @@ mod tests {
                 Value::new(42),
                 Value::new("test".to_string()),
                 Value::new(true),
-                Value::new(3.14),
+                Value::new(std::f64::consts::PI),
             ],
             &Schema::new(columns),
             RID::new(0, 0),

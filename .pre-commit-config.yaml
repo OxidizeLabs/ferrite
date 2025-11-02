@@ -1,7 +1,7 @@
 repos:
   # Pre-commit hooks for general code quality
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -84,7 +84,7 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
-        stages: [push]  # Only run on push, not commit
+        stages: [pre-push]  # Only run on push, not commit
 
 # Configuration for specific hooks
 ci:

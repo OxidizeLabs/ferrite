@@ -1,3 +1,6 @@
+#![allow(clippy::all)]
+#![allow(unused_parens)]
+
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::collections::HashMap;
 use std::hint::black_box;

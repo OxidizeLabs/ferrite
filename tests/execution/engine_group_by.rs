@@ -1,3 +1,5 @@
+#![allow(clippy::useless_vec)]
+
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
 use tkdb::catalog::column::Column;

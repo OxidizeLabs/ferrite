@@ -835,7 +835,7 @@ mod tests {
             let mut writer = TestResultWriter::new();
             let sql = "SELECT name FROM users";
 
-            println!("Executing simple query: {}", sql);
+            log::info!("Executing simple query: {}", sql);
             match ctx
                 .engine
                 .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
@@ -844,7 +844,7 @@ mod tests {
                 Ok(success) => {
                     assert!(success, "Query execution failed for: {}", sql);
                     let rows = writer.get_rows();
-                    println!("Query returned {} rows", rows.len());
+                    log::info!("Query returned {} rows", rows.len());
                     assert_eq!(rows.len(), 1, "Incorrect number of rows");
                 }
                 Err(e) => {
@@ -1695,7 +1695,7 @@ mod tests {
 
             if !writer.get_rows().is_empty() {
                 // Should only have original 2 users
-                println!("User count after rollback: {}", writer.get_rows()[0][0]);
+                log::info!("User count after rollback: {}", writer.get_rows()[0][0]);
             }
         }
 
@@ -1794,9 +1794,9 @@ mod tests {
 
             if !writer.get_rows().is_empty() {
                 let rows = writer.get_rows();
-                println!("Final balances:");
+                log::info!("Final balances:");
                 for row in rows {
-                    println!("  {}: {}", row[0], row[1]);
+                    log::info!("  {}: {}", row[0], row[1]);
                 }
             }
 
@@ -1811,7 +1811,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("Transaction log entries: {}", writer.get_rows()[0][0]);
+                log::info!("Transaction log entries: {}", writer.get_rows()[0][0]);
             }
         }
 
@@ -1871,7 +1871,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("Value within transaction: {}", writer.get_rows()[0][0]);
+                log::info!("Value within transaction: {}", writer.get_rows()[0][0]);
             }
 
             // Rollback to test isolation
@@ -1895,7 +1895,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("Value after rollback: {}", writer.get_rows()[0][0]);
+                log::info!("Value after rollback: {}", writer.get_rows()[0][0]);
             }
         }
 
@@ -1979,7 +1979,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!(
+                log::info!(
                     "User count after constraint violation rollback: {}",
                     writer.get_rows()[0][0]
                 );
@@ -2077,7 +2077,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!(
+                log::info!(
                     "Final count after savepoint test: {}",
                     writer.get_rows()[0][0]
                 );
@@ -2139,7 +2139,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("Data from DDL table: {}", writer.get_rows()[0][0]);
+                log::info!("Data from DDL table: {}", writer.get_rows()[0][0]);
             }
         }
 
@@ -2221,7 +2221,7 @@ mod tests {
             if !writer.get_rows().is_empty() {
                 let rows = writer.get_rows();
                 for row in rows {
-                    println!("Resource: {}, Lock Count: {}", row[0], row[1]);
+                    log::info!("Resource: {}, Lock Count: {}", row[0], row[1]);
                 }
             }
         }
@@ -2284,7 +2284,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!("Records after timeout test: {}", writer.get_rows()[0][0]);
+                log::info!("Records after timeout test: {}", writer.get_rows()[0][0]);
             }
         }
 
@@ -2354,7 +2354,7 @@ mod tests {
 
             if !writer.get_rows().is_empty() {
                 let total_balance = &writer.get_rows()[0][0];
-                println!("Total balance during transaction: {}", total_balance);
+                log::info!("Total balance during transaction: {}", total_balance);
                 // Should still be 1500 (1000 + 500)
             }
 
@@ -2381,11 +2381,13 @@ mod tests {
 
             if !writer.get_rows().is_empty() {
                 let rows = writer.get_rows();
-                println!("Final state after ACID test:");
+                log::info!("Final state after ACID test:");
                 for row in rows {
-                    println!(
+                    log::info!(
                         "  Account {}: Balance {}, Updated: {}",
-                        row[0], row[1], row[2]
+                        row[0],
+                        row[1],
+                        row[2]
                     );
                 }
             }
@@ -2402,7 +2404,7 @@ mod tests {
 
             if !writer.get_rows().is_empty() {
                 let final_total = &writer.get_rows()[0][0];
-                println!("Final total balance: {}", final_total);
+                log::info!("Final total balance: {}", final_total);
             }
         }
 
@@ -2479,7 +2481,7 @@ mod tests {
             assert!(success);
 
             if !writer.get_rows().is_empty() {
-                println!(
+                log::info!(
                     "Records processed in batch transaction: {}",
                     writer.get_rows()[0][0]
                 );
@@ -2498,14 +2500,17 @@ mod tests {
             if !writer.get_rows().is_empty() {
                 let rows = writer.get_rows();
                 for row in rows {
-                    println!(
+                    log::info!(
                         "Batch {}: Count={}, Sum={}, Avg={}",
-                        row[0], row[1], row[2], row[3]
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3]
                     );
                 }
             }
 
-            println!("Performance stress test completed successfully");
+            log::info!("Performance stress test completed successfully");
         }
     }
 
@@ -2575,9 +2580,9 @@ mod tests {
             assert_eq!(rows.len(), 3, "Expected 3 rows");
 
             // Verify default decimal formatting
-            println!("Default decimal formatting:");
+            log::info!("Default decimal formatting:");
             for (i, row) in rows.iter().enumerate() {
-                println!(
+                log::info!(
                     "Row {}: id={}, price={}, rate={}, percentage={}, currency={}",
                     i + 1,
                     row[0],
@@ -2599,11 +2604,13 @@ mod tests {
             assert!(success, "Decimal arithmetic failed");
 
             let calc_rows = writer.get_rows();
-            println!("\nDecimal arithmetic results:");
+            log::info!("\nDecimal arithmetic results:");
             for row in calc_rows {
-                println!(
+                log::info!(
                     "ID: {}, Calculated: {}, Adjusted Price: {}",
-                    row[0], row[1], row[2]
+                    row[0],
+                    row[1],
+                    row[2]
                 );
             }
 
@@ -2618,11 +2625,14 @@ mod tests {
             assert!(success, "Decimal aggregation failed");
 
             let agg_rows = writer.get_rows();
-            println!("\nDecimal aggregation results:");
+            log::info!("\nDecimal aggregation results:");
             for row in agg_rows {
-                println!(
+                log::info!(
                     "Avg Price: {}, Total Currency: {}, Min Rate: {}, Max Percentage: {}",
-                    row[0], row[1], row[2], row[3]
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3]
                 );
             }
 
@@ -2637,9 +2647,9 @@ mod tests {
             assert!(success, "Decimal filtering failed");
 
             let filter_rows = writer.get_rows();
-            println!("\nFiltered decimal results (price > 50.0 AND rate < 0.5):");
+            log::info!("\nFiltered decimal results (price > 50.0 AND rate < 0.5):");
             for row in filter_rows {
-                println!("ID: {}, Price: {}", row[0], row[1]);
+                log::info!("ID: {}, Price: {}", row[0], row[1]);
             }
 
             // Test 5: CASE expressions with decimals
@@ -2653,9 +2663,9 @@ mod tests {
             assert!(success, "Decimal CASE expression failed");
 
             let case_rows = writer.get_rows();
-            println!("\nDecimal CASE expression results:");
+            log::info!("\nDecimal CASE expression results:");
             for row in case_rows {
-                println!("ID: {}, Category: {}, Price: {}", row[0], row[1], row[2]);
+                log::info!("ID: {}, Category: {}, Price: {}", row[0], row[1], row[2]);
             }
         }
 
@@ -2685,9 +2695,9 @@ mod tests {
                 ],
                 vec![
                     Value::new(2),
-                    Value::new(2.718f32),  // e approximation
-                    Value::new(1.414f32),  // sqrt(2) approximation
-                    Value::new(9.87e6f32), // Large scientific number
+                    Value::new(std::f32::consts::E), // e approximation
+                    Value::new(1.414f32),            // sqrt(2) approximation
+                    Value::new(9.87e6f32),           // Large scientific number
                 ],
                 vec![
                     Value::new(3),
@@ -2711,9 +2721,9 @@ mod tests {
             assert!(success, "Basic float select failed");
 
             let rows = writer.get_rows();
-            println!("Float display results:");
+            log::info!("Float display results:");
             for (i, row) in rows.iter().enumerate() {
-                println!(
+                log::info!(
                     "Row {}: id={}, measurement={}, ratio={}, scientific={}",
                     i + 1,
                     row[0],
@@ -2734,11 +2744,13 @@ mod tests {
             assert!(success, "Float arithmetic failed");
 
             let calc_rows = writer.get_rows();
-            println!("\nFloat arithmetic results:");
+            log::info!("\nFloat arithmetic results:");
             for row in calc_rows {
-                println!(
+                log::info!(
                     "ID: {}, Product: {}, Incremented: {}",
-                    row[0], row[1], row[2]
+                    row[0],
+                    row[1],
+                    row[2]
                 );
             }
 
@@ -2753,9 +2765,9 @@ mod tests {
             assert!(success, "Float aggregation failed");
 
             let agg_rows = writer.get_rows();
-            println!("\nFloat aggregation results:");
+            log::info!("\nFloat aggregation results:");
             for row in agg_rows {
-                println!("Avg Measurement: {}, Sum Ratio: {}", row[0], row[1]);
+                log::info!("Avg Measurement: {}, Sum Ratio: {}", row[0], row[1]);
             }
         }
 
@@ -2783,14 +2795,14 @@ mod tests {
                     Value::new(42),
                     Value::new(1000000i64),
                     Value::new(123.456),
-                    Value::new(3.14f32),
+                    Value::new(std::f32::consts::PI),
                 ],
                 vec![
                     Value::new(2),
                     Value::new(-17),
                     Value::new(-500000i64),
                     Value::new(0.001),
-                    Value::new(2.718f32),
+                    Value::new(std::f32::consts::E),
                 ],
                 vec![
                     Value::new(3),
@@ -2814,9 +2826,9 @@ mod tests {
             assert!(success, "Mixed numeric select failed");
 
             let rows = writer.get_rows();
-            println!("Mixed numeric display results:");
+            log::info!("Mixed numeric display results:");
             for (i, row) in rows.iter().enumerate() {
-                println!(
+                log::info!(
                     "Row {}: id={}, int={}, bigint={}, decimal={}, float={}",
                     i + 1,
                     row[0],
@@ -2838,11 +2850,13 @@ mod tests {
             assert!(success, "Mixed arithmetic failed");
 
             let calc_rows = writer.get_rows();
-            println!("\nMixed arithmetic results:");
+            log::info!("\nMixed arithmetic results:");
             for row in calc_rows {
-                println!(
+                log::info!(
                     "ID: {}, Int+Decimal: {}, BigInt*Float: {}",
-                    row[0], row[1], row[2]
+                    row[0],
+                    row[1],
+                    row[2]
                 );
             }
 
@@ -2857,9 +2871,9 @@ mod tests {
             assert!(success, "Mixed comparison failed");
 
             let comp_rows = writer.get_rows();
-            println!("\nMixed comparison results (int_val < decimal_val):");
+            log::info!("\nMixed comparison results (int_val < decimal_val):");
             for row in comp_rows {
-                println!("ID: {}, Int: {}, Decimal: {}", row[0], row[1], row[2]);
+                log::info!("ID: {}, Int: {}, Decimal: {}", row[0], row[1], row[2]);
             }
 
             // Test 4: Aggregations across different numeric types
@@ -2873,11 +2887,13 @@ mod tests {
             assert!(success, "Mixed aggregation failed");
 
             let agg_rows = writer.get_rows();
-            println!("\nMixed aggregation results:");
+            log::info!("\nMixed aggregation results:");
             for row in agg_rows {
-                println!(
+                log::info!(
                     "Avg Int: {}, Avg Decimal: {}, Avg Float: {}",
-                    row[0], row[1], row[2]
+                    row[0],
+                    row[1],
+                    row[2]
                 );
             }
         }
@@ -2944,9 +2960,9 @@ mod tests {
             assert!(success, "Edge cases select failed");
 
             let rows = writer.get_rows();
-            println!("Decimal edge cases display:");
+            log::info!("Decimal edge cases display:");
             for (i, row) in rows.iter().enumerate() {
-                println!(
+                log::info!(
                     "{}: id={}, description={}, value={}",
                     i + 1,
                     row[0],
@@ -2966,11 +2982,14 @@ mod tests {
             assert!(success, "Edge case operations failed");
 
             let ops_rows = writer.get_rows();
-            println!("\nEdge case operations:");
+            log::info!("\nEdge case operations:");
             for row in ops_rows {
-                println!(
+                log::info!(
                     "{}: original={}, doubled={}, halved={}",
-                    row[1], row[2], row[3], row[4]
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4]
                 );
             }
         }
@@ -3039,9 +3058,9 @@ mod tests {
             assert!(success, "Column-aware decimal select failed");
 
             let rows = writer.get_rows();
-            println!("Column-aware decimal formatting results:");
+            log::info!("Column-aware decimal formatting results:");
             for (i, row) in rows.iter().enumerate() {
-                println!(
+                log::info!(
                     "Row {}: id={}, price={} (scale 2), rate={} (scale 4), percentage={} (scale 1)",
                     i + 1,
                     row[0],
@@ -3062,11 +3081,13 @@ mod tests {
             assert!(success, "Decimal calculation formatting failed");
 
             let calc_rows = writer.get_rows();
-            println!("\nCalculated decimal formatting:");
+            log::info!("\nCalculated decimal formatting:");
             for row in calc_rows {
-                println!(
+                log::info!(
                     "ID: {}, Calculated Amount: {}, Decimal Percentage: {}",
-                    row[0], row[1], row[2]
+                    row[0],
+                    row[1],
+                    row[2]
                 );
             }
 
@@ -3081,11 +3102,13 @@ mod tests {
             assert!(success, "Decimal aggregation formatting failed");
 
             let agg_rows = writer.get_rows();
-            println!("\nAggregated decimal formatting:");
+            log::info!("\nAggregated decimal formatting:");
             for row in agg_rows {
-                println!(
+                log::info!(
                     "Avg Price: {}, Total Rate: {}, Max Percentage: {}",
-                    row[0], row[1], row[2]
+                    row[0],
+                    row[1],
+                    row[2]
                 );
             }
         }
@@ -3133,11 +3156,12 @@ mod tests {
                 .io_count
                 .load(std::sync::atomic::Ordering::Relaxed);
 
-            println!(
+            log::info!(
                 "Metrics Verification: write_ops={}, io_count={}",
-                write_ops, io_count
+                write_ops,
+                io_count
             );
-            println!("Write latency avg: {} ns", snapshot.write_latency_avg_ns);
+            log::info!("Write latency avg: {} ns", snapshot.write_latency_avg_ns);
 
             // Verify metrics are working (should have non-zero values now)
             assert!(write_ops > 0, "Write operations should be recorded");
@@ -3146,7 +3170,7 @@ mod tests {
             let db_file_size = ctx.get_db_file_size().await.unwrap();
             assert!(db_file_size > 0, "Database file should contain data");
 
-            println!("✅ Metrics collection verification passed!");
+            log::info!("✅ Metrics collection verification passed!");
         }
     }
 }

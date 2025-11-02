@@ -94,7 +94,7 @@ pub fn open_direct_io<P: AsRef<Path>>(
 
 /// Check if a buffer is properly aligned for direct I/O
 pub fn is_aligned(buffer: &[u8], alignment: usize) -> bool {
-    buffer.as_ptr() as usize % alignment == 0
+    (buffer.as_ptr() as usize).is_multiple_of(alignment)
 }
 
 /// Create an aligned buffer for direct I/O operations
@@ -140,7 +140,7 @@ pub fn read_aligned(
     file.seek(SeekFrom::Start(offset))?;
 
     // For direct I/O, we need to read in aligned chunks
-    if config.enabled && size % config.alignment != 0 {
+    if config.enabled && !size.is_multiple_of(config.alignment) {
         warn!(
             "Direct I/O read size {} is not aligned to {}, this may cause issues",
             size, config.alignment
@@ -170,7 +170,7 @@ pub fn write_aligned(
             warn!("Data buffer is not aligned for direct I/O, performance may be degraded");
         }
 
-        if data.len() % config.alignment != 0 {
+        if !data.len().is_multiple_of(config.alignment) {
             warn!(
                 "Write size {} is not aligned to {}, this may cause issues with direct I/O",
                 data.len(),

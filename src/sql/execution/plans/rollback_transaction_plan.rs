@@ -203,7 +203,7 @@ mod tests {
         // Test that we can convert back and forth
         match &plan_enum {
             PlanNode::RollbackTransaction(inner_node) => {
-                assert_eq!(inner_node.is_chain(), true);
+                assert!(inner_node.is_chain());
                 assert_eq!(
                     inner_node.get_savepoint(),
                     &Some("test_savepoint".to_string())
@@ -235,7 +235,7 @@ mod tests {
         let plan_enum = PlanNode::RollbackTransaction(plan_node);
 
         // Simulate what explain_internal would do
-        let indent = "  ".repeat(1); // Indent level 1
+        let indent = "  ".to_string(); // Indent level 1
         let mut result = String::new();
 
         match &plan_enum {

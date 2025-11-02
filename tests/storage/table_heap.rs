@@ -1,3 +1,9 @@
+#![allow(
+    clippy::needless_borrow,
+    clippy::clone_on_copy,
+    clippy::unnecessary_mut_passed
+)]
+
 use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;

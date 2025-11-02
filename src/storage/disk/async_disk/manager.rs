@@ -1824,17 +1824,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_compression_configuration() {
-        let mut config = DiskManagerConfig::default();
-        config.compression_enabled = true;
-        config.compression_algorithm = CompressionAlgorithm::LZ4;
+        let config = DiskManagerConfig {
+            compression_enabled: true,
+            compression_algorithm: CompressionAlgorithm::LZ4,
+            ..Default::default()
+        };
 
         let (manager, _temp_dir) = create_test_manager_with_config(config).await;
 
-        assert_eq!(manager.config.compression_enabled, true);
-        assert_eq!(
-            manager.config.compression_algorithm,
-            CompressionAlgorithm::LZ4
-        );
+        assert!(manager.config.compression_enabled);
+        assert!(manager.config.compression_algorithm == CompressionAlgorithm::LZ4);
 
         // Test write with compression
         let test_data = vec![0x42; 1024]; // Compressible data
@@ -1911,8 +1910,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_metrics_integration() {
-        let mut config = DiskManagerConfig::default();
-        config.cache_size_mb = 64; // Enable cache
+        let config = DiskManagerConfig {
+            cache_size_mb: 64, // Enable cache
+            ..Default::default()
+        };
 
         let (manager, _temp_dir) = create_test_manager_with_config(config).await;
 

@@ -264,7 +264,7 @@ mod tests {
         let tuple = Tuple::new(
             &vec![
                 Value::new(42),                     // Integer
-                Value::new(3.14),                   // Decimal
+                Value::new(std::f64::consts::PI),   // Decimal
                 Value::new("test"),                 // VarChar
                 Value::new(9223372036854775807i64), // BigInt (i64::MAX)
             ],
