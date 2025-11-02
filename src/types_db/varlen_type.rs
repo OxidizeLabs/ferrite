@@ -7,6 +7,12 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub struct VarCharType;
 
+impl Default for VarCharType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VarCharType {
     pub fn new() -> Self {
         VarCharType

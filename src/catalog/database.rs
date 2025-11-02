@@ -4,7 +4,7 @@ use crate::catalog::schema::Schema;
 use crate::common::config::{DataBaseOid, IndexOidT, TableOidT};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::storage::index::b_plus_tree::BPlusTree;
-use crate::storage::index::index::{IndexInfo, IndexType};
+use crate::storage::index::{IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use core::fmt;
@@ -12,8 +12,8 @@ use log::{info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A static atomic counter for generating unique database IDs
 static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
@@ -313,9 +313,10 @@ impl Database {
 
         self.next_index_oid += 1;
 
-        // Now we would need to populate the index with existing table data
-        // This part would be handled similarly to the original implementation,
-        // but is omitted here for brevity
+        // Populate the index with existing table data
+        if let Some(table_info) = self.get_table_info_by_name(table_name) {
+            self.populate_index_with_existing_data(&index, &index_info, &table_info);
+        }
 
         // Return reference to the newly created index info
         self.get_index_by_index_oid(index_oid)
@@ -389,6 +390,69 @@ impl Database {
 
     pub fn get_all_tables(&self) -> Vec<String> {
         self.table_names.keys().cloned().collect()
+    }
+
+    /// Populates a newly created index with existing data from the table
+    fn populate_index_with_existing_data(
+        &self,
+        index: &Arc<RwLock<BPlusTree>>,
+        index_info: &Arc<IndexInfo>,
+        table_info: &Arc<TableInfo>,
+    ) {
+        use crate::storage::table::table_iterator::TableScanIterator;
+        use log::debug;
+
+        debug!(
+            "Populating index '{}' with existing table data",
+            index_info.get_index_name()
+        );
+
+        let key_attrs = index_info.get_key_attrs();
+
+        // Create a table scan iterator to scan through all tuples
+        let mut iterator = TableScanIterator::new(table_info.clone());
+
+        let mut entry_count = 0;
+
+        // Iterate through all tuples in the table
+        while let Some((_meta, tuple)) = iterator.next() {
+            let rid = iterator.get_rid();
+
+            // Extract key values for the index
+            let mut key_values = Vec::new();
+            let tuple_values = tuple.get_values();
+
+            for &col_idx in key_attrs {
+                if col_idx < tuple_values.len() {
+                    key_values.push(tuple_values[col_idx].clone());
+                }
+            }
+
+            // For single-column indexes, use the value directly
+            if key_values.len() == 1 {
+                let key_value = key_values[0].clone();
+
+                // Insert into B+ tree
+                let mut btree_write = index.write();
+                btree_write.insert(key_value, rid);
+                entry_count += 1;
+
+                debug!(
+                    "Inserted index entry for key: {:?}, RID: {:?}",
+                    key_values[0], rid
+                );
+            } else if key_values.len() > 1 {
+                // For composite keys, we would need to handle this differently
+                // For now, we'll skip composite keys
+                log::warn!("Composite key index population not yet implemented");
+            }
+        }
+
+        debug!(
+            "Successfully populated index '{}' with {} entries",
+            index_info.get_index_name(),
+            entry_count
+        );
     }
 }
 

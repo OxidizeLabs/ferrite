@@ -1,7 +1,7 @@
 use crate::concurrency::transaction::IsolationLevel;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use bincode::{Encode, Decode};
+use bincode::{Decode, Encode};
 
 #[derive(Debug, Encode, Decode)]
 pub enum DatabaseRequest {

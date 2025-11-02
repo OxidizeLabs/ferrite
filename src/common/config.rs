@@ -22,7 +22,7 @@ pub const BUFFER_POOL_SIZE: u64 = 8192; // 32MB buffer pool (8192 * 4KB pages)
 pub const LOG_BUFFER_SIZE: u64 = (BUFFER_POOL_SIZE + 1) * DB_PAGE_SIZE; // size of a log buffer in bytes
 pub const BUCKET_SIZE: u64 = 50; // size of extendable hash bucket
 
-// PERFORMANCE OPTIMIZATION: Reduced LRU-K window for faster eviction decisions  
+// PERFORMANCE OPTIMIZATION: Reduced LRU-K window for faster eviction decisions
 pub const LRUK_REPLACER_K: u64 = 2; // lookback window for lru-k replacer (reduced from 10)
 
 // NEW PERFORMANCE PARAMETERS

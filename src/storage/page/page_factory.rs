@@ -4,7 +4,7 @@
 //
 // use crate::common::config::PageId;
 // use crate::storage::index::b_plus_tree_index::{KeyComparator, KeyType};
-// use crate::storage::page::page::{BasicPage, Page, PageTrait, PageType};
+// use crate::storage::page::{BasicPage, Page, PageTrait, PageType};
 // use crate::storage::page::page_types::b_plus_tree_internal_page::BPlusTreeInternalPage;
 // use crate::storage::page::page_types::b_plus_tree_leaf_page::BPlusTreeLeafPage;
 // use crate::storage::page::page_types::table_page::TablePage;

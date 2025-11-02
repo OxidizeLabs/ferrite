@@ -1,9 +1,14 @@
 [package]
 name = "tkdb"
-description = "DBMS inspired by CMU 15-415/445 - Introduction to DBMS Course"
+description = "TokamakDB: a Rust OLTP database with NUMA-aware async execution and first-class observability"
 version = "0.1.0"
 authors = ["Thomas Korrison <thomas_korrison@hotmail.com>"]
 edition = "2024"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/tokamakdb/tokamakdb"
+keywords = ["database", "oltp", "rust", "concurrency", "numa"]
+categories = ["database-implementations", "asynchronous", "concurrency"]
 
 [dependencies]
 # Core runtime dependencies
@@ -71,6 +76,7 @@ tokio = { version = "1.47", features = ["full", "test-util"] }
 mockall = "0.13"
 tempfile = "3.20"
 sqllogictest = "0.28"
+test-tag = "0.1"
 
 # Benchmarking
 criterion = { version = "0.7", features = ["html_reports"] }
@@ -154,4 +160,3 @@ mocking = ["dep:mockall"]
 # Development and testing features
 dev = ["server", "mocking"]
 full = ["cli", "client", "server"]
-

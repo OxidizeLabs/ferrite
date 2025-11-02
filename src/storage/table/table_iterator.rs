@@ -1,4 +1,4 @@
-use crate::common::config::{PageId, INVALID_PAGE_ID};
+use crate::common::config::{INVALID_PAGE_ID, PageId};
 use crate::common::rid::RID;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableInfo;
@@ -112,7 +112,7 @@ impl TableIterator {
         }
 
         // Validate slot number
-        if let Some(page_guard) = table_heap.get_page(self.current_rid.get_page_id()).ok() {
+        if let Ok(page_guard) = table_heap.get_page(self.current_rid.get_page_id()) {
             let page = page_guard.read();
             if self.current_rid.get_slot_num() >= page.get_num_tuples() as u32 {
                 debug!("Invalid slot number, resetting to 0");
@@ -288,8 +288,8 @@ mod tests {
     use crate::types_db::types::Type;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::TempDir;
     use tokio;
 

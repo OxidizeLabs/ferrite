@@ -1,0 +1,224 @@
+# CREATE TABLE with Constraints Tests
+
+# Test PRIMARY KEY constraint
+statement ok
+CREATE TABLE departments (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    budget DECIMAL
+);
+
+# Test NOT NULL constraints
+statement ok
+CREATE TABLE employees (
+    id INTEGER PRIMARY KEY,
+    first_name VARCHAR NOT NULL,
+    last_name VARCHAR NOT NULL,
+    email VARCHAR,
+    hire_date TIMESTAMP NOT NULL
+);
+
+# Test UNIQUE constraints
+statement ok
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    username VARCHAR UNIQUE,
+    email VARCHAR UNIQUE NOT NULL,
+    phone VARCHAR
+);
+
+# Test CHECK constraints
+statement ok
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    price DECIMAL CHECK (price > 0),
+    quantity INTEGER CHECK (quantity >= 0),
+    category VARCHAR
+);
+
+# Test DEFAULT values
+statement ok
+CREATE TABLE orders (
+    id INTEGER PRIMARY KEY,
+    customer_id INTEGER NOT NULL,
+    status VARCHAR DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total DECIMAL DEFAULT 0.0
+);
+
+# Test FOREIGN KEY constraints
+statement ok
+CREATE TABLE order_items (
+    id INTEGER PRIMARY KEY,
+    order_id INTEGER REFERENCES orders(id),
+    product_id INTEGER REFERENCES products(id),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    unit_price DECIMAL NOT NULL CHECK (unit_price > 0)
+);
+
+# Test multiple constraints on single column
+statement ok
+CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY,
+    account_number VARCHAR UNIQUE NOT NULL,
+    balance DECIMAL NOT NULL DEFAULT 0.0 CHECK (balance >= 0),
+    account_type VARCHAR NOT NULL DEFAULT 'checking',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+# Test composite PRIMARY KEY
+statement ok
+CREATE TABLE user_roles (
+    user_id INTEGER,
+    role_id INTEGER,
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, role_id)
+);
+
+# Test FOREIGN KEY with ON DELETE and ON UPDATE actions
+statement ok
+CREATE TABLE employee_departments (
+    employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+    department_id INTEGER REFERENCES departments(id) ON UPDATE CASCADE,
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP,
+    PRIMARY KEY (employee_id, department_id)
+);
+
+# Test complex CHECK constraints
+statement ok
+CREATE TABLE inventory (
+    id INTEGER PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    warehouse_location VARCHAR NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity >= 0),
+    reserved_quantity INTEGER DEFAULT 0 CHECK (reserved_quantity >= 0),
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CHECK (reserved_quantity <= quantity)
+);
+
+# Test table with all constraint types
+statement ok
+CREATE TABLE comprehensive_table (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR UNIQUE NOT NULL,
+    email VARCHAR UNIQUE NOT NULL CHECK (email LIKE '%@%'),
+    age INTEGER CHECK (age >= 18 AND age <= 120),
+    salary DECIMAL DEFAULT 50000.0 CHECK (salary > 0),
+    department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+    status VARCHAR DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'pending')),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+# Test DECIMAL with precision and scale with constraints
+statement ok
+CREATE TABLE financial_records (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    amount DECIMAL(15,2) NOT NULL CHECK (amount != 0),
+    transaction_type VARCHAR NOT NULL CHECK (transaction_type IN ('debit', 'credit')),
+    description VARCHAR,
+    transaction_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+# Error Cases - Constraint violations in table definition
+
+# Test invalid CHECK constraint syntax
+statement error
+CREATE TABLE invalid_check (
+    id INTEGER PRIMARY KEY,
+    age INTEGER CHECK (age >=)
+);
+
+# Test FOREIGN KEY to non-existent table
+statement error
+CREATE TABLE invalid_fk (
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER REFERENCES non_existent_table(id)
+);
+
+# Test FOREIGN KEY to non-existent column
+statement error
+CREATE TABLE invalid_fk_column (
+    id INTEGER PRIMARY KEY,
+    dept_id INTEGER REFERENCES departments(non_existent_column)
+);
+
+# Test duplicate PRIMARY KEY definition
+statement error
+CREATE TABLE duplicate_pk (
+    id INTEGER PRIMARY KEY,
+    code VARCHAR PRIMARY KEY
+);
+
+# Test PRIMARY KEY on nullable column (should fail if implemented)
+statement error
+CREATE TABLE nullable_pk (
+    id INTEGER PRIMARY KEY NULL
+);
+
+# Test invalid DEFAULT value type
+statement error
+CREATE TABLE invalid_default (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR DEFAULT 12345,
+    age INTEGER DEFAULT 'not_a_number'
+);
+
+# Test self-referencing FOREIGN KEY
+statement ok
+CREATE TABLE categories (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR NOT NULL,
+    parent_id INTEGER REFERENCES categories(id),
+    description VARCHAR
+);
+
+# Test multiple UNIQUE constraints
+statement ok
+CREATE TABLE unique_test (
+    id INTEGER PRIMARY KEY,
+    email VARCHAR UNIQUE,
+    username VARCHAR UNIQUE,
+    phone VARCHAR UNIQUE,
+    social_security VARCHAR UNIQUE
+);
+
+# Test CHECK constraint with multiple conditions
+statement ok
+CREATE TABLE student_grades (
+    id INTEGER PRIMARY KEY,
+    student_id INTEGER NOT NULL,
+    subject VARCHAR NOT NULL,
+    grade DECIMAL(4,2) CHECK (grade >= 0.0 AND grade <= 100.0),
+    semester VARCHAR CHECK (semester IN ('fall', 'spring', 'summer')),
+    year INTEGER CHECK (year >= 1900 AND year <= 2100),
+    UNIQUE (student_id, subject, semester, year)
+);
+
+# Test constraints with complex expressions
+statement ok
+CREATE TABLE time_tracking (
+    id INTEGER PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    clock_in TIMESTAMP NOT NULL,
+    clock_out TIMESTAMP,
+    break_duration INTEGER DEFAULT 0 CHECK (break_duration >= 0),
+    CHECK (clock_out IS NULL OR clock_out > clock_in),
+    CHECK (break_duration * 60 < EXTRACT(EPOCH FROM (clock_out - clock_in)))
+);
+
+# Test constraints on different data types
+statement ok
+CREATE TABLE data_type_constraints (
+    id INTEGER PRIMARY KEY,
+    tiny_val TINYINT CHECK (tiny_val BETWEEN -100 AND 100),
+    small_val SMALLINT NOT NULL DEFAULT 0,
+    big_val BIGINT UNIQUE,
+    bool_val BOOLEAN NOT NULL DEFAULT false,
+    float_val DECIMAL CHECK (float_val > 0.0),
+    text_val VARCHAR CHECK (LENGTH(text_val) >= 3),
+    timestamp_val TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

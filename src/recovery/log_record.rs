@@ -1,12 +1,12 @@
 use std::fmt::Debug;
 use std::mem::size_of;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use bincode::{Encode, Decode};
-use crate::common::config::{Lsn, PageId, TxnId, INVALID_LSN};
+use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
+use bincode::{Decode, Encode};
 
 /// The type of the log record.
 #[repr(i32)]
@@ -48,8 +48,8 @@ pub struct LogRecord {
     insert_rid: Option<RID>,
     insert_tuple: Option<Tuple>, // Store as Tuple for serialization
     update_rid: Option<RID>,
-    old_tuple: Option<Tuple>,    // Store as Tuple for serialization
-    new_tuple: Option<Tuple>,    // Store as Tuple for serialization
+    old_tuple: Option<Tuple>, // Store as Tuple for serialization
+    new_tuple: Option<Tuple>, // Store as Tuple for serialization
     prev_page_id: Option<PageId>,
     page_id: Option<PageId>,
 }
@@ -336,7 +336,11 @@ impl LogRecord {
     pub fn to_string(&self) -> String {
         format!(
             "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
-            self.size, self.lsn.load(Ordering::SeqCst), self.txn_id, self.prev_lsn, self.log_record_type as i32
+            self.size,
+            self.lsn.load(Ordering::SeqCst),
+            self.txn_id,
+            self.prev_lsn,
+            self.log_record_type as i32
         )
     }
 

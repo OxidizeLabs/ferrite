@@ -59,4 +59,4 @@ DELETE FROM posts WHERE id = 3;
 
 -- Clean up (commented out for safety)
 -- DROP TABLE posts;
--- DROP TABLE users; 
+-- DROP TABLE users;

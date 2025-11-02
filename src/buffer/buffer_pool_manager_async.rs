@@ -1,18 +1,22 @@
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
 use crate::common::config::INVALID_PAGE_ID;
-use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
+use crate::common::config::{DB_PAGE_SIZE, FrameId, PageId};
 use crate::common::exception::DeletePageError;
 use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::storage::page::page::{Page, PageTrait};
-use crate::storage::page::page::{PageType, PAGE_TYPE_OFFSET};
 use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::{PAGE_TYPE_OFFSET, PageType};
+use crate::storage::page::{Page, PageTrait};
 use log::{error, info, trace, warn};
 use parking_lot::{RwLock, RwLockReadGuard};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Type aliases for complex types
+type PageCollection = Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>;
+type PageTable = Arc<RwLock<HashMap<PageId, FrameId>>>;
 
 /// The `BufferPoolManager` is responsible for managing the buffer pool,
 /// including fetching and unpinning pages, and handling page replacement.
@@ -21,8 +25,8 @@ use std::sync::Arc;
 pub struct BufferPoolManager {
     pool_size: usize,
     next_page_id: AtomicU64,
-    pages: Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>,
-    page_table: Arc<RwLock<HashMap<PageId, FrameId>>>,
+    pages: PageCollection,
+    page_table: PageTable,
     replacer: Arc<RwLock<LRUKReplacer>>,
     free_list: Arc<RwLock<Vec<FrameId>>>,
     disk_manager: Arc<AsyncDiskManager>,
@@ -65,14 +69,14 @@ impl BufferPoolManager {
         bypass_disk_cache_for_pinned: bool,
     ) -> Result<Self, String> {
         let free_list: Vec<FrameId> = (0..pool_size as FrameId).collect();
-        
+
         info!(
             "BufferPoolManager initialized with pool size: {}, disk manager health: {}, cache coordination: {}",
             pool_size,
             disk_manager.health_check(),
             use_disk_manager_cache
         );
-        
+
         Ok(Self {
             pool_size,
             next_page_id: AtomicU64::new(0),
@@ -97,14 +101,14 @@ impl BufferPoolManager {
         let disk_manager = Arc::new(
             AsyncDiskManager::new(db_file_path, log_file_path, config)
                 .await
-                .map_err(|e| format!("Failed to create async disk manager: {}", e))?
+                .map_err(|e| format!("Failed to create async disk manager: {}", e))?,
         );
-        
+
         // Start monitoring if enabled
         if let Err(e) = disk_manager.start_monitoring().await {
             warn!("Failed to start disk manager monitoring: {}", e);
         }
-        
+
         // Create replacer (use default LRU-K with k=2)
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(pool_size, 2)));
         Self::new(pool_size, disk_manager, replacer)
@@ -116,7 +120,7 @@ impl BufferPoolManager {
     }
 
     /// Returns the pages in the buffer pool.
-    pub fn get_pages(&self) -> Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>> {
+    pub fn get_pages(&self) -> PageCollection {
         self.pages.clone()
     }
 
@@ -157,7 +161,10 @@ impl BufferPoolManager {
     where
         F: FnOnce(PageId) -> T,
     {
-        trace!("Creating new page with custom options of type {:?}", T::TYPE_ID);
+        trace!(
+            "Creating new page with custom options of type {:?}",
+            T::TYPE_ID
+        );
 
         let frame_id = self.get_available_frame()?;
         trace!("Got available frame: {}", frame_id);
@@ -170,7 +177,10 @@ impl BufferPoolManager {
         let new_page = self.create_typed_page_with_constructor::<T, F>(new_page_id, constructor);
         self.update_page_metadata(frame_id, new_page_id, &new_page);
 
-        trace!("Created new page {} in frame {} with custom options", new_page_id, frame_id);
+        trace!(
+            "Created new page {} in frame {} with custom options",
+            new_page_id, frame_id
+        );
         Some(PageGuard::new_for_new_page(new_page, new_page_id))
     }
 
@@ -310,14 +320,16 @@ impl BufferPoolManager {
     }
 
     /// Load page with cache coordination between BPM and AsyncDiskManager
-    fn load_page_with_cache_coordination(&self, page_id: PageId) -> Result<Vec<u8>, std::io::Error> {
+    fn load_page_with_cache_coordination(
+        &self,
+        page_id: PageId,
+    ) -> Result<Vec<u8>, std::io::Error> {
         trace!("Loading page {} with cache coordination", page_id);
 
         // Use AsyncDiskManager's read_page which checks its multi-level cache first
         // This avoids duplication since AsyncDiskManager handles cache levels internally
-        futures::executor::block_on(async {
-            self.disk_manager.read_page(page_id).await
-        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        futures::executor::block_on(async { self.disk_manager.read_page(page_id).await })
+            .map_err(std::io::Error::other)
     }
 
     /// Load page bypassing AsyncDiskManager cache (BPM as sole cache)
@@ -327,23 +339,30 @@ impl BufferPoolManager {
         // When BPM wants to be the sole cache manager, we still use AsyncDiskManager
         // for I/O but could add a bypass_cache flag in the future
         // For now, we'll use the regular read_page but this could be optimized
-        futures::executor::block_on(async {
-            self.disk_manager.read_page(page_id).await
-        }).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        futures::executor::block_on(async { self.disk_manager.read_page(page_id).await })
+            .map_err(std::io::Error::other)
     }
 
     /// Creates a page from raw data with proper type checking
-    fn create_page_from_data<T: Page + 'static>(&self, page_id: PageId, data: Vec<u8>) -> Option<PageGuard<T>> {
+    fn create_page_from_data<T: Page + 'static>(
+        &self,
+        page_id: PageId,
+        data: Vec<u8>,
+    ) -> Option<PageGuard<T>> {
         // Verify data size
         if data.len() < DB_PAGE_SIZE as usize {
-            error!("Page data too short for page {}: {} bytes", page_id, data.len());
+            error!(
+                "Page data too short for page {}: {} bytes",
+                page_id,
+                data.len()
+            );
             return None;
         }
 
         // Verify page type
         let type_byte = data[PAGE_TYPE_OFFSET];
         let page_type = PageType::from_u8(type_byte);
-        
+
         trace!(
             "Creating page {} from data - Type byte: {}, Parsed type: {:?}, Expected: {:?}",
             page_id,
@@ -364,7 +383,7 @@ impl BufferPoolManager {
 
         // Create new page
         let page_arc = self.create_typed_page::<T>(page_id);
-        
+
         // Set the data
         {
             let mut page_guard = page_arc.write();
@@ -535,10 +554,10 @@ impl BufferPoolManager {
     /// - `page_id`: The ID of the page to deallocate.
     pub fn deallocate_page(&mut self, page_id: PageId) {
         trace!("Deallocating page {}", page_id);
-        
+
         // Remove from page table
         self.remove_page_from_table(page_id);
-        
+
         // Note: In a full implementation, we might want to track deallocated page IDs
         // for reuse, but for now we'll just remove it from the buffer pool
     }
@@ -593,7 +612,7 @@ impl BufferPoolManager {
     }
 
     /// Returns a read guard to the replacer.
-    pub fn get_replacer(&self) -> Option<RwLockReadGuard<LRUKReplacer>> {
+    pub fn get_replacer(&self) -> Option<RwLockReadGuard<'_, LRUKReplacer>> {
         Some(self.replacer.read())
     }
 
@@ -649,11 +668,7 @@ impl BufferPoolManager {
             let pages = self.pages.read();
             if let Some(Some(page)) = pages.get(frame_id as usize) {
                 let is_dirty = page.read().is_dirty();
-                if is_dirty {
-                    Some(page.clone())
-                } else {
-                    None
-                }
+                if is_dirty { Some(page.clone()) } else { None }
             } else {
                 None
             }
@@ -662,7 +677,10 @@ impl BufferPoolManager {
         if let Some(page) = page_to_flush {
             trace!("Flushing dirty page {} before eviction", old_page_id);
             if let Err(e) = self.write_page_to_disk(old_page_id, &page) {
-                error!("Failed to flush page {} during eviction: {}", old_page_id, e);
+                error!(
+                    "Failed to flush page {} during eviction: {}",
+                    old_page_id, e
+                );
             }
         }
 
@@ -671,10 +689,16 @@ impl BufferPoolManager {
 
         // Reset frame
         if let Err(e) = self.reset_frame(frame_id) {
-            error!("Failed to reset frame {} during eviction: {:?}", frame_id, e);
+            error!(
+                "Failed to reset frame {} during eviction: {:?}",
+                frame_id, e
+            );
         }
 
-        trace!("Successfully evicted page {} from frame {}", old_page_id, frame_id);
+        trace!(
+            "Successfully evicted page {} from frame {}",
+            old_page_id, frame_id
+        );
     }
 
     fn get_available_frame(&self) -> Option<FrameId> {
@@ -690,35 +714,35 @@ impl BufferPoolManager {
         // No free frames, try to evict using LRU-K
         trace!("No free frames, attempting eviction");
         let mut replacer = self.replacer.write();
-        
+
         // Try multiple eviction attempts if needed
         for _ in 0..self.pool_size {
             if let Some(frame_id) = replacer.evict() {
                 trace!("LRU-K replacer selected frame {} for eviction", frame_id);
-                
+
                 // Find the page_id for this frame
                 let page_id = {
                     let page_table = self.page_table.read();
                     let mut victim_page_id = None;
-                    
+
                     for (&pid, &fid) in page_table.iter() {
                         if fid == frame_id {
                             victim_page_id = Some(pid);
                             break;
                         }
                     }
-                    
+
                     victim_page_id
                 };
-                
+
                 // If we found a page to evict, do it now
                 if let Some(old_page_id) = page_id {
                     self.evict_old_page(frame_id, old_page_id);
                 }
-                
+
                 return Some(frame_id);
             }
-            
+
             // If no frames are evictable, try to make some evictable
             // Find pages with pin count 0 that aren't marked as evictable
             let pages = self.pages.read();
@@ -728,14 +752,14 @@ impl BufferPoolManager {
                     if page_data.get_pin_count() == 0 {
                         // Drop read lock before acquiring write lock
                         drop(page_data);
-                        
+
                         // Set this frame as evictable
                         replacer.set_evictable(i as FrameId, true);
                     }
                 }
             }
         }
-        
+
         warn!("No evictable frames found after multiple attempts");
         None
     }
@@ -746,7 +770,7 @@ impl BufferPoolManager {
 
     fn create_typed_page<T: Page>(&self, page_id: PageId) -> Arc<RwLock<T>> {
         let mut page = T::new(page_id);
-        
+
         // Set initial page metadata
         page.set_pin_count(1); // Start with pin count 1
         page.set_dirty(false);
@@ -765,12 +789,16 @@ impl BufferPoolManager {
         Arc::new(RwLock::new(page))
     }
 
-    fn create_typed_page_with_constructor<T: Page, F>(&self, page_id: PageId, constructor: F) -> Arc<RwLock<T>>
+    fn create_typed_page_with_constructor<T: Page, F>(
+        &self,
+        page_id: PageId,
+        constructor: F,
+    ) -> Arc<RwLock<T>>
     where
         F: FnOnce(PageId) -> T,
     {
         let mut page = constructor(page_id);
-        
+
         // Set initial page metadata
         page.set_pin_count(1); // Start with pin count 1
         page.set_dirty(false);
@@ -818,13 +846,12 @@ impl BufferPoolManager {
 
         trace!(
             "Updated metadata for page {} in frame {}",
-            page_id,
-            frame_id
+            page_id, frame_id
         );
     }
 
     /// Writes a page to disk with proper cache coordination
-    /// 
+    ///
     /// PERFORMANCE OPTIMIZATION: Now truly async - no more blocking on async operations!
     pub async fn write_page_to_disk_async(
         &self,
@@ -842,7 +869,9 @@ impl BufferPoolManager {
         };
 
         // PERFORMANCE OPTIMIZATION: Use native async - no more blocking!
-        self.disk_manager.write_page(page_id, data_buffer).await
+        self.disk_manager
+            .write_page(page_id, data_buffer)
+            .await
             .map_err(|e| format!("Failed to write page to disk: {}", e))?;
 
         // Mark page as clean after successful write
@@ -851,12 +880,15 @@ impl BufferPoolManager {
             page_guard.set_dirty(false);
         }
 
-        trace!("Successfully wrote page {} to disk with cache coordination", page_id);
+        trace!(
+            "Successfully wrote page {} to disk with cache coordination",
+            page_id
+        );
         Ok(())
     }
 
     /// DEPRECATED: Use write_page_to_disk_async instead
-    /// 
+    ///
     /// This method is kept for backward compatibility but will be removed.
     /// It still blocks on async operations which defeats the purpose of async I/O.
     fn write_page_to_disk(
@@ -864,8 +896,10 @@ impl BufferPoolManager {
         page_id: PageId,
         page: &Arc<RwLock<dyn PageTrait>>,
     ) -> Result<(), String> {
-        warn!("DEPRECATED: write_page_to_disk still uses blocking sync wrapper. Use write_page_to_disk_async instead for better performance.");
-        
+        warn!(
+            "DEPRECATED: write_page_to_disk still uses blocking sync wrapper. Use write_page_to_disk_async instead for better performance."
+        );
+
         // Prepare data for writing
         let data_buffer = {
             let page_guard = page.read();
@@ -887,7 +921,10 @@ impl BufferPoolManager {
             page_guard.set_dirty(false);
         }
 
-        trace!("Successfully wrote page {} to disk with cache coordination", page_id);
+        trace!(
+            "Successfully wrote page {} to disk with cache coordination",
+            page_id
+        );
         Ok(())
     }
 
@@ -900,7 +937,10 @@ impl BufferPoolManager {
     }
 
     /// Enhanced batch page loading for better performance
-    pub async fn load_pages_batch<T: Page + 'static>(&self, page_ids: Vec<PageId>) -> Vec<Option<PageGuard<T>>> {
+    pub async fn load_pages_batch<T: Page + 'static>(
+        &self,
+        page_ids: Vec<PageId>,
+    ) -> Vec<Option<PageGuard<T>>> {
         if page_ids.is_empty() {
             return Vec::new();
         }
@@ -926,20 +966,24 @@ impl BufferPoolManager {
 
         // Load missing pages from disk in batch
         if !pages_to_load.is_empty() {
-            match self.disk_manager.read_pages_batch(pages_to_load.clone()).await {
+            match self
+                .disk_manager
+                .read_pages_batch(pages_to_load.clone())
+                .await
+            {
                 Ok(pages_data) => {
                     for (page_id, data) in pages_to_load.into_iter().zip(pages_data) {
-                                                 if let Some(guard) = self.create_page_from_data::<T>(page_id, data) {
-                             // Get frame and update metadata
-                             if let Some(frame_id) = self.get_available_frame() {
-                                 self.evict_page_if_necessary(frame_id);
-                                 let page_arc = guard.get_page().clone();
-                                 self.update_page_metadata(frame_id, page_id, &page_arc);
-                             }
-                             in_memory_pages.push((page_id, Some(guard)));
-                         } else {
-                             in_memory_pages.push((page_id, None));
-                         }
+                        if let Some(guard) = self.create_page_from_data::<T>(page_id, data) {
+                            // Get frame and update metadata
+                            if let Some(frame_id) = self.get_available_frame() {
+                                self.evict_page_if_necessary(frame_id);
+                                let page_arc = guard.get_page().clone();
+                                self.update_page_metadata(frame_id, page_id, &page_arc);
+                            }
+                            in_memory_pages.push((page_id, Some(guard)));
+                        } else {
+                            in_memory_pages.push((page_id, None));
+                        }
                     }
                 }
                 Err(e) => {
@@ -953,7 +997,10 @@ impl BufferPoolManager {
 
         // Sort by original order and return
         in_memory_pages.sort_by_key(|(page_id, _)| *page_id);
-        in_memory_pages.into_iter().map(|(_, guard)| guard).collect()
+        in_memory_pages
+            .into_iter()
+            .map(|(_, guard)| guard)
+            .collect()
     }
 
     /// Creates a guard from an existing page in memory
@@ -990,8 +1037,11 @@ impl BufferPoolManager {
 
     /// Enhanced batch flush using async disk manager
     pub async fn flush_dirty_pages_batch_async(&self, max_pages: usize) -> Result<usize, String> {
-        trace!("Starting async batch flush of up to {} dirty pages", max_pages);
-        
+        trace!(
+            "Starting async batch flush of up to {} dirty pages",
+            max_pages
+        );
+
         // Collect dirty pages
         let dirty_pages: Vec<(PageId, Vec<u8>)> = {
             let pages = self.pages.read();
@@ -1020,20 +1070,26 @@ impl BufferPoolManager {
         }
 
         // Write in batch using async disk manager
-        let result = self.disk_manager.write_pages_batch(dirty_pages.clone()).await;
-        
+        let result = self
+            .disk_manager
+            .write_pages_batch(dirty_pages.clone())
+            .await;
+
         match result {
             Ok(()) => {
                 // Mark pages as clean
                 let pages = self.pages.read();
                 for (page_id, _) in &dirty_pages {
-                    if let Some(frame_id) = self.page_table.read().get(page_id) {
-                        if let Some(Some(page)) = pages.get(*frame_id as usize) {
-                            page.write().set_dirty(false);
-                        }
+                    if let Some(frame_id) = self.page_table.read().get(page_id)
+                        && let Some(Some(page)) = pages.get(*frame_id as usize)
+                    {
+                        page.write().set_dirty(false);
                     }
                 }
-                trace!("Successfully flushed {} dirty pages in batch", dirty_pages.len());
+                trace!(
+                    "Successfully flushed {} dirty pages in batch",
+                    dirty_pages.len()
+                );
                 Ok(dirty_pages.len())
             }
             Err(e) => {
@@ -1044,23 +1100,30 @@ impl BufferPoolManager {
     }
 
     // Cache Coordination Management Methods
-    
+
     /// Configures cache coordination behavior
-    pub fn set_cache_coordination(&mut self, use_disk_manager_cache: bool, bypass_disk_cache_for_pinned: bool) {
+    pub fn set_cache_coordination(
+        &mut self,
+        use_disk_manager_cache: bool,
+        bypass_disk_cache_for_pinned: bool,
+    ) {
         self.use_disk_manager_cache = use_disk_manager_cache;
         self.bypass_disk_cache_for_pinned = bypass_disk_cache_for_pinned;
-        
+
         info!(
             "Cache coordination updated: use_disk_manager_cache={}, bypass_disk_cache_for_pinned={}",
             use_disk_manager_cache, bypass_disk_cache_for_pinned
         );
     }
-    
+
     /// Gets current cache coordination settings
     pub fn get_cache_coordination_settings(&self) -> (bool, bool) {
-        (self.use_disk_manager_cache, self.bypass_disk_cache_for_pinned)
+        (
+            self.use_disk_manager_cache,
+            self.bypass_disk_cache_for_pinned,
+        )
     }
-    
+
     /// Invalidates a page from AsyncDiskManager cache when it's modified in BPM
     pub fn invalidate_disk_cache(&self, page_id: PageId) {
         if self.use_disk_manager_cache {
@@ -1069,20 +1132,23 @@ impl BufferPoolManager {
             // For now, we rely on the fact that writes update the cache
         }
     }
-    
+
     /// Prefetches pages into AsyncDiskManager cache for future BPM access
     pub async fn prefetch_to_disk_cache(&self, page_ids: Vec<PageId>) -> Result<usize, String> {
         if !self.use_disk_manager_cache || page_ids.is_empty() {
             return Ok(0);
         }
-        
+
         trace!("Prefetching {} pages to disk manager cache", page_ids.len());
-        
+
         // Use batch read to populate AsyncDiskManager cache
         // We don't need the data, just want to populate the cache
         match self.disk_manager.read_pages_batch(page_ids.clone()).await {
             Ok(_) => {
-                trace!("Successfully prefetched {} pages to disk cache", page_ids.len());
+                trace!(
+                    "Successfully prefetched {} pages to disk cache",
+                    page_ids.len()
+                );
                 Ok(page_ids.len())
             }
             Err(e) => {
@@ -1091,28 +1157,29 @@ impl BufferPoolManager {
             }
         }
     }
-    
+
     /// Gets cache coordination statistics
     pub async fn get_cache_coordination_stats(&self) -> CacheCoordinationStats {
-        let (disk_cache_hits, disk_cache_misses, disk_hit_ratio) = 
+        let (disk_cache_hits, disk_cache_misses, disk_hit_ratio) =
             self.disk_manager.get_cache_stats().await;
-        
+
         let bpm_utilization = {
             let page_table_size = self.page_table.read().len();
             page_table_size as f64 / self.pool_size as f64 * 100.0
         };
-        
+
         CacheCoordinationStats {
             use_disk_manager_cache: self.use_disk_manager_cache,
             bypass_disk_cache_for_pinned: self.bypass_disk_cache_for_pinned,
-                         bpm_pool_utilization: bpm_utilization,
+            bpm_pool_utilization: bpm_utilization,
             disk_cache_hits,
             disk_cache_misses,
             disk_cache_hit_ratio: disk_hit_ratio,
-                         total_cache_efficiency: self.calculate_total_cache_efficiency(bpm_utilization, disk_hit_ratio),
+            total_cache_efficiency: self
+                .calculate_total_cache_efficiency(bpm_utilization, disk_hit_ratio),
         }
     }
-    
+
     /// Calculates overall cache efficiency across BPM and AsyncDiskManager
     fn calculate_total_cache_efficiency(&self, bpm_utilization: f64, disk_hit_ratio: f64) -> f64 {
         if self.use_disk_manager_cache {
@@ -1123,14 +1190,18 @@ impl BufferPoolManager {
             bpm_utilization
         }
     }
-    
+
     /// Optimizes cache coordination based on access patterns
     pub async fn optimize_cache_coordination(&mut self) -> Result<(), String> {
         let stats = self.get_cache_coordination_stats().await;
-        
-        trace!("Current cache stats: BPM utilization: {:.2}%, Disk hit ratio: {:.2}%, Total efficiency: {:.2}%",
-               stats.bpm_pool_utilization, stats.disk_cache_hit_ratio * 100.0, stats.total_cache_efficiency);
-        
+
+        trace!(
+            "Current cache stats: BPM utilization: {:.2}%, Disk hit ratio: {:.2}%, Total efficiency: {:.2}%",
+            stats.bpm_pool_utilization,
+            stats.disk_cache_hit_ratio * 100.0,
+            stats.total_cache_efficiency
+        );
+
         // Auto-optimization logic
         if stats.bpm_pool_utilization > 90.0 && stats.disk_cache_hit_ratio < 0.3 {
             // BPM is highly utilized but disk cache isn't helping much
@@ -1139,26 +1210,25 @@ impl BufferPoolManager {
             // Disk cache is very effective, BPM has room
             info!("Cache coordination is working well");
         }
-        
+
         Ok(())
     }
 
     /// Gets comprehensive health status including disk manager metrics (async)
-    /// 
+    ///
     /// PERFORMANCE OPTIMIZATION: Now truly async - no more blocking on async operations!
     pub async fn get_health_status_async(&self) -> BufferPoolHealthStatus {
         let disk_health = self.disk_manager.health_check();
         let disk_metrics = self.disk_manager.get_metrics();
-        let (cache_hits, cache_misses, cache_hit_ratio) = 
-            self.disk_manager.get_cache_stats().await;
-        
+        let (cache_hits, cache_misses, cache_hit_ratio) = self.disk_manager.get_cache_stats().await;
+
         let pages_count = self.pages.read().len();
         let free_list_size = self.free_list.read().len();
         let page_table_size = self.page_table.read().len();
-        
-        let buffer_pool_healthy = pages_count == self.pool_size
-            && free_list_size + page_table_size <= self.pool_size;
-        
+
+        let buffer_pool_healthy =
+            pages_count == self.pool_size && free_list_size + page_table_size <= self.pool_size;
+
         BufferPoolHealthStatus {
             overall_healthy: disk_health && buffer_pool_healthy,
             disk_manager_healthy: disk_health,
@@ -1174,30 +1244,38 @@ impl BufferPoolManager {
     }
 
     /// DEPRECATED: Use get_health_status_async instead
-    /// 
+    ///
     /// This method blocks on async operations which defeats the purpose of async I/O.
     pub fn get_health_status(&self) -> BufferPoolHealthStatus {
-        warn!("DEPRECATED: get_health_status still uses blocking sync wrapper. Use get_health_status_async instead for better performance.");
+        warn!(
+            "DEPRECATED: get_health_status still uses blocking sync wrapper. Use get_health_status_async instead for better performance."
+        );
         futures::executor::block_on(self.get_health_status_async())
     }
 
     /// Gets disk manager metrics
-    pub fn get_disk_metrics(&self) -> crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot {
+    pub fn get_disk_metrics(
+        &self,
+    ) -> crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot {
         self.disk_manager.get_metrics()
     }
 
     /// Forces a full sync to disk
     pub async fn sync_to_disk(&self) -> Result<(), String> {
-        self.disk_manager.sync().await
+        self.disk_manager
+            .sync()
+            .await
             .map_err(|e| format!("Failed to sync to disk: {}", e))
     }
 
     /// DEPRECATED: Use flush_dirty_pages_batch_async instead
-    /// 
+    ///
     /// This method blocks on async operations which defeats the purpose of async I/O.
     /// Use flush_dirty_pages_batch_async for better performance.
     pub fn flush_dirty_pages_batch(&self, max_pages: usize) -> Result<usize, String> {
-        warn!("DEPRECATED: flush_dirty_pages_batch still uses blocking sync wrapper. Use flush_dirty_pages_batch_async instead for better performance.");
+        warn!(
+            "DEPRECATED: flush_dirty_pages_batch still uses blocking sync wrapper. Use flush_dirty_pages_batch_async instead for better performance."
+        );
         futures::executor::block_on(self.flush_dirty_pages_batch_async(max_pages))
     }
 
@@ -1212,31 +1290,33 @@ impl BufferPoolManager {
     }
 
     /// DEPRECATED: Use health_check_async instead
-    /// 
+    ///
     /// This method blocks on async operations which defeats the purpose of async I/O.
     pub fn health_check(&self) -> bool {
-        warn!("DEPRECATED: health_check still uses blocking sync wrapper. Use health_check_async instead for better performance.");
+        warn!(
+            "DEPRECATED: health_check still uses blocking sync wrapper. Use health_check_async instead for better performance."
+        );
         self.get_health_status().overall_healthy
     }
 
     /// Executes an async operation with proper error handling and logging
-    /// 
+    ///
     /// This method provides a generic way to execute async operations on the buffer pool
     /// with consistent error handling, logging, and performance monitoring.
-    /// 
+    ///
     /// # Type Parameters
     /// - `F`: The future type returned by the operation
     /// - `T`: The result type of the operation
-    /// 
+    ///
     /// # Parameters
     /// - `operation_name`: A descriptive name for the operation (used in logging)
     /// - `operation`: The async operation to execute
-    /// 
+    ///
     /// # Returns
     /// The result of the operation wrapped in a Result for error handling
-    /// 
+    ///
     /// # Example
-    /// ```rust
+    /// ```rust,no_run
     /// let result = bpm.run_async_operation("flush_specific_page", async {
     ///     bpm.flush_page_async(page_id).await
     /// }).await?;
@@ -1247,44 +1327,44 @@ impl BufferPoolManager {
         operation: F,
     ) -> Result<T, String>
     where
-        F: std::future::Future<Output = Result<T, String>>,
+        F: Future<Output = Result<T, String>>,
     {
         trace!("Starting async operation: {}", operation_name);
         let start_time = std::time::Instant::now();
-        
+
         // Execute the operation with timeout protection
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(30), // 30 second timeout
-            operation
-        ).await;
-        
+            operation,
+        )
+        .await;
+
         let duration = start_time.elapsed();
-        
+
         match result {
             Ok(Ok(value)) => {
                 trace!(
                     "Async operation '{}' completed successfully in {:?}",
-                    operation_name,
-                    duration
+                    operation_name, duration
                 );
                 Ok(value)
             }
             Ok(Err(e)) => {
                 error!(
                     "Async operation '{}' failed after {:?}: {}",
-                    operation_name,
-                    duration,
-                    e
+                    operation_name, duration, e
                 );
                 Err(format!("Operation '{}' failed: {}", operation_name, e))
             }
             Err(_) => {
                 error!(
                     "Async operation '{}' timed out after {:?}",
-                    operation_name,
-                    duration
+                    operation_name, duration
                 );
-                Err(format!("Operation '{}' timed out after 30 seconds", operation_name))
+                Err(format!(
+                    "Operation '{}' timed out after 30 seconds",
+                    operation_name
+                ))
             }
         }
     }
@@ -1292,21 +1372,22 @@ impl BufferPoolManager {
     /// Gracefully shuts down with proper async disk manager cleanup
     pub async fn shutdown(&mut self) -> Result<(), String> {
         info!("Shutting down BufferPoolManager");
-        
+
         // Flush all dirty pages using async batch operation
         let dirty_count = self.flush_dirty_pages_batch_async(self.pool_size).await?;
         info!("Flushed {} dirty pages during shutdown", dirty_count);
-        
+
         // Sync to ensure all data is written
         self.sync_to_disk().await?;
-        
+
         // Shutdown the disk manager
         let disk_manager = Arc::clone(&self.disk_manager);
-        if let Some(mut dm) = Arc::try_unwrap(disk_manager).ok() {
-            dm.shutdown().await
+        if let Ok(mut dm) = Arc::try_unwrap(disk_manager) {
+            dm.shutdown()
+                .await
                 .map_err(|e| format!("Failed to shutdown disk manager: {}", e))?;
         }
-        
+
         info!("BufferPoolManager shutdown complete");
         Ok(())
     }
@@ -1358,7 +1439,7 @@ impl Clone for BufferPoolManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::page::page::{BasicPage, PageTrait, PageType};
+    use crate::storage::page::{BasicPage, PageTrait, PageType};
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -1388,16 +1469,11 @@ mod tests {
 
             // Use default configuration for testing
             let config = DiskManagerConfig::default();
-            
+
             let bpm = Arc::new(
-                BufferPoolManager::new_with_config(
-                    BUFFER_POOL_SIZE,
-                    db_path,
-                    log_path,
-                    config,
-                )
-                .await
-                .expect("Failed to create BufferPoolManager")
+                BufferPoolManager::new_with_config(BUFFER_POOL_SIZE, db_path, log_path, config)
+                    .await
+                    .expect("Failed to create BufferPoolManager"),
             );
 
             Self {
@@ -1473,9 +1549,9 @@ mod tests {
         let page_guard = bpm
             .new_page::<BasicPage>()
             .expect("Failed to create new page");
-        
+
         let page_id = page_guard.read().get_page_id();
-        
+
         // Write some test data
         {
             let mut data = page_guard.write();
@@ -1484,19 +1560,21 @@ mod tests {
         }
 
         // Flush to disk using async version
-        bpm.flush_page_async(page_id).await.expect("Failed to flush page");
-        
+        bpm.flush_page_async(page_id)
+            .await
+            .expect("Failed to flush page");
+
         // Unpin the page
         drop(page_guard);
-        
+
         // Delete from buffer pool to force disk read
         bpm.delete_page(page_id).expect("Failed to delete page");
-        
+
         // Fetch again - should read from disk
         let reloaded_guard = bpm
             .fetch_page::<BasicPage>(page_id)
             .expect("Failed to fetch page from disk");
-        
+
         // Verify data was persisted
         let data = reloaded_guard.read();
         assert_eq!(data.get_data()[1], 123);
@@ -1515,14 +1593,16 @@ mod tests {
         for i in 0..3 {
             let page_guard = bpm.new_page::<BasicPage>().expect("Failed to create page");
             let page_id = page_guard.read().get_page_id();
-            
+
             {
                 let mut data = page_guard.write();
                 data.get_data_mut()[1] = i as u8;
             }
-            
+
             drop(page_guard);
-            bpm.flush_page_async(page_id).await.expect("Failed to flush page");
+            bpm.flush_page_async(page_id)
+                .await
+                .expect("Failed to flush page");
         }
 
         assert!(bpm.health_check());
@@ -1539,18 +1619,20 @@ mod tests {
             let page_guard = bpm.new_page::<BasicPage>().expect("Failed to create page");
             let page_id = page_guard.read().get_page_id();
             page_ids.push(page_id);
-            
+
             {
                 let mut data = page_guard.write();
                 data.get_data_mut()[1] = i as u8;
                 data.set_dirty(true);
             }
-            
+
             drop(page_guard);
         }
 
         // Flush in batch
-        let flushed_count = bpm.flush_dirty_pages_batch(3).expect("Failed to batch flush");
+        let flushed_count = bpm
+            .flush_dirty_pages_batch(3)
+            .expect("Failed to batch flush");
         assert!(flushed_count <= 3);
         assert!(flushed_count > 0);
     }
@@ -1561,9 +1643,11 @@ mod tests {
         let bpm = ctx.bpm();
 
         // Test successful operation
-        let result = bpm.run_async_operation("test_health_check", async {
-            Ok(bpm.health_check_async().await)
-        }).await;
+        let result = bpm
+            .run_async_operation("test_health_check", async {
+                Ok(bpm.health_check_async().await)
+            })
+            .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap());
@@ -1575,27 +1659,30 @@ mod tests {
         let bpm = ctx.bpm();
 
         // Test operation that involves actual page management
-        let result = bpm.run_async_operation("create_and_flush_page", async {
-            // Create a new page
-            let page_guard = bpm.new_page::<BasicPage>()
-                .ok_or_else(|| "Failed to create page".to_string())?;
-            
-            let page_id = page_guard.read().get_page_id();
-            
-            // Write some data
-            {
-                let mut data = page_guard.write();
-                data.get_data_mut()[0] = 42;
-                data.set_dirty(true);
-            }
-            
-            drop(page_guard);
-            
-            // Flush the page
-            bpm.flush_page_async(page_id).await?;
-            
-            Ok(page_id)
-        }).await;
+        let result = bpm
+            .run_async_operation("create_and_flush_page", async {
+                // Create a new page
+                let page_guard = bpm
+                    .new_page::<BasicPage>()
+                    .ok_or_else(|| "Failed to create page".to_string())?;
+
+                let page_id = page_guard.read().get_page_id();
+
+                // Write some data
+                {
+                    let mut data = page_guard.write();
+                    data.get_data_mut()[0] = 42;
+                    data.set_dirty(true);
+                }
+
+                drop(page_guard);
+
+                // Flush the page
+                bpm.flush_page_async(page_id).await?;
+
+                Ok(page_id)
+            })
+            .await;
 
         assert!(result.is_ok());
         let page_id = result.unwrap();
@@ -1608,9 +1695,11 @@ mod tests {
         let bpm = ctx.bpm();
 
         // Test operation that fails
-        let result = bpm.run_async_operation("failing_operation", async {
-            Err::<(), String>("Intentional test failure".to_string())
-        }).await;
+        let result = bpm
+            .run_async_operation("failing_operation", async {
+                Err::<(), String>("Intentional test failure".to_string())
+            })
+            .await;
 
         assert!(result.is_err());
         let error_msg = result.unwrap_err();
@@ -1624,10 +1713,12 @@ mod tests {
         let bpm = ctx.bpm();
 
         // Test operation that times out (using a longer delay than the timeout)
-        let result = bpm.run_async_operation("slow_operation", async {
-            tokio::time::sleep(std::time::Duration::from_secs(35)).await;
-            Ok::<(), String>(())
-        }).await;
+        let result = bpm
+            .run_async_operation("slow_operation", async {
+                tokio::time::sleep(std::time::Duration::from_secs(35)).await;
+                Ok::<(), String>(())
+            })
+            .await;
 
         assert!(result.is_err());
         let error_msg = result.unwrap_err();
@@ -1641,38 +1732,42 @@ mod tests {
         let bpm = ctx.bpm();
 
         // Test a complex workflow involving multiple async operations
-        let result = bpm.run_async_operation("complex_workflow", async {
-            let mut page_ids = Vec::new();
-            
-            // Create multiple pages
-            for i in 0..3 {
-                let page_guard = bpm.new_page::<BasicPage>()
-                    .ok_or_else(|| format!("Failed to create page {}", i))?;
-                
-                let page_id = page_guard.read().get_page_id();
-                page_ids.push(page_id);
-                
-                // Write unique data to each page
-                {
-                    let mut data = page_guard.write();
-                    data.get_data_mut()[0] = i as u8;
-                    data.set_dirty(true);
+        let result = bpm
+            .run_async_operation("complex_workflow", async {
+                let mut page_ids = Vec::new();
+
+                // Create multiple pages
+                for i in 0..3 {
+                    let page_guard = bpm
+                        .new_page::<BasicPage>()
+                        .ok_or_else(|| format!("Failed to create page {}", i))?;
+
+                    let page_id = page_guard.read().get_page_id();
+                    page_ids.push(page_id);
+
+                    // Write unique data to each page
+                    {
+                        let mut data = page_guard.write();
+                        data.get_data_mut()[0] = i as u8;
+                        data.set_dirty(true);
+                    }
+
+                    drop(page_guard);
                 }
-                
-                drop(page_guard);
-            }
-            
-            // Flush all pages
-            for page_id in &page_ids {
-                bpm.flush_page_async(*page_id).await
-                    .map_err(|e| format!("Failed to flush page {}: {}", page_id, e))?;
-            }
-            
-            // Note: Simplified test - in a real scenario we would verify page data
-            // but for the test we just ensure all operations completed successfully
-            
-            Ok(page_ids.len())
-        }).await;
+
+                // Flush all pages
+                for page_id in &page_ids {
+                    bpm.flush_page_async(*page_id)
+                        .await
+                        .map_err(|e| format!("Failed to flush page {}: {}", page_id, e))?;
+                }
+
+                // Note: Simplified test - in a real scenario we would verify page data
+                // but for the test we just ensure all operations completed successfully
+
+                Ok(page_ids.len())
+            })
+            .await;
 
         match result {
             Ok(count) => {
@@ -1692,39 +1787,39 @@ mod tests {
         // Test multiple sequential async operations to simulate concurrency concepts
         // without running into complex lifetime/Send issues
         let mut results = Vec::new();
-        
+
         for i in 0..3 {
-            let result = bpm.run_async_operation(
-                &format!("sequential_op_{}", i),
-                async {
+            let result = bpm
+                .run_async_operation(&format!("sequential_op_{}", i), async {
                     // Create a page
-                    let page_guard = bpm.new_page::<BasicPage>()
+                    let page_guard = bpm
+                        .new_page::<BasicPage>()
                         .ok_or_else(|| "Failed to create page".to_string())?;
-                    
+
                     let page_id = page_guard.read().get_page_id();
-                    
+
                     // Write data
                     {
                         let mut data = page_guard.write();
                         data.get_data_mut()[0] = i as u8;
                         data.set_dirty(true);
                     }
-                    
+
                     drop(page_guard);
-                    
+
                     // Small delay to simulate work
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                    
+
                     // Flush the page
                     bpm.flush_page_async(page_id).await?;
-                    
+
                     Ok(page_id)
-                }
-            ).await;
-            
+                })
+                .await;
+
             results.push(result);
         }
-        
+
         // Verify all operations succeeded
         for (i, result) in results.into_iter().enumerate() {
             assert!(result.is_ok(), "Operation {} should succeed", i);
@@ -1738,18 +1833,20 @@ mod tests {
 
         // Test that performance timing works correctly
         let start = std::time::Instant::now();
-        
-        let result = bpm.run_async_operation("timed_operation", async {
-            // Simulate some work
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            Ok::<String, String>("completed".to_string())
-        }).await;
+
+        let result = bpm
+            .run_async_operation("timed_operation", async {
+                // Simulate some work
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                Ok::<String, String>("completed".to_string())
+            })
+            .await;
 
         let elapsed = start.elapsed();
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "completed");
         assert!(elapsed >= std::time::Duration::from_millis(50));
         assert!(elapsed < std::time::Duration::from_millis(1000)); // Should complete quickly
     }
-} 
+}

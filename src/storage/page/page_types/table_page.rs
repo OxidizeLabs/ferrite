@@ -1,16 +1,13 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
+use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
-use crate::storage::page::page::Page;
-use crate::storage::page::page::{
-    PageTrait, PageType, PageTypeId, PAGE_ID_OFFSET, PAGE_TYPE_OFFSET,
-};
+use crate::storage::page::Page;
+use crate::storage::page::{PAGE_ID_OFFSET, PAGE_TYPE_OFFSET, PageTrait, PageType, PageTypeId};
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use log;
+use bincode::{Decode, Encode};
 use log::{debug, error};
 use std::any::Any;
 use std::mem::size_of;
-use bincode::{Decode, Encode};
 
 /// Represents a table page using a slotted page format.
 ///
@@ -29,7 +26,7 @@ use bincode::{Decode, Encode};
 ///
 /// Tuple format:
 /// | meta | data |
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TablePage {
     data: Box<[u8; DB_PAGE_SIZE as usize]>,
     header: TablePageHeader,
@@ -38,7 +35,7 @@ pub struct TablePage {
     pin_count: i32,
 }
 
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Encode, Decode)]
 struct TablePageHeader {
     page_id: PageId,
     next_page_id: PageId,
@@ -182,17 +179,20 @@ impl TablePage {
             debug!("Tuple is too large for any page, rejecting");
             return None;
         }
-        
+
         // Then serialize the tuple to get its actual size
         let tuple_data = match bincode::encode_to_vec(tuple, bincode::config::standard()) {
             Ok(data) => data,
             Err(_) => return None,
         };
         let tuple_size = tuple_data.len() as u16;
-        
+
         // Enforce a hard maximum size for any tuple
         if tuple_size > 3500 {
-            debug!("Tuple size {} exceeds maximum allowed size of 3500 bytes", tuple_size);
+            debug!(
+                "Tuple size {} exceeds maximum allowed size of 3500 bytes",
+                tuple_size
+            );
             return None;
         }
 
@@ -204,11 +204,13 @@ impl TablePage {
 
         let tuple_offset = slot_end_offset.saturating_sub(tuple_size);
         let offset_size = self.get_header_size() + self.tuple_info_size() + 100; // Add safety buffer
-        
+
         // Ensure we have enough space for tuple data + metadata + safety margin
         if tuple_offset < offset_size {
-            debug!("Not enough space in page: tuple_offset {} < offset_size {}", 
-                   tuple_offset, offset_size);
+            debug!(
+                "Not enough space in page: tuple_offset {} < offset_size {}",
+                tuple_offset, offset_size
+            );
             None
         } else {
             Some(tuple_offset)
@@ -217,7 +219,7 @@ impl TablePage {
 
     pub fn update_tuple(
         &mut self,
-        meta: &TupleMeta,
+        meta: TupleMeta,
         tuple: &Tuple,
         rid: RID,
     ) -> Result<(), PageError> {
@@ -236,8 +238,8 @@ impl TablePage {
 
         // Try to update in place if the new tuple size is smaller than or equal to current size
         if new_size <= current_size {
-            // Update the tuple metadata
-            self.tuple_info[tuple_id].2 = meta.clone();
+            // Update metadata in tuple_info
+            self.tuple_info[tuple_id].2 = meta;
 
             // Update the size to reflect the actual new size
             self.tuple_info[tuple_id].1 = new_size;
@@ -289,7 +291,7 @@ impl TablePage {
             }
 
             // Update tuple info with new location
-            self.tuple_info[tuple_id] = (new_offset, new_size, meta.clone());
+            self.tuple_info[tuple_id] = (new_offset, new_size, meta);
 
             // Write new tuple data
             let start = new_offset as usize;
@@ -305,7 +307,7 @@ impl TablePage {
     }
 
     /// Updates the metadata of a tuple.
-    pub fn update_tuple_meta(&mut self, meta: &TupleMeta, rid: &RID) -> Result<(), String> {
+    pub fn update_tuple_meta(&mut self, meta: TupleMeta, rid: &RID) -> Result<(), String> {
         debug!(
             "Updating tuple meta for RID {:?}, current num_tuples: {}",
             rid, self.header.num_tuples
@@ -332,7 +334,7 @@ impl TablePage {
             self.tuple_info.len()
         );
 
-        let old_meta = &mut self.tuple_info[tuple_id].2;
+        let old_meta = &self.tuple_info[tuple_id].2;
         debug!(
             "Old meta - creator_txn: {}, commit_ts: {}, deleted: {}",
             old_meta.get_creator_txn_id(),
@@ -355,12 +357,13 @@ impl TablePage {
         } else if old_meta.is_deleted() && !meta.is_deleted() {
             self.header.num_deleted_tuples = self.header.num_deleted_tuples.saturating_sub(1);
             debug!(
-                "Decrementing num_deleted_tuples to {}",
+                "Decrimenting num_deleted_tuples to {}",
                 self.header.num_deleted_tuples
             );
         }
 
-        *old_meta = meta.clone();
+        // Simple copy since TupleMeta is now Copy
+        self.tuple_info[tuple_id].2 = meta;
         self.is_dirty = true;
 
         debug!(
@@ -413,7 +416,14 @@ impl TablePage {
 
         // Deserialize tuple data
         match bincode::decode_from_slice(&self.data[start..end], bincode::config::standard()) {
-            Ok((tuple, _)) => Ok((meta.clone(), tuple)),
+            Ok((tuple, _)) => {
+                // Create owned TupleMeta by copying fields instead of cloning
+                let mut owned_meta =
+                    TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
+                owned_meta.set_commit_timestamp(meta.get_commit_timestamp());
+                owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
+                Ok((owned_meta, tuple))
+            }
             Err(e) => Err(format!("Failed to deserialize tuple: {}", e)),
         }
     }
@@ -428,7 +438,13 @@ impl TablePage {
             ));
         }
 
-        Ok(self.tuple_info[tuple_id].2.clone())
+        // Create owned TupleMeta by copying fields instead of cloning
+        let meta = &self.tuple_info[tuple_id].2;
+        let mut owned_meta =
+            TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
+        owned_meta.set_commit_timestamp(meta.get_commit_timestamp());
+        owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
+        Ok(owned_meta)
     }
 
     pub fn get_num_tuples(&self) -> u16 {
@@ -453,7 +469,7 @@ impl TablePage {
         self.is_dirty = true;
     }
 
-        /// Serializes the page into a fixed-size byte array
+    /// Serializes the page into a fixed-size byte array
     pub fn serialize(&self) -> [u8; DB_PAGE_SIZE as usize] {
         debug!("Starting page serialization");
         let mut buffer = [0u8; DB_PAGE_SIZE as usize];
@@ -479,16 +495,23 @@ impl TablePage {
         offset += 4;
 
         // Calculate total needed space for metadata to ensure we have room for end marker
-        let tuple_info_size: usize = self.tuple_info.iter().map(|(_, _, meta)| {
-            4 + bincode::encode_to_vec(meta, bincode::config::standard())
-                .expect("Failed to serialize meta")
-                .len()
-        }).sum();
-        
+        let tuple_info_size: usize = self
+            .tuple_info
+            .iter()
+            .map(|(_, _, meta)| {
+                4 + bincode::encode_to_vec(meta, bincode::config::standard())
+                    .expect("Failed to serialize meta")
+                    .len()
+            })
+            .sum();
+
         let total_metadata_size = offset + tuple_info_size + 4; // +4 for end magic
         if total_metadata_size > buffer.len() {
-            debug!("Warning: Metadata would exceed page size ({} > {}), truncating", 
-                total_metadata_size, buffer.len());
+            debug!(
+                "Warning: Metadata would exceed page size ({} > {}), truncating",
+                total_metadata_size,
+                buffer.len()
+            );
             // If this happens in production, it indicates a serious issue with page design
             // We'll still write what we can but the page may not be fully valid
         }
@@ -497,11 +520,12 @@ impl TablePage {
         debug!("Writing {} tuple info entries", self.tuple_info.len());
         for (i, (tuple_offset, size, meta)) in self.tuple_info.iter().enumerate() {
             // Check if we have enough room for this tuple entry plus end magic
-            if offset + 4 + 4 > buffer.len() { // +4 for tuple info, +4 for end magic
+            if offset + 4 + 4 > buffer.len() {
+                // +4 for tuple info, +4 for end magic
                 debug!("Not enough space for tuple info {}, stopping", i);
                 break;
             }
-            
+
             debug!(
                 "Writing tuple info {} - offset: {}, size: {}, meta txn_id: {}",
                 i,
@@ -518,14 +542,14 @@ impl TablePage {
             // Write tuple meta
             let meta_bytes = bincode::encode_to_vec(meta, bincode::config::standard())
                 .expect("Failed to serialize meta");
-            
+
             // Check if we have room for meta plus end magic
             if offset + meta_bytes.len() + 4 > buffer.len() {
                 debug!("Not enough space for tuple meta, stopping");
                 offset -= 4; // Roll back the tuple offset/size
                 break;
             }
-            
+
             buffer[offset..offset + meta_bytes.len()].copy_from_slice(&meta_bytes);
             offset += meta_bytes.len();
         }
@@ -533,21 +557,24 @@ impl TablePage {
         // Write another magic number to mark the end of metadata (in big-endian format)
         // Always use a fixed known offset of 41 for the end magic marker for deserialization consistency
         // This is a hardcoded value based on the observed behavior in the logs
-        let fixed_offset = 41;  // Using constant offset from logs
+        let fixed_offset = 41; // Using constant offset from logs
         let end_magic = 0xCAFEBABEu32.to_be_bytes();
         debug!("Writing end magic number at fixed offset {}", fixed_offset);
-        
+
         if fixed_offset + 4 <= buffer.len() {
             buffer[fixed_offset..fixed_offset + 4].copy_from_slice(&end_magic);
             debug!("End magic written successfully at fixed offset");
         } else {
-            debug!("ERROR: Not enough space for end magic marker at fixed offset {}", fixed_offset);
+            debug!(
+                "ERROR: Not enough space for end magic marker at fixed offset {}",
+                fixed_offset
+            );
             // This is a critical error - write the magic at the last possible position
             let last_pos = buffer.len() - 4;
             buffer[last_pos..].copy_from_slice(&end_magic);
             debug!("End magic written at backup position {}", last_pos);
         }
-        
+
         // Also write at the current offset for backward compatibility
         if offset + 4 <= buffer.len() && offset != fixed_offset {
             debug!("Also writing end magic at calculated offset {}", offset);
@@ -630,14 +657,12 @@ impl TablePage {
             );
 
             // Read meta - use actual decoding to get the exact size consumed
-            let meta_result: Result<(TupleMeta, usize), _> = bincode::decode_from_slice(
-                &bytes[offset..], 
-                bincode::config::standard()
-            );
-            
-            let (meta, meta_size) = meta_result
-                .map_err(|e| format!("Failed to deserialize meta: {}", e))?;
-            
+            let meta_result: Result<(TupleMeta, usize), _> =
+                bincode::decode_from_slice(&bytes[offset..], bincode::config::standard());
+
+            let (meta, meta_size) =
+                meta_result.map_err(|e| format!("Failed to deserialize meta: {}", e))?;
+
             debug!("Deserialized meta with size {} bytes", meta_size);
             offset += meta_size;
 
@@ -645,46 +670,59 @@ impl TablePage {
         }
 
         // Before looking for end magic, let's debug key offsets and expected positions
-        debug!("Page size: {}, After reading tuples offset: {}, Expected end magic at: 41", 
-               bytes.len(), offset);
+        debug!(
+            "Page size: {}, After reading tuples offset: {}, Expected end magic at: 41",
+            bytes.len(),
+            offset
+        );
 
-        // First check if the magic was written at a fixed known offset (41) where the serialization 
+        // First check if the magic was written at a fixed known offset (41) where the serialization
         // logs showed it was written
         let known_offset = 41;
         if known_offset + 4 <= bytes.len() {
-            let fixed_end_magic = u32::from_be_bytes(bytes[known_offset..known_offset + 4].try_into().unwrap());
-            debug!("Checking for end magic at fixed offset {}: {:x}", known_offset, fixed_end_magic);
+            let fixed_end_magic =
+                u32::from_be_bytes(bytes[known_offset..known_offset + 4].try_into().unwrap());
+            debug!(
+                "Checking for end magic at fixed offset {}: {:x}",
+                known_offset, fixed_end_magic
+            );
             if fixed_end_magic == 0xCAFEBABE {
                 debug!("Found end magic at fixed offset position");
                 return Ok(page);
             }
         }
-        
+
         // Then try at the current calculated offset
         if offset + 4 <= bytes.len() {
             let end_magic = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap());
-            debug!("Checking for end magic at calculated offset {}: {:x}", offset, end_magic);
+            debug!(
+                "Checking for end magic at calculated offset {}: {:x}",
+                offset, end_magic
+            );
             if end_magic == 0xCAFEBABE {
                 debug!("Found end magic at calculated position");
                 return Ok(page);
             }
         }
-        
+
         // As a last resort, check at the end of the page
         let last_pos = bytes.len() - 4;
         let end_magic = u32::from_be_bytes(bytes[last_pos..].try_into().unwrap());
-        debug!("Checking for end magic at end of page {}: {:x}", last_pos, end_magic);
+        debug!(
+            "Checking for end magic at end of page {}: {:x}",
+            last_pos, end_magic
+        );
         if end_magic == 0xCAFEBABE {
             debug!("Found end magic at end of page");
             return Ok(page);
         }
-        
+
         // If we reach here, we didn't find the magic number anywhere
         Err("End magic marker not found".to_string())
-        
+
         // This code is unreachable due to the return statements above
         // Keeping it for documentation purposes
-        /* 
+        /*
         debug!(
             "Completed page deserialization - num_tuples: {}, tuple_info.len: {}",
             page.header.num_tuples,
@@ -709,7 +747,7 @@ impl TablePage {
     /// - `rid`: RID of the tuple to update
     pub unsafe fn update_tuple_in_place_unsafe(
         &mut self,
-        meta: &TupleMeta,
+        meta: TupleMeta,
         tuple: &Tuple,
         rid: RID,
     ) -> Result<(), String> {
@@ -728,8 +766,8 @@ impl TablePage {
         // Get current tuple info
         let (offset, size, _) = self.tuple_info[tuple_id];
 
-        // Update the tuple metadata
-        self.tuple_info[tuple_id].2 = meta.clone();
+        // Update the tuple metadata (simple copy since TupleMeta is Copy)
+        self.tuple_info[tuple_id].2 = meta;
 
         // Write the new tuple data
         let start = offset as usize;
@@ -804,20 +842,20 @@ impl TablePage {
             Ok(data) => data.len(),
             Err(_) => return true, // If we can't serialize it, consider it too large
         };
-        
+
         // Add space for tuple metadata in tuple_info
         let tuple_info_entry_size = size_of::<(u16, u16, TupleMeta)>();
         let total_size = serialized_size + tuple_info_entry_size;
-        
+
         // Reserve additional space for metadata structures to ensure we have room for end markers
         let reserved_metadata_size = self.get_header_size() as usize + 100; // Header + safety buffer
-        
+
         // A tuple is too large if it's more than ~75% of the page size to leave room for overhead
         let max_safe_tuple_size = (DB_PAGE_SIZE as usize * 3) / 4;
-        
+
         // Check both the absolute size and relative to page size
         serialized_size > 3500 || // Ensure large tuples (>3500 bytes) are rejected
-        total_size > max_safe_tuple_size || 
+        total_size > max_safe_tuple_size ||
         total_size > (DB_PAGE_SIZE as usize - reserved_metadata_size)
     }
 
@@ -877,8 +915,9 @@ impl TablePage {
             tuple_data.len(),
             meta.get_creator_txn_id()
         );
+        // Simple copy since TupleMeta is Copy
         self.tuple_info
-            .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
+            .push((tuple_offset, tuple_data.len() as u16, *meta));
 
         // Write tuple data to page
         let start = tuple_offset as usize;
@@ -961,8 +1000,9 @@ impl TablePage {
             tuple_data.len(),
             meta.get_creator_txn_id()
         );
+        // Simple copy since TupleMeta is Copy
         self.tuple_info
-            .push((tuple_offset, tuple_data.len() as u16, meta.clone()));
+            .push((tuple_offset, tuple_data.len() as u16, *meta));
 
         // Write tuple data to page
         let start = tuple_offset as usize;
@@ -1120,9 +1160,9 @@ mod unit_tests {
     #[test]
     fn test_insert_and_get_tuple() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let tuple_id = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let tuple_id = page.insert_tuple(&meta, &tuple).unwrap();
         assert_eq!(page.header.num_tuples, 1);
 
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&tuple_id, false).unwrap();
@@ -1137,15 +1177,15 @@ mod unit_tests {
     #[test]
     fn test_update_tuple_meta() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let tuple_rid_id = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let tuple_rid_id = page.insert_tuple(&meta, &tuple).unwrap();
 
         // Create new metadata with deleted flag set to true
         let mut new_meta = TupleMeta::new(456);
         new_meta.set_deleted(true);
 
-        page.update_tuple_meta(&new_meta, &tuple_rid_id).unwrap();
+        page.update_tuple_meta(new_meta, &tuple_rid_id).unwrap();
         let retrieved_meta = page.get_tuple_meta(&tuple_rid_id).unwrap();
 
         assert_eq!(
@@ -1203,15 +1243,15 @@ mod unit_tests {
     #[test]
     fn test_update_tuple_in_place_unsafe() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
         // First insert a tuple
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
 
         // Test with invalid RID
         let invalid_rid = RID::new(1, 999);
         unsafe {
-            match page.update_tuple_in_place_unsafe(&meta, &tuple, invalid_rid) {
+            match page.update_tuple_in_place_unsafe(meta, &tuple, invalid_rid) {
                 Ok(_) => panic!("Expected error for invalid RID"),
                 Err(err) => {
                     assert!(
@@ -1228,7 +1268,7 @@ mod unit_tests {
         let new_tuple = create_test_tuple(2).1;
 
         unsafe {
-            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, rid)
+            page.update_tuple_in_place_unsafe(new_meta, &new_tuple, rid)
                 .unwrap();
         }
 
@@ -1312,7 +1352,7 @@ mod unit_tests {
         let meta = TupleMeta::new(123);
 
         // Test updating invalid tuple metadata
-        match page.update_tuple_meta(&meta, &invalid_rid) {
+        match page.update_tuple_meta(meta, &invalid_rid) {
             Ok(_) => panic!("Expected error for invalid tuple meta update"),
             Err(err) => {
                 assert!(
@@ -1348,9 +1388,9 @@ mod tuple_operation_tests {
     #[test]
     fn test_basic_tuple_insertion() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
         assert_eq!(page.header.num_tuples, 1);
         assert_eq!(rid.get_page_id(), 1);
         assert_eq!(rid.get_slot_num(), 0);
@@ -1359,9 +1399,9 @@ mod tuple_operation_tests {
     #[test]
     fn test_tuple_retrieval() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
         let (retrieved_meta, retrieved_tuple) = page.get_tuple(&rid, false).unwrap();
 
         assert_eq!(
@@ -1376,15 +1416,15 @@ mod tuple_operation_tests {
     #[test]
     fn test_tuple_metadata_update() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
 
         // Create new metadata with deleted flag set to true
         let mut new_meta = TupleMeta::new(456);
         new_meta.set_deleted(true);
 
-        page.update_tuple_meta(&new_meta, &rid).unwrap();
+        page.update_tuple_meta(new_meta, &rid).unwrap();
         let retrieved_meta = page.get_tuple_meta(&rid).unwrap();
 
         assert_eq!(
@@ -1398,14 +1438,14 @@ mod tuple_operation_tests {
     #[test]
     fn test_tuple_in_place_update() {
         let mut page = TablePage::new(1);
-        let (meta, mut tuple) = create_test_tuple(1);
+        let (meta, tuple) = create_test_tuple(1);
 
-        let rid = page.insert_tuple(&meta, &mut tuple).unwrap();
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
         let new_meta = TupleMeta::new(789);
         let new_tuple = create_test_tuple(2).1;
 
         unsafe {
-            page.update_tuple_in_place_unsafe(&new_meta, &new_tuple, rid)
+            page.update_tuple_in_place_unsafe(new_meta, &new_tuple, rid)
                 .unwrap();
         }
 
@@ -1502,7 +1542,7 @@ mod error_handling_tests {
         let invalid_rid = RID::new(1, 100);
         let meta = TupleMeta::new(123);
         assert!(matches!(
-            page.update_tuple_meta(&meta, &invalid_rid),
+            page.update_tuple_meta(meta, &invalid_rid),
             Err(..)
         ));
     }
@@ -1515,7 +1555,7 @@ mod error_handling_tests {
 
         unsafe {
             assert!(matches!(
-                page.update_tuple_in_place_unsafe(&meta, &tuple, invalid_rid),
+                page.update_tuple_in_place_unsafe(meta, &tuple, invalid_rid),
                 Err(..)
             ));
         }
@@ -1683,7 +1723,8 @@ mod serialization_tests {
 
         // Verify tuple
         debug!("Retrieving tuple from deserialized page");
-        let (deserialized_meta, deserialized_tuple) = deserialized_page.get_tuple(&rid, false).unwrap();
+        let (deserialized_meta, deserialized_tuple) =
+            deserialized_page.get_tuple(&rid, false).unwrap();
 
         debug!("Comparing metadata");
         assert_eq!(
@@ -1708,9 +1749,9 @@ mod serialization_tests {
         // Insert test tuple before spawning threads
         {
             let mut page_guard = page.lock();
-            let (meta, mut tuple) = create_test_tuple();
+            let (meta, tuple) = create_test_tuple();
             debug!("Original meta timestamp: {:?}", meta.get_commit_timestamp());
-            page_guard.insert_tuple(&meta, &mut tuple).unwrap();
+            page_guard.insert_tuple(&meta, &tuple).unwrap();
 
             // Verify initial insertion
             let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid, false).unwrap();
@@ -1765,7 +1806,7 @@ mod serialization_tests {
             match handle.join() {
                 Ok(result) => {
                     let (timestamp, value) =
-                        result.expect(&format!("Thread {} failed to read tuple", i));
+                        result.unwrap_or_else(|_| panic!("Thread {} failed to read tuple", i));
                     assert_eq!(timestamp, 123);
                     assert_eq!(value, Value::new(42));
                 }
@@ -1826,7 +1867,7 @@ mod serialization_tests {
             let updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
             // Update the tuple - this is where the bug occurred
-            let result = page.update_tuple(&current_meta, &updated_tuple, rid);
+            let result = page.update_tuple(current_meta, &updated_tuple, rid);
             assert!(result.is_ok(), "Failed to update tuple {}: {:?}", i, result);
         }
 
@@ -1889,7 +1930,7 @@ mod serialization_tests {
         let updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
         // This update changes the tuple size significantly
-        let result = page.update_tuple(&meta, &updated_tuple, rid);
+        let result = page.update_tuple(meta, &updated_tuple, rid);
         assert!(
             result.is_ok(),
             "Failed to update tuple with size change: {:?}",
@@ -1951,7 +1992,7 @@ mod serialization_tests {
         let updated_tuple = Tuple::new(&updated_values, &schema, rid);
 
         // This update makes the tuple smaller - this was causing corruption
-        let result = page.update_tuple(&meta, &updated_tuple, rid);
+        let result = page.update_tuple(meta, &updated_tuple, rid);
         assert!(
             result.is_ok(),
             "Failed to update tuple with smaller size: {:?}",
@@ -2062,13 +2103,13 @@ mod page_type_tests {
         // Update tuple with new values
         let new_values = vec![Value::new(1), Value::new("updated")];
         let new_tuple = Tuple::new(&new_values, &schema, rid);
-        page.update_tuple(&meta, &new_tuple, rid).unwrap();
+        page.update_tuple(meta, &new_tuple, rid).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);
 
         // Update tuple meta
-        let mut new_meta = meta.clone();
+        let mut new_meta = meta;
         new_meta.set_deleted(true);
-        page.update_tuple_meta(&new_meta, &rid).unwrap();
+        page.update_tuple_meta(new_meta, &rid).unwrap();
         assert_eq!(page.get_page_type(), PageType::Table);
 
         // Verify the page type is still correct after all operations

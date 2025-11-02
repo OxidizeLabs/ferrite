@@ -7,6 +7,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug)]
 pub struct TimestampType;
 
+impl Default for TimestampType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimestampType {
     pub fn new() -> Self {
         TimestampType

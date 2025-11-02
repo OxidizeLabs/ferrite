@@ -66,7 +66,7 @@ impl AbstractExecutor for MyExecutor {
     fn init(&mut self) -> Result<()> {
         // Initialize executor state
     }
-    
+
     fn next(&mut self) -> Result<Option<Tuple>> {
         // Return next tuple or None if exhausted
     }

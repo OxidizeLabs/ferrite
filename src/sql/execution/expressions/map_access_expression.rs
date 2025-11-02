@@ -559,7 +559,7 @@ mod tests {
             "null_value": null,
             "bool_value": true,
             "int_value": 42,
-            "float_value": 3.14,
+            "float_value": std::f64::consts::PI,
             "string_value": "hello",
             "array_value": [1, 2, 3],
             "object_value": {"key": "value"}
@@ -612,7 +612,7 @@ mod tests {
         let result = map_access
             .evaluate(&create_test_tuple(), &create_test_schema())
             .unwrap();
-        assert_eq!(result, Value::new(3.14));
+        assert_eq!(result, Value::new(std::f64::consts::PI));
 
         // Test string conversion
         let map_access = MapAccessExpression::new(

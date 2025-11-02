@@ -1,7 +1,7 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
-use crate::catalog::catalog::Catalog;
-use crate::client::client::ClientSession;
+use crate::catalog::Catalog;
+use crate::client::ClientSession;
 use crate::common::exception::DBError;
 use crate::common::result_writer::{CliResultWriter, NetworkResultWriter, ResultWriter};
 use crate::concurrency::transaction::{IsolationLevel, Transaction};
@@ -14,6 +14,7 @@ use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::execution_engine::ExecutionEngine;
 use crate::sql::execution::transaction_context::TransactionContext;
+use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::error;
@@ -22,10 +23,10 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
 /// Configuration options for DB instance
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct DBConfig {
     pub db_filename: String,
     pub db_log_filename: String,
@@ -43,6 +44,7 @@ pub struct DBConfig {
 
 /// Main struct representing the DB database instance with generic disk manager type
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct DBInstance {
     buffer_pool_manager: Arc<BufferPoolManager>,
     catalog: Arc<RwLock<Catalog>>,
@@ -96,8 +98,9 @@ impl DBInstance {
         let disk_manager = AsyncDiskManager::new(
             config.db_filename.clone(),
             config.db_log_filename.clone(),
-            DiskManagerConfig::default()
-        ).await?;
+            DiskManagerConfig::default(),
+        )
+        .await?;
 
         let disk_manager_arc = Arc::new(disk_manager);
 
@@ -145,7 +148,6 @@ impl DBInstance {
             info!("Existing database and log files found, running recovery...");
             let recovery_manager = Arc::new(LogRecoveryManager::new(
                 disk_manager_arc.clone(),
-                buffer_pool_manager.clone(),
                 log_manager.clone(),
             ));
 
@@ -226,7 +228,11 @@ impl DBInstance {
         match result {
             Ok(success) => {
                 if success {
-                    if self.transaction_factory.commit_transaction(txn_ctx.clone()).await {
+                    if self
+                        .transaction_factory
+                        .commit_transaction(txn_ctx.clone())
+                        .await
+                    {
                         Ok(true)
                     } else {
                         self.transaction_factory.abort_transaction(txn_ctx);
@@ -351,7 +357,10 @@ impl DBInstance {
             .get_transaction(&txn_id)
             .ok_or_else(|| DBError::Transaction(format!("Transaction {} not found", txn_id)))?;
 
-        if !txn_manager.commit(txn, self.buffer_pool_manager.clone()).await {
+        if !txn_manager
+            .commit(txn, self.buffer_pool_manager.clone())
+            .await
+        {
             warn!("Transaction commit failed");
             return Err(DBError::Transaction(
                 "Failed to commit transaction".to_string(),
@@ -378,22 +387,26 @@ impl DBInstance {
         query: DatabaseRequest,
         client_id: u64,
     ) -> Result<DatabaseResponse, DBError> {
-        let mut sessions = self.client_sessions.lock();
-        let session = sessions
-            .get_mut(&client_id)
-            .ok_or_else(|| DBError::Client(format!("No session found for client {}", client_id)))?;
-
         match query {
             DatabaseRequest::Query(sql) => {
-                let mut writer = NetworkResultWriter::new();
+                // Extract session data first
+                let (txn_ctx, has_current_transaction) = {
+                    let mut sessions = self.client_sessions.lock();
+                    let session = sessions.get_mut(&client_id).ok_or_else(|| {
+                        DBError::Client(format!("No session found for client {}", client_id))
+                    })?;
 
-                // Create transaction context
-                let txn_ctx = if let Some(txn) = &session.current_transaction {
-                    txn.clone()
-                } else {
-                    self.transaction_factory
-                        .begin_transaction(session.isolation_level)
+                    let txn_ctx = if let Some(txn) = &session.current_transaction {
+                        txn.clone()
+                    } else {
+                        self.transaction_factory
+                            .begin_transaction(session.isolation_level)
+                    };
+                    let has_current_transaction = session.current_transaction.is_some();
+                    (txn_ctx, has_current_transaction)
                 };
+
+                let mut writer = NetworkResultWriter::new();
 
                 // Create execution context
                 let exec_ctx = Arc::new(RwLock::new(ExecutionContext::new(
@@ -403,15 +416,20 @@ impl DBInstance {
                 )));
 
                 // Execute query
-                match self
-                    .execution_engine
-                    .lock()
-                    .execute_sql(&sql, exec_ctx, &mut writer).await
-                {
+                let execution_result = {
+                    let mut engine = self.execution_engine.lock();
+                    engine.execute_sql(&sql, exec_ctx, &mut writer).await
+                };
+
+                match execution_result {
                     Ok(_) => {
-                        if session.current_transaction.is_none() {
+                        if !has_current_transaction {
                             // Auto-commit if not in transaction
-                            if !self.transaction_factory.commit_transaction(txn_ctx.clone()).await {
+                            if !self
+                                .transaction_factory
+                                .commit_transaction(txn_ctx.clone())
+                                .await
+                            {
                                 self.transaction_factory.abort_transaction(txn_ctx);
                                 return Err(DBError::Execution(
                                     "Failed to commit transaction".to_string(),
@@ -422,7 +440,7 @@ impl DBInstance {
                         Ok(DatabaseResponse::Results(writer.into_results()))
                     }
                     Err(e) => {
-                        if session.current_transaction.is_none() {
+                        if !has_current_transaction {
                             self.transaction_factory.abort_transaction(txn_ctx);
                         }
                         Err(e)
@@ -430,16 +448,51 @@ impl DBInstance {
                 }
             }
             DatabaseRequest::BeginTransaction { isolation_level } => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions.get_mut(&client_id).ok_or_else(|| {
+                    DBError::Client(format!("No session found for client {}", client_id))
+                })?;
                 self.handle_begin_transaction(session, isolation_level)
             }
-            DatabaseRequest::Commit => self.handle_commit(session).await,
-            DatabaseRequest::Rollback => self.handle_rollback(session),
-            DatabaseRequest::Prepare(sql) => self.handle_sql_query(sql, session).await,
+            #[allow(clippy::await_holding_lock)]
+            DatabaseRequest::Commit => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions.get_mut(&client_id).ok_or_else(|| {
+                    DBError::Client(format!("No session found for client {}", client_id))
+                })?;
+                self.handle_commit(session).await
+            }
+            DatabaseRequest::Rollback => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions.get_mut(&client_id).ok_or_else(|| {
+                    DBError::Client(format!("No session found for client {}", client_id))
+                })?;
+                self.handle_rollback(session)
+            }
+            #[allow(clippy::await_holding_lock)]
+            DatabaseRequest::Prepare(sql) => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions.get_mut(&client_id).ok_or_else(|| {
+                    DBError::Client(format!("No session found for client {}", client_id))
+                })?;
+                self.handle_sql_query(sql, session).await
+            }
+            #[allow(clippy::await_holding_lock)]
             DatabaseRequest::Execute { stmt_id, params } => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions.get_mut(&client_id).ok_or_else(|| {
+                    DBError::Client(format!("No session found for client {}", client_id))
+                })?;
                 self.handle_execute_statement(stmt_id, params, session)
                     .await
             }
-            DatabaseRequest::Close(stmt_id) => self.handle_close_statement(stmt_id, session),
+            DatabaseRequest::Close(stmt_id) => {
+                let mut sessions = self.client_sessions.lock();
+                let session = sessions.get_mut(&client_id).ok_or_else(|| {
+                    DBError::Client(format!("No session found for client {}", client_id))
+                })?;
+                self.handle_close_statement(stmt_id, session)
+            }
         }
     }
 
@@ -452,10 +505,12 @@ impl DBInstance {
 
         let result = if let Some(txn_ctx) = &session.current_transaction {
             // Execute within existing transaction
-            self.execute_transaction(&sql, txn_ctx.clone(), &mut writer).await
+            self.execute_transaction(&sql, txn_ctx.clone(), &mut writer)
+                .await
         } else {
             // Auto-commit transaction
-            self.execute_sql(&sql, session.isolation_level, &mut writer).await
+            self.execute_sql(&sql, session.isolation_level, &mut writer)
+                .await
         };
 
         match result {
@@ -504,7 +559,10 @@ impl DBInstance {
         Ok(DatabaseResponse::Results(QueryResults::empty()))
     }
 
-    async fn handle_commit(&self, session: &mut ClientSession) -> Result<DatabaseResponse, DBError> {
+    async fn handle_commit(
+        &self,
+        session: &mut ClientSession,
+    ) -> Result<DatabaseResponse, DBError> {
         if let Some(txn_ctx) = session.current_transaction.take() {
             if self.transaction_factory.commit_transaction(txn_ctx).await {
                 if self.debug_mode {
@@ -539,33 +597,6 @@ impl DBInstance {
         }
     }
 
-    // Private helper methods
-    async fn create_disk_manager(config: &DBConfig) -> Result<Arc<AsyncDiskManager>, DBError> {
-        let disk_manager = AsyncDiskManager::new(
-            config.db_filename.clone(),
-            config.db_log_filename.clone(),
-            DiskManagerConfig::default(),
-        ).await.map_err(|e| DBError::Io(format!("Failed to create disk manager: {}", e)))?;
-
-        Ok(Arc::new(disk_manager))
-    }
-
-
-    fn create_buffer_pool_manager(
-        config: &DBConfig,
-        disk_manager: &Arc<AsyncDiskManager>,
-    ) -> Result<Option<Arc<BufferPoolManager>>, DBError> {
-        let replacer = LRUKReplacer::new(config.lru_sample_size, config.lru_k);
-
-        let bpm = BufferPoolManager::new(
-            config.buffer_pool_size,
-            disk_manager.clone(),
-            Arc::new(RwLock::new(replacer)),
-        )?;
-
-        Ok(Some(Arc::new(bpm)))
-    }
-
     /// Add method to enable/disable debug output
     pub fn set_debug_mode(&mut self, enabled: bool) {
         self.debug_mode = enabled;
@@ -595,47 +626,6 @@ impl DBInstance {
         }
         if self.debug_mode {
             info!("Removed session for client {}", client_id);
-        }
-    }
-
-    async fn handle_prepare_statement(
-        &self,
-        sql: String,
-        session: &mut ClientSession,
-    ) -> Result<DatabaseResponse, DBError> {
-        // Parse SQL to validate and get parameter types
-        match self.execution_engine.lock().prepare_statement(&sql) {
-            Ok(param_types) => {
-                let stmt = PreparedStatement {
-                    sql,
-                    parameter_types: param_types,
-                };
-
-                let stmt_id = {
-                    let mut id = self.next_statement_id.lock();
-                    *id += 1;
-                    *id
-                };
-
-                self.prepared_statements.lock().insert(stmt_id, stmt);
-
-                if self.debug_mode {
-                    info!("Client {} prepared statement {}", session.id, stmt_id);
-                }
-
-                Ok(DatabaseResponse::Results(QueryResults {
-                    column_names: vec!["statement_id".to_string()],
-                    rows: vec![vec![Value::new(stmt_id as i32)]],
-                    messages: vec![],
-                }))
-            }
-            Err(e) => {
-                let error = format!("Failed to prepare statement: {}", e);
-                if self.debug_mode {
-                    error!("Client {}: {}", session.id, error);
-                }
-                Ok(DatabaseResponse::Error(error))
-            }
         }
     }
 
@@ -685,14 +675,16 @@ impl DBInstance {
         // Execute the statement with parameters
         let mut writer = NetworkResultWriter::new();
         let result = if let Some(txn_ctx) = &session.current_transaction {
-            self.execute_prepared_statement(&stmt.sql, params, txn_ctx.clone(), &mut writer).await
+            self.execute_prepared_statement(&stmt.sql, params, txn_ctx.clone(), &mut writer)
+                .await
         } else {
             self.execute_prepared_statement_autocommit(
                 &stmt.sql,
                 params,
                 session.isolation_level,
                 &mut writer,
-            ).await
+            )
+            .await
         };
 
         match result {
@@ -752,7 +744,9 @@ impl DBInstance {
         )));
 
         let mut engine = self.execution_engine.lock();
-        engine.execute_prepared_statement(sql, params, exec_ctx, writer).await
+        engine
+            .execute_prepared_statement(sql, params, exec_ctx, writer)
+            .await
     }
 
     async fn execute_prepared_statement_autocommit(
@@ -764,7 +758,9 @@ impl DBInstance {
     ) -> Result<bool, DBError> {
         let txn_ctx = self.transaction_factory.begin_transaction(isolation_level);
 
-        let result = self.execute_prepared_statement(sql, params, txn_ctx.clone(), writer).await;
+        let result = self
+            .execute_prepared_statement(sql, params, txn_ctx.clone(), writer)
+            .await;
 
         match result {
             Ok(success) => {
@@ -854,7 +850,8 @@ mod tests {
                     IsolationLevel::ReadCommitted,
                     &mut writer,
                 )
-                .await.unwrap();
+                .await
+                .unwrap();
 
             db_instance
                 .execute_sql(
@@ -862,7 +859,8 @@ mod tests {
                     IsolationLevel::ReadCommitted,
                     &mut writer,
                 )
-                .await.unwrap();
+                .await
+                .unwrap();
         }
 
         // Second session - open existing DB (should trigger recovery)
@@ -875,11 +873,13 @@ mod tests {
 
             // Validate recovery worked by checking if table exists
             let mut writer = CliResultWriter::new();
-            let result = db_instance.execute_sql(
-                "SELECT * FROM test;",
-                IsolationLevel::ReadCommitted,
-                &mut writer,
-            ).await;
+            let result = db_instance
+                .execute_sql(
+                    "SELECT * FROM test;",
+                    IsolationLevel::ReadCommitted,
+                    &mut writer,
+                )
+                .await;
             assert!(result.is_ok(), "Should be able to query recovered table");
         }
 

@@ -167,7 +167,7 @@ impl ExpressionOps for UnaryOpExpression {
     fn clone_with_children(&self, children: Vec<Arc<Expression>>) -> Arc<Expression> {
         Arc::new(Expression::UnaryOp(UnaryOpExpression {
             expr: children[0].clone(),
-            op: self.op.clone(),
+            op: self.op,
             return_type: self.return_type.clone(),
             children,
         }))
@@ -235,7 +235,11 @@ mod tests {
             Column::new("int_col", TypeId::Integer),
             Column::new("decimal_col", TypeId::Decimal),
         ]);
-        let values = vec![Value::new(true), Value::new(42), Value::new(3.14)];
+        let values = vec![
+            Value::new(true),
+            Value::new(42),
+            Value::new(std::f64::consts::PI),
+        ];
         let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
         (tuple, schema)
     }

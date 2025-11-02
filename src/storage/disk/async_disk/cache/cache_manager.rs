@@ -1,21 +1,23 @@
 //! Advanced multi-level cache management system for the Async Disk Manager
-//! 
+//!
 //! This module contains the CacheManager and related components for efficient page caching,
 //! prefetching, and data temperature management.
 
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use super::fifo::FIFOCache;
+use super::lfu::LFUCache;
+use super::lru_k::LRUKCache;
+use crate::common::config::{DB_PAGE_SIZE, PageId};
+use crate::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, FIFOCacheTrait, LFUCacheTrait, LRUKCacheTrait,
+};
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
-use crate::storage::disk::async_disk::prefetching::MLPrefetcher;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
+use crate::storage::disk::async_disk::prefetching::MLPrefetcher;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 use tokio::sync::RwLock;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait, LFUCacheTrait, LRUKCacheTrait};
-use super::lru_k::LRUKCache;
-use super::lfu::LFUCache;
-use super::fifo::FIFOCache;
 
 /// Page data with metadata
 #[derive(Debug, Clone)]
@@ -80,6 +82,12 @@ pub struct DeduplicationEngine {
     pub total_pages_processed: AtomicUsize,
 }
 
+impl Default for DeduplicationEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeduplicationEngine {
     pub fn new() -> Self {
         Self {
@@ -96,12 +104,13 @@ impl DeduplicationEngine {
 
         self.total_pages_processed.fetch_add(1, Ordering::Relaxed);
 
-        if let Some(&existing_page_id) = self.page_hashes.get(&hash) {
-            if existing_page_id != page_id {
-                // Found a duplicate page
-                self.dedup_savings_bytes.fetch_add(data.len(), Ordering::Relaxed);
-                return Some(existing_page_id);
-            }
+        if let Some(&existing_page_id) = self.page_hashes.get(&hash)
+            && existing_page_id != page_id
+        {
+            // Found a duplicate page
+            self.dedup_savings_bytes
+                .fetch_add(data.len(), Ordering::Relaxed);
+            return Some(existing_page_id);
         }
 
         // No duplicate found, add to hash map
@@ -120,7 +129,11 @@ impl DeduplicationEngine {
     pub fn get_stats(&self) -> (usize, usize, f64) {
         let savings = self.dedup_savings_bytes.load(Ordering::Relaxed);
         let total = self.total_pages_processed.load(Ordering::Relaxed);
-        let ratio = if total > 0 { savings as f64 / (total * DB_PAGE_SIZE as usize) as f64 } else { 0.0 };
+        let ratio = if total > 0 {
+            savings as f64 / (total * DB_PAGE_SIZE as usize) as f64
+        } else {
+            0.0
+        };
         (savings, total, ratio)
     }
 }
@@ -279,7 +292,11 @@ impl CacheManager {
     }
 
     /// Internal method to get a page from any cache level
-    fn get_page_internal(&self, page_id: PageId, metrics_collector: Option<&MetricsCollector>) -> Option<Vec<u8>> {
+    fn get_page_internal(
+        &self,
+        page_id: PageId,
+        metrics_collector: Option<&MetricsCollector>,
+    ) -> Option<Vec<u8>> {
         // Record access pattern for prefetching
         self.record_access_pattern(page_id);
 
@@ -287,49 +304,68 @@ impl CacheManager {
         self.check_prefetch_hit(page_id);
 
         // Check L1 hot cache first (LRU-K)
-        if let Ok(mut hot_cache) = self.hot_cache.try_write() {
-            if let Some(data_arc) = <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::get(&mut hot_cache, &page_id) {
-                if let Some(metrics) = metrics_collector {
-                    metrics.record_cache_operation("hot", true);
-                }
-                // Only clone the actual data when returning to caller
-                return Some((**data_arc).clone());
+        if let Ok(mut hot_cache) = self.hot_cache.try_write()
+            && let Some(data_arc) = <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<
+                PageId,
+                Arc<Vec<u8>>,
+            >>::get(&mut hot_cache, &page_id)
+        {
+            if let Some(metrics) = metrics_collector {
+                metrics.record_cache_operation("hot", true);
             }
+            // Only clone the actual data when returning to caller
+            return Some((**data_arc).clone());
         }
 
         // Check L2 warm cache (LFU)
-        if let Ok(mut warm_cache) = self.warm_cache.try_write() {
-            if let Some(page_data) = <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(&mut warm_cache, &page_id) {
-                // Promote to hot cache on hit - share the Arc, no data copying
-                self.promotion_count.fetch_add(1, Ordering::Relaxed);
-                let data_arc = Arc::clone(&page_data.data);
-                if let Ok(mut hot_cache) = self.hot_cache.try_write() {
-                    <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(&mut hot_cache, page_id, data_arc);
-                }
-                if let Some(metrics) = metrics_collector {
-                    metrics.record_cache_operation("warm", true);
-                    metrics.record_cache_migration(true);
-                }
-                // Only clone the actual data when returning to caller
-                return Some((*page_data.data).clone());
+        if let Ok(mut warm_cache) = self.warm_cache.try_write()
+            && let Some(page_data) =
+                <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(
+                    &mut warm_cache,
+                    &page_id,
+                )
+        {
+            // Promote to hot cache on hit - share the Arc, no data copying
+            self.promotion_count.fetch_add(1, Ordering::Relaxed);
+            let data_arc = Arc::clone(&page_data.data);
+            if let Ok(mut hot_cache) = self.hot_cache.try_write() {
+                <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(
+                    &mut hot_cache,
+                    page_id,
+                    data_arc,
+                );
             }
+            if let Some(metrics) = metrics_collector {
+                metrics.record_cache_operation("warm", true);
+                metrics.record_cache_migration(true);
+            }
+            // Only clone the actual data when returning to caller
+            return Some((*page_data.data).clone());
         }
 
         // Check L3 cold cache (FIFO)
-        if let Ok(mut cold_cache) = self.cold_cache.try_write() {
-            if let Some(page_data) = <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(&mut cold_cache, &page_id) {
-                // Promote to warm cache on hit - clone the PageData (cheap with Arc)
-                self.promotion_count.fetch_add(1, Ordering::Relaxed);
-                if let Ok(mut warm_cache) = self.warm_cache.try_write() {
-                    <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(&mut warm_cache, page_id, page_data.clone());
-                }
-                if let Some(metrics) = metrics_collector {
-                    metrics.record_cache_operation("cold", true);
-                    metrics.record_cache_migration(true);
-                }
-                // Only clone the actual data when returning to caller
-                return Some((*page_data.data).clone());
+        if let Ok(mut cold_cache) = self.cold_cache.try_write()
+            && let Some(page_data) =
+                <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(
+                    &mut cold_cache,
+                    &page_id,
+                )
+        {
+            // Promote to warm cache on hit - clone the PageData (cheap with Arc)
+            self.promotion_count.fetch_add(1, Ordering::Relaxed);
+            if let Ok(mut warm_cache) = self.warm_cache.try_write() {
+                <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
+                    &mut warm_cache,
+                    page_id,
+                    page_data.clone(),
+                );
             }
+            if let Some(metrics) = metrics_collector {
+                metrics.record_cache_operation("cold", true);
+                metrics.record_cache_migration(true);
+            }
+            // Only clone the actual data when returning to caller
+            return Some((*page_data.data).clone());
         }
 
         // Cache miss - record for metrics
@@ -341,7 +377,11 @@ impl CacheManager {
     }
 
     /// Attempts to get a page from any cache level with enhanced monitoring
-    pub fn get_page_with_metrics(&self, page_id: PageId, metrics_collector: &MetricsCollector) -> Option<Vec<u8>> {
+    pub fn get_page_with_metrics(
+        &self,
+        page_id: PageId,
+        metrics_collector: &MetricsCollector,
+    ) -> Option<Vec<u8>> {
         self.get_page_internal(page_id, Some(metrics_collector))
     }
 
@@ -350,7 +390,8 @@ impl CacheManager {
         // Update basic prefetch engine
         if let Ok(mut prefetch_engine) = self.prefetch_engine.try_write() {
             // Update access patterns for sequential detection
-            prefetch_engine.access_patterns
+            prefetch_engine
+                .access_patterns
                 .entry(page_id)
                 .or_insert_with(Vec::new)
                 .push(page_id);
@@ -371,10 +412,10 @@ impl CacheManager {
                 predicted_reuse: false,
                 size_bytes: 0,
             });
-            
+
             metadata.access_count += 1;
             metadata.last_accessed = Instant::now();
-            
+
             // Update temperature based on access frequency
             metadata.temperature = match metadata.access_count {
                 n if n > 10 => DataTemperature::Hot,
@@ -394,12 +435,12 @@ impl CacheManager {
 
         // Check for duplicate pages
         let mut should_store = true;
-        if let Ok(mut dedup) = self.dedup_engine.try_write() {
-            if let Some(_existing_page) = dedup.check_duplicate(page_id, &data) {
-                // This is a duplicate page, don't store it
-                should_store = false;
-                self.dedup_savings.fetch_add(1, Ordering::Relaxed);
-            }
+        if let Ok(mut dedup) = self.dedup_engine.try_write()
+            && let Some(_existing_page) = dedup.check_duplicate(page_id, &data)
+        {
+            // This is a duplicate page, don't store it
+            should_store = false;
+            self.dedup_savings.fetch_add(1, Ordering::Relaxed);
         }
 
         if !should_store {
@@ -415,9 +456,13 @@ impl CacheManager {
         match temperature {
             DataTemperature::Hot => {
                 if let Ok(mut cache) = self.hot_cache.try_write() {
-                    <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(&mut cache, page_id, Arc::clone(&data_arc));
+                    <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(
+                        &mut cache,
+                        page_id,
+                        Arc::clone(&data_arc),
+                    );
                 }
-            },
+            }
             DataTemperature::Warm => {
                 let page_data = PageData {
                     data: Arc::clone(&data_arc),
@@ -426,9 +471,11 @@ impl CacheManager {
                     temperature: temperature.clone(),
                 };
                 if let Ok(mut cache) = self.warm_cache.try_write() {
-                    <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(&mut cache, page_id, page_data);
+                    <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
+                        &mut cache, page_id, page_data,
+                    );
                 }
-            },
+            }
             _ => {
                 let page_data = PageData {
                     data: Arc::clone(&data_arc),
@@ -437,7 +484,9 @@ impl CacheManager {
                     temperature: temperature.clone(),
                 };
                 if let Ok(mut cache) = self.cold_cache.try_write() {
-                    <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(&mut cache, page_id, page_data);
+                    <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
+                        &mut cache, page_id, page_data,
+                    );
                 }
             }
         }
@@ -449,26 +498,32 @@ impl CacheManager {
     /// Determines whether a page should be admitted to the cache
     fn should_admit_page(&self, page_id: PageId, data: &[u8]) -> bool {
         // Check memory pressure
-        let memory_pressure = self.admission_controller.memory_pressure.load(Ordering::Relaxed);
+        let memory_pressure = self
+            .admission_controller
+            .memory_pressure
+            .load(Ordering::Relaxed);
         if memory_pressure > 80 {
             // High memory pressure - be more selective
-            let admission_rate = self.admission_controller.admission_rate.load(Ordering::Relaxed);
+            let admission_rate = self
+                .admission_controller
+                .admission_rate
+                .load(Ordering::Relaxed);
             if admission_rate < 50 {
                 return false;
             }
         }
 
         // Check if this page is likely to be reused
-        if let Ok(tracker) = self.hot_data_tracker.try_read() {
-            if let Some(metadata) = tracker.get(&page_id) {
-                // If page has been accessed recently, admit it
-                if metadata.last_accessed.elapsed().as_secs() < 60 {
-                    return true;
-                }
-                // If page has high access count, admit it
-                if metadata.access_count > 3 {
-                    return true;
-                }
+        if let Ok(tracker) = self.hot_data_tracker.try_read()
+            && let Some(metadata) = tracker.get(&page_id)
+        {
+            // If page has been accessed recently, admit it
+            if metadata.last_accessed.elapsed().as_secs() < 60 {
+                return true;
+            }
+            // If page has high access count, admit it
+            if metadata.access_count > 3 {
+                return true;
             }
         }
 
@@ -483,10 +538,10 @@ impl CacheManager {
 
     /// Determines the temperature of a page based on access patterns
     fn determine_data_temperature(&self, page_id: PageId) -> DataTemperature {
-        if let Ok(tracker) = self.hot_data_tracker.try_read() {
-            if let Some(metadata) = tracker.get(&page_id) {
-                return metadata.temperature.clone();
-            }
+        if let Ok(tracker) = self.hot_data_tracker.try_read()
+            && let Some(metadata) = tracker.get(&page_id)
+        {
+            return metadata.temperature.clone();
         }
 
         // Default to cold for new pages
@@ -496,7 +551,7 @@ impl CacheManager {
     /// Predicts and returns pages that should be prefetched
     pub fn predict_prefetch_pages(&self, current_page: PageId) -> Vec<PageId> {
         let mut predicted_pages = Vec::new();
-        
+
         // Get current prefetch accuracy to adapt prefetch aggressiveness
         let current_accuracy = self.get_prefetch_accuracy();
         let accuracy_factor = if current_accuracy > 0.7 {
@@ -520,29 +575,32 @@ impl CacheManager {
         // Get predictions from basic prefetch engine
         if let Ok(prefetch_engine) = self.prefetch_engine.try_read() {
             // Adaptive sequential prefetching based on accuracy
-            let prefetch_distance = (prefetch_engine.prefetch_distance as f64 * accuracy_factor) as usize;
-            let effective_distance = prefetch_distance.max(1).min(prefetch_engine.prefetch_distance);
-            
+            let prefetch_distance =
+                (prefetch_engine.prefetch_distance as f64 * accuracy_factor) as usize;
+            let effective_distance = prefetch_distance
+                .max(1)
+                .min(prefetch_engine.prefetch_distance);
+
             for i in 1..=effective_distance {
                 predicted_pages.push(current_page + i as u64);
             }
 
             // Pattern-based prefetching (only if accuracy is reasonable)
-            if current_accuracy > 0.2 {
-                if let Some(patterns) = prefetch_engine.access_patterns.get(&current_page) {
-                    if patterns.len() >= prefetch_engine.sequential_threshold {
-                        // Find the most common next page
-                        let mut next_page_counts = HashMap::new();
-                        for &page in patterns {
-                            *next_page_counts.entry(page + 1).or_insert(0) += 1;
-                        }
-                        
-                        if let Some((most_common_next, count)) = next_page_counts.iter().max_by_key(|(_, count)| *count) {
-                            if *count >= 2 {
-                                predicted_pages.push(*most_common_next);
-                            }
-                        }
-                    }
+            if current_accuracy > 0.2
+                && let Some(patterns) = prefetch_engine.access_patterns.get(&current_page)
+                && patterns.len() >= prefetch_engine.sequential_threshold
+            {
+                // Find the most common next page
+                let mut next_page_counts = HashMap::new();
+                for &page in patterns {
+                    *next_page_counts.entry(page + 1).or_insert(0) += 1;
+                }
+
+                if let Some((most_common_next, count)) =
+                    next_page_counts.iter().max_by_key(|(_, count)| *count)
+                    && *count >= 2
+                {
+                    predicted_pages.push(*most_common_next);
                 }
             }
         }
@@ -553,9 +611,9 @@ impl CacheManager {
         let max_predictions = if current_accuracy > 0.7 {
             12 // High accuracy - allow more predictions
         } else if current_accuracy > 0.4 {
-            8  // Medium accuracy - standard predictions
+            8 // Medium accuracy - standard predictions
         } else {
-            4  // Low accuracy - fewer predictions
+            4 // Low accuracy - fewer predictions
         };
         predicted_pages.truncate(max_predictions);
 
@@ -591,10 +649,9 @@ impl CacheManager {
             0.0
         };
 
-        self.admission_controller.memory_pressure.store(
-            usage_percentage as u64,
-            Ordering::Relaxed,
-        );
+        self.admission_controller
+            .memory_pressure
+            .store(usage_percentage as u64, Ordering::Relaxed);
 
         // Adjust admission rate based on memory pressure
         let new_admission_rate = match usage_percentage as u64 {
@@ -605,28 +662,34 @@ impl CacheManager {
             _ => 20,
         };
 
-        self.admission_controller.admission_rate.store(
-            new_admission_rate,
-            Ordering::Relaxed,
-        );
+        self.admission_controller
+            .admission_rate
+            .store(new_admission_rate, Ordering::Relaxed);
     }
 
     /// Evicts pages from cache based on pressure and policies
     pub fn evict_if_needed(&self) {
-        let memory_pressure = self.admission_controller.memory_pressure.load(Ordering::Relaxed);
-        
+        let memory_pressure = self
+            .admission_controller
+            .memory_pressure
+            .load(Ordering::Relaxed);
+
         if memory_pressure > 85 {
             // High memory pressure - reduce cold cache size
             if let Ok(mut cold_cache) = self.cold_cache.try_write() {
                 let target_size = self.cold_cache_size / 2;
-                let current_size = <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cold_cache);
+                let current_size =
+                    <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cold_cache);
                 if current_size > target_size {
                     // For FIFO cache, we can't easily evict specific items
                     // Instead, we'll clear part of the cache
                     if current_size > target_size * 2 {
                         let evicted_count = current_size as u64;
-                        <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(&mut cold_cache);
-                        self.demotion_count.fetch_add(evicted_count, Ordering::Relaxed);
+                        <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(
+                            &mut cold_cache,
+                        );
+                        self.demotion_count
+                            .fetch_add(evicted_count, Ordering::Relaxed);
                     }
                 }
             }
@@ -636,14 +699,18 @@ impl CacheManager {
             // Extreme memory pressure - reduce warm cache size
             if let Ok(mut warm_cache) = self.warm_cache.try_write() {
                 let target_size = self.warm_cache_size / 2;
-                let current_size = <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&warm_cache);
+                let current_size =
+                    <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&warm_cache);
                 if current_size > target_size {
                     // For LFU cache, we can't easily evict specific items
                     // Instead, we'll clear part of the cache
                     if current_size > target_size * 2 {
                         let evicted_count = current_size as u64;
-                        <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(&mut warm_cache);
-                        self.demotion_count.fetch_add(evicted_count, Ordering::Relaxed);
+                        <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(
+                            &mut warm_cache,
+                        );
+                        self.demotion_count
+                            .fetch_add(evicted_count, Ordering::Relaxed);
                     }
                 }
             }
@@ -703,12 +770,12 @@ impl CacheManager {
     /// Trigger prefetching for a given page (public interface)
     pub fn trigger_prefetch(&self, current_page: PageId) -> Vec<PageId> {
         let predicted_pages = self.predict_prefetch_pages(current_page);
-        
+
         // Record predictions for accuracy tracking
         if !predicted_pages.is_empty() {
             self.record_prefetch_predictions(&predicted_pages);
         }
-        
+
         predicted_pages
     }
 
@@ -720,22 +787,26 @@ impl CacheManager {
 
     /// Get current memory pressure (0-100)
     pub fn get_memory_pressure(&self) -> u64 {
-        self.admission_controller.memory_pressure.load(Ordering::Relaxed)
+        self.admission_controller
+            .memory_pressure
+            .load(Ordering::Relaxed)
     }
 
     /// Get current admission rate (0-100)
     pub fn get_admission_rate(&self) -> u64 {
-        self.admission_controller.admission_rate.load(Ordering::Relaxed)
+        self.admission_controller
+            .admission_rate
+            .load(Ordering::Relaxed)
     }
 
     /// Check if a page access was a prefetch hit and update accuracy
     fn check_prefetch_hit(&self, page_id: PageId) {
-        if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
-            if predictions.remove(&page_id).is_some() {
-                // This page was predicted and accessed - it's a hit
-                self.prefetch_hits.fetch_add(1, Ordering::Relaxed);
-                self.update_prefetch_accuracy();
-            }
+        if let Ok(mut predictions) = self.prefetch_predictions.try_write()
+            && predictions.remove(&page_id).is_some()
+        {
+            // This page was predicted and accessed - it's a hit
+            self.prefetch_hits.fetch_add(1, Ordering::Relaxed);
+            self.update_prefetch_accuracy();
         }
     }
 
@@ -743,7 +814,7 @@ impl CacheManager {
     fn update_prefetch_accuracy(&self) {
         let hits = self.prefetch_hits.load(Ordering::Relaxed);
         let total = self.prefetch_total.load(Ordering::Relaxed);
-        
+
         if total > 0 {
             // Calculate accuracy as percentage (0-100)
             let accuracy = (hits as f64 / total as f64 * 100.0) as u64;
@@ -759,10 +830,11 @@ impl CacheManager {
                 predictions.insert(page_id, now);
             }
         }
-        
+
         // Update total predictions count
-        self.prefetch_total.fetch_add(predicted_pages.len() as u64, Ordering::Relaxed);
-        
+        self.prefetch_total
+            .fetch_add(predicted_pages.len() as u64, Ordering::Relaxed);
+
         // Clean up old predictions (older than 60 seconds)
         self.cleanup_old_predictions();
     }
@@ -772,12 +844,12 @@ impl CacheManager {
         if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
             let now = Instant::now();
             let cutoff_time = now - std::time::Duration::from_secs(60);
-            
+
             // Remove predictions older than 60 seconds
             let old_count = predictions.len();
             predictions.retain(|_, &mut timestamp| timestamp > cutoff_time);
             let removed_count = old_count - predictions.len();
-            
+
             // Adjust total count for removed predictions (they become misses)
             if removed_count > 0 {
                 self.update_prefetch_accuracy();
@@ -794,7 +866,9 @@ impl CacheManager {
     pub fn get_enhanced_cache_statistics(&self) -> EnhancedCacheStatistics {
         // Get LRU-K specific statistics from hot cache
         let lru_k_value = if let Ok(cache) = self.hot_cache.try_read() {
-            <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::k_value(&cache)
+            <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::k_value(
+                &cache,
+            )
         } else {
             0
         };
@@ -814,27 +888,36 @@ impl CacheManager {
     /// Demonstrate specialized cache operations for maintenance
     pub fn perform_specialized_maintenance(&self) {
         // Use FIFO-specific operations for cold cache
-        if let Ok(cold_cache) = self.cold_cache.try_read() {
-            if let Some((oldest_key, _)) = <FIFOCache<PageId, PageData> as FIFOCacheTrait<PageId, PageData>>::peek_oldest(&cold_cache) {
-                // Log the oldest page for monitoring
-                log::trace!("Oldest page in cold cache: {}", oldest_key);
-            }
+        if let Ok(cold_cache) = self.cold_cache.try_read()
+            && let Some((oldest_key, _)) = <FIFOCache<PageId, PageData> as FIFOCacheTrait<
+                PageId,
+                PageData,
+            >>::peek_oldest(&cold_cache)
+        {
+            // Log the oldest page for monitoring
+            log::trace!("Oldest page in cold cache: {}", oldest_key);
         }
 
-        // Use LFU-specific operations for warm cache  
-        if let Ok(warm_cache) = self.warm_cache.try_read() {
-            if let Some((lfu_key, _)) = <LFUCache<PageId, PageData> as LFUCacheTrait<PageId, PageData>>::peek_lfu(&warm_cache) {
-                // Log the least frequently used page
-                log::trace!("Least frequently used page in warm cache: {}", lfu_key);
-            }
+        // Use LFU-specific operations for warm cache
+        if let Ok(warm_cache) = self.warm_cache.try_read()
+            && let Some((lfu_key, _)) = <LFUCache<PageId, PageData> as LFUCacheTrait<
+                PageId,
+                PageData,
+            >>::peek_lfu(&warm_cache)
+        {
+            // Log the least frequently used page
+            log::trace!("Least frequently used page in warm cache: {}", lfu_key);
         }
 
         // Use LRU-K specific operations for hot cache
-        if let Ok(hot_cache) = self.hot_cache.try_read() {
-            if let Some((lru_k_key, _)) = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::peek_lru_k(&hot_cache) {
-                // Log the LRU-K candidate for eviction
-                log::trace!("LRU-K eviction candidate in hot cache: {}", lru_k_key);
-            }
+        if let Ok(hot_cache) = self.hot_cache.try_read()
+            && let Some((lru_k_key, _)) = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                PageId,
+                Arc<Vec<u8>>,
+            >>::peek_lru_k(&hot_cache)
+        {
+            // Log the LRU-K candidate for eviction
+            log::trace!("LRU-K eviction candidate in hot cache: {}", lru_k_key);
         }
 
         // Perform standard maintenance
@@ -845,11 +928,26 @@ impl CacheManager {
     pub fn get_page_access_details(&self, page_id: PageId) -> Option<PageAccessDetails> {
         if let Ok(hot_cache) = self.hot_cache.try_read() {
             // Check if page is in hot cache and get LRU-K specific details
-            if <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::contains(&hot_cache, &page_id) {
-                let k_value = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::k_value(&hot_cache);
-                let access_count = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::access_count(&hot_cache, &page_id).map(|count| count as u64);
-                let k_distance = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::k_distance(&hot_cache, &page_id);
-                let rank = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::k_distance_rank(&hot_cache, &page_id);
+            if <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::contains(
+                &hot_cache, &page_id,
+            ) {
+                let k_value = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                    PageId,
+                    Arc<Vec<u8>>,
+                >>::k_value(&hot_cache);
+                let access_count = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                    PageId,
+                    Arc<Vec<u8>>,
+                >>::access_count(&hot_cache, &page_id)
+                .map(|count| count as u64);
+                let k_distance = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                    PageId,
+                    Arc<Vec<u8>>,
+                >>::k_distance(&hot_cache, &page_id);
+                let rank = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                    PageId,
+                    Arc<Vec<u8>>,
+                >>::k_distance_rank(&hot_cache, &page_id);
 
                 return Some(PageAccessDetails {
                     cache_level: "Hot".to_string(),
@@ -865,8 +963,15 @@ impl CacheManager {
 
         if let Ok(warm_cache) = self.warm_cache.try_read() {
             // Check if page is in warm cache and get LFU specific details
-            if <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(&warm_cache, &page_id) {
-                let frequency = <LFUCache<PageId, PageData> as LFUCacheTrait<PageId, PageData>>::frequency(&warm_cache, &page_id);
+            if <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(
+                &warm_cache,
+                &page_id,
+            ) {
+                let frequency =
+                    <LFUCache<PageId, PageData> as LFUCacheTrait<PageId, PageData>>::frequency(
+                        &warm_cache,
+                        &page_id,
+                    );
 
                 return Some(PageAccessDetails {
                     cache_level: "Warm".to_string(),
@@ -882,8 +987,15 @@ impl CacheManager {
 
         if let Ok(cold_cache) = self.cold_cache.try_read() {
             // Check if page is in cold cache and get FIFO specific details
-            if <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(&cold_cache, &page_id) {
-                let age_rank = <FIFOCache<PageId, PageData> as FIFOCacheTrait<PageId, PageData>>::age_rank(&cold_cache, &page_id);
+            if <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(
+                &cold_cache,
+                &page_id,
+            ) {
+                let age_rank =
+                    <FIFOCache<PageId, PageData> as FIFOCacheTrait<PageId, PageData>>::age_rank(
+                        &cold_cache,
+                        &page_id,
+                    );
 
                 return Some(PageAccessDetails {
                     cache_level: "Cold".to_string(),
@@ -993,7 +1105,7 @@ mod tests {
 
         // Predict prefetch for page 3
         let predicted_pages = cache_manager.predict_prefetch_pages(3);
-        
+
         // Should predict sequential pages (4, 5, 6, 7)
         assert!(!predicted_pages.is_empty());
         assert!(predicted_pages.contains(&4));
@@ -1016,15 +1128,17 @@ mod tests {
 
         // After learning the pattern, check if ML prefetcher can predict
         let predicted_pages = cache_manager.predict_prefetch_pages(2);
-        
+
         // Should include some predictions based on learned patterns
         assert!(!predicted_pages.is_empty());
     }
 
     #[test]
     fn test_admission_controller_rejection() {
-        let mut config = DiskManagerConfig::default();
-        config.cache_size_mb = 1; // Very small cache to trigger admission control
+        let config = DiskManagerConfig {
+            cache_size_mb: 1, // Very small cache to trigger admission control
+            ..Default::default()
+        };
         let cache_manager = CacheManager::new(&config);
 
         // Fill cache completely
@@ -1035,21 +1149,23 @@ mod tests {
 
         // Force memory pressure calculation
         cache_manager.update_memory_pressure();
-        
+
         let memory_pressure = cache_manager.get_memory_pressure();
         let admission_rate = cache_manager.get_admission_rate();
-        
+
         // With small cache, memory pressure should be high
         assert!(memory_pressure > 50); // Should be quite high
-        
+
         // Admission rate should be reduced due to high memory pressure
         assert!(admission_rate <= 100);
     }
 
     #[test]
     fn test_cache_eviction_under_pressure() {
-        let mut config = DiskManagerConfig::default();
-        config.cache_size_mb = 1; // Small cache
+        let config = DiskManagerConfig {
+            cache_size_mb: 1, // Small cache
+            ..Default::default()
+        };
         let cache_manager = CacheManager::new(&config);
 
         // Fill cache beyond capacity
@@ -1059,13 +1175,16 @@ mod tests {
         }
 
         let initial_stats = cache_manager.get_cache_statistics();
-        let initial_total = initial_stats.hot_cache_used + initial_stats.warm_cache_used + initial_stats.cold_cache_used;
+        let initial_total = initial_stats.hot_cache_used
+            + initial_stats.warm_cache_used
+            + initial_stats.cold_cache_used;
 
         // Trigger eviction
         cache_manager.evict_if_needed();
 
         let final_stats = cache_manager.get_cache_statistics();
-        let final_total = final_stats.hot_cache_used + final_stats.warm_cache_used + final_stats.cold_cache_used;
+        let final_total =
+            final_stats.hot_cache_used + final_stats.warm_cache_used + final_stats.cold_cache_used;
 
         // Eviction should have reduced cache usage under extreme pressure
         // Note: Due to cache implementation details, exact eviction behavior may vary
@@ -1129,7 +1248,7 @@ mod tests {
 
         // Store the same data under different page IDs
         let duplicate_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        
+
         cache_manager.store_page(1, duplicate_data.clone());
         cache_manager.store_page(2, duplicate_data.clone());
         cache_manager.store_page(3, duplicate_data.clone());
@@ -1146,7 +1265,7 @@ mod tests {
         let cache_manager = CacheManager::new(&config);
 
         // Access pages with different frequencies to create temperature differences
-        
+
         // Hot page - access many times
         let hot_page = 1;
         for _ in 0..15 {
@@ -1228,7 +1347,7 @@ mod tests {
         // Memory pressure should be calculated
         assert!(final_memory_pressure > 0);
         assert!(final_memory_pressure <= 100);
-        
+
         // Admission rate should be reasonable
         assert!(final_admission_rate > 0);
         assert!(final_admission_rate <= 100);
@@ -1241,10 +1360,10 @@ mod tests {
 
         // Simulate concurrent access patterns
         let access_patterns = vec![
-            vec![1, 2, 3, 4, 5],    // Sequential
-            vec![10, 8, 6, 4, 2],   // Reverse
-            vec![1, 3, 5, 7, 9],    // Odd numbers
-            vec![2, 4, 6, 8, 10],   // Even numbers
+            vec![1, 2, 3, 4, 5],  // Sequential
+            vec![10, 8, 6, 4, 2], // Reverse
+            vec![1, 3, 5, 7, 9],  // Odd numbers
+            vec![2, 4, 6, 8, 10], // Even numbers
         ];
 
         // Execute different access patterns
@@ -1252,7 +1371,7 @@ mod tests {
             for page_id in pattern {
                 let data = vec![page_id as u8; 64];
                 cache_manager.store_page(page_id, data.clone());
-                
+
                 // Verify immediate retrieval
                 let retrieved = cache_manager.get_page(page_id);
                 assert!(retrieved.is_some());
@@ -1276,7 +1395,7 @@ mod tests {
 
         // Test operations on empty cache
         assert!(cache_manager.get_page(1).is_none());
-        
+
         let predictions = cache_manager.trigger_prefetch(1);
         // Should still return some predictions (sequential)
         assert!(!predictions.is_empty());
@@ -1330,11 +1449,14 @@ mod tests {
         assert!(!predicted_pages.is_empty());
 
         // Access some of the predicted pages (hits)
-        for i in 0..predicted_pages.len().min(3) {
-            let page_id = predicted_pages[i];
+        for page_id in predicted_pages
+            .iter()
+            .take(predicted_pages.len().min(3))
+            .copied()
+        {
             let data = vec![page_id as u8; 64];
             cache_manager.store_page(page_id, data.clone());
-            
+
             // Access the page to register a prefetch hit
             let retrieved = cache_manager.get_page(page_id);
             assert!(retrieved.is_some());
@@ -1342,7 +1464,10 @@ mod tests {
 
         // Check that accuracy has been calculated
         let accuracy = cache_manager.get_prefetch_accuracy();
-        assert!(accuracy > 0.0, "Accuracy should be greater than 0 after hits");
+        assert!(
+            accuracy > 0.0,
+            "Accuracy should be greater than 0 after hits"
+        );
         assert!(accuracy <= 1.0, "Accuracy should not exceed 100%");
 
         // Test adaptive prefetching based on accuracy
@@ -1352,7 +1477,10 @@ mod tests {
         // Test that accuracy affects prediction count
         // With some accuracy, we should get reasonable number of predictions
         if accuracy > 0.4 {
-            assert!(new_predictions.len() >= 4, "Should make more predictions with decent accuracy");
+            assert!(
+                new_predictions.len() >= 4,
+                "Should make more predictions with decent accuracy"
+            );
         }
     }
 
@@ -1377,7 +1505,7 @@ mod tests {
 
         // Accuracy should still be reasonable
         let accuracy = cache_manager.get_prefetch_accuracy();
-        assert!(accuracy >= 0.0 && accuracy <= 1.0);
+        assert!((0.0..=1.0).contains(&accuracy));
     }
 
     #[test]
@@ -1386,7 +1514,7 @@ mod tests {
         let cache_manager = CacheManager::new(&config);
 
         // Test that prefetch distance adapts to accuracy
-        
+
         // With no history, should get moderate prefetching
         let initial_predictions = cache_manager.trigger_prefetch(40);
         let initial_count = initial_predictions.len();
@@ -1402,7 +1530,7 @@ mod tests {
         // With higher accuracy, might get more predictions
         let improved_predictions = cache_manager.trigger_prefetch(50);
         assert!(!improved_predictions.is_empty());
-        
+
         // Test that cache statistics include our prefetch accuracy
         let stats = cache_manager.get_cache_statistics();
         assert!(stats.prefetch_accuracy >= 0.0);
@@ -1429,10 +1557,11 @@ mod tests {
         assert_eq!(enhanced_stats.warm_cache_algorithm, "LFU");
         assert_eq!(enhanced_stats.cold_cache_algorithm, "FIFO");
 
-        // Verify basic stats are included
-        assert!(enhanced_stats.basic_stats.hot_cache_used >= 0);
-        assert!(enhanced_stats.basic_stats.warm_cache_used >= 0);
-        assert!(enhanced_stats.basic_stats.cold_cache_used >= 0);
+        // Verify basic stats are included (values are unsigned, so always >= 0)
+        // Just verify they're accessible without panicking
+        let _ = enhanced_stats.basic_stats.hot_cache_used;
+        let _ = enhanced_stats.basic_stats.warm_cache_used;
+        let _ = enhanced_stats.basic_stats.cold_cache_used;
     }
 
     #[test]
@@ -1447,25 +1576,25 @@ mod tests {
 
         // Get detailed access information using specialized traits
         let access_details = cache_manager.get_page_access_details(page_id);
-        
+
         if let Some(details) = access_details {
             // Verify we get meaningful access details
             assert!(!details.cache_level.is_empty());
             assert!(!details.algorithm.is_empty());
-            
+
             // Different cache levels should provide different information
             match details.algorithm.as_str() {
                 "LRU-K" => {
                     assert!(details.k_value.is_some());
                     assert_eq!(details.k_value.unwrap(), 2); // Default K value
                     assert!(details.access_count.is_some());
-                },
+                }
                 "LFU" => {
                     assert!(details.access_count.is_some()); // Frequency information
-                },
+                }
                 "FIFO" => {
                     assert!(details.eviction_rank.is_some()); // Age rank information
-                },
+                }
                 _ => panic!("Unknown algorithm: {}", details.algorithm),
             }
         }
@@ -1487,9 +1616,10 @@ mod tests {
 
         // Verify cache is still functional after specialized maintenance
         let stats = cache_manager.get_cache_statistics();
-        assert!(stats.hot_cache_used >= 0);
-        assert!(stats.warm_cache_used >= 0);
-        assert!(stats.cold_cache_used >= 0);
+        // Values are unsigned, so always >= 0 - just verify they're accessible
+        let _ = stats.hot_cache_used;
+        let _ = stats.warm_cache_used;
+        let _ = stats.cold_cache_used;
     }
 
     #[test]
@@ -1513,13 +1643,13 @@ mod tests {
         let _ = cache_manager.get_page(1);
 
         // Get page access details to verify LRU-K specific information
-        if let Some(details) = cache_manager.get_page_access_details(1) {
-            if details.algorithm == "LRU-K" {
-                assert_eq!(details.k_value, Some(2));
-                assert!(details.access_count.is_some());
-                // Page 1 should have at least 2 accesses (K value reached)
-                assert!(details.access_count.unwrap() >= 2);
-            }
+        if let Some(details) = cache_manager.get_page_access_details(1)
+            && details.algorithm == "LRU-K"
+        {
+            assert_eq!(details.k_value, Some(2));
+            assert!(details.access_count.is_some());
+            // Page 1 should have at least 2 accesses (K value reached)
+            assert!(details.access_count.unwrap() >= 2);
         }
     }
 
@@ -1529,7 +1659,7 @@ mod tests {
         let cache_manager = CacheManager::new(&config);
 
         // Test that all existing functionality still works after trait migration
-        
+
         // Basic store and retrieve
         let page_id = 100;
         let data = vec![100; 512];
@@ -1543,13 +1673,15 @@ mod tests {
 
         // Memory pressure and admission control
         cache_manager.update_memory_pressure();
-        assert!(cache_manager.get_memory_pressure() >= 0);
+        // Memory pressure is unsigned, so always >= 0 - just verify it's accessible
+        let _ = cache_manager.get_memory_pressure();
         assert!(cache_manager.get_admission_rate() > 0);
 
         // Statistics
         let stats = cache_manager.get_cache_statistics();
-        assert!(stats.hot_cache_used >= 0);
-        
+        // hot_cache_used is unsigned, so always >= 0 - just verify it's accessible
+        let _ = stats.hot_cache_used;
+
         // Enhanced statistics using new traits
         let enhanced_stats = cache_manager.get_enhanced_cache_statistics();
         assert_eq!(enhanced_stats.lru_k_value, 2);

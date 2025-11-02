@@ -53,8 +53,8 @@ impl AbstractPlanNode for MockScanNode {
 impl Display for MockScanNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if f.alternate() {
-            write!(f, "MockScan [\n")?;
-            write!(f, "  Table: {}\n", self.get_table_name())?;
+            writeln!(f, "MockScan [")?;
+            writeln!(f, "  Table: {}", self.get_table_name())?;
             write!(f, "  Schema: {}", self.output_schema)?;
             if !self.children.is_empty() {
                 for child in &self.children {

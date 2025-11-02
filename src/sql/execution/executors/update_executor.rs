@@ -94,7 +94,7 @@ impl AbstractExecutor for UpdateExecutor {
             let binding = self.context.read();
             let catalog_guard = binding.get_catalog().read();
             let table_info = catalog_guard
-                .get_table(&self.plan.get_table_name())
+                .get_table(self.plan.get_table_name())
                 .ok_or_else(|| DBError::TableNotFound(self.plan.get_table_name().to_string()))?;
 
             let schema = table_info.get_table_schema().clone();
@@ -115,69 +115,62 @@ impl AbstractExecutor for UpdateExecutor {
 
         // Process all tuples from child executor (scan)
         if let Some(ref mut child) = self.child_executor {
-            loop {
-                match child.next()? {
-                    Some((tuple, rid)) => {
-                        debug!("Processing tuple for update with RID {:?}", rid);
+            while let Some((tuple, rid)) = child.next()? {
+                debug!("Processing tuple for update with RID {:?}", rid);
 
-                        // Apply updates based on the update plan
-                        let mut updated_values = tuple.get_values().clone();
+                // Apply updates based on the update plan
+                let mut updated_values = tuple.get_values().clone();
 
-                        // Apply each update expression
-                        let expressions = self.plan.get_target_expressions();
-                        for expression in expressions {
-                            match expression.as_ref() {
-                                Expression::Assignment(assignment_expr) => {
-                                    // Handle AssignmentExpression - the modern format
-                                    let column_idx = assignment_expr.get_target_column_index();
-                                    let new_value = assignment_expr.evaluate(&tuple, &schema)?;
-                                    updated_values[column_idx] = new_value;
-                                }
-                                _ => {
-                                    // Fall back to legacy pair format if needed
-                                    for i in (0..expressions.len()).step_by(2) {
-                                        if i + 1 < expressions.len() {
-                                            // First expression should be a column reference indicating which column to update
-                                            if let Expression::ColumnRef(col_ref) =
-                                                expressions[i].as_ref()
-                                            {
-                                                let column_idx = col_ref.get_column_index();
-                                                let new_value_expr = &expressions[i + 1];
-                                                let new_value =
-                                                    new_value_expr.evaluate(&tuple, &schema)?;
-                                                updated_values[column_idx] = new_value;
-                                            }
-                                        }
-                                    }
-                                    break; // Only process once for legacy format
-                                }
-                            }
+                // Apply each update expression
+                let expressions = self.plan.get_target_expressions();
+                for expression in expressions {
+                    match expression.as_ref() {
+                        Expression::Assignment(assignment_expr) => {
+                            // Handle AssignmentExpression - the modern format
+                            let column_idx = assignment_expr.get_target_column_index();
+                            let new_value = assignment_expr.evaluate(&tuple, &schema)?;
+                            updated_values[column_idx] = new_value;
                         }
-
-                        // Create updated tuple
-                        let updated_tuple = Tuple::new(&updated_values, &schema, rid);
-
-                        // Update the tuple in the table
-                        match transactional_table_heap.update_tuple(
-                            &TupleMeta::new(0),
-                            &updated_tuple,
-                            rid,
-                            txn_context.clone(),
-                        ) {
-                            Ok(_) => {
-                                update_count += 1;
-                                trace!(
-                                    "Successfully updated tuple #{} with RID {:?}",
-                                    update_count, rid
-                                );
+                        _ => {
+                            // Fall back to legacy pair format if needed
+                            for i in (0..expressions.len()).step_by(2) {
+                                if i + 1 < expressions.len() {
+                                    // First expression should be a column reference indicating which column to update
+                                    if let Expression::ColumnRef(col_ref) = expressions[i].as_ref()
+                                    {
+                                        let column_idx = col_ref.get_column_index();
+                                        let new_value_expr = &expressions[i + 1];
+                                        let new_value = new_value_expr.evaluate(&tuple, &schema)?;
+                                        updated_values[column_idx] = new_value;
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                error!("Failed to update tuple with RID {:?}: {}", rid, e);
-                                return Err(DBError::Execution(format!("Update failed: {}", e)));
-                            }
+                            break; // Only process once for legacy format
                         }
                     }
-                    None => break,
+                }
+
+                // Create updated tuple
+                let updated_tuple = Tuple::new(&updated_values, &schema, rid);
+
+                // Update the tuple in the table
+                match transactional_table_heap.update_tuple(
+                    &TupleMeta::new(0),
+                    &updated_tuple,
+                    rid,
+                    txn_context.clone(),
+                ) {
+                    Ok(_) => {
+                        update_count += 1;
+                        trace!(
+                            "Successfully updated tuple #{} with RID {:?}",
+                            update_count, rid
+                        );
+                    }
+                    Err(e) => {
+                        error!("Failed to update tuple with RID {:?}: {}", rid, e);
+                        return Err(DBError::Execution(format!("Update failed: {}", e)));
+                    }
                 }
             }
         } else {
@@ -217,7 +210,8 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -234,12 +228,11 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::filter_plan::FilterNode;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::types_db::types::Type;
-    use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::types::KeyType;
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
+    use crate::types_db::types::Type;
+    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -270,14 +263,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -594,7 +595,7 @@ mod tests {
                 Value::new(salary),
             ];
             table_heap
-                .insert_tuple_from_values(values, &schema, transaction_context.clone())
+                .insert_tuple_from_values(values, schema, transaction_context.clone())
                 .unwrap();
         }
     }
@@ -702,7 +703,7 @@ mod tests {
         let mut found_updates = 0;
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
 
-        while let Some((meta, tuple)) = iterator.next() {
+        for (meta, tuple) in &mut iterator {
             if meta.is_deleted() {
                 continue;
             }
@@ -825,7 +826,7 @@ mod tests {
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
 
-        while let Some((meta, tuple)) = iterator.next() {
+        for (meta, tuple) in &mut iterator {
             if meta.is_deleted() {
                 continue;
             }
@@ -942,7 +943,7 @@ mod tests {
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
 
-        while let Some((meta, tuple)) = iterator.next() {
+        for (meta, tuple) in &mut iterator {
             if meta.is_deleted() {
                 continue;
             }
@@ -1347,7 +1348,7 @@ mod tests {
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
 
-        while let Some((meta, tuple)) = iterator.next() {
+        for (meta, tuple) in &mut iterator {
             if meta.is_deleted() {
                 continue;
             }
@@ -1449,7 +1450,7 @@ mod tests {
         let mut iterator = table_heap.make_iterator(Some(ctx.transaction_context.clone()));
         let mut verified = false;
 
-        while let Some((meta, tuple)) = iterator.next() {
+        for (meta, tuple) in &mut iterator {
             if meta.is_deleted() {
                 continue;
             }

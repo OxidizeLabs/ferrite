@@ -8,7 +8,7 @@ use crate::sql::execution::expressions::comparison_expression::ComparisonType;
 use crate::sql::execution::expressions::logic_expression::LogicType;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::index_scan_plan::IndexScanNode;
-use crate::storage::index::index::IndexInfo;
+use crate::storage::index::IndexInfo;
 use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
@@ -23,15 +23,10 @@ pub struct IndexScanExecutor {
     table_heap: Arc<TransactionalTableHeap>,
     initialized: bool,
     iterator: Option<IndexIterator>,
-    child_executor: Box<dyn AbstractExecutor>,
 }
 
 impl IndexScanExecutor {
-    pub fn new(
-        child_executor: Box<dyn AbstractExecutor>,
-        context: Arc<RwLock<ExecutionContext>>,
-        plan: Arc<IndexScanNode>,
-    ) -> Self {
+    pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<IndexScanNode>) -> Self {
         let table_name = plan.get_table_name();
         debug!(
             "Creating IndexScanExecutor for table '{}' using index '{}'",
@@ -84,7 +79,6 @@ impl IndexScanExecutor {
             table_heap,
             iterator: None,
             initialized: false,
-            child_executor,
         }
     }
 
@@ -154,7 +148,7 @@ impl IndexScanExecutor {
                             match child.as_ref() {
                                 Expression::Comparison(comp_expr) => {
                                     if let Ok(value) = comp_expr.get_right().evaluate(
-                                        &Tuple::new(&vec![], &Schema::new(vec![]), RID::new(0, 0)),
+                                        &Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0)),
                                         &Schema::new(vec![]),
                                     ) {
                                         match comp_expr.get_comp_type() {
@@ -204,7 +198,7 @@ impl IndexScanExecutor {
             }
             Expression::Comparison(comp_expr) => {
                 if let Ok(value) = comp_expr.get_right().evaluate(
-                    &Tuple::new(&vec![], &Schema::new(vec![]), RID::new(0, 0)),
+                    &Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0)),
                     &Schema::new(vec![]),
                 ) {
                     match comp_expr.get_comp_type() {
@@ -298,11 +292,11 @@ impl IndexScanExecutor {
 
         let start_tuple = final_start
             .clone()
-            .map(|v| Arc::new(Tuple::new(&vec![v], &key_schema, RID::new(0, 0))));
+            .map(|v| Arc::new(Tuple::new(&[v], &key_schema, RID::new(0, 0))));
 
         let end_tuple = final_end
             .clone()
-            .map(|v| Arc::new(Tuple::new(&vec![v], &key_schema, RID::new(0, 0))));
+            .map(|v| Arc::new(Tuple::new(&[v], &key_schema, RID::new(0, 0))));
 
         debug!(
             "Scan bounds: start={:?} (incl={}), end={:?} (incl={})",
@@ -341,17 +335,7 @@ impl AbstractExecutor for IndexScanExecutor {
             self.init();
         }
 
-        // Get child result first
-        // Handle the Result from child_executor.next()
-        match self.child_executor.next()? {
-            Some(child_result) => {
-                debug!("Using result from child executor");
-                return Ok(Some(child_result));
-            }
-            None => {
-                debug!("Child executor exhausted, proceeding with index scan");
-            }
-        }
+        // Proceed directly with index scan
 
         // Get schema upfront
         let output_schema = self.get_output_schema().clone();
@@ -370,7 +354,7 @@ impl AbstractExecutor for IndexScanExecutor {
         };
 
         // Keep trying until we find a valid tuple or reach the end
-        while let Some(rid) = iter.next() {
+        for rid in iter.by_ref() {
             debug!("Found RID {:?} in index", rid);
 
             // Use RID to fetch tuple from table heap with transaction context
@@ -435,9 +419,10 @@ mod index_scan_executor_tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::common::config::{IndexOidT, TableOidT};
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -445,14 +430,13 @@ mod index_scan_executor_tests {
     use crate::sql::execution::expressions::comparison_expression::ComparisonExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::transaction_context::TransactionContext;
-    use crate::storage::index::index::IndexType;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::index::IndexType;
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         execution_context: Arc<RwLock<ExecutionContext>>,
@@ -481,14 +465,22 @@ mod index_scan_executor_tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             let transaction_manager = Arc::new(TransactionManager::new());
             let lock_manager = Arc::new(LockManager::new());
@@ -606,7 +598,7 @@ mod index_scan_executor_tests {
 
                 // Insert using transactional table heap
                 let rid = txn_table_heap
-                    .insert_tuple_from_values(values, &schema, transaction_context.clone())
+                    .insert_tuple_from_values(values, schema, transaction_context.clone())
                     .unwrap();
 
                 // Insert into index
@@ -647,31 +639,6 @@ mod index_scan_executor_tests {
         values
     }
 
-    // Add this new struct for testing
-    struct DummyExecutor {
-        initialized: bool,
-        schema: Schema,
-        context: Arc<RwLock<ExecutionContext>>,
-    }
-
-    impl AbstractExecutor for DummyExecutor {
-        fn init(&mut self) {
-            self.initialized = true;
-        }
-
-        fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
-            Ok(None)
-        }
-
-        fn get_output_schema(&self) -> &Schema {
-            &self.schema
-        }
-
-        fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
-            self.context.clone()
-        }
-    }
-
     #[tokio::test]
     async fn test_index_scan_full() {
         let schema = create_test_schema();
@@ -679,13 +646,6 @@ mod index_scan_executor_tests {
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
-
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: context.clone(),
-        });
 
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
@@ -696,12 +656,12 @@ mod index_scan_executor_tests {
             vec![], // no predicates
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
         let mut count = 0;
         while let Ok(Some((tuple, _))) = executor.next() {
             count += 1;
-            println!("Got tuple: {:?}", tuple);
+            log::debug!("Got tuple: {:?}", tuple);
         }
         assert_eq!(count, 10);
     }
@@ -713,13 +673,6 @@ mod index_scan_executor_tests {
         let context = ctx.execution_context();
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
-
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: context.clone(),
-        });
 
         // id = 5
         let predicate = create_predicate_expression(ComparisonType::Equal, 5);
@@ -733,7 +686,7 @@ mod index_scan_executor_tests {
             vec![predicate],
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
         let mut count = 0;
         while let Ok(Some((tuple, _))) = executor.next() {
@@ -754,13 +707,6 @@ mod index_scan_executor_tests {
 
         let (table_name, index_name, table_id, index_id, _) = setup_test_table(&schema, &context);
 
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: context.clone(),
-        });
-
         // 3 <= id <= 7
         let pred_low = create_predicate_expression(ComparisonType::GreaterThanOrEqual, 3);
         let pred_high = create_predicate_expression(ComparisonType::LessThanOrEqual, 7);
@@ -774,7 +720,7 @@ mod index_scan_executor_tests {
             vec![pred_low, pred_high],
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(context.clone(), plan);
 
         let mut count = 0;
         while let Ok(Some((tuple, _))) = executor.next() {
@@ -806,12 +752,11 @@ mod index_scan_executor_tests {
         for i in &[3, 7] {
             let mut iterator = txn_table_heap.make_iterator(Some(txn_ctx.clone()));
 
-            while let Some((_, tuple)) = iterator.next() {
+            for (_, tuple) in &mut iterator {
                 let id = tuple.get_value(0).compare_equals(&Value::new(*i));
                 let rid = tuple.get_rid();
 
                 if id == CmpBool::CmpTrue {
-                    // Use delete_tuple instead of manually setting deleted flag
                     let _ = txn_table_heap.delete_tuple(rid, txn_ctx.clone());
                     break;
                 }
@@ -820,10 +765,8 @@ mod index_scan_executor_tests {
 
         // Commit the transaction that performed the deletes
         let txn_manager = txn_ctx.get_transaction_manager();
-        txn_manager.commit(
-            txn_ctx.get_transaction(),
-            context.read().get_buffer_pool_manager(),
-        ).await;
+        let bpm = context.read().get_buffer_pool_manager();
+        txn_manager.commit(txn_ctx.get_transaction(), bpm).await;
 
         // Create new transaction for scanning with new execution context
         let scan_txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
@@ -840,13 +783,6 @@ mod index_scan_executor_tests {
             scan_txn_ctx.clone(),
         )));
 
-        // Create dummy child executor
-        let child_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: schema.clone(),
-            context: scan_context.clone(),
-        });
-
         // Create and execute scan with new context
         let plan = Arc::new(IndexScanNode::new(
             schema.clone(),
@@ -857,7 +793,7 @@ mod index_scan_executor_tests {
             vec![], // no predicates
         ));
 
-        let mut executor = IndexScanExecutor::new(child_executor, scan_context.clone(), plan);
+        let mut executor = IndexScanExecutor::new(scan_context.clone(), plan);
 
         let mut count = 0;
         let mut seen_ids = Vec::new();
@@ -921,7 +857,7 @@ mod index_scan_executor_tests {
 
             // Delete tuples with IDs 3 and 7
             let mut iterator = table_heap.make_iterator(Some(transaction_context.clone()));
-            while let Some((meta, mut tuple)) = iterator.next() {
+            for (meta, tuple) in &mut iterator {
                 // Store both id and rid before any mutable borrows
                 let id = tuple.get_value(0).as_integer().unwrap();
                 let rid = tuple.get_rid();
@@ -933,7 +869,7 @@ mod index_scan_executor_tests {
 
                     let _ = table_heap.update_tuple(
                         &new_meta,
-                        &mut tuple,
+                        &tuple,
                         rid, // Use the stored rid
                         transaction_context.clone(),
                     );

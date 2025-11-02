@@ -87,17 +87,17 @@ mod tests {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction_manager::TransactionManager;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::table_heap::TableHeap;
     use crate::types_db::type_id::TypeId;
     use parking_lot::RwLock;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
-        transaction_manager: Arc<TransactionManager>
+        transaction_manager: Arc<TransactionManager>,
     }
 
     impl TestContext {
@@ -122,20 +122,24 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager
             let transaction_manager = Arc::new(TransactionManager::new());
 
             Self {
                 bpm,
-                transaction_manager
+                transaction_manager,
             }
         }
     }

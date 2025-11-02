@@ -3,8 +3,8 @@ use crate::common::exception::DBError;
 use crate::common::result_writer::CliResultWriter;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::transaction_context::TransactionContext;
-use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 use std::sync::Arc;
 
 pub struct CLI {
@@ -119,7 +119,11 @@ impl CLI {
 
     async fn commit_transaction(&mut self) -> Result<(), DBError> {
         if let Some(txn_ctx) = self.current_transaction.take() {
-            match self.db.commit_transaction(txn_ctx.get_transaction_id()).await {
+            match self
+                .db
+                .commit_transaction(txn_ctx.get_transaction_id())
+                .await
+            {
                 Ok(_) => {
                     println!("Transaction committed successfully.");
                 }
@@ -170,7 +174,8 @@ impl CLI {
                 // Execute within existing transaction
                 match self
                     .db
-                    .execute_transaction(sql, txn_ctx.clone(), &mut writer).await
+                    .execute_transaction(sql, txn_ctx.clone(), &mut writer)
+                    .await
                 {
                     Ok(_) => Ok(()),
                     Err(e) => {
@@ -183,7 +188,8 @@ impl CLI {
                 // Auto-commit mode
                 match self
                     .db
-                    .execute_sql(sql, IsolationLevel::ReadCommitted, &mut writer).await
+                    .execute_sql(sql, IsolationLevel::ReadCommitted, &mut writer)
+                    .await
                 {
                     Ok(_) => Ok(()),
                     Err(e) => {

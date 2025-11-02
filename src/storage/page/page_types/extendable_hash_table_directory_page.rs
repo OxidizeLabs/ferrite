@@ -1,8 +1,8 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
+use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
-use crate::storage::page::page::Page;
-use crate::storage::page::page::PAGE_TYPE_OFFSET;
-use crate::storage::page::page::{PageTrait, PageType, PageTypeId};
+use crate::storage::page::PAGE_TYPE_OFFSET;
+use crate::storage::page::Page;
+use crate::storage::page::{PageTrait, PageType, PageTypeId};
 use log::{debug, info, warn};
 use std::any::Any;
 use std::collections::HashMap;
@@ -510,11 +510,9 @@ impl ExtendableHTableDirectoryPage {
         let local_depth = self.get_local_depth(bucket_index as u32);
 
         // Check if we need to grow the directory
-        if local_depth >= self.global_depth {
-            if !self.grow_directory() {
-                debug!("Failed to grow directory during split");
-                return;
-            }
+        if local_depth >= self.global_depth && !self.grow_directory() {
+            debug!("Failed to grow directory during split");
+            return;
         }
 
         // Calculate masks for redistribution
@@ -584,7 +582,7 @@ impl ExtendableHTableDirectoryPage {
         }
 
         // Return the page ID of the bucket being removed
-        Some(self.get_bucket_page_id(bucket_index)?)
+        self.get_bucket_page_id(bucket_index)
     }
 
     // Helper method to find the correct bucket index for a given page ID

@@ -1,6 +1,6 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 use log::debug;
 use std::any::Any;
 use std::fmt::{Debug, Formatter};
@@ -73,7 +73,7 @@ impl<
     /// In B+ trees, when a root has only one child left, it should be removed
     /// to maintain the height balance property
     pub fn should_collapse_root(&self) -> bool {
-        self.is_root && self.keys.len() == 0
+        self.is_root && self.keys.is_empty()
     }
 
     /// Get the only child of the root (when root should be collapsed)
@@ -285,7 +285,7 @@ impl<
                         Some(self.values[0])
                     }
                 }
-            }
+            };
         }
 
         // In B+ tree internal nodes, the keys divide the range of keys
@@ -306,14 +306,12 @@ impl<
                     Some(self.values[i + 1])
                 } else {
                     Some(self.values[self.values.len() - 1])
-                }
+                };
             }
         }
 
         // If key >= the last key, go to the rightmost pointer
-        if self.values.len() > self.keys.len() {
-            Some(self.values[self.values.len() - 1])
-        } else if !self.values.is_empty() {
+        if !self.values.is_empty() {
             Some(self.values[self.values.len() - 1])
         } else {
             None
@@ -495,7 +493,7 @@ impl<
         dot.push_str("|{");
         for i in 0..self.size {
             if i > 0 {
-                dot.push_str("|");
+                dot.push('|');
             }
             if let Some(key) = self.get_key_at(i) {
                 dot.push_str(&format!("<key{}>K:{:?}", i, key));
@@ -523,7 +521,7 @@ impl<
 
         // 2. Check the relationship between keys and values (pointers)
         // In a B+ tree internal node, for n keys there must be n+1 pointers
-        if self.values.len() != self.keys.len() + 1 && self.keys.len() > 0 {
+        if self.values.len() != self.keys.len() + 1 && !self.keys.is_empty() {
             return Err(format!(
                 "Key-value count invariant violated: keys={}, values={}, expected values={}",
                 self.keys.len(),
@@ -559,7 +557,7 @@ impl<
         if !self.is_root {
             // Internal node should have at least min_size keys
             let min_size = self.get_min_size();
-            if self.keys.len() < min_size && self.keys.len() > 0 {
+            if self.keys.len() < min_size && !self.keys.is_empty() {
                 return Err(format!(
                     "Non-root node has too few keys: contains {} keys but min is {}",
                     self.keys.len(),
@@ -570,7 +568,7 @@ impl<
             // Root specific checks
             // - Root can have fewer than min_size keys
             // - But if it has keys, it must follow the key-value relationship rules
-            if self.keys.len() > 0 && self.values.len() != self.keys.len() + 1 {
+            if !self.keys.is_empty() && self.values.len() != self.keys.len() + 1 {
                 return Err(format!(
                     "Root node key-value count invariant violated: keys={}, values={}, expected values={}",
                     self.keys.len(),
@@ -644,7 +642,7 @@ impl<
     /// Determines if this node is underfull (has fewer than min_size keys)
     /// but not empty. Empty nodes are handled separately.
     pub fn is_underfull(&self) -> bool {
-        !self.is_root && self.keys.len() > 0 && self.keys.len() < self.get_min_size()
+        !self.is_root && !self.keys.is_empty() && self.keys.len() < self.get_min_size()
     }
 
     /// Determines if this node can afford to give away a key
@@ -764,13 +762,13 @@ impl<
         if !self.values.is_empty() && !right_sibling_values.is_empty() {
             // Skip the first pointer of the right sibling (p1') because it should be
             // the same as the last pointer of the left node
-            for i in 1..right_sibling_values.len() {
-                self.values.push(right_sibling_values[i]);
+            for i in right_sibling_values.iter().skip(1) {
+                self.values.push(*i);
             }
         }
 
         // Make sure we have n+1 pointers for n keys
-        if self.keys.len() > 0 && self.values.len() != self.keys.len() + 1 {
+        if !self.keys.is_empty() && self.values.len() != self.keys.len() + 1 {
             debug!(
                 "After merge - keys: {}, values: {} - invariant requires {} values",
                 self.keys.len(),
@@ -967,7 +965,7 @@ mod tests {
         assert_eq!(page.get_value_at(0), None);
 
         // Insert first key-value pair: this sets up the first key and both left/right pointers
-        assert_eq!(page.insert_key_value(1, 2), true);
+        assert!(page.insert_key_value(1, 2));
         assert_eq!(page.get_size(), 1);
         assert_eq!(page.get_key_at(0), Some(1)); // Key at index 0
         assert_eq!(page.get_value_at(0), Some(2)); // First (leftmost) pointer
@@ -975,7 +973,7 @@ mod tests {
 
         // Insert second key-value pair (3, 4)
         // This adds the second key and its corresponding pointer
-        assert_eq!(page.insert_key_value(3, 4), true);
+        assert!(page.insert_key_value(3, 4));
         assert_eq!(page.get_size(), 2);
         assert_eq!(page.get_key_at(0), Some(1)); // First key
         assert_eq!(page.get_key_at(1), Some(3)); // Second key
@@ -984,7 +982,7 @@ mod tests {
         assert_eq!(page.get_value_at(2), Some(4)); // Rightmost pointer (associated with key 3)
 
         // Insert third key-value pair (5, 6) - should maintain sorted order
-        assert_eq!(page.insert_key_value(5, 6), true);
+        assert!(page.insert_key_value(5, 6));
         assert_eq!(page.get_size(), 3);
         assert_eq!(page.get_key_at(0), Some(1)); // First key
         assert_eq!(page.get_key_at(1), Some(3)); // Second key
@@ -995,7 +993,7 @@ mod tests {
         assert_eq!(page.get_value_at(3), Some(6)); // Rightmost pointer
 
         // Insert key between existing keys to test sorted ordering
-        assert_eq!(page.insert_key_value(4, 8), true);
+        assert!(page.insert_key_value(4, 8));
         assert_eq!(page.get_size(), 4);
         assert_eq!(page.get_key_at(0), Some(1)); // First key
         assert_eq!(page.get_key_at(1), Some(3)); // Second key
@@ -1008,7 +1006,7 @@ mod tests {
         assert_eq!(page.get_value_at(4), Some(6)); // Rightmost pointer (for key 5)
 
         // Try to insert when page is full
-        assert_eq!(page.insert_key_value(7, 10), false);
+        assert!(!page.insert_key_value(7, 10));
         assert_eq!(page.get_size(), 4); // Size shouldn't change
     }
 
@@ -1212,15 +1210,15 @@ mod tests {
             int_comparator,
         );
 
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
 
         // Create a page with keys [20, 40, 60]
         assert!(page.insert_key_value(40, 400));
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
         assert!(page.insert_key_value(20, 200));
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
         assert!(page.insert_key_value(60, 600));
-        println!("{}", page.visualize());
+        log::info!("{}", page.visualize());
 
         // Test finding index for existing keys
         assert_eq!(page.find_key_index(&20), 0);

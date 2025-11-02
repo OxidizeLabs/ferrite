@@ -111,7 +111,7 @@ pub enum DeletePageError {
     #[error("Page pinned - PageID: {0}")]
     PagePinned(PageId),
     #[error("Invalid Frame - FrameID: {0}")]
-    InvalidFrame(FrameId)
+    InvalidFrame(FrameId),
 }
 
 #[derive(Debug)]
@@ -422,9 +422,7 @@ impl From<PageError> for DBError {
 
 impl From<FlushError> for DBError {
     fn from(error: FlushError) -> Self {
-        match error {
-            _ => DBError::Internal(error.to_string()),
-        }
+        DBError::Internal(error.to_string())
     }
 }
 

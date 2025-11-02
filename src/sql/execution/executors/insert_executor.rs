@@ -1,5 +1,5 @@
 use crate::catalog::schema::Schema;
-use crate::common::config::{BATCH_INSERT_THRESHOLD};
+use crate::common::config::BATCH_INSERT_THRESHOLD;
 use crate::common::exception::DBError;
 use crate::common::performance_monitor::{record_insert_performance, record_query_execution};
 use crate::common::rid::RID;
@@ -65,7 +65,10 @@ impl InsertExecutor {
             txn_context,
         ) {
             Ok(rids) => {
-                info!("✓ TRUE bulk insert completed successfully: {} rows inserted", rids);
+                info!(
+                    "✓ TRUE bulk insert completed successfully: {} rows inserted",
+                    rids
+                );
                 Ok(rids)
             }
             Err(e) => {
@@ -79,7 +82,7 @@ impl InsertExecutor {
     fn validate_foreign_key_constraints_with_context(
         context: &Arc<RwLock<ExecutionContext>>,
         values: &[crate::types_db::value::Value],
-        schema: &Schema
+        schema: &Schema,
     ) -> Result<(), String> {
         for (column_index, column) in schema.get_columns().iter().enumerate() {
             if let Some(foreign_key_constraint) = column.get_foreign_key() {
@@ -100,9 +103,9 @@ impl InsertExecutor {
                 // Validate that the foreign key value exists in the referenced table
                 if !Self::validate_foreign_key_reference_with_context(
                     context,
-                    &value,
+                    value,
                     &foreign_key_constraint.referenced_table,
-                    &foreign_key_constraint.referenced_column
+                    &foreign_key_constraint.referenced_column,
                 )? {
                     return Err(format!(
                         "Foreign key constraint violation for column '{}': value '{}' does not exist in table '{}' column '{}'",
@@ -136,19 +139,23 @@ impl InsertExecutor {
         let referenced_schema = table_info.get_table_schema();
 
         // Find the referenced column index
-        let column_index = referenced_schema.get_columns()
+        let column_index = referenced_schema
+            .get_columns()
             .iter()
             .position(|col| col.get_name() == referenced_column)
-            .ok_or_else(|| format!("Referenced column '{}' not found in table '{}'", referenced_column, referenced_table))?;
+            .ok_or_else(|| {
+                format!(
+                    "Referenced column '{}' not found in table '{}'",
+                    referenced_column, referenced_table
+                )
+            })?;
 
         // Get transaction context
         let txn_context = context_guard.get_transaction_context().clone();
 
         // Create transactional table heap for the referenced table
-        let referenced_table_heap = TransactionalTableHeap::new(
-            table_info.get_table_heap(),
-            table_info.get_table_oidt()
-        );
+        let referenced_table_heap =
+            TransactionalTableHeap::new(table_info.get_table_heap(), table_info.get_table_oidt());
 
         // Check if the value exists in the referenced table
         let iterator = referenced_table_heap.make_iterator(Some(txn_context));
@@ -210,7 +217,7 @@ impl AbstractExecutor for InsertExecutor {
             let binding = self.context.read();
             let catalog_guard = binding.get_catalog().read();
             let table_info = catalog_guard
-                .get_table(&self.plan.get_table_name())
+                .get_table(self.plan.get_table_name())
                 .ok_or_else(|| DBError::TableNotFound(self.plan.get_table_name().to_string()))?;
 
             let schema = table_info.get_table_schema().clone();
@@ -233,12 +240,15 @@ impl AbstractExecutor for InsertExecutor {
 
             // PERFORMANCE OPTIMIZATION: Process inserts in batches
             if values_to_insert.len() >= BATCH_INSERT_THRESHOLD {
-                debug!("Using TRUE bulk insert optimization for {} rows", values_to_insert.len());
-                
+                debug!(
+                    "Using TRUE bulk insert optimization for {} rows",
+                    values_to_insert.len()
+                );
+
                 // OPTIMIZATION: Process in optimal batch sizes for memory efficiency
                 // Use larger batches for better performance while respecting memory limits
                 let optimal_batch_size = std::cmp::min(BATCH_INSERT_THRESHOLD * 2, 1000);
-                
+
                 for batch in values_to_insert.chunks(optimal_batch_size) {
                     let batch_result = self.bulk_insert_values(
                         batch,
@@ -247,14 +257,20 @@ impl AbstractExecutor for InsertExecutor {
                         txn_context.clone(),
                     )?;
                     insert_count += batch_result;
-                    trace!("✓ Successfully completed TRUE bulk insert batch of {} tuples", batch_result);
+                    trace!(
+                        "✓ Successfully completed TRUE bulk insert batch of {} tuples",
+                        batch_result
+                    );
                 }
             } else {
                 // OPTIMIZATION: Even for small batches, use bulk insert if we have multiple rows
                 if values_to_insert.len() > 1 {
-                    debug!("Using TRUE bulk insert for small batch of {} rows", values_to_insert.len());
+                    debug!(
+                        "Using TRUE bulk insert for small batch of {} rows",
+                        values_to_insert.len()
+                    );
                     let batch_result = self.bulk_insert_values(
-                        &values_to_insert,
+                        values_to_insert,
                         &schema,
                         &transactional_table_heap,
                         txn_context.clone(),
@@ -292,32 +308,32 @@ impl AbstractExecutor for InsertExecutor {
 
                 // Collect all values first to avoid borrowing conflicts
                 let mut all_values = Vec::new();
-                loop {
-                    match child.next()? {
-                        Some((tuple, _)) => {
-                            let values = tuple.get_values().clone();
-                            all_values.push(values);
-                        }
-                        None => break,
-                    }
+                while let Some((tuple, _)) = child.next()? {
+                    let values = tuple.get_values().clone();
+                    all_values.push(values);
                 }
 
                 // Now validate and insert each set of values
                 for values in all_values {
                     // Map values from child schema to table schema
-                    let mapped_values = self.schema_manager.map_values_to_schema(
-                        &values,
-                        &child_schema,
-                        &schema,
-                    );
-                    
+                    let mapped_values =
+                        self.schema_manager
+                            .map_values_to_schema(&values, &child_schema, &schema);
+
                     debug!("Original values: {:?}", values);
                     debug!("Mapped values: {:?}", mapped_values);
 
                     // Validate foreign key constraints before inserting
-                    if let Err(e) = Self::validate_foreign_key_constraints_with_context(&self.context, &mapped_values, &schema) {
+                    if let Err(e) = Self::validate_foreign_key_constraints_with_context(
+                        &self.context,
+                        &mapped_values,
+                        &schema,
+                    ) {
                         error!("Foreign key constraint violation: {}", e);
-                        return Err(DBError::Execution(format!("Insert from VALUES/SELECT failed: {}", e)));
+                        return Err(DBError::Execution(format!(
+                            "Insert from VALUES/SELECT failed: {}",
+                            e
+                        )));
                     }
 
                     match transactional_table_heap.insert_tuple_from_values(
@@ -327,7 +343,10 @@ impl AbstractExecutor for InsertExecutor {
                     ) {
                         Ok(_rid) => {
                             insert_count += 1;
-                            trace!("Successfully inserted tuple #{} from VALUES/SELECT", insert_count);
+                            trace!(
+                                "Successfully inserted tuple #{} from VALUES/SELECT",
+                                insert_count
+                            );
                         }
                         Err(e) => {
                             error!("Failed to insert tuple from VALUES/SELECT: {}", e);
@@ -370,14 +389,14 @@ impl AbstractExecutor for InsertExecutor {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -386,12 +405,11 @@ mod tests {
     use crate::sql::execution::plans::abstract_plan::PlanNode;
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use parking_lot::RwLock;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -422,14 +440,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -1065,14 +1091,15 @@ mod tests {
         // Execute insert - this should fail because the string is too large for a page
         executor.init();
         let result = executor.next();
-        
+
         // Expect the insert to fail with an error about the tuple being too large
         assert!(result.is_err(), "Insert should fail for oversized tuple");
         if let Err(error) = result {
             let error_msg = error.to_string();
             assert!(
                 error_msg.contains("too large") || error_msg.contains("Tuple is too large"),
-                "Error should mention tuple size issue, got: {}", error_msg
+                "Error should mention tuple size issue, got: {}",
+                error_msg
             );
         }
     }
@@ -1331,7 +1358,10 @@ mod tests {
         // Execute insert - this should succeed
         executor.init();
         let result = executor.next();
-        assert!(result.unwrap().is_none(), "Insert should return None for success");
+        assert!(
+            result.unwrap().is_none(),
+            "Insert should return None for success"
+        );
     }
 
     #[tokio::test]
@@ -1485,11 +1515,7 @@ mod tests {
         }
 
         let expressions = vec![vec![Arc::new(Expression::Constant(
-            ConstantExpression::new(
-                Value::new(1),
-                Column::new("id", TypeId::Integer),
-                vec![],
-            ),
+            ConstantExpression::new(Value::new(1), Column::new("id", TypeId::Integer), vec![]),
         ))]];
 
         let values_node = Arc::new(ValuesNode::new(

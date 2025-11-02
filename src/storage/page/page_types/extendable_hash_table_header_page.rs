@@ -1,6 +1,6 @@
-use crate::common::config::{PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
+use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
-use crate::storage::page::page::{Page, PageTrait, PageType, PageTypeId, PAGE_TYPE_OFFSET};
+use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 use log::{debug, info};
 use std::any::Any;
 use std::fmt;
@@ -283,7 +283,7 @@ impl PageTrait for ExtendableHTableHeaderPage {
 
 impl Debug for ExtendableHTableHeaderPage {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self)
     }
 }
 
@@ -298,16 +298,16 @@ mod basic_behavior {
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
-    use crate::storage::page::page::PageTrait;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
     use log::info;
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     pub struct TestContext {
-        bpm: Arc<BufferPoolManager>
+        bpm: Arc<BufferPoolManager>,
     }
 
     impl TestContext {
@@ -332,17 +332,19 @@ mod basic_behavior {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
-            Self {
-                bpm
-            }
+            Self { bpm }
         }
     }
 

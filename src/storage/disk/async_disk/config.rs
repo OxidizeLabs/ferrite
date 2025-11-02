@@ -1,10 +1,10 @@
 //! Configuration for the Async Disk Manager
-//! 
+//!
 //! This module contains the configuration structures and enums for the async disk manager.
 
-use std::time::Duration;
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
+use std::time::Duration;
 
 /// Configuration for the disk manager with optimizations
 #[derive(Debug, Clone)]
@@ -69,10 +69,10 @@ pub enum FsyncPolicy {
 /// Durability levels for writes
 #[derive(Debug, Clone, PartialEq)]
 pub enum DurabilityLevel {
-    None,        // No durability guarantees
-    Buffer,      // Buffered writes
-    Sync,        // Synchronous writes
-    Durable,     // Guaranteed durability
+    None,    // No durability guarantees
+    Buffer,  // Buffered writes
+    Sync,    // Synchronous writes
+    Durable, // Guaranteed durability
 }
 
 /// Priority levels for I/O operations
@@ -98,10 +98,10 @@ pub enum IOOperationType {
 /// Cache eviction policies
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvictionPolicy {
-    LRU,    // Least Recently Used
-    LFU,    // Least Frequently Used
-    FIFO,   // First In, First Out
-    ARC,    // Adaptive Replacement Cache
+    LRU,  // Least Recently Used
+    LFU,  // Least Frequently Used
+    FIFO, // First In, First Out
+    ARC,  // Adaptive Replacement Cache
 }
 
 impl Default for DiskManagerConfig {
@@ -147,7 +147,7 @@ impl Default for DiskManagerConfig {
             vectorized_operations: true,
             hot_cold_separation: true,
             deduplication_enabled: false, // Expensive operation, disabled by default
-            compression_level: 6, // Balanced compression level
+            compression_level: 6,         // Balanced compression level
         }
     }
 }

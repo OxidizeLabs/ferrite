@@ -16,6 +16,10 @@ use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// Type aliases for complex types
+type TupleWithPartitionAndSort = (Vec<Value>, Vec<Value>, Arc<Tuple>, RID);
+type PartitionMap = HashMap<Vec<Value>, Vec<(Vec<Value>, Arc<Tuple>, RID)>>;
+
 /// Wrapper type for tuple and sort keys to implement custom ordering
 #[derive(Eq)]
 struct TupleWithKeys {
@@ -126,7 +130,7 @@ impl AbstractExecutor for WindowExecutor {
             self.child_executor.init();
 
             // Collect all tuples and their sort keys
-            let mut all_tuples: Vec<(Vec<Value>, Vec<Value>, Arc<Tuple>, RID)> = Vec::new();
+            let mut all_tuples: Vec<TupleWithPartitionAndSort> = Vec::new();
             loop {
                 match self.child_executor.next() {
                     Ok(Some((tuple, rid))) => {
@@ -143,12 +147,11 @@ impl AbstractExecutor for WindowExecutor {
             }
 
             // Group tuples by partition
-            let mut partitions_map: HashMap<Vec<Value>, Vec<(Vec<Value>, Arc<Tuple>, RID)>> =
-                HashMap::new();
+            let mut partitions_map: PartitionMap = HashMap::new();
             for (partition_keys, sort_keys, tuple, rid) in all_tuples {
                 partitions_map
                     .entry(partition_keys)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push((sort_keys, tuple, rid));
             }
 
@@ -269,8 +272,9 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
@@ -281,13 +285,12 @@ mod tests {
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType};
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;
     use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -318,14 +321,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());

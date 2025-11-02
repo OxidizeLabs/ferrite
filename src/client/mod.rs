@@ -1,4 +1,3 @@
-pub mod client;
-pub mod config;
-mod error;
-mod pool;
+mod client_impl;
+
+pub use client_impl::*;

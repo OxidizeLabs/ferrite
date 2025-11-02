@@ -8,6 +8,12 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorType;
 
+impl Default for VectorType {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VectorType {
     /// Creates a new `VectorType` instance.
     pub fn new() -> Self {
@@ -135,8 +141,7 @@ impl Type for VectorType {
                 Ok(Value::new(result))
             }
             Val::Integer(i) => {
-                let mut result = Vec::new();
-                result.push(Value::new(*i));
+                let result = vec![Value::new(*i)];
                 Ok(Value::new(result))
             }
             Val::Null => Ok(Value::new(Val::Null)),

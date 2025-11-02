@@ -7,7 +7,6 @@ use crate::storage::table::tuple::Tuple;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-#[derive(Debug)]
 pub struct WALManager {
     log_manager: Arc<RwLock<LogManager>>,
 }

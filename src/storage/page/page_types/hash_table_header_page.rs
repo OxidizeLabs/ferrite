@@ -20,6 +20,12 @@ pub struct HashTableHeaderPage {
     block_page_ids: Mutex<Vec<PageId>>,
 }
 
+impl Default for HashTableHeaderPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HashTableHeaderPage {
     /// Creates a new `HashTableHeaderPage`.
     pub fn new() -> Self {

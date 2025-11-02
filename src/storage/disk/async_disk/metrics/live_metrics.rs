@@ -5,9 +5,9 @@ use std::time::Instant;
 #[derive(Debug)]
 pub struct LiveMetrics {
     // I/O Performance (Enhanced) - FIXED: Separate read/write latency tracking
-    pub io_latency_sum: AtomicU64,        // Keep for backward compatibility
-    pub read_latency_sum: AtomicU64,      // NEW: Separate read latency tracking
-    pub write_latency_sum: AtomicU64,     // NEW: Separate write latency tracking
+    pub io_latency_sum: AtomicU64,    // Keep for backward compatibility
+    pub read_latency_sum: AtomicU64,  // NEW: Separate read latency tracking
+    pub write_latency_sum: AtomicU64, // NEW: Separate write latency tracking
     pub io_count: AtomicU64,
     pub io_throughput_bytes: AtomicU64,
     pub io_queue_depth: AtomicUsize,
@@ -67,7 +67,7 @@ pub struct LiveMetrics {
     pub health_score: AtomicU64, // 0-100 health score
     pub uptime_seconds: AtomicU64,
     pub last_checkpoint: AtomicU64,
-    
+
     // Timing - NEW: For time-based calculations
     pub start_time: Instant,
 }

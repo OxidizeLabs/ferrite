@@ -108,14 +108,14 @@ impl TypedStringExpression {
         }
 
         // If that fails, try parsing with the T separator format without timezone
-        if timestamp_str.contains('T') {
-            if let Ok(dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S") {
-                let utc_dt = dt.and_utc();
-                return Ok(Value::new_with_type(
-                    Val::Timestamp(utc_dt.timestamp() as u64),
-                    TypeId::Timestamp,
-                ));
-            }
+        if timestamp_str.contains('T')
+            && let Ok(dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+        {
+            let utc_dt = dt.and_utc();
+            return Ok(Value::new_with_type(
+                Val::Timestamp(utc_dt.timestamp() as u64),
+                TypeId::Timestamp,
+            ));
         }
 
         // Finally try the default format
@@ -264,10 +264,10 @@ impl ExpressionOps for TypedStringExpression {
                 }
 
                 // Try with T separator
-                if self.value.contains('T') {
-                    if NaiveDateTime::parse_from_str(&self.value, "%Y-%m-%dT%H:%M:%S").is_ok() {
-                        return Ok(());
-                    }
+                if self.value.contains('T')
+                    && NaiveDateTime::parse_from_str(&self.value, "%Y-%m-%dT%H:%M:%S").is_ok()
+                {
+                    return Ok(());
                 }
 
                 // Try standard format
@@ -312,7 +312,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);
@@ -327,7 +327,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);
@@ -350,7 +350,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);
@@ -365,7 +365,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema);
         assert!(result.is_err());
@@ -380,7 +380,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Integer);
@@ -407,7 +407,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);
@@ -423,7 +423,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.get_type_id(), TypeId::Timestamp);

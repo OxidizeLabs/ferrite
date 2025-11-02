@@ -325,7 +325,6 @@
 ///     }
 /// }
 /// ```
-
 use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -436,12 +435,14 @@ where
         let value_arc = Arc::new(value);
 
         // If key already exists, update the value
-        if self.cache.contains_key(&key_arc) {
-            return self.cache.insert(key_arc, value_arc)
-                .and_then(|old_value_arc| {
+        if let std::collections::hash_map::Entry::Occupied(mut e) =
+            self.cache.entry(key_arc.clone())
+        {
+            return Some(e.insert(value_arc))
+                .map(|old_value_arc| {
                     // Try to unwrap the Arc to get the original value
                     match Arc::try_unwrap(old_value_arc) {
-                        Ok(old_value) => Some(old_value),
+                        Ok(old_value) => old_value,
                         Err(_) => {
                             // If unwrap fails, there are external references to this Arc<V>
                             // This violates our cache's ownership model

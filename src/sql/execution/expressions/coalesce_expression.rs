@@ -135,11 +135,11 @@ impl Display for CoalesceExpression {
                 write!(f, ", ")?;
             }
             // Handle NULL values specially when displaying
-            if let Expression::Constant(constant) = child.as_ref() {
-                if constant.get_return_type().get_type() == TypeId::Invalid {
-                    write!(f, "NULL")?;
-                    continue;
-                }
+            if let Expression::Constant(constant) = child.as_ref()
+                && constant.get_return_type().get_type() == TypeId::Invalid
+            {
+                write!(f, "NULL")?;
+                continue;
             }
             write!(f, "{}", child)?;
         }
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn test_coalesce_basic() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test case: COALESCE(NULL, 1, 2)
         let expr = CoalesceExpression::new(
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn test_coalesce_all_null() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test case: COALESCE(NULL, NULL, NULL)
         let expr = CoalesceExpression::new(
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn test_coalesce_mixed_types() {
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, crate::common::rid::RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, crate::common::rid::RID::new(0, 0));
 
         // Test case: COALESCE(NULL, 1, 2.5)
         let expr = CoalesceExpression::new(
@@ -292,8 +292,8 @@ mod tests {
     fn test_coalesce_evaluate_join() {
         let left_schema = Schema::new(vec![]);
         let right_schema = Schema::new(vec![]);
-        let left_tuple = Tuple::new(&*vec![], &left_schema, crate::common::rid::RID::new(0, 0));
-        let right_tuple = Tuple::new(&*vec![], &right_schema, crate::common::rid::RID::new(0, 0));
+        let left_tuple = Tuple::new(&[], &left_schema, crate::common::rid::RID::new(0, 0));
+        let right_tuple = Tuple::new(&[], &right_schema, crate::common::rid::RID::new(0, 0));
 
         let expr = CoalesceExpression::new(
             vec![

@@ -69,7 +69,7 @@ impl ValuesNode {
     }
 
     fn validate_row_expression_lengths(
-        expressions: &Vec<Vec<Arc<Expression>>>,
+        expressions: &[Vec<Arc<Expression>>],
         column_count: usize,
     ) -> Result<(), ValuesError> {
         for row_exprs in expressions.iter() {
@@ -123,7 +123,7 @@ impl ValueRow {
                 })
                 .collect();
 
-            let dummy_tuple = Tuple::new(&dummy_values, &schema, Default::default());
+            let dummy_tuple = Tuple::new(&dummy_values, schema, Default::default());
 
             // Evaluate each expression
             for (idx, expr) in self.expressions.iter().enumerate() {

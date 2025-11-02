@@ -1,8 +1,8 @@
-use crate::catalog::catalog::Catalog;
+use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
+use crate::common::config::INVALID_PAGE_ID;
 use crate::common::config::TableOidT;
 use crate::common::config::Timestamp;
-use crate::common::config::INVALID_PAGE_ID;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
 use crate::concurrency::transaction::UndoLog;
@@ -14,7 +14,7 @@ use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::types::Type;
 use crate::types_db::value::Value;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -134,6 +134,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates check constraints for the given values against the schema
+    #[allow(dead_code)]
     fn validate_check_constraints(values: &[Value], schema: &Schema) -> Result<(), String> {
         for (i, column) in schema.get_columns().iter().enumerate() {
             if let Some(constraint_expr) = column.get_check_constraint() {
@@ -163,6 +164,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates NOT NULL constraints for the given values against the schema
+    #[allow(dead_code)]
     fn validate_not_null_constraints(values: &[Value], schema: &Schema) -> Result<(), String> {
         for (i, column) in schema.get_columns().iter().enumerate() {
             if column.is_not_null() {
@@ -175,14 +177,14 @@ impl TransactionalTableHeap {
 
                 let value = &values[i];
                 if value.is_null() {
-                    // Skip NOT NULL validation for AUTO_INCREMENT columns since they should have 
+                    // Skip NOT NULL validation for AUTO_INCREMENT columns since they should have
                     // been expanded by expand_values_for_schema before reaching this point
                     if column.is_primary_key() {
                         // Assume primary key columns with NOT NULL are AUTO_INCREMENT
                         // In a real implementation, we'd check for an explicit AUTO_INCREMENT flag
                         continue;
                     }
-                    
+
                     return Err(format!(
                         "NOT NULL constraint violation for column '{}': NULL value not allowed",
                         column.get_name()
@@ -195,6 +197,7 @@ impl TransactionalTableHeap {
     }
 
     /// Evaluates simple check constraints without requiring full SQL parsing
+    #[allow(dead_code)]
     fn evaluate_simple_constraint(
         constraint: &str,
         value: &Value,
@@ -230,14 +233,14 @@ impl TransactionalTableHeap {
             if parts.len() == 2 {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
-                
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
-                        if let Ok(val) = value.as_decimal() {
-                            return Ok(val >= threshold);
-                        } else if let Ok(val) = value.as_integer() {
-                            return Ok(val as f64 >= threshold);
-                        }
+
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>()
+                {
+                    if let Ok(val) = value.as_decimal() {
+                        return Ok(val >= threshold);
+                    } else if let Ok(val) = value.as_integer() {
+                        return Ok(val as f64 >= threshold);
                     }
                 }
             }
@@ -248,14 +251,14 @@ impl TransactionalTableHeap {
             if parts.len() == 2 {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
-                
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
-                        if let Ok(val) = value.as_decimal() {
-                            return Ok(val <= threshold);
-                        } else if let Ok(val) = value.as_integer() {
-                            return Ok(val as f64 <= threshold);
-                        }
+
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>()
+                {
+                    if let Ok(val) = value.as_decimal() {
+                        return Ok(val <= threshold);
+                    } else if let Ok(val) = value.as_integer() {
+                        return Ok(val as f64 <= threshold);
                     }
                 }
             }
@@ -266,14 +269,14 @@ impl TransactionalTableHeap {
             if parts.len() == 2 {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
-                
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
-                        if let Ok(val) = value.as_decimal() {
-                            return Ok(val > threshold);
-                        } else if let Ok(val) = value.as_integer() {
-                            return Ok(val as f64 > threshold);
-                        }
+
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>()
+                {
+                    if let Ok(val) = value.as_decimal() {
+                        return Ok(val > threshold);
+                    } else if let Ok(val) = value.as_integer() {
+                        return Ok(val as f64 > threshold);
                     }
                 }
             }
@@ -284,14 +287,14 @@ impl TransactionalTableHeap {
             if parts.len() == 2 {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
-                
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
-                        if let Ok(val) = value.as_decimal() {
-                            return Ok(val < threshold);
-                        } else if let Ok(val) = value.as_integer() {
-                            return Ok((val as f64) < threshold);
-                        }
+
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>()
+                {
+                    if let Ok(val) = value.as_decimal() {
+                        return Ok(val < threshold);
+                    } else if let Ok(val) = value.as_integer() {
+                        return Ok((val as f64) < threshold);
                     }
                 }
             }
@@ -302,14 +305,14 @@ impl TransactionalTableHeap {
             if parts.len() == 2 {
                 let left = parts[0].trim();
                 let right = parts[1].trim();
-                
-                if left == column_name {
-                    if let Ok(threshold) = right.parse::<f64>() {
-                        if let Ok(val) = value.as_decimal() {
-                            return Ok((val - threshold).abs() < f64::EPSILON);
-                        } else if let Ok(val) = value.as_integer() {
-                            return Ok((val as f64 - threshold).abs() < f64::EPSILON);
-                        }
+
+                if left == column_name
+                    && let Ok(threshold) = right.parse::<f64>()
+                {
+                    if let Ok(val) = value.as_decimal() {
+                        return Ok((val - threshold).abs() < f64::EPSILON);
+                    } else if let Ok(val) = value.as_integer() {
+                        return Ok((val as f64 - threshold).abs() < f64::EPSILON);
                     }
                 }
             }
@@ -326,6 +329,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates PRIMARY KEY and UNIQUE constraints for the given values against existing data
+    #[allow(dead_code)]
     fn validate_primary_key_and_unique_constraints(
         &self,
         values: &[Value],
@@ -335,10 +339,10 @@ impl TransactionalTableHeap {
         // Collect primary key columns and their values
         let mut primary_key_values = Vec::new();
         let mut primary_key_columns = Vec::new();
-        
+
         // Collect unique columns and their values (only for columns that are UNIQUE but not part of PRIMARY KEY)
         let mut unique_constraints = Vec::new();
-        
+
         for (i, column) in schema.get_columns().iter().enumerate() {
             if i >= values.len() {
                 return Err(format!(
@@ -351,7 +355,7 @@ impl TransactionalTableHeap {
                 primary_key_values.push(values[i].clone());
                 primary_key_columns.push(column.get_name().to_string());
             }
-            
+
             // Only check individual UNIQUE constraints for columns that are NOT part of the PRIMARY KEY
             // For PRIMARY KEY columns, uniqueness is checked as part of the composite key
             if column.is_unique() && !column.is_primary_key() {
@@ -360,13 +364,18 @@ impl TransactionalTableHeap {
         }
 
         // Check PRIMARY KEY constraint if there are primary key columns
-        if !primary_key_values.is_empty() {
-            if self.check_primary_key_violation(&primary_key_values, &primary_key_columns, schema, txn_ctx)? {
-                return Err(format!(
-                    "Primary key violation: duplicate key value for columns ({})",
-                    primary_key_columns.join(", ")
-                ));
-            }
+        if !primary_key_values.is_empty()
+            && self.check_primary_key_violation(
+                &primary_key_values,
+                &primary_key_columns,
+                schema,
+                txn_ctx,
+            )?
+        {
+            return Err(format!(
+                "Primary key violation: duplicate key value for columns ({})",
+                primary_key_columns.join(", ")
+            ));
         }
 
         // Check UNIQUE constraints for non-primary key columns
@@ -374,8 +383,7 @@ impl TransactionalTableHeap {
             if self.check_unique_constraint_violation(&column_name, &value, schema, txn_ctx)? {
                 return Err(format!(
                     "Unique constraint violation for column '{}': value '{}' already exists",
-                    column_name,
-                    value
+                    column_name, value
                 ));
             }
         }
@@ -384,6 +392,7 @@ impl TransactionalTableHeap {
     }
 
     /// Check if inserting the given primary key values would violate the PRIMARY KEY constraint
+    #[allow(dead_code)]
     fn check_primary_key_violation(
         &self,
         pk_values: &[Value],
@@ -393,10 +402,10 @@ impl TransactionalTableHeap {
     ) -> Result<bool, String> {
         // Create an iterator over all tuples in the table
         let iterator = self.make_iterator(Some(txn_ctx.clone()));
-        
+
         for item in iterator {
             let (_, tuple) = item;
-            
+
             // Check if this tuple has the same primary key values
             let mut matches = true;
             for (i, pk_column) in pk_columns.iter().enumerate() {
@@ -407,19 +416,23 @@ impl TransactionalTableHeap {
                         break;
                     }
                 } else {
-                    return Err(format!("Primary key column '{}' not found in schema", pk_column));
+                    return Err(format!(
+                        "Primary key column '{}' not found in schema",
+                        pk_column
+                    ));
                 }
             }
-            
+
             if matches {
                 return Ok(true); // Found a duplicate
             }
         }
-        
+
         Ok(false) // No duplicate found
     }
 
     /// Check if inserting the given value would violate a UNIQUE constraint
+    #[allow(dead_code)]
     fn check_unique_constraint_violation(
         &self,
         column_name: &str,
@@ -427,27 +440,33 @@ impl TransactionalTableHeap {
         schema: &Schema,
         txn_ctx: &Arc<TransactionContext>,
     ) -> Result<bool, String> {
-        let column_index = Self::find_column_index(schema, column_name)
-            .ok_or_else(|| format!("Unique constraint column '{}' not found in schema", column_name))?;
-        
+        let column_index = Self::find_column_index(schema, column_name).ok_or_else(|| {
+            format!(
+                "Unique constraint column '{}' not found in schema",
+                column_name
+            )
+        })?;
+
         // Create an iterator over all tuples in the table
         let iterator = self.make_iterator(Some(txn_ctx.clone()));
-        
+
         for item in iterator {
             let (_, tuple) = item;
-            
+
             let existing_value = tuple.get_value(column_index);
             if existing_value == *value {
                 return Ok(true); // Found a duplicate
             }
         }
-        
+
         Ok(false) // No duplicate found
     }
 
     /// Helper function to find the index of a column by name
+    #[allow(dead_code)]
     fn find_column_index(schema: &Schema, column_name: &str) -> Option<usize> {
-        schema.get_columns()
+        schema
+            .get_columns()
             .iter()
             .position(|col| col.get_name() == column_name)
     }
@@ -471,8 +490,18 @@ impl TransactionalTableHeap {
             .lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
             .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
+        // Ensure the tuple's metadata reflects the current transaction as creator
+        let mut fixed_meta = TupleMeta::new(txn.get_transaction_id());
+        fixed_meta.set_commit_timestamp(meta.get_commit_timestamp());
+        if meta.is_deleted() {
+            fixed_meta.set_deleted(true);
+        }
+        fixed_meta.set_undo_log_idx(meta.get_undo_log_idx());
+
         // Perform insert using internal method
-        let rid = self.table_heap.insert_tuple_internal(meta, tuple)?;
+        let rid = self
+            .table_heap
+            .insert_tuple_internal(Arc::new(fixed_meta), tuple)?;
 
         // Transaction bookkeeping
         txn.append_write_set(self.table_oid, rid);
@@ -633,7 +662,17 @@ impl TransactionalTableHeap {
                 txn.get_transaction_id()
             );
 
-            let undo_log = txn_manager.get_undo_log(undo_link.clone());
+            // Attempt to fetch the undo log; if missing, stop traversal
+            let undo_log = if let Some(log) = txn_manager.get_undo_log_optional(undo_link.clone()) {
+                log
+            } else {
+                warn!(
+                    "Missing undo log for link: txn={}, idx={}; stopping traversal",
+                    undo_link.prev_txn, undo_link.prev_log_idx
+                );
+                current_link = None;
+                continue;
+            };
             let undo_log_clone = undo_log.clone();
             log::debug!(
                 "Retrieved undo log: ts={}, is_deleted={}, prev_version: txn={}, idx={}",
@@ -780,6 +819,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validates FOREIGN KEY constraints for the given values against referenced tables
+    #[allow(dead_code)]
     fn validate_foreign_key_constraints(
         &self,
         values: &[Value],
@@ -805,11 +845,11 @@ impl TransactionalTableHeap {
 
                 // Validate that the foreign key value exists in the referenced table
                 if !self.validate_foreign_key_reference(
-                    &value, 
-                    &foreign_key_constraint.referenced_table, 
-                    &foreign_key_constraint.referenced_column, 
+                    value,
+                    &foreign_key_constraint.referenced_table,
+                    &foreign_key_constraint.referenced_column,
                     txn_ctx,
-                    catalog
+                    catalog,
                 )? {
                     return Err(format!(
                         "Foreign key constraint violation for column '{}': value '{}' does not exist in table '{}' column '{}'",
@@ -826,6 +866,7 @@ impl TransactionalTableHeap {
     }
 
     /// Validate that a foreign key value exists in the referenced table
+    #[allow(dead_code)]
     fn validate_foreign_key_reference(
         &self,
         value: &Value,
@@ -836,71 +877,82 @@ impl TransactionalTableHeap {
     ) -> Result<bool, String> {
         log::debug!(
             "Validating foreign key reference: value='{}' in table='{}' column='{}'",
-            value, referred_table, referred_column
+            value,
+            referred_table,
+            referred_column
         );
 
         // Get the referenced table from catalog
-        let ref_table_info = catalog.get_table(referred_table)
+        let ref_table_info = catalog
+            .get_table(referred_table)
             .ok_or_else(|| format!("Referenced table '{}' not found", referred_table))?;
 
         // Get the referenced table's schema
-        let ref_schema = catalog.get_table_schema(referred_table)
+        let ref_schema = catalog
+            .get_table_schema(referred_table)
             .ok_or_else(|| format!("Schema for table '{}' not found", referred_table))?;
 
         // Find the referenced column index
-        let ref_column_index = Self::find_column_index(&ref_schema, referred_column)
-            .ok_or_else(|| format!("Referenced column '{}' not found in table '{}'", 
-                                   referred_column, referred_table))?;
+        let ref_column_index =
+            Self::find_column_index(&ref_schema, referred_column).ok_or_else(|| {
+                format!(
+                    "Referenced column '{}' not found in table '{}'",
+                    referred_column, referred_table
+                )
+            })?;
 
         // Get the referenced table heap
-        let ref_table_heap = catalog.get_table_heap(referred_table)
+        let ref_table_heap = catalog
+            .get_table_heap(referred_table)
             .ok_or_else(|| format!("Table heap for '{}' not found", referred_table))?;
 
         // Create a TransactionalTableHeap for the referenced table
-        let ref_txn_table_heap = TransactionalTableHeap::new(
-            ref_table_heap,
-            ref_table_info.get_table_oidt()
-        );
+        let ref_txn_table_heap =
+            TransactionalTableHeap::new(ref_table_heap, ref_table_info.get_table_oidt());
 
         // Search the referenced table for the value
         let iterator = ref_txn_table_heap.make_iterator(Some(txn_ctx.clone()));
-        
+
         for item in iterator {
             let (meta, tuple) = item;
-            
+
             // Skip deleted tuples and check visibility
             if meta.is_deleted() {
                 continue;
             }
-            
+
             // Check if this version is visible to the current transaction
             let txn = txn_ctx.get_transaction();
             if !txn.is_tuple_visible(&meta) {
                 continue;
             }
-            
+
             let existing_value = tuple.get_value(ref_column_index);
             if existing_value == *value {
                 log::debug!(
                     "Found matching foreign key value '{}' in table '{}' column '{}'",
-                    value, referred_table, referred_column
+                    value,
+                    referred_table,
+                    referred_column
                 );
                 return Ok(true); // Found the referenced value
             }
         }
-        
+
         log::debug!(
             "Foreign key value '{}' not found in table '{}' column '{}'",
-            value, referred_table, referred_column
+            value,
+            referred_table,
+            referred_column
         );
         Ok(false) // Referenced value not found
     }
 
     /// PERFORMANCE OPTIMIZATION: True bulk insert with batched operations
-    /// 
+    ///
     /// This is a complete rewrite of bulk insert that actually batches operations:
     /// - Single lock acquisition for the entire batch
-    /// - Pre-allocation of pages 
+    /// - Pre-allocation of pages
     /// - Batched transaction bookkeeping
     /// - Efficient tuple processing
     pub fn bulk_insert_tuples_from_values(
@@ -917,17 +969,17 @@ impl TransactionalTableHeap {
 
         // PERFORMANCE OPTIMIZATION: Use async buffer pool operations
         // Convert to async and run in tokio context
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.bulk_insert_tuples_from_values_async(values_batch, schema, txn_context).await
-            })
-        });
 
-        result
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.bulk_insert_tuples_from_values_async(values_batch, schema, txn_context)
+                    .await
+            })
+        })
     }
 
     /// PERFORMANCE OPTIMIZATION: Async bulk insert with native async buffer pool operations
-    /// 
+    ///
     /// This method uses the async buffer pool operations directly to avoid blocking on async operations:
     /// - Leverages AsyncDiskManager's batching capabilities
     /// - Uses async page flushing for better I/O performance
@@ -942,7 +994,10 @@ impl TransactionalTableHeap {
             return Ok(0);
         }
 
-        debug!("Starting async TRUE bulk insert of {} tuples", values_batch.len());
+        debug!(
+            "Starting async TRUE bulk insert of {} tuples",
+            values_batch.len()
+        );
 
         // Single lock acquisition for the entire batch
         let txn_id = txn_context.get_transaction_id();
@@ -954,25 +1009,27 @@ impl TransactionalTableHeap {
 
         // Batch processing - process tuples in chunks for memory efficiency
         const CHUNK_SIZE: usize = 50; // Process in smaller chunks for memory efficiency
-        
+
         for chunk in values_batch.chunks(CHUNK_SIZE) {
             let mut page_writes = Vec::new();
-            
+
             // Process chunk and collect pages that need to be written
             for values in chunk {
-                let expanded_values = self.table_heap.expand_values_for_schema(values.clone(), schema)?;
-                
+                let expanded_values = self
+                    .table_heap
+                    .expand_values_for_schema(values.clone(), schema)?;
+
                 // Create tuple
                 let tuple = Tuple::new(&expanded_values, schema, RID::new(0, 0));
-                
+
                 // Create metadata for the tuple
                 let meta = Arc::new(TupleMeta::new(txn_id));
-                
+
                 // Insert tuple and collect page info for batching
                 match self.insert_tuple(meta, &tuple, txn_context.clone()) {
                     Ok(rid) => {
                         successful_inserts += 1;
-                        
+
                         // Collect page ID for potential batch flushing
                         let page_id = rid.get_page_id();
                         if !page_writes.contains(&page_id) {
@@ -984,18 +1041,21 @@ impl TransactionalTableHeap {
                     }
                 }
             }
-            
+
             // PERFORMANCE OPTIMIZATION: Batch flush dirty pages using async operations
             if !page_writes.is_empty() {
                 debug!("Async batch flushing {} pages for chunk", page_writes.len());
-                
+
                 // Note: In a full implementation, this would access the buffer pool manager
                 // directly and use async batch flushing operations. For now, we rely on
                 // the normal flushing mechanisms within the table heap operations.
             }
         }
 
-        info!("Completed async bulk insert: {} tuples inserted successfully", successful_inserts);
+        info!(
+            "Completed async bulk insert: {} tuples inserted successfully",
+            successful_inserts
+        );
         Ok(successful_inserts)
     }
 }
@@ -1027,7 +1087,7 @@ mod tests {
 
             const BUFFER_POOL_SIZE: usize = 100;
             const K: usize = 2;
-            
+
             // Set up storage components
             let temp_dir = TempDir::new().unwrap();
             let db_path = temp_dir
@@ -1043,13 +1103,17 @@ mod tests {
                 .unwrap()
                 .to_string();
 
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(7, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Set up transaction components with mock lock manager
             let txn_manager = Arc::new(TransactionManager::new());
@@ -1059,6 +1123,8 @@ mod tests {
 
             // Create transactional table heap
             let txn_heap = Arc::new(TransactionalTableHeap::new(table_heap.clone(), 1));
+            // Register table with transaction manager so commits can update metadata
+            txn_manager.register_table(txn_heap.clone());
 
             Self {
                 txn_heap,
@@ -1153,7 +1219,8 @@ mod tests {
 
         // Commit first transaction
         ctx.txn_manager
-            .commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm()).await;
+            .commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm())
+            .await;
 
         // Create second transaction
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
@@ -1199,16 +1266,17 @@ mod tests {
         let txn1 = txn_ctx1.get_transaction();
 
         // Insert initial version with txn1's ID
-        let (meta, mut tuple) = create_test_tuple();
+        let (meta, tuple) = create_test_tuple();
 
         let rid = ctx
             .txn_heap
-            .insert_tuple(Arc::from(meta), &mut tuple, txn_ctx1.clone())
+            .insert_tuple(Arc::from(meta), &tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Commit first transaction
         ctx.txn_manager
-            .commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm()).await;
+            .commit(txn1.clone(), ctx.txn_heap.get_table_heap().get_bpm())
+            .await;
 
         // Create a second transaction
         let txn_ctx2 = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
@@ -1218,7 +1286,7 @@ mod tests {
         new_tuple.get_values_mut()[1] = Value::new(200);
 
         ctx.txn_heap
-            .update_tuple(&meta, &mut new_tuple, rid, txn_ctx2.clone())
+            .update_tuple(&meta, &new_tuple, rid, txn_ctx2.clone())
             .expect("Update failed");
 
         // Create third transaction to verify version chain
@@ -1277,11 +1345,11 @@ mod tests {
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
 
         // Insert tuple
-        let (meta, mut tuple) = create_test_tuple();
+        let (meta, tuple) = create_test_tuple();
 
         let rid = ctx
             .txn_heap
-            .insert_tuple(Arc::from(meta), &mut tuple, txn_ctx1.clone())
+            .insert_tuple(Arc::from(meta), &tuple, txn_ctx1.clone())
             .expect("Insert failed");
 
         // Verify visibility based on the isolation level

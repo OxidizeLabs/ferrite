@@ -1,8 +1,8 @@
-use crate::storage::page::page_types::hash_table_page_defs::{block_array_size, MappingType};
+use crate::storage::page::page_types::hash_table_page_defs::{MappingType, block_array_size};
 use log::info;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /**
  * Store indexed key and value together within block page. Supports
@@ -21,6 +21,18 @@ pub struct HashTableBlockPage<KeyType, ValueType, KeyComparator> {
     readable: Vec<AtomicU8>,
     array: Mutex<Vec<MappingType<KeyType, ValueType>>>,
     _marker: PhantomData<KeyComparator>,
+}
+
+impl<KeyType, ValueType, KeyComparator> Default
+    for HashTableBlockPage<KeyType, ValueType, KeyComparator>
+where
+    KeyComparator: Fn(&KeyType, &KeyType) -> bool,
+    KeyType: Clone + Default,
+    ValueType: Clone + Default + PartialEq,
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<KeyType, ValueType, KeyComparator> HashTableBlockPage<KeyType, ValueType, KeyComparator>

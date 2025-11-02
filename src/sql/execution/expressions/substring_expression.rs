@@ -391,7 +391,7 @@ mod tests {
         let substring_expr = SubstringExpression::new(string_expr, from_expr, Some(for_expr));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = substring_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.to_string(), "ell");
@@ -415,7 +415,7 @@ mod tests {
         let substring_expr = SubstringExpression::new(string_expr, from_expr, None);
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = substring_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.to_string(), "llo");
@@ -439,7 +439,7 @@ mod tests {
         let substring_expr = SubstringExpression::new(string_expr, from_expr, None);
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = substring_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.to_string(), "lo");
@@ -469,7 +469,7 @@ mod tests {
         let substring_expr = SubstringExpression::new(string_expr, from_expr, Some(for_expr));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = substring_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.to_string(), "");
@@ -499,7 +499,7 @@ mod tests {
         let substring_expr = SubstringExpression::new(string_expr, from_expr, Some(for_expr));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = substring_expr.evaluate(&tuple, &schema).unwrap();
         assert_eq!(result.to_string(), "");
@@ -529,7 +529,7 @@ mod tests {
         let substring_expr = SubstringExpression::new(string_expr, from_expr, Some(for_expr));
 
         let schema = Schema::new(vec![]);
-        let tuple = Tuple::new(&*vec![], &schema, RID::new(0, 0));
+        let tuple = Tuple::new(&[], &schema, RID::new(0, 0));
 
         let result = substring_expr.evaluate(&tuple, &schema).unwrap();
         assert!(result.is_null());

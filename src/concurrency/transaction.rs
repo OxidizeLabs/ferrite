@@ -1,18 +1,18 @@
 use crate::common::config::{
-    Lsn, TableOidT, TimeStampOidT, Timestamp, TxnId, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID,
+    INVALID_LSN, INVALID_TXN_ID, Lsn, TXN_START_ID, TableOidT, TimeStampOidT, Timestamp, TxnId,
 };
 use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::storage::table::tuple::Tuple;
 use crate::storage::table::tuple::TupleMeta;
+use bincode::{Decode, Encode};
 use log;
 use log::debug;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
-use bincode::{Encode, Decode};
 
 /// Transaction state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,9 +26,10 @@ pub enum TransactionState {
 }
 
 /// Transaction isolation level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode, Default)]
 pub enum IsolationLevel {
     ReadUncommitted,
+    #[default]
     ReadCommitted,
     RepeatableRead,
     Serializable,
@@ -276,7 +277,7 @@ impl Transaction {
         let undo_logs = self.undo_logs.lock().unwrap();
         undo_logs
             .get(log_id)
-            .expect(&format!("Undo log at index {} not found", log_id))
+            .unwrap_or_else(|| panic!("Undo log at index {} not found", log_id))
             .clone()
     }
 
@@ -299,10 +300,7 @@ impl Transaction {
     /// Appends a write operation to the transaction's write set
     pub fn append_write_set(&self, table_oid: TableOidT, rid: RID) {
         let mut write_set = self.write_set.lock().unwrap();
-        write_set
-            .entry(table_oid)
-            .or_insert_with(HashSet::new)
-            .insert(rid);
+        write_set.entry(table_oid).or_default().insert(rid);
     }
 
     /// Gets all write operations performed in this transaction
@@ -321,10 +319,7 @@ impl Transaction {
     /// - `predicate`: The scan predicate expression.
     pub fn append_scan_predicate(&self, t: u32, predicate: Arc<Expression>) {
         let mut scan_predicates = self.scan_predicates.lock().unwrap();
-        scan_predicates
-            .entry(t)
-            .or_insert_with(Vec::new)
-            .push(predicate);
+        scan_predicates.entry(t).or_default().push(predicate);
     }
 
     /// Sets the transaction state to tainted.
@@ -411,12 +406,6 @@ impl Transaction {
     }
 }
 
-impl Default for IsolationLevel {
-    fn default() -> Self {
-        IsolationLevel::ReadCommitted
-    }
-}
-
 /// Formatter implementation for `IsolationLevel`.
 impl fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -468,7 +457,7 @@ mod tests {
     }
 
     mod basic_behaviour {
-        use crate::common::config::{TimeStampOidT, INVALID_LSN, INVALID_TXN_ID, TXN_START_ID};
+        use crate::common::config::{INVALID_LSN, INVALID_TXN_ID, TXN_START_ID, TimeStampOidT};
         use crate::common::rid::RID;
         use crate::concurrency::transaction::tests::create_test_tuple;
         use crate::concurrency::transaction::{

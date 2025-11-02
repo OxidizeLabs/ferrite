@@ -101,9 +101,9 @@ impl InExpression {
             Val::Null => {
                 // If the subquery returns NULL, the IN operator result is also NULL
                 Ok(Value::new(Val::Null))
-            },
+            }
             // If the subquery returns a scalar value, convert it to a single-item list
-            _ => self.check_value_in_list(value, &vec![subquery_result]),
+            _ => self.check_value_in_list(value, &[subquery_result]),
         }
     }
 
@@ -135,7 +135,7 @@ impl InExpression {
                 has_null = true;
                 continue;
             }
-            
+
             // Handle type conversion for comparison
             // For example, if comparing Integer with TinyInt
             let comparable_value = if value.get_type_id() != list_value.get_type_id() {
@@ -148,7 +148,7 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    },
+                    }
                     (TypeId::Integer, TypeId::SmallInt) => {
                         // Convert SmallInt to Integer
                         if let Val::SmallInt(n) = list_value.get_val() {
@@ -156,7 +156,7 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    },
+                    }
                     (TypeId::Integer, TypeId::BigInt) => {
                         // Convert BigInt to Integer if it fits
                         if let Val::BigInt(n) = list_value.get_val() {
@@ -168,7 +168,7 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    },
+                    }
                     (TypeId::Integer, TypeId::Decimal) => {
                         // Convert Decimal to Integer if it's a whole number
                         if let Val::Decimal(n) = list_value.get_val() {
@@ -180,9 +180,9 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    },
+                    }
                     // Add more type conversions as needed
-                    _ => list_value.clone()
+                    _ => list_value.clone(),
                 }
             } else {
                 list_value.clone()

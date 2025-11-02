@@ -140,7 +140,7 @@ impl AbstractExecutor for SeqScanExecutor {
         };
 
         // Keep trying until we find a valid tuple or reach the end
-        while let Some((meta, tuple)) = iter.next() {
+        for (meta, tuple) in iter.by_ref() {
             let rid = tuple.get_rid();
             trace!("Found tuple with RID {:?}", rid);
 
@@ -173,20 +173,20 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Val;
     use crate::types_db::value::Value;
     use parking_lot::RwLock;
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -217,14 +217,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -257,11 +265,7 @@ mod tests {
         )
     }
 
-    fn create_test_values(
-        id: i32,
-        name: &str,
-        age: i32,
-    ) -> (TupleMeta, Vec<Value>) {
+    fn create_test_values(id: i32, name: &str, age: i32) -> (TupleMeta, Vec<Value>) {
         let values = vec![
             Value::new(id),
             Value::new(name.to_string()),
@@ -494,14 +498,9 @@ mod tests {
 
         // Count tuples
         let mut tuple_count = 0;
-        loop {
-            match executor.next().unwrap() {
-                Some((tuple, _rid)) => {
-                    tuple_count += 1;
-                    assert_eq!(tuple.get_values().len(), 3);
-                }
-                None => break,
-            }
+        while let Some((tuple, _rid)) = executor.next().unwrap() {
+            tuple_count += 1;
+            assert_eq!(tuple.get_values().len(), 3);
         }
 
         assert_eq!(tuple_count, 3);

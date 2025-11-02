@@ -237,10 +237,14 @@ impl Default for CacheConfig {
 /// Note: Will be implemented in Phase 2 when async-trait dependency is added
 pub trait AsyncCacheFuture<K, V>: Send + Sync {
     /// Placeholder for future async get operation
-    fn supports_async_get(&self) -> bool { false }
+    fn supports_async_get(&self) -> bool {
+        false
+    }
 
     /// Placeholder for future async insert operation
-    fn supports_async_insert(&self) -> bool { false }
+    fn supports_async_insert(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

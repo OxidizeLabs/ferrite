@@ -88,7 +88,7 @@ impl NestedIndexJoinExecutor {
         // Create tuple with combined values and a placeholder RID
         Arc::new(Tuple::new(
             &joined_values,
-            &self.get_output_schema(),
+            self.get_output_schema(),
             RID::new(0, 0), // Use a placeholder RID for joined tuples
         ))
     }
@@ -97,24 +97,19 @@ impl NestedIndexJoinExecutor {
         // Updated to handle Result type from child executors
         // If we have a current right executor, try to get next tuple from it
         if let Some(executor) = &mut self.current_right_executor {
-            loop {
-                if let Ok(Some(tuple_and_rid)) = executor.next() {
-                    let right_rid = tuple_and_rid.1;
-                    // Skip if we've already processed this right tuple for the current left tuple
-                    if self.processed_right_rids.contains(&right_rid) {
-                        debug!("Skipping already processed RID: {:?}", right_rid);
-                        continue; // Skip to next tuple
-                    }
-
-                    // Add the RID to processed list
-                    debug!("Adding RID to processed list: {:?}", right_rid);
-                    self.processed_right_rids.push(right_rid);
-
-                    return Ok(Some(tuple_and_rid));
-                } else {
-                    // No more tuples from this executor
-                    break;
+            while let Ok(Some(tuple_and_rid)) = executor.next() {
+                let right_rid = tuple_and_rid.1;
+                // Skip if we've already processed this right tuple for the current left tuple
+                if self.processed_right_rids.contains(&right_rid) {
+                    debug!("Skipping already processed RID: {:?}", right_rid);
+                    continue; // Skip to next tuple
                 }
+
+                // Add the RID to processed list
+                debug!("Adding RID to processed list: {:?}", right_rid);
+                self.processed_right_rids.push(right_rid);
+
+                return Ok(Some(tuple_and_rid));
             }
             // If we get here, exhausted the executor
             self.current_right_executor = None;
@@ -129,28 +124,28 @@ impl NestedIndexJoinExecutor {
         }
 
         // Now try to get the first result with the newly created executor
-        if let Some(executor) = &mut self.current_right_executor {
-            if let Ok(Some(tuple_and_rid)) = executor.next() {
-                let right_rid = tuple_and_rid.1;
+        if let Some(executor) = &mut self.current_right_executor
+            && let Ok(Some(tuple_and_rid)) = executor.next()
+        {
+            let right_rid = tuple_and_rid.1;
 
-                // Check if we've already processed this RID
-                if self.processed_right_rids.contains(&right_rid) {
-                    debug!(
-                        "Skipping already processed RID (first result): {:?}",
-                        right_rid
-                    );
-                    return self.get_next_inner_tuple(); // Recursively try next
-                }
-
-                // Add to processed list
+            // Check if we've already processed this RID
+            if self.processed_right_rids.contains(&right_rid) {
                 debug!(
-                    "Adding RID to processed list (first result): {:?}",
+                    "Skipping already processed RID (first result): {:?}",
                     right_rid
                 );
-                self.processed_right_rids.push(right_rid);
-
-                return Ok(Some(tuple_and_rid));
+                return self.get_next_inner_tuple(); // Recursively try next
             }
+
+            // Add to processed list
+            debug!(
+                "Adding RID to processed list (first result): {:?}",
+                right_rid
+            );
+            self.processed_right_rids.push(right_rid);
+
+            return Ok(Some(tuple_and_rid));
         }
 
         // No results found
@@ -203,8 +198,8 @@ impl NestedIndexJoinExecutor {
             _ => return None, // Return None if we can't get table name
         };
 
-        let table_info = catalog_guard.get_table(&table_name).unwrap();
-        let table_indexes = catalog_guard.get_table_indexes(&table_name);
+        let table_info = catalog_guard.get_table(table_name).unwrap();
+        let table_indexes = catalog_guard.get_table_indexes(table_name);
 
         // Find suitable index
         let index_info = match table_indexes.iter().find(|idx| {
@@ -231,13 +226,6 @@ impl NestedIndexJoinExecutor {
             }
         };
 
-        // Create a dummy executor for the index scan
-        let dummy_executor = Box::new(DummyExecutor {
-            initialized: false,
-            schema: right_schema.clone(),
-            context: self.context.clone(),
-        });
-
         // Create and execute index scan
         let index_scan_plan = Arc::new(IndexScanNode::new(
             right_schema,
@@ -248,40 +236,14 @@ impl NestedIndexJoinExecutor {
             predicate_keys,
         ));
 
-        // Create new executor with dummy child
-        let mut index_scan_executor =
-            IndexScanExecutor::new(dummy_executor, self.context.clone(), index_scan_plan);
+        // Create new executor
+        let mut index_scan_executor = IndexScanExecutor::new(self.context.clone(), index_scan_plan);
 
         index_scan_executor.init();
 
         // Store for future use
         self.current_right_executor = Some(Box::new(index_scan_executor));
         Some(())
-    }
-}
-
-// Add DummyExecutor struct for index scan
-struct DummyExecutor {
-    initialized: bool,
-    schema: Schema,
-    context: Arc<RwLock<ExecutionContext>>,
-}
-
-impl AbstractExecutor for DummyExecutor {
-    fn init(&mut self) {
-        self.initialized = true;
-    }
-
-    fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
-        Ok(None)
-    }
-
-    fn get_output_schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
-        self.context.clone()
     }
 }
 
@@ -403,7 +365,7 @@ mod tests {
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
-    use crate::catalog::catalog::Catalog;
+    use crate::catalog::Catalog;
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
@@ -420,12 +382,12 @@ mod tests {
     use crate::sql::execution::plans::create_index_plan::CreateIndexPlanNode;
     use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::sql::execution::transaction_context::TransactionContext;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use sqlparser::ast::{JoinConstraint, JoinOperator};
     use tempfile::TempDir;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -456,14 +418,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path.clone(), log_path.clone(), DiskManagerConfig::default()).await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                disk_manager_arc.clone(),
-                replacer.clone(),
-            ).unwrap());
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    disk_manager_arc.clone(),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
 
             // Create transaction manager and lock manager first
             let transaction_manager = Arc::new(TransactionManager::new());
@@ -548,7 +518,7 @@ mod tests {
         let left_tuple_meta = Arc::new(TupleMeta::new(0));
 
         // Insert each tuple separately with proper Value objects
-        for (id, value) in vec![(1, "A"), (2, "B"), (3, "C")] {
+        for (id, value) in [(1, "A"), (2, "B"), (3, "C")] {
             let values = vec![Value::new(id), Value::new(value)];
             left_table
                 .insert_tuple_from_values(values, &left_schema, left_tuple_meta.clone())
@@ -565,7 +535,7 @@ mod tests {
         let right_tuple_meta = Arc::new(TupleMeta::new(0));
 
         // Insert each tuple separately with proper Value objects
-        for (id, data) in vec![(1, "X"), (2, "Y"), (4, "Z")] {
+        for (id, data) in [(1, "X"), (2, "Y"), (4, "Z")] {
             let values = vec![Value::new(id), Value::new(data)];
             right_table
                 .insert_tuple_from_values(values, &right_schema, right_tuple_meta.clone())
@@ -695,7 +665,6 @@ mod tests {
             // Manually insert entries into the index using the B+ tree directly
             let index_oid = index_info.get_index_oid();
             if let Some((_, btree)) = catalog.get_index_by_index_oid(index_oid) {
-
                 // Insert each tuple's keys into the index
                 while let Ok(Some((tuple, rid))) = right_executor.next() {
                     // Extract the key value (id) from the tuple
@@ -704,7 +673,7 @@ mod tests {
                     for &col_idx in &key_columns {
                         key_values.push(tuple.get_values()[col_idx].clone());
                     }
-                    
+
                     // Extract the key value for the B+ tree
                     let key_value = key_values[0].clone();
 
@@ -800,7 +769,7 @@ mod tests {
         // Should have 2 matching rows (id=1 and id=2)
         debug!("Total join results: {}", results.len());
 
-        if results.len() == 0 {
+        if results.is_empty() {
             debug!(
                 "ERROR: No join results produced! This suggests an issue with the join execution."
             );
@@ -891,12 +860,12 @@ mod tests {
 
         // Create test tuples
         let left_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("A")],
+            &[Value::new(1), Value::new("A")],
             &left_schema,
             RID::new(0, 0),
         );
         let right_tuple = Tuple::new(
-            &vec![Value::new(1), Value::new("X")],
+            &[Value::new(1), Value::new("X")],
             &right_schema,
             RID::new(0, 0),
         );
@@ -965,7 +934,7 @@ mod tests {
 
         // Insert data into left table
         let left_tuple_meta = Arc::new(TupleMeta::new(0));
-        for (id, value) in vec![(1, "A"), (2, "B"), (3, "C")] {
+        for (id, value) in [(1, "A"), (2, "B"), (3, "C")] {
             let values = vec![Value::new(id), Value::new(value)];
             let result =
                 left_table.insert_tuple_from_values(values, &left_schema, left_tuple_meta.clone());
@@ -974,7 +943,7 @@ mod tests {
 
         // Insert data into right table
         let right_tuple_meta = Arc::new(TupleMeta::new(0));
-        for (id, data) in vec![(1, "X"), (2, "Y"), (4, "Z")] {
+        for (id, data) in [(1, "X"), (2, "Y"), (4, "Z")] {
             let values = vec![Value::new(id), Value::new(data)];
             let result = right_table.insert_tuple_from_values(
                 values,

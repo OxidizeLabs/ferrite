@@ -1,6 +1,7 @@
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
-use crate::storage::index::index::{Index, IndexInfo};
+use crate::storage::index::index_iterator_mem::IndexIterator;
+use crate::storage::index::{Index, IndexInfo};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
@@ -9,7 +10,6 @@ use parking_lot::RwLock;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::sync::Arc;
-use crate::storage::index::index_iterator_mem::IndexIterator;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -85,7 +85,7 @@ impl BPlusTree {
             {
                 let mut root_guard = self.root.write();
                 root_guard.children.push(old_root);
-                if !self.split_child(&mut *root_guard, 0) {
+                if !self.split_child(&mut root_guard, 0) {
                     debug!("Root split failed");
                     return false;
                 }
@@ -94,10 +94,10 @@ impl BPlusTree {
 
             // Now insert into the split root
             let mut root_guard = self.root.write();
-            self.insert_non_full(&mut *root_guard, key, rid)
+            self.insert_non_full(&mut root_guard, key, rid)
         } else {
             let mut root_guard = self.root.write();
-            self.insert_non_full(&mut *root_guard, key, rid)
+            self.insert_non_full(&mut root_guard, key, rid)
         }
     }
 
@@ -324,7 +324,7 @@ impl BPlusTree {
     /// - Internal nodes with their keys
     /// - Leaf nodes with keys and values
     /// - Leaf node links
-    /// Returns a string representation of the tree
+    ///   Returns a string representation of the tree
     pub fn visualize(&self) -> String {
         let mut result = String::new();
         result.push_str("B+ Tree Visualization:\n");
@@ -363,7 +363,7 @@ impl BPlusTree {
                         index,
                         node.keys
                             .iter()
-                            .map(|k| format_key(k))
+                            .map(format_key)
                             .collect::<Vec<_>>()
                             .join("|")
                     ));
@@ -609,11 +609,11 @@ impl BPlusTree {
 
                         let child_arc = Arc::clone(&node.children[new_child_idx]);
                         let mut child_guard = child_arc.write();
-                        return self.insert_non_full(&mut *child_guard, key, rid);
+                        return self.insert_non_full(&mut child_guard, key, rid);
                     }
 
                     debug!("Recursing into child node");
-                    self.insert_non_full(&mut *child_guard, key, rid)
+                    self.insert_non_full(&mut child_guard, key, rid)
                 }
             }
         }
@@ -701,8 +701,7 @@ impl BPlusTree {
     fn rebalance_after_delete(&self, path: Vec<(Arc<RwLock<BPlusTreeNode>>, usize)>) {
         let mut current_path = path;
 
-        while !current_path.is_empty() {
-            let (parent_arc, child_idx) = current_path.pop().unwrap();
+        while let Some((parent_arc, child_idx)) = current_path.pop() {
             let mut parent = parent_arc.write();
 
             // Check if child needs rebalancing
@@ -881,8 +880,8 @@ impl BPlusTree {
         match right.node_type {
             NodeType::Leaf => {
                 // Move all entries from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.values.extend(right.values.drain(..));
+                left.keys.append(&mut right.keys);
+                left.values.append(&mut right.values);
                 // Update leaf node links
                 left.next_leaf = right.next_leaf.take();
             }
@@ -892,8 +891,8 @@ impl BPlusTree {
                 left.keys.push(separator);
 
                 // Move all keys and children from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.children.extend(right.children.drain(..));
+                left.keys.append(&mut right.keys);
+                left.children.append(&mut right.children);
             }
         }
 
@@ -919,8 +918,8 @@ impl BPlusTree {
         match left.node_type {
             NodeType::Leaf => {
                 // Move all entries from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.values.extend(right.values.drain(..));
+                left.keys.append(&mut right.keys);
+                left.values.append(&mut right.values);
                 // Update leaf node links
                 left.next_leaf = right.next_leaf.take();
             }
@@ -930,8 +929,8 @@ impl BPlusTree {
                 left.keys.push(separator);
 
                 // Move all keys and children from right to left
-                left.keys.extend(right.keys.drain(..));
-                left.children.extend(right.children.drain(..));
+                left.keys.append(&mut right.keys);
+                left.children.append(&mut right.children);
             }
         }
 
@@ -983,24 +982,24 @@ impl Index for BPlusTree {
 
     fn create_iterator(&self, start_key: Option<Tuple>, end_key: Option<Tuple>) -> IndexIterator {
         // Convert Option<Tuple> to Option<Arc<Tuple>>
-        let start_key_arc = start_key.map(|t| Arc::new(t));
-        let end_key_arc = end_key.map(|t| Arc::new(t));
-        
+        let start_key_arc = start_key.map(Arc::new);
+        let end_key_arc = end_key.map(Arc::new);
+
         // Create an Arc<RwLock<BPlusTree>> from self
         // Since we need to provide an Arc<RwLock<BPlusTree>> but we only have &self,
         // we need to create a new Arc containing a clone of the tree
         let tree_arc = Arc::new(RwLock::new(self.clone()));
-        
+
         IndexIterator::new(tree_arc, start_key_arc, end_key_arc)
     }
 
     fn create_point_iterator(&self, key: &Tuple) -> IndexIterator {
         // For point iteration, both start and end keys are the same
         let key_arc = Arc::new(key.clone());
-        
+
         // Create an Arc<RwLock<BPlusTree>> from self
         let tree_arc = Arc::new(RwLock::new(self.clone()));
-        
+
         IndexIterator::new(tree_arc, Some(key_arc.clone()), Some(key_arc))
     }
 
@@ -1015,7 +1014,7 @@ mod test_utils {
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::concurrency::transaction::IsolationLevel;
-    use crate::storage::index::index::{IndexInfo, IndexType};
+    use crate::storage::index::{IndexInfo, IndexType};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
 
@@ -1092,20 +1091,20 @@ mod unit_tests {
         let tree_read_guard = tree.read();
 
         let binding = tuple1.keys_from_tuple(vec![0]);
-        let key1 = binding.get(0).unwrap();
+        let key1 = binding.first().unwrap();
         let binding = tuple2.keys_from_tuple(vec![0]);
-        let key2 = binding.get(0).unwrap();
+        let key2 = binding.first().unwrap();
 
         assert_eq!(
-            tree_read_guard.compare_keys_ordering(key1, &key2),
+            tree_read_guard.compare_keys_ordering(key1, key2),
             std::cmp::Ordering::Less
         );
         assert_eq!(
-            tree_read_guard.compare_keys_ordering(&key2, &key1),
+            tree_read_guard.compare_keys_ordering(key2, key1),
             std::cmp::Ordering::Greater
         );
         assert_eq!(
-            tree_read_guard.compare_keys_ordering(&key1, &key1),
+            tree_read_guard.compare_keys_ordering(key1, key1),
             std::cmp::Ordering::Equal
         );
     }
@@ -1518,11 +1517,11 @@ mod split_behavior_tests {
         let left_child = root.children[0].read();
         let right_child = root.children[1].read();
         assert!(
-            matches!(left_child.next_leaf, Some(_)),
+            left_child.next_leaf.is_some(),
             "Left leaf should have next pointer"
         );
         assert!(
-            matches!(right_child.next_leaf, None),
+            right_child.next_leaf.is_none(),
             "Right leaf should have no next pointer"
         );
     }
@@ -1556,7 +1555,7 @@ mod split_behavior_tests {
             NodeType::Internal,
             "Root should be internal"
         );
-        assert!(root.keys.len() > 0, "Root should have at least one key");
+        assert!(!root.keys.is_empty(), "Root should have at least one key");
 
         // Verify all leaf nodes are properly linked
         let mut current_node = Arc::clone(&tree_write_guard.root);

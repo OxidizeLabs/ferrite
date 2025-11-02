@@ -54,8 +54,8 @@ impl AbstractPlanNode for DeleteNode {
 impl Display for DeleteNode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if f.alternate() {
-            write!(f, "Delete [\n")?;
-            write!(f, "  Table: {} (OID: {})\n", self.table_name, self.table_id)?;
+            writeln!(f, "Delete [")?;
+            writeln!(f, "  Table: {} (OID: {})", self.table_name, self.table_id)?;
             write!(f, "  Schema: {}", self.output_schema)?;
             for child in &self.children {
                 write!(f, "\n  {}", child)?;

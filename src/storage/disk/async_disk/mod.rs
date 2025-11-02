@@ -2,23 +2,23 @@
 // Refactored according to Single Responsibility Principle
 
 // Core components
-pub mod manager;
 pub mod config;
+pub mod manager;
 
 // Optimization components
 pub mod compression;
-pub mod simd;
 pub mod prefetching;
 pub mod scheduler;
+pub mod simd;
 
 // Cache implementations
 pub mod cache;
 pub mod memory;
 
 // Metrics and monitoring
-pub mod metrics;
 pub mod io;
+pub mod metrics;
 
+pub use config::DiskManagerConfig;
 // Re-export the main AsyncDiskManager for backward compatibility
 pub use manager::AsyncDiskManager;
-pub use config::DiskManagerConfig;

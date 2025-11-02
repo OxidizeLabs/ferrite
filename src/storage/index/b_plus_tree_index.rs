@@ -1,10 +1,10 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::{
-    config::{PageId, INVALID_PAGE_ID},
+    config::{INVALID_PAGE_ID, PageId},
     rid::RID,
 };
-use crate::storage::index::index::IndexInfo;
-use crate::storage::index::types::comparators::{i32_comparator, I32Comparator};
+use crate::storage::index::IndexInfo;
+use crate::storage::index::types::comparators::{I32Comparator, i32_comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
 use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::{
@@ -49,6 +49,12 @@ pub enum BPlusTreeError {
 
     #[error("Conversion error: {0}")]
     ConversionError(String),
+}
+
+impl From<String> for BPlusTreeError {
+    fn from(error: String) -> Self {
+        BPlusTreeError::ConversionError(error)
+    }
 }
 
 pub struct TypedBPlusTreeIndex {
@@ -173,7 +179,7 @@ where
         let header_page = self
             .buffer_pool_manager
             .new_page::<BPlusTreeHeaderPage>()
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         // Set initial values for the header
         {
@@ -260,9 +266,13 @@ where
             let new_leaf_page = self
                 .buffer_pool_manager
                 .new_page_with_options(|page_id| {
-                    BPlusTreeLeafPage::<K, V, C>::new_with_options(page_id, leaf_max_size, comparator)
+                    BPlusTreeLeafPage::<K, V, C>::new_with_options(
+                        page_id,
+                        leaf_max_size,
+                        comparator,
+                    )
                 })
-                .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+                .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
             let new_page_id = new_leaf_page.get_page_id();
 
@@ -300,13 +310,13 @@ where
             let key_index = leaf_write.find_key_index(&key);
             if key_index < leaf_write.get_size() {
                 // Check if key at this position matches our key
-                if let Some(existing_key) = leaf_write.get_key_at(key_index) {
-                    if (self.comparator)(&key, existing_key) == Ordering::Equal {
-                        // Update existing value
-                        leaf_write.set_value_at(key_index, value.clone());
-                        inserted = true;
-                        // No new key added, just updated existing value
-                    }
+                if let Some(existing_key) = leaf_write.get_key_at(key_index)
+                    && (self.comparator)(&key, existing_key) == Ordering::Equal
+                {
+                    // Update existing value
+                    leaf_write.set_value_at(key_index, value.clone());
+                    inserted = true;
+                    // No new key added, just updated existing value
                 }
             }
 
@@ -375,12 +385,12 @@ where
         // Check if key exists in the leaf
         if key_index < leaf_page_read.get_size() {
             let key_at_index = leaf_page_read.get_key_at(key_index).unwrap();
-            if (self.comparator)(key, &key_at_index) == Ordering::Equal {
+            if (self.comparator)(key, key_at_index) == Ordering::Equal {
                 // Key found, return the value
                 return match leaf_page_read.get_value_at(key_index) {
                     Some(value) => Ok(Some(value.clone())),
                     None => Ok(None),
-                }
+                };
             }
         }
 
@@ -503,7 +513,7 @@ where
                 while key_index < size {
                     if let Some(key) = leaf_page.get_key_at(key_index) {
                         // Check if we've exceeded the end of the range
-                        if (self.comparator)(&key, end) == Ordering::Greater {
+                        if (self.comparator)(key, end) == Ordering::Greater {
                             return Ok(result); // Done with range scan
                         }
 
@@ -530,7 +540,7 @@ where
             current_leaf_guard = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(next_page_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(next_page_id))?;
         }
 
         Ok(result)
@@ -574,49 +584,51 @@ where
             let leaf_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
             return Ok(leaf_page);
         }
 
         // Traverse down to leaf
-        while tree_height > 1 {
-            // First try as an internal page (since we know height > 1 and we're not at leaf level yet)
-            let internal_page = self
-                .buffer_pool_manager
-                .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))?;
+        if tree_height > 1 {
+            loop {
+                // First try as an internal page (since we know height > 1 and we're not at leaf level yet)
+                let internal_page = self
+                    .buffer_pool_manager
+                    .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
+                    .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
 
-            // Find the child page id for the key
-            let child_page_id;
-            {
-                let internal = internal_page.read();
-                // Find the appropriate child page for the key
-                child_page_id = internal.find_child_for_key(key);
+                // Find the child page id for the key
+                let child_page_id;
+                {
+                    let internal = internal_page.read();
+                    // Find the appropriate child page for the key
+                    child_page_id = internal.find_child_for_key(key);
+                }
+
+                // Get the child page id before dropping the internal page
+                let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+
+                // Drop the internal page before continuing to next level
+                drop(internal_page);
+
+                // Try to fetch the child as a leaf page
+                if let Some(leaf_page) = self
+                    .buffer_pool_manager
+                    .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
+                {
+                    // If we successfully fetched a leaf page, return it
+                    return Ok(leaf_page);
+                }
+
+                // Continue with this child (it's another internal page)
+                current_page_id = next_page_id;
             }
-
-            // Get the child page id before dropping the internal page
-            let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
-            
-            // Drop the internal page before continuing to next level
-            drop(internal_page);
-
-            // Try to fetch the child as a leaf page
-            if let Some(leaf_page) = self
-                .buffer_pool_manager
-                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
-            {
-                // If we successfully fetched a leaf page, return it
-                return Ok(leaf_page);
-            }
-
-            // Continue with this child (it's another internal page)
-            current_page_id = next_page_id;
         }
 
         // If we get here without finding a leaf, try one more time
         self.buffer_pool_manager
             .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-            .ok_or_else(|| BPlusTreeError::PageNotFound(current_page_id))
+            .ok_or(BPlusTreeError::PageNotFound(current_page_id))
     }
 
     /// Split a leaf page when it becomes full
@@ -639,7 +651,7 @@ where
             .new_page_with_options(|page_id| {
                 BPlusTreeLeafPage::<K, V, C>::new_with_options(page_id, leaf_max_size, comparator)
             })
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         let new_page_id = new_page.get_page_id();
 
@@ -655,7 +667,7 @@ where
             new_leaf_write.set_next_page_id(None);
 
             // Determine split point - ceiling(max_size/2)
-            let split_point = (leaf_max_size + 1) / 2;
+            let split_point = leaf_max_size.div_ceil(2);
             let current_size = leaf_write.get_size();
 
             // Copy keys/values after split point to the new page
@@ -676,7 +688,7 @@ where
                 Some(key) => key.clone(),
                 None => return Err(BPlusTreeError::InvalidPageType), // Should never happen
             };
-            
+
             // Remove the moved keys from the original leaf
             for _i in split_point..current_size {
                 leaf_write.remove_key_value_at(split_point);
@@ -755,9 +767,13 @@ where
         let new_page = self
             .buffer_pool_manager
             .new_page_with_options(|page_id| {
-                BPlusTreeInternalPage::<K, C>::new_with_options(page_id, internal_max_size, comparator)
+                BPlusTreeInternalPage::<K, C>::new_with_options(
+                    page_id,
+                    internal_max_size,
+                    comparator,
+                )
             })
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         let new_page_id = new_page.get_page_id();
 
@@ -777,14 +793,14 @@ where
             // The middle key (at split_point) will be promoted to the parent
             middle_key = internal_write
                 .get_key_at(split_point)
-                .ok_or_else(|| BPlusTreeError::InvalidPageType)?
+                .ok_or(BPlusTreeError::InvalidPageType)?
                 .clone();
 
             // Get the child that will be the leftmost pointer in the new page
             // (This is the child pointer that goes immediately after the middle key)
             let child_after_middle = internal_write
                 .get_value_at(split_point + 1)
-                .ok_or_else(|| BPlusTreeError::InvalidPageType)?;
+                .ok_or(BPlusTreeError::InvalidPageType)?;
 
             // First insert the leftmost child pointer in the new page
             // For an internal page, we need to setup the first child before any keys
@@ -794,10 +810,10 @@ where
 
             // Now move the remaining keys and values
             for i in (split_point + 1)..current_size {
-                if let Some(key) = internal_write.get_key_at(i) {
-                    if let Some(child_id) = internal_write.get_value_at(i + 1) {
-                        new_internal_write.insert_key_value(key.clone(), child_id);
-                    }
+                if let Some(key) = internal_write.get_key_at(i)
+                    && let Some(child_id) = internal_write.get_value_at(i + 1)
+                {
+                    new_internal_write.insert_key_value(key.clone(), child_id);
                 }
             }
 
@@ -875,7 +891,7 @@ where
         let left_page_id = left_page.get_page_id();
         let right_page_id = right_page.get_page_id();
         let parent_page_id = parent_page.get_page_id();
-        
+
         // 1. Acquire write locks on all pages
         let mut left_write = left_page.write();
         let right_write = right_page.write();
@@ -970,7 +986,7 @@ where
         // Store parent information before dropping the write guard
         let parent_needs_rebalancing =
             !is_parent_root && parent_size < parent_write.get_max_size() / 2;
-        
+
         // Release all write locks
         drop(left_write);
         drop(parent_write);
@@ -1037,8 +1053,8 @@ where
             // Move keys from the beginning of right page to end of left page
             for i in 0..keys_to_move {
                 // Retrieve key and value first to avoid borrowing issues
-                let key_to_move = right_write.get_key_at(i).map(|k| k.clone());
-                let value_to_move = right_write.get_value_at(i).map(|v| v.clone());
+                let key_to_move = right_write.get_key_at(i).cloned();
+                let value_to_move = right_write.get_value_at(i).cloned();
 
                 if let (Some(key), Some(value)) = (key_to_move, value_to_move) {
                     left_write.insert_key_value(key, value);
@@ -1051,7 +1067,7 @@ where
             }
 
             // Update the separator key in parent to the first key in right page
-            let new_separator = right_write.get_key_at(0).map(|k| k.clone());
+            let new_separator = right_write.get_key_at(0).cloned();
             if let Some(new_sep) = new_separator {
                 // Fix: Replace set_key_at with proper method to update a key
                 if parent_write.get_key_at(parent_key_index).is_some() {
@@ -1071,8 +1087,8 @@ where
             // Create a temporary vector to store the keys/values to move
             let mut keys_values = Vec::with_capacity(keys_to_move);
             for i in start_index..left_size {
-                let key_to_move = left_write.get_key_at(i).map(|k| k.clone());
-                let value_to_move = left_write.get_value_at(i).map(|v| v.clone());
+                let key_to_move = left_write.get_key_at(i).cloned();
+                let value_to_move = left_write.get_value_at(i).cloned();
 
                 if let (Some(key), Some(value)) = (key_to_move, value_to_move) {
                     keys_values.push((key, value));
@@ -1087,8 +1103,8 @@ where
                 let mut right_keys_values = Vec::with_capacity(right_size);
 
                 for j in 0..right_size {
-                    let k = right_write.get_key_at(j).map(|key| key.clone());
-                    let v = right_write.get_value_at(j).map(|val| val.clone());
+                    let k = right_write.get_key_at(j).cloned();
+                    let v = right_write.get_value_at(j).cloned();
                     if let (Some(key), Some(val)) = (k, v) {
                         right_keys_values.push((key, val));
                     }
@@ -1116,7 +1132,7 @@ where
             }
 
             // Update the separator key in parent to the first key in right page
-            let new_separator = right_write.get_key_at(0).map(|k| k.clone());
+            let new_separator = right_write.get_key_at(0).cloned();
             if let Some(new_sep) = new_separator {
                 // Fix: Replace set_key_at with proper method to update a key
                 if parent_write.get_key_at(parent_key_index).is_some() {
@@ -1146,7 +1162,7 @@ where
         let left_page_id = left_page.get_page_id();
         let right_page_id = right_page.get_page_id();
         let parent_page_id = parent_page.get_page_id();
-        
+
         // 1. Acquire write locks on all pages
         let mut left_write = left_page.write();
         let right_write = right_page.write();
@@ -1185,10 +1201,10 @@ where
         // 4. Copy all keys and child pointers from right page to left page
         // Skip the first child pointer of right page as it's already handled with the separator key
         for i in 0..right_write.get_size() {
-            if let Some(key) = right_write.get_key_at(i) {
-                if let Some(child_id) = right_write.get_value_at(i + 1) {
-                    left_write.insert_key_value(key.clone(), child_id);
-                }
+            if let Some(key) = right_write.get_key_at(i)
+                && let Some(child_id) = right_write.get_value_at(i + 1)
+            {
+                left_write.insert_key_value(key.clone(), child_id);
             }
         }
 
@@ -1322,8 +1338,8 @@ where
 
             // Move additional keys and children from right to left
             for i in 0..additional_keys_to_move {
-                let key_to_move = right_write.get_key_at(i).map(|k| k.clone());
-                let child_id_to_move = right_write.get_value_at(i + 1).map(|v| v.clone());
+                let key_to_move = right_write.get_key_at(i);
+                let child_id_to_move = right_write.get_value_at(i + 1);
 
                 if let (Some(key), Some(child_id)) = (key_to_move, child_id_to_move) {
                     left_write.insert_key_value(key, child_id);
@@ -1383,8 +1399,8 @@ where
             let mut right_kv_pairs = Vec::with_capacity(right_size);
 
             for i in 0..right_size {
-                let key = right_write.get_key_at(i).map(|k| k.clone());
-                let child_id = right_write.get_value_at(i + 1).map(|v| v.clone());
+                let key = right_write.get_key_at(i);
+                let child_id = right_write.get_value_at(i + 1);
 
                 if let (Some(k), Some(v)) = (key, child_id) {
                     right_kv_pairs.push((k, v));
@@ -1406,8 +1422,8 @@ where
             // Create a temporary vector of keys to move
             let mut keys_to_move_vec = Vec::with_capacity(keys_to_move);
             for i in start_idx..end_idx {
-                let key = left_write.get_key_at(i).map(|k| k.clone());
-                let child_id = left_write.get_value_at(i + 1).map(|v| v.clone());
+                let key = left_write.get_key_at(i);
+                let child_id = left_write.get_value_at(i + 1);
 
                 if let (Some(k), Some(v)) = (key, child_id) {
                     keys_to_move_vec.push((k, v));
@@ -1453,9 +1469,13 @@ where
         let new_page = self
             .buffer_pool_manager
             .new_page_with_options(|page_id| {
-                BPlusTreeInternalPage::<K, C>::new_with_options(page_id, internal_max_size, comparator)
+                BPlusTreeInternalPage::<K, C>::new_with_options(
+                    page_id,
+                    internal_max_size,
+                    comparator,
+                )
             })
-            .ok_or_else(|| BPlusTreeError::PageAllocationFailed)?;
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
 
         let new_root_id = new_page.get_page_id();
 
@@ -1751,7 +1771,7 @@ where
                 Err(BPlusTreeError::BufferPoolError(
                     "Invalid root page state".to_string(),
                 ))
-            }
+            };
         }
 
         // 3. For non-root pages, check minimum size requirement
@@ -2233,7 +2253,7 @@ where
             let next_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(next_page_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(next_page_id))?;
 
             // Update current leaf
             current_leaf = next_page;
@@ -2289,7 +2309,7 @@ where
                 let leftmost_child_id = internal_page
                     .read()
                     .get_value_at(0)
-                    .ok_or_else(|| BPlusTreeError::InvalidPageType)?;
+                    .ok_or(BPlusTreeError::InvalidPageType)?;
 
                 // Continue with this child
                 current_page_id = leftmost_child_id;
@@ -2470,13 +2490,13 @@ where
         }
 
         // Validate that all leaves are at the same level
-        if let Some(leaf_level) = stats.leaf_level {
-            if leaf_level != stats.max_depth {
-                return Err(BPlusTreeError::ConversionError(format!(
-                    "Leaves not at same level: found leaves at level {} but max depth is {}",
-                    leaf_level, stats.max_depth
-                )));
-            }
+        if let Some(leaf_level) = stats.leaf_level
+            && leaf_level != stats.max_depth
+        {
+            return Err(BPlusTreeError::ConversionError(format!(
+                "Leaves not at same level: found leaves at level {} but max depth is {}",
+                leaf_level, stats.max_depth
+            )));
         }
 
         Ok(stats)
@@ -2552,15 +2572,14 @@ where
         for i in 1..size {
             if let (Some(prev_key), Some(curr_key)) =
                 (leaf_read.get_key_at(i - 1), leaf_read.get_key_at(i))
+                && (self.comparator)(prev_key, curr_key) != Ordering::Less
             {
-                if (self.comparator)(prev_key, curr_key) != Ordering::Less {
-                    return Err(BPlusTreeError::ConversionError(format!(
-                        "Keys not in order in leaf page {}: {} >= {}",
-                        leaf_page.get_page_id(),
-                        prev_key,
-                        curr_key
-                    )));
-                }
+                return Err(BPlusTreeError::ConversionError(format!(
+                    "Keys not in order in leaf page {}: {} >= {}",
+                    leaf_page.get_page_id(),
+                    prev_key,
+                    curr_key
+                )));
             }
         }
 
@@ -2614,13 +2633,12 @@ where
         for i in 1..size {
             if let (Some(prev_key), Some(curr_key)) =
                 (internal_read.get_key_at(i - 1), internal_read.get_key_at(i))
+                && (self.comparator)(&prev_key, &curr_key) != Ordering::Less
             {
-                if (self.comparator)(&prev_key, &curr_key) != Ordering::Less {
-                    return Err(BPlusTreeError::ConversionError(format!(
-                        "Keys not in order in internal page {}: {} >= {}",
-                        page_id, prev_key, curr_key
-                    )));
-                }
+                return Err(BPlusTreeError::ConversionError(format!(
+                    "Keys not in order in internal page {}: {} >= {}",
+                    page_id, prev_key, curr_key
+                )));
             }
         }
 
@@ -2674,7 +2692,7 @@ where
             current_leaf = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_id)
-                .ok_or_else(|| BPlusTreeError::PageNotFound(next_id))?;
+                .ok_or(BPlusTreeError::PageNotFound(next_id))?;
         }
 
         Ok(())
@@ -2735,7 +2753,7 @@ impl ValidationStats {
 
     /// Check if the tree is balanced (all leaves at same level)
     pub fn is_balanced(&self) -> bool {
-        self.leaf_level.map_or(true, |level| level == self.max_depth)
+        self.leaf_level.is_none_or(|level| level == self.max_depth)
     }
 }
 
@@ -2764,12 +2782,12 @@ mod tests {
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
-    use crate::storage::index::index::{IndexInfo, IndexType};
+    use crate::common::logger::initialize_logger;
+    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+    use crate::storage::index::{IndexInfo, IndexType};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use crate::common::logger::initialize_logger;
-    use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,
@@ -2798,26 +2816,30 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
+            let disk_manager =
+                AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
             let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
-            let bpm = Arc::new(BufferPoolManager::new(
-                BUFFER_POOL_SIZE,
-                Arc::from(disk_manager.unwrap()),
-                replacer.clone(),
-            ).unwrap());
-            
+            let bpm = Arc::new(
+                BufferPoolManager::new(
+                    BUFFER_POOL_SIZE,
+                    Arc::from(disk_manager.unwrap()),
+                    replacer.clone(),
+                )
+                .unwrap(),
+            );
+
             Self {
                 bpm,
                 _temp_dir: temp_dir,
             }
         }
     }
-    
+
     #[tokio::test]
     async fn test_basic_tree_operations() {
         let ctx = TestContext::new("test_basic_tree_operations").await;
         let bpm = ctx.bpm;
-    
+
         // Create a simple schema
         let key_schema = Schema::new(vec![]);
 
@@ -2834,11 +2856,8 @@ mod tests {
         );
 
         // Create B+ tree
-        let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
-            i32_comparator,
-            metadata,
-            bpm,
-        );
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm);
 
         // Initialize tree with order 4
         println!("Initializing tree...");
@@ -2849,12 +2868,16 @@ mod tests {
         let key = 42;
         let value = RID::new(1, 1);
         println!("Inserting key {} with value {:?}", key, value);
-        let insert_result = tree.insert(key, value.clone());
+        let insert_result = tree.insert(key, value);
         if let Err(ref e) = insert_result {
             println!("Insert failed with error: {}", e);
         }
         assert!(insert_result.is_ok());
-        println!("Insert successful. Tree height: {}, size: {}", tree.get_height(), tree.get_size());
+        println!(
+            "Insert successful. Tree height: {}, size: {}",
+            tree.get_height(),
+            tree.get_size()
+        );
 
         // Search for the key
         println!("Searching for key {}", key);
@@ -2865,7 +2888,11 @@ mod tests {
             Err(e) => println!("Search failed with error: {}", e),
         }
         let result = search_result.unwrap();
-        assert!(result.is_some(), "Expected to find key {} but got None", key);
+        assert!(
+            result.is_some(),
+            "Expected to find key {} but got None",
+            key
+        );
         assert_eq!(result.unwrap(), value);
         println!("Search test passed");
 
@@ -2886,34 +2913,34 @@ mod tests {
             if i == 5 {
                 println!("\n=== DETAILED DEBUG FOR KEY 5 ===");
                 println!("About to insert key 5...");
-                
+
                 // Print tree before inserting key 5
                 println!("Tree before inserting key 5:");
                 let _ = tree.print_tree();
-                
+
                 // Print keys in order before key 5
                 match tree.in_order_traversal() {
                     Ok(keys) => println!("Current keys in tree: {:?}", keys),
                     Err(e) => println!("Failed to get keys: {}", e),
                 }
             }
-            
+
             println!("Inserting key {}", i);
             assert!(tree.insert(i, RID::new(1, i as u32)).is_ok());
-            
+
             if i == 5 {
                 println!("Key 5 inserted successfully!");
-                
+
                 // Print tree after inserting key 5
                 println!("Tree after inserting key 5:");
                 let _ = tree.print_tree();
-                
+
                 // Print keys in order after key 5
                 match tree.in_order_traversal() {
                     Ok(keys) => println!("Keys after inserting 5: {:?}", keys),
                     Err(e) => println!("Failed to get keys: {}", e),
                 }
-                
+
                 // Try to search for key 5
                 match tree.search(&5) {
                     Ok(Some(v)) => println!("Key 5 found with value: {:?}", v),
@@ -2922,7 +2949,7 @@ mod tests {
                 }
                 println!("=== END DETAILED DEBUG FOR KEY 5 ===\n");
             }
-            
+
             // Print tree structure after key insertions to debug
             if i == 4 {
                 println!("\n=== Tree structure after inserting key {} ===", i);
@@ -2930,18 +2957,28 @@ mod tests {
                 println!("=======================================\n");
             }
             if i == 6 {
-                println!("\n=== Tree structure after inserting key {} (before split) ===", i);
+                println!(
+                    "\n=== Tree structure after inserting key {} (before split) ===",
+                    i
+                );
                 let _ = tree.print_tree();
                 println!("=======================================\n");
             }
             if i == 7 {
-                println!("\n=== Tree structure after inserting key {} (after split) ===", i);
+                println!(
+                    "\n=== Tree structure after inserting key {} (after split) ===",
+                    i
+                );
                 let _ = tree.print_tree();
                 println!("=======================================\n");
             }
         }
-        println!("Tree height after inserts: {}, size: {}", tree.get_height(), tree.get_size());
-        
+        println!(
+            "Tree height after inserts: {}, size: {}",
+            tree.get_height(),
+            tree.get_size()
+        );
+
         println!("\n=== Final tree structure ===");
         let _ = tree.print_tree();
         println!("=======================================\n");
@@ -2956,7 +2993,7 @@ mod tests {
                 println!("\n=== Tree structure when key {} was not found ===", i);
                 let _ = tree.print_tree();
                 println!("=======================================\n");
-                
+
                 // Also print in-order traversal to see all keys that exist
                 match tree.in_order_traversal() {
                     Ok(keys) => println!("Keys in tree (in-order): {:?}", keys),
@@ -2997,7 +3034,7 @@ mod tests {
     async fn test_debug_key_5_split() {
         let ctx = TestContext::new("test_debug_key_5_split").await;
         let bpm = ctx.bpm;
-    
+
         // Create a simple schema
         let key_schema = Schema::new(vec![]);
 
@@ -3014,11 +3051,8 @@ mod tests {
         );
 
         // Create B+ tree
-        let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
-            i32_comparator,
-            metadata,
-            bpm,
-        );
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm);
 
         // Initialize tree with order 4
         assert!(tree.init_with_order(4).is_ok());
@@ -3028,20 +3062,25 @@ mod tests {
             println!("Inserting key {}", i);
             assert!(tree.insert(i, RID::new(1, i as u32)).is_ok());
         }
-        
+
         println!("\n=== Tree before inserting key 5 (should be full) ===");
         let _ = tree.print_tree();
-        
+
         // Get the leaf page directly to examine it
         let root_page_id = tree.get_root_page_id();
-        let leaf_page = tree.buffer_pool_manager
+        let leaf_page = tree
+            .buffer_pool_manager
             .fetch_page::<BPlusTreeLeafPage<i32, RID, I32Comparator>>(root_page_id)
             .unwrap();
-        
+
         {
             let leaf_read = leaf_page.read();
             println!("Leaf page before split:");
-            println!("  Size: {}, Max size: {}", leaf_read.get_size(), leaf_read.get_max_size());
+            println!(
+                "  Size: {}, Max size: {}",
+                leaf_read.get_size(),
+                leaf_read.get_max_size()
+            );
             print!("  Keys: [");
             for i in 0..leaf_read.get_size() {
                 if let Some(key) = leaf_read.get_key_at(i) {
@@ -3063,20 +3102,20 @@ mod tests {
             }
             println!("]");
         }
-        
+
         println!("\n=== Inserting key 5 (should trigger split) ===");
         assert!(tree.insert(5, RID::new(1, 5)).is_ok());
-        
+
         println!("\n=== Tree after inserting key 5 ===");
         let _ = tree.print_tree();
-        
+
         // Verify key 5 can be found
         match tree.search(&5) {
             Ok(Some(v)) => println!("SUCCESS: Key 5 found with value: {:?}", v),
             Ok(None) => println!("ERROR: Key 5 not found!"),
             Err(e) => println!("ERROR searching for key 5: {}", e),
         }
-        
+
         // Print all keys in order
         match tree.in_order_traversal() {
             Ok(keys) => println!("All keys in tree: {:?}", keys),
@@ -3088,7 +3127,7 @@ mod tests {
     async fn test_validation_stats_integration() {
         let ctx = TestContext::new("test_validation_stats").await;
         let bpm = ctx.bpm;
-    
+
         // Create a simple schema
         let key_schema = Schema::new(vec![]);
 
@@ -3105,11 +3144,8 @@ mod tests {
         );
 
         // Create B+ tree
-        let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
-            i32_comparator,
-            metadata,
-            bpm.clone(),
-        );
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm.clone());
 
         // Initialize tree with order 4
         assert!(tree.init_with_order(4).is_ok());
@@ -3168,11 +3204,5 @@ mod tests {
         assert_eq!(metadata_ref.get_index_name(), "test_validation_index");
 
         println!("All validation tests passed!");
-    }
-}
-
-impl From<String> for BPlusTreeError {
-    fn from(error: String) -> Self {
-        BPlusTreeError::ConversionError(error)
     }
 }

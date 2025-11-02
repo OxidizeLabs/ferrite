@@ -264,7 +264,7 @@ mod tests {
         let tuple = Tuple::new(
             &vec![
                 Value::new(42),                     // Integer
-                Value::new(3.14),                   // Decimal
+                Value::new(std::f64::consts::PI),   // Decimal
                 Value::new("test"),                 // VarChar
                 Value::new(9223372036854775807i64), // BigInt (i64::MAX)
             ],
@@ -400,7 +400,7 @@ mod tests {
     fn test_cast_null_value() {
         let schema = create_test_schema();
         let tuple = Tuple::new(
-            &vec![Value::new(Val::Null)],
+            &[Value::new(Val::Null)],
             &Schema::new(vec![
                 // Use Integer type for the column, even though we'll store NULL in it
                 Column::new("null_col", TypeId::Integer),
