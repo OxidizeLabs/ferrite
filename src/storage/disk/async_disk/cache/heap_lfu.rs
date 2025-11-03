@@ -6,6 +6,8 @@ use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LFUCacheTrait, MutableCache,
 };
 use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
+use std::hash::Hash;
 /// # Heap-Based LFU Cache Implementation
 ///
 /// This is an alternative LFU cache implementation that uses a binary heap for O(log n) eviction
@@ -71,12 +73,6 @@ use std::cmp::Reverse;
 /// - Cache sizes are small (<100 items)
 /// - Simple, minimal overhead is preferred
 ///
-use std::collections::{BinaryHeap, HashMap};
-use std::hash::Hash;
-
-/// Heap-based LFU cache with O(log n) eviction operations.
-///
-/// See module-level documentation for comprehensive usage guide.
 #[derive(Debug)]
 pub struct HeapLFUCache<K, V>
 where

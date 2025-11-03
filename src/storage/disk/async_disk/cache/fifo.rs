@@ -1,3 +1,8 @@
+use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::hash::Hash;
+use std::sync::Arc;
 /// # FIFO (First In, First Out) Cache Implementation
 ///
 /// This module provides a high-performance FIFO cache that evicts the oldest (first inserted)
@@ -325,13 +330,6 @@
 ///     }
 /// }
 /// ```
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::hash::Hash;
-use std::sync::Arc;
-
-/// FIFO (First In, First Out) Cache implementation.
 #[derive(Debug)]
 pub struct FIFOCache<K, V>
 where
@@ -573,2370 +571,1065 @@ mod tests {
     use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
     use std::collections::HashSet;
 
-    // ==============================================
-    // CORRECTNESS TESTS MODULE
-    // ==============================================
-    mod correctness {
+    // Basic FIFO Behavior Tests
+    mod basic_behavior {
         use super::*;
 
-        // Basic FIFO Behavior Tests
-        mod basic_behavior {
-            use super::*;
+        #[test]
+        fn test_basic_fifo_insertion_and_retrieval() {
+            let mut cache = FIFOCache::new(3);
 
-            #[test]
-            fn test_basic_fifo_insertion_and_retrieval() {
-                let mut cache = FIFOCache::new(3);
+            // Test basic insertion and retrieval
+            assert_eq!(cache.insert("key1", "value1"), None);
+            assert_eq!(cache.insert("key2", "value2"), None);
+            assert_eq!(cache.insert("key3", "value3"), None);
 
-                // Test basic insertion and retrieval
-                assert_eq!(cache.insert("key1", "value1"), None);
-                assert_eq!(cache.insert("key2", "value2"), None);
-                assert_eq!(cache.insert("key3", "value3"), None);
-
-                assert_eq!(cache.get(&"key1"), Some(&"value1"));
-                assert_eq!(cache.get(&"key2"), Some(&"value2"));
-                assert_eq!(cache.get(&"key3"), Some(&"value3"));
-                assert_eq!(cache.len(), 3);
-            }
-
-            #[test]
-            fn test_fifo_eviction_order() {
-                let mut cache = FIFOCache::new(2);
-
-                // Fill cache to capacity
-                cache.insert("first", "value1");
-                cache.insert("second", "value2");
-                assert_eq!(cache.len(), 2);
-
-                // Insert third item - should evict "first" (oldest)
-                cache.insert("third", "value3");
-                assert_eq!(cache.len(), 2);
-                assert!(!cache.contains(&"first")); // First item should be evicted
-                assert!(cache.contains(&"second"));
-                assert!(cache.contains(&"third"));
-            }
-
-            #[test]
-            fn test_capacity_enforcement() {
-                let mut cache = FIFOCache::new(3);
-
-                // Fill beyond capacity
-                for i in 1..=5 {
-                    cache.insert(format!("key{}", i), format!("value{}", i));
-                }
-
-                // Should only contain last 3 items due to FIFO eviction
-                assert_eq!(cache.len(), 3);
-                assert!(!cache.contains(&"key1".to_string()));
-                assert!(!cache.contains(&"key2".to_string()));
-                assert!(cache.contains(&"key3".to_string()));
-                assert!(cache.contains(&"key4".to_string()));
-                assert!(cache.contains(&"key5".to_string()));
-            }
-
-            #[test]
-            fn test_update_existing_key() {
-                let mut cache = FIFOCache::new(3);
-
-                cache.insert("key1", "original");
-                cache.insert("key2", "value2");
-
-                // Update existing key - should return old value
-                let old_value = cache.insert("key1", "updated");
-                assert_eq!(old_value, Some("original"));
-                assert_eq!(cache.get(&"key1"), Some(&"updated"));
-                assert_eq!(cache.len(), 2); // Length shouldn't change
-            }
-
-            #[test]
-            fn test_insertion_order_preservation() {
-                let mut cache = FIFOCache::new(4);
-
-                // Insert items in specific order
-                cache.insert("first", 1);
-                cache.insert("second", 2);
-                cache.insert("third", 3);
-                cache.insert("fourth", 4);
-
-                // Verify insertion order is preserved in FIFO operations
-                assert_eq!(cache.peek_oldest(), Some((&"first", &1)));
-                assert_eq!(cache.age_rank(&"first"), Some(0)); // oldest
-                assert_eq!(cache.age_rank(&"second"), Some(1));
-                assert_eq!(cache.age_rank(&"third"), Some(2));
-                assert_eq!(cache.age_rank(&"fourth"), Some(3)); // newest
-
-                // Pop oldest and verify order shifts correctly
-                assert_eq!(cache.pop_oldest(), Some(("first", 1)));
-                assert_eq!(cache.peek_oldest(), Some((&"second", &2)));
-                assert_eq!(cache.age_rank(&"second"), Some(0)); // now oldest
-                assert_eq!(cache.age_rank(&"third"), Some(1));
-                assert_eq!(cache.age_rank(&"fourth"), Some(2)); // still newest
-
-                // Insert new item and verify it becomes newest
-                cache.insert("fifth", 5);
-                assert_eq!(cache.age_rank(&"second"), Some(0));
-                assert_eq!(cache.age_rank(&"third"), Some(1));
-                assert_eq!(cache.age_rank(&"fourth"), Some(2));
-                assert_eq!(cache.age_rank(&"fifth"), Some(3)); // newest
-
-                // Test eviction maintains order - add item beyond capacity
-                cache.insert("sixth", 6);
-                // Should evict "second" (oldest)
-                assert!(!cache.contains(&"second"));
-                assert_eq!(cache.peek_oldest(), Some((&"third", &3)));
-                assert_eq!(cache.age_rank(&"third"), Some(0)); // now oldest
-                assert_eq!(cache.age_rank(&"fourth"), Some(1));
-                assert_eq!(cache.age_rank(&"fifth"), Some(2));
-                assert_eq!(cache.age_rank(&"sixth"), Some(3)); // newest
-            }
-
-            #[test]
-            fn test_key_operations_consistency() {
-                let mut cache = FIFOCache::new(3);
-
-                // Test consistency between contains, get, and len
-                assert_eq!(cache.len(), 0);
-                assert!(!cache.contains(&"key1"));
-                assert_eq!(cache.get(&"key1"), None);
-
-                // Insert first item
-                cache.insert("key1", "value1");
-                assert_eq!(cache.len(), 1);
-                assert!(cache.contains(&"key1"));
-                assert_eq!(cache.get(&"key1"), Some(&"value1"));
-                assert!(!cache.contains(&"key2"));
-                assert_eq!(cache.get(&"key2"), None);
-
-                // Insert second item
-                cache.insert("key2", "value2");
-                assert_eq!(cache.len(), 2);
-                assert!(cache.contains(&"key1"));
-                assert!(cache.contains(&"key2"));
-                assert_eq!(cache.get(&"key1"), Some(&"value1"));
-                assert_eq!(cache.get(&"key2"), Some(&"value2"));
-
-                // Update existing key - len should not change
-                let old_value = cache.insert("key1", "updated_value1");
-                assert_eq!(old_value, Some("value1"));
-                assert_eq!(cache.len(), 2); // Should remain 2
-                assert!(cache.contains(&"key1"));
-                assert_eq!(cache.get(&"key1"), Some(&"updated_value1"));
-                assert_eq!(cache.get(&"key2"), Some(&"value2"));
-
-                // Fill to capacity
-                cache.insert("key3", "value3");
-                assert_eq!(cache.len(), 3);
-                assert_eq!(cache.capacity(), 3);
-                assert!(cache.contains(&"key1"));
-                assert!(cache.contains(&"key2"));
-                assert!(cache.contains(&"key3"));
-
-                // Trigger eviction - should evict key1 (oldest, even though updated)
-                // In true FIFO, updating a key does NOT change its insertion order position
-                cache.insert("key4", "value4");
-                assert_eq!(cache.len(), 3); // Should remain at capacity
-                assert!(!cache.contains(&"key1")); // Should be evicted (oldest insertion time)
-                assert!(cache.contains(&"key2")); // Should remain
-                assert!(cache.contains(&"key3"));
-                assert!(cache.contains(&"key4"));
-                assert_eq!(cache.get(&"key1"), None);
-                assert_eq!(cache.get(&"key4"), Some(&"value4"));
-
-                // Test pop_oldest consistency - should pop key2 (now oldest)
-                let popped = cache.pop_oldest();
-                assert_eq!(popped, Some(("key2", "value2")));
-                assert_eq!(cache.len(), 2);
-                assert!(!cache.contains(&"key2"));
-                assert_eq!(cache.get(&"key2"), None);
-
-                // Verify remaining items
-                assert!(cache.contains(&"key3"));
-                assert!(cache.contains(&"key4"));
-
-                // Clear and verify all operations report empty state
-                cache.clear();
-                assert_eq!(cache.len(), 0);
-                assert!(!cache.contains(&"key2"));
-                assert!(!cache.contains(&"key3"));
-                assert!(!cache.contains(&"key4"));
-                assert_eq!(cache.get(&"key2"), None);
-                assert_eq!(cache.get(&"key3"), None);
-                assert_eq!(cache.get(&"key4"), None);
-                assert_eq!(cache.peek_oldest(), None);
-                assert_eq!(cache.pop_oldest(), None);
-            }
+            assert_eq!(cache.get(&"key1"), Some(&"value1"));
+            assert_eq!(cache.get(&"key2"), Some(&"value2"));
+            assert_eq!(cache.get(&"key3"), Some(&"value3"));
+            assert_eq!(cache.len(), 3);
         }
 
-        // Edge Cases Tests
-        mod edge_cases {
-            use super::*;
+        #[test]
+        fn test_fifo_eviction_order() {
+            let mut cache = FIFOCache::new(2);
 
-            #[test]
-            fn test_empty_cache_operations() {
-                let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
+            // Fill cache to capacity
+            cache.insert("first", "value1");
+            cache.insert("second", "value2");
+            assert_eq!(cache.len(), 2);
 
-                assert_eq!(cache.get(&"nonexistent".to_string()), None);
-                assert!(!cache.contains(&"nonexistent".to_string()));
-                assert_eq!(cache.len(), 0);
-                assert_eq!(cache.capacity(), 5);
-
-                // Clear empty cache should work
-                cache.clear();
-                assert_eq!(cache.len(), 0);
-            }
-
-            #[test]
-            fn test_single_item_cache() {
-                let mut cache = FIFOCache::new(1);
-
-                cache.insert("only", "value1");
-                assert_eq!(cache.len(), 1);
-                assert_eq!(cache.get(&"only"), Some(&"value1"));
-
-                // Insert second item - should evict first
-                cache.insert("second", "value2");
-                assert_eq!(cache.len(), 1);
-                assert!(!cache.contains(&"only"));
-                assert!(cache.contains(&"second"));
-            }
-
-            #[test]
-            fn test_zero_capacity_cache() {
-                let mut cache = FIFOCache::new(0);
-
-                // Should not be able to store anything
-                cache.insert("key", "value");
-                assert_eq!(cache.len(), 0);
-                assert!(!cache.contains(&"key"));
-                assert_eq!(cache.get(&"key"), None);
-            }
-
-            #[test]
-            fn test_clear_operation() {
-                let mut cache = FIFOCache::new(3);
-
-                cache.insert("key1", "value1");
-                cache.insert("key2", "value2");
-                assert_eq!(cache.len(), 2);
-
-                cache.clear();
-                assert_eq!(cache.len(), 0);
-                assert!(!cache.contains(&"key1"));
-                assert!(!cache.contains(&"key2"));
-                assert_eq!(cache.get(&"key1"), None);
-            }
-
-            #[test]
-            fn test_duplicate_key_handling() {
-                let mut cache = FIFOCache::new(3);
-
-                // Insert initial key
-                assert_eq!(cache.insert("key1", "value1"), None);
-                assert_eq!(cache.len(), 1);
-                assert!(cache.contains(&"key1"));
-                assert_eq!(cache.get(&"key1"), Some(&"value1"));
-
-                // Insert same key again - should update, not add new entry
-                assert_eq!(cache.insert("key1", "value1_updated"), Some("value1"));
-                assert_eq!(cache.len(), 1); // Length should remain the same
-                assert_eq!(cache.get(&"key1"), Some(&"value1_updated"));
-
-                // Add more keys
-                cache.insert("key2", "value2");
-                cache.insert("key3", "value3");
-                assert_eq!(cache.len(), 3);
-
-                // Update existing key multiple times
-                assert_eq!(cache.insert("key2", "value2_v2"), Some("value2"));
-                assert_eq!(cache.insert("key2", "value2_v3"), Some("value2_v2"));
-                assert_eq!(cache.len(), 3); // Should still be 3
-                assert_eq!(cache.get(&"key2"), Some(&"value2_v3"));
-
-                // Verify insertion order preserved (key1 should still be oldest)
-                assert_eq!(cache.age_rank(&"key1"), Some(0)); // Still oldest despite updates
-                assert_eq!(cache.age_rank(&"key2"), Some(1));
-                assert_eq!(cache.age_rank(&"key3"), Some(2));
-
-                // Fill to capacity and force eviction
-                cache.insert("key4", "value4");
-                assert_eq!(cache.len(), 3);
-                assert!(!cache.contains(&"key1")); // Oldest should be evicted
-                assert!(cache.contains(&"key2"));
-                assert!(cache.contains(&"key3"));
-                assert!(cache.contains(&"key4"));
-
-                // Update existing key after eviction
-                assert_eq!(cache.insert("key2", "value2_final"), Some("value2_v3"));
-                assert_eq!(cache.len(), 3);
-                assert_eq!(cache.get(&"key2"), Some(&"value2_final"));
-
-                // Verify no duplicate entries in internal structures
-                let mut found_keys = HashSet::new();
-                let mut count = 0;
-                while let Some((key, _)) = cache.pop_oldest() {
-                    assert!(found_keys.insert(key), "Duplicate key found: {}", key);
-                    count += 1;
-                }
-                assert_eq!(count, 3); // Should have exactly 3 unique keys
-            }
-
-            #[test]
-            fn test_boundary_conditions() {
-                let mut cache = FIFOCache::new(2);
-
-                // Test exactly at capacity
-                cache.insert("key1", "value1");
-                assert_eq!(cache.len(), 1);
-                assert!(!cache.contains(&"key2"));
-
-                cache.insert("key2", "value2");
-                assert_eq!(cache.len(), 2); // Exactly at capacity
-                assert_eq!(cache.capacity(), 2);
-                assert!(cache.contains(&"key1"));
-                assert!(cache.contains(&"key2"));
-
-                // Test operations at capacity limit
-                assert_eq!(cache.peek_oldest(), Some((&"key1", &"value1")));
-                assert_eq!(cache.age_rank(&"key1"), Some(0));
-                assert_eq!(cache.age_rank(&"key2"), Some(1));
-
-                // Insert one more to trigger eviction (capacity + 1)
-                cache.insert("key3", "value3");
-                assert_eq!(cache.len(), 2); // Should remain at capacity
-                assert!(!cache.contains(&"key1")); // Oldest evicted
-                assert!(cache.contains(&"key2"));
-                assert!(cache.contains(&"key3"));
-
-                // Test boundary with updates at capacity
-                assert_eq!(cache.insert("key2", "value2_updated"), Some("value2"));
-                assert_eq!(cache.len(), 2); // Still at capacity
-                assert_eq!(cache.get(&"key2"), Some(&"value2_updated"));
-
-                // Test pop operations at boundary
-                assert_eq!(cache.pop_oldest(), Some(("key2", "value2_updated")));
-                assert_eq!(cache.len(), 1); // One below capacity
-
-                assert_eq!(cache.pop_oldest(), Some(("key3", "value3")));
-                assert_eq!(cache.len(), 0); // Empty
-
-                // Test operations on empty cache after reaching boundary
-                assert_eq!(cache.pop_oldest(), None);
-                assert_eq!(cache.peek_oldest(), None);
-                assert_eq!(cache.len(), 0);
-
-                // Test filling back to capacity
-                cache.insert("new1", "newval1");
-                cache.insert("new2", "newval2");
-                assert_eq!(cache.len(), 2); // Back to capacity
-
-                // Test batch operations at boundary
-                let batch = cache.pop_oldest_batch(3); // Request more than available
-                assert_eq!(batch.len(), 2); // Should get exactly what's available
-                assert_eq!(cache.len(), 0); // Should be empty
-            }
-
-            #[test]
-            fn test_empty_to_full_transition() {
-                let mut cache = FIFOCache::new(4);
-
-                // Start empty
-                assert_eq!(cache.len(), 0);
-                assert_eq!(cache.capacity(), 4);
-                assert_eq!(cache.peek_oldest(), None);
-                assert_eq!(cache.pop_oldest(), None);
-
-                // Fill step by step, verifying state at each step
-
-                // Step 1: Insert first item
-                cache.insert("item1", 1);
-                assert_eq!(cache.len(), 1);
-                assert!(cache.contains(&"item1"));
-                assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
-                assert_eq!(cache.age_rank(&"item1"), Some(0));
-
-                // Step 2: Insert second item
-                cache.insert("item2", 2);
-                assert_eq!(cache.len(), 2);
-                assert!(cache.contains(&"item1"));
-                assert!(cache.contains(&"item2"));
-                assert_eq!(cache.peek_oldest(), Some((&"item1", &1))); // Still oldest
-                assert_eq!(cache.age_rank(&"item1"), Some(0));
-                assert_eq!(cache.age_rank(&"item2"), Some(1));
-
-                // Step 3: Insert third item
-                cache.insert("item3", 3);
-                assert_eq!(cache.len(), 3);
-                assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
-                assert_eq!(cache.age_rank(&"item1"), Some(0));
-                assert_eq!(cache.age_rank(&"item2"), Some(1));
-                assert_eq!(cache.age_rank(&"item3"), Some(2));
-
-                // Step 4: Fill to capacity
-                cache.insert("item4", 4);
-                assert_eq!(cache.len(), 4); // Now at full capacity
-                assert_eq!(cache.capacity(), 4);
-
-                // Verify all items present and in correct order
-                assert!(cache.contains(&"item1"));
-                assert_eq!(cache.get(&"item1"), Some(&1));
-                assert_eq!(cache.age_rank(&"item1"), Some(0));
-
-                assert!(cache.contains(&"item2"));
-                assert_eq!(cache.get(&"item2"), Some(&2));
-                assert_eq!(cache.age_rank(&"item2"), Some(1));
-
-                assert!(cache.contains(&"item3"));
-                assert_eq!(cache.get(&"item3"), Some(&3));
-                assert_eq!(cache.age_rank(&"item3"), Some(2));
-
-                assert!(cache.contains(&"item4"));
-                assert_eq!(cache.get(&"item4"), Some(&4));
-                assert_eq!(cache.age_rank(&"item4"), Some(3));
-
-                // Verify oldest is still first
-                assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
-
-                // Test that we're truly at capacity - next insert should evict
-                cache.insert("item5", 5);
-                assert_eq!(cache.len(), 4); // Still at capacity
-                assert!(!cache.contains(&"item1")); // First item evicted
-                assert!(cache.contains(&"item5")); // New item added
-                assert_eq!(cache.peek_oldest(), Some((&"item2", &2))); // item2 now oldest
-            }
-
-            #[test]
-            fn test_full_to_empty_transition() {
-                // Helper function to create cache with same initial state (avoids cloning)
-                let create_test_cache = || {
-                    let mut cache = FIFOCache::new(3);
-                    cache.insert("item1", 1);
-                    cache.insert("item2", 2);
-                    cache.insert("item3", 3);
-                    assert_eq!(cache.len(), 3);
-                    assert_eq!(cache.capacity(), 3);
-                    cache
-                };
-
-                // Method 1: Empty using pop_oldest one by one
-                let mut emptying_cache = create_test_cache();
-
-                // First pop
-                assert_eq!(emptying_cache.pop_oldest(), Some(("item1", 1)));
-                assert_eq!(emptying_cache.len(), 2);
-                assert!(!emptying_cache.contains(&"item1"));
-                assert!(emptying_cache.contains(&"item2"));
-                assert!(emptying_cache.contains(&"item3"));
-                assert_eq!(emptying_cache.peek_oldest(), Some((&"item2", &2)));
-
-                // Second pop
-                assert_eq!(emptying_cache.pop_oldest(), Some(("item2", 2)));
-                assert_eq!(emptying_cache.len(), 1);
-                assert!(!emptying_cache.contains(&"item2"));
-                assert!(emptying_cache.contains(&"item3"));
-                assert_eq!(emptying_cache.peek_oldest(), Some((&"item3", &3)));
-
-                // Third pop
-                assert_eq!(emptying_cache.pop_oldest(), Some(("item3", 3)));
-                assert_eq!(emptying_cache.len(), 0);
-                assert!(!emptying_cache.contains(&"item3"));
-                assert_eq!(emptying_cache.peek_oldest(), None);
-
-                // Fourth pop on empty cache
-                assert_eq!(emptying_cache.pop_oldest(), None);
-                assert_eq!(emptying_cache.len(), 0);
-
-                // Method 2: Empty using batch operation
-                let mut batch_cache = create_test_cache();
-                let batch = batch_cache.pop_oldest_batch(3);
-                assert_eq!(batch.len(), 3);
-                assert_eq!(batch[0], ("item1", 1));
-                assert_eq!(batch[1], ("item2", 2));
-                assert_eq!(batch[2], ("item3", 3));
-                assert_eq!(batch_cache.len(), 0);
-                assert_eq!(batch_cache.peek_oldest(), None);
-
-                // Method 3: Empty using clear operation
-                let mut clear_cache = create_test_cache();
-                clear_cache.clear();
-                assert_eq!(clear_cache.len(), 0);
-                assert_eq!(clear_cache.capacity(), 3); // Capacity unchanged
-                assert_eq!(clear_cache.peek_oldest(), None);
-                assert_eq!(clear_cache.pop_oldest(), None);
-
-                // Verify cache can be refilled after each emptying method
-                for mut test_cache in [emptying_cache, batch_cache, clear_cache] {
-                    test_cache.insert("new1", 100);
-                    assert_eq!(test_cache.len(), 1);
-                    assert!(test_cache.contains(&"new1"));
-                    assert_eq!(test_cache.peek_oldest(), Some((&"new1", &100)));
-                }
-
-                // Test partial emptying and refilling
-                let mut partial_cache = FIFOCache::new(4);
-                partial_cache.insert("a", 1);
-                partial_cache.insert("b", 2);
-                partial_cache.insert("c", 3);
-                partial_cache.insert("d", 4);
-
-                // Remove 2 items
-                partial_cache.pop_oldest(); // Remove "a"
-                partial_cache.pop_oldest(); // Remove "b"
-                assert_eq!(partial_cache.len(), 2);
-
-                // Add 2 new items
-                partial_cache.insert("e", 5);
-                partial_cache.insert("f", 6);
-                assert_eq!(partial_cache.len(), 4); // Back to full
-
-                // Verify correct order maintained
-                assert_eq!(partial_cache.peek_oldest(), Some((&"c", &3))); // "c" should be oldest
-                assert_eq!(partial_cache.age_rank(&"c"), Some(0));
-                assert_eq!(partial_cache.age_rank(&"d"), Some(1));
-                assert_eq!(partial_cache.age_rank(&"e"), Some(2));
-                assert_eq!(partial_cache.age_rank(&"f"), Some(3));
-            }
+            // Insert third item - should evict "first" (oldest)
+            cache.insert("third", "value3");
+            assert_eq!(cache.len(), 2);
+            assert!(!cache.contains(&"first")); // First item should be evicted
+            assert!(cache.contains(&"second"));
+            assert!(cache.contains(&"third"));
         }
 
-        // FIFO Trait Methods Tests
-        mod trait_methods {
-            use super::*;
+        #[test]
+        fn test_capacity_enforcement() {
+            let mut cache = FIFOCache::new(3);
 
-            #[test]
-            fn test_pop_oldest() {
-                let mut cache = FIFOCache::new(3);
-
-                cache.insert("first", "value1");
-                cache.insert("second", "value2");
-                cache.insert("third", "value3");
-
-                // Pop oldest should return first inserted
-                assert_eq!(cache.pop_oldest(), Some(("first", "value1")));
-                assert_eq!(cache.len(), 2);
-                assert!(!cache.contains(&"first"));
-
-                // Next pop should return second oldest
-                assert_eq!(cache.pop_oldest(), Some(("second", "value2")));
-                assert_eq!(cache.len(), 1);
+            // Fill beyond capacity
+            for i in 1..=5 {
+                cache.insert(format!("key{}", i), format!("value{}", i));
             }
 
-            #[test]
-            fn test_peek_oldest() {
-                let mut cache = FIFOCache::new(3);
-
-                cache.insert("first", "value1");
-                cache.insert("second", "value2");
-
-                // Peek should return oldest without removing
-                assert_eq!(cache.peek_oldest(), Some((&"first", &"value1")));
-                assert_eq!(cache.len(), 2); // Should not change length
-                assert!(cache.contains(&"first")); // Should still be present
-
-                // Multiple peeks should return same result
-                assert_eq!(cache.peek_oldest(), Some((&"first", &"value1")));
-            }
-
-            #[test]
-            fn test_age_rank() {
-                let mut cache = FIFOCache::new(4);
-
-                cache.insert("first", "value1"); // rank 0 (oldest)
-                cache.insert("second", "value2"); // rank 1
-                cache.insert("third", "value3"); // rank 2
-                cache.insert("fourth", "value4"); // rank 3 (newest)
-
-                assert_eq!(cache.age_rank(&"first"), Some(0));
-                assert_eq!(cache.age_rank(&"second"), Some(1));
-                assert_eq!(cache.age_rank(&"third"), Some(2));
-                assert_eq!(cache.age_rank(&"fourth"), Some(3));
-                assert_eq!(cache.age_rank(&"nonexistent"), None);
-            }
-
-            #[test]
-            fn test_pop_oldest_batch() {
-                let mut cache = FIFOCache::new(5);
-
-                for i in 1..=5 {
-                    cache.insert(format!("key{}", i), format!("value{}", i));
-                }
-
-                // Pop batch of 3 items
-                let batch = cache.pop_oldest_batch(3);
-                assert_eq!(batch.len(), 3);
-                assert_eq!(batch[0], ("key1".to_string(), "value1".to_string()));
-                assert_eq!(batch[1], ("key2".to_string(), "value2".to_string()));
-                assert_eq!(batch[2], ("key3".to_string(), "value3".to_string()));
-
-                // Cache should have 2 items left
-                assert_eq!(cache.len(), 2);
-                assert!(cache.contains(&"key4".to_string()));
-                assert!(cache.contains(&"key5".to_string()));
-            }
-
-            #[test]
-            fn test_pop_oldest_batch_more_than_available() {
-                let mut cache = FIFOCache::new(3);
-
-                cache.insert("key1", "value1");
-                cache.insert("key2", "value2");
-
-                // Request more than available
-                let batch = cache.pop_oldest_batch(5);
-                assert_eq!(batch.len(), 2); // Should only return what's available
-                assert_eq!(cache.len(), 0); // Cache should be empty
-            }
-
-            #[test]
-            fn test_pop_oldest_empty_cache() {
-                let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
-
-                // Pop from empty cache should return None
-                assert_eq!(cache.pop_oldest(), None);
-                assert_eq!(cache.len(), 0);
-
-                // Multiple pops should still return None
-                assert_eq!(cache.pop_oldest(), None);
-                assert_eq!(cache.pop_oldest(), None);
-                assert_eq!(cache.len(), 0);
-
-                // Add one item, pop it, then pop from empty again
-                cache.insert("key1".to_string(), "value1".to_string());
-                assert_eq!(cache.len(), 1);
-
-                let popped = cache.pop_oldest();
-                assert_eq!(popped, Some(("key1".to_string(), "value1".to_string())));
-                assert_eq!(cache.len(), 0);
-
-                // Now it's empty again
-                assert_eq!(cache.pop_oldest(), None);
-                assert_eq!(cache.len(), 0);
-            }
-
-            #[test]
-            fn test_peek_oldest_empty_cache() {
-                let cache: FIFOCache<String, String> = FIFOCache::new(5);
-
-                // Peek at empty cache should return None
-                assert_eq!(cache.peek_oldest(), None);
-                assert_eq!(cache.len(), 0);
-
-                // Multiple peeks should still return None
-                assert_eq!(cache.peek_oldest(), None);
-                assert_eq!(cache.peek_oldest(), None);
-                assert_eq!(cache.len(), 0);
-
-                // Test peek after clear
-                let mut test_cache = FIFOCache::new(3);
-                test_cache.insert("key1".to_string(), "value1".to_string());
-                test_cache.insert("key2".to_string(), "value2".to_string());
-
-                // Should have content
-                assert!(test_cache.peek_oldest().is_some());
-                assert_eq!(test_cache.len(), 2);
-
-                // Clear and peek again
-                test_cache.clear();
-                assert_eq!(test_cache.peek_oldest(), None);
-                assert_eq!(test_cache.len(), 0);
-            }
-
-            #[test]
-            fn test_age_rank_after_eviction() {
-                let mut cache = FIFOCache::new(3);
-
-                // Fill cache
-                cache.insert("first", 1);
-                cache.insert("second", 2);
-                cache.insert("third", 3);
-
-                // Verify initial ranks
-                assert_eq!(cache.age_rank(&"first"), Some(0));
-                assert_eq!(cache.age_rank(&"second"), Some(1));
-                assert_eq!(cache.age_rank(&"third"), Some(2));
-
-                // Trigger eviction by adding fourth item
-                cache.insert("fourth", 4);
-
-                // "first" should be evicted, ranks should shift
-                assert_eq!(cache.age_rank(&"first"), None); // Evicted
-                assert_eq!(cache.age_rank(&"second"), Some(0)); // Now oldest
-                assert_eq!(cache.age_rank(&"third"), Some(1));
-                assert_eq!(cache.age_rank(&"fourth"), Some(2)); // Newest
-
-                // Add another item to trigger another eviction
-                cache.insert("fifth", 5);
-
-                // "second" should be evicted, ranks shift again
-                assert_eq!(cache.age_rank(&"first"), None); // Still evicted
-                assert_eq!(cache.age_rank(&"second"), None); // Now evicted
-                assert_eq!(cache.age_rank(&"third"), Some(0)); // Now oldest
-                assert_eq!(cache.age_rank(&"fourth"), Some(1));
-                assert_eq!(cache.age_rank(&"fifth"), Some(2)); // Newest
-
-                // Test manual eviction with pop_oldest
-                let popped = cache.pop_oldest();
-                assert_eq!(popped, Some(("third", 3)));
-
-                // Ranks should shift after manual pop
-                assert_eq!(cache.age_rank(&"third"), None); // Just popped
-                assert_eq!(cache.age_rank(&"fourth"), Some(0)); // Now oldest
-                assert_eq!(cache.age_rank(&"fifth"), Some(1)); // Now newest
-
-                // Test batch eviction
-                cache.insert("sixth", 6);
-                cache.insert("seventh", 7);
-                assert_eq!(cache.len(), 3);
-
-                let batch = cache.pop_oldest_batch(2);
-                assert_eq!(batch.len(), 2);
-                assert_eq!(cache.len(), 1);
-
-                // Only "seventh" should remain
-                assert_eq!(cache.age_rank(&"fourth"), None);
-                assert_eq!(cache.age_rank(&"fifth"), None);
-                assert_eq!(cache.age_rank(&"sixth"), None);
-                assert_eq!(cache.age_rank(&"seventh"), Some(0)); // Only remaining item
-            }
-
-            #[test]
-            fn test_batch_operations_edge_cases() {
-                let mut cache = FIFOCache::new(3);
-
-                // Test batch with count = 0
-                cache.insert("key1", "value1");
-                cache.insert("key2", "value2");
-
-                let batch = cache.pop_oldest_batch(0);
-                assert_eq!(batch.len(), 0);
-                assert_eq!(cache.len(), 2); // Nothing should be removed
-                assert!(cache.contains(&"key1"));
-                assert!(cache.contains(&"key2"));
-
-                // Test batch on empty cache
-                let mut empty_cache: FIFOCache<String, String> = FIFOCache::new(5);
-                let empty_batch = empty_cache.pop_oldest_batch(3);
-                assert_eq!(empty_batch.len(), 0);
-                assert_eq!(empty_cache.len(), 0);
-
-                // Test batch with count = 1 (single item)
-                let batch_one = cache.pop_oldest_batch(1);
-                assert_eq!(batch_one.len(), 1);
-                assert_eq!(batch_one[0], ("key1", "value1"));
-                assert_eq!(cache.len(), 1);
-                assert!(!cache.contains(&"key1"));
-                assert!(cache.contains(&"key2"));
-
-                // Test batch equal to cache size
-                cache.insert("key3", "value3");
-                cache.insert("key4", "value4");
-                assert_eq!(cache.len(), 3);
-
-                let all_batch = cache.pop_oldest_batch(3);
-                assert_eq!(all_batch.len(), 3);
-                assert_eq!(all_batch[0], ("key2", "value2"));
-                assert_eq!(all_batch[1], ("key3", "value3"));
-                assert_eq!(all_batch[2], ("key4", "value4"));
-                assert_eq!(cache.len(), 0);
-
-                // Verify cache is completely empty
-                assert_eq!(cache.peek_oldest(), None);
-                assert_eq!(cache.pop_oldest(), None);
-
-                // Test large batch request on small cache
-                cache.insert("only", "item");
-                let large_batch = cache.pop_oldest_batch(100);
-                assert_eq!(large_batch.len(), 1);
-                assert_eq!(large_batch[0], ("only", "item"));
-                assert_eq!(cache.len(), 0);
-
-                // Test batch on cache that became empty during operation
-                cache.insert("a", "1");
-                cache.insert("b", "2");
-
-                // First, empty the cache manually
-                cache.clear();
-
-                // Then try batch operation on now-empty cache
-                let post_clear_batch = cache.pop_oldest_batch(5);
-                assert_eq!(post_clear_batch.len(), 0);
-                assert_eq!(cache.len(), 0);
-            }
+            // Should only contain last 3 items due to FIFO eviction
+            assert_eq!(cache.len(), 3);
+            assert!(!cache.contains(&"key1".to_string()));
+            assert!(!cache.contains(&"key2".to_string()));
+            assert!(cache.contains(&"key3".to_string()));
+            assert!(cache.contains(&"key4".to_string()));
+            assert!(cache.contains(&"key5".to_string()));
         }
 
-        // Stale Entry Handling Tests
-        mod stale_entries {
-            use super::*;
+        #[test]
+        fn test_update_existing_key() {
+            let mut cache = FIFOCache::new(3);
 
-            #[test]
-            fn test_stale_entry_skipping_during_eviction() {
-                let mut cache = FIFOCache::new(3);
+            cache.insert("key1", "original");
+            cache.insert("key2", "value2");
 
-                // Fill cache to capacity
-                cache.insert("key1", "value1");
-                cache.insert("key2", "value2");
-                cache.insert("key3", "value3");
-                assert_eq!(cache.len(), 3);
+            // Update existing key - should return old value
+            let old_value = cache.insert("key1", "updated");
+            assert_eq!(old_value, Some("original"));
+            assert_eq!(cache.get(&"key1"), Some(&"updated"));
+            assert_eq!(cache.len(), 2); // Length shouldn't change
+        }
 
-                // Manually remove key1 from HashMap but leave it in insertion_order
-                // This simulates how stale entries would occur in a more complex scenario
-                cache.remove_from_cache_only(&"key1");
-                assert_eq!(cache.len(), 2); // HashMap now has 2 items
+        #[test]
+        fn test_insertion_order_preservation() {
+            let mut cache = FIFOCache::new(4);
 
-                // The insertion_order VecDeque still has 3 entries, but "key1" is now stale
-                assert_eq!(cache.insertion_order_len(), 3);
-                assert!(!cache.contains(&"key1")); // key1 is not in cache anymore
-                assert!(cache.contains(&"key2")); // key2 is still valid
-                assert!(cache.contains(&"key3")); // key3 is still valid
+            // Insert items in specific order
+            cache.insert("first", 1);
+            cache.insert("second", 2);
+            cache.insert("third", 3);
+            cache.insert("fourth", 4);
 
-                // Add another item to get back to capacity (so next insert will trigger eviction)
-                cache.insert("temp", "temp_value");
-                assert_eq!(cache.len(), 3);
+            // Verify insertion order is preserved in FIFO operations
+            assert_eq!(cache.peek_oldest(), Some((&"first", &1)));
+            assert_eq!(cache.age_rank(&"first"), Some(0)); // oldest
+            assert_eq!(cache.age_rank(&"second"), Some(1));
+            assert_eq!(cache.age_rank(&"third"), Some(2));
+            assert_eq!(cache.age_rank(&"fourth"), Some(3)); // newest
 
-                // Now trigger eviction by inserting a new item
-                // This should skip over the stale "key1" entry and evict "key2" instead
-                cache.insert("key4", "value4");
+            // Pop oldest and verify order shifts correctly
+            assert_eq!(cache.pop_oldest(), Some(("first", 1)));
+            assert_eq!(cache.peek_oldest(), Some((&"second", &2)));
+            assert_eq!(cache.age_rank(&"second"), Some(0)); // now oldest
+            assert_eq!(cache.age_rank(&"third"), Some(1));
+            assert_eq!(cache.age_rank(&"fourth"), Some(2)); // still newest
 
-                // Verify the eviction skipped stale entry and evicted the next valid entry
-                assert_eq!(cache.len(), 3); // Should remain at capacity
-                assert!(!cache.contains(&"key1")); // Still not present (was stale)
-                assert!(!cache.contains(&"key2")); // Should be evicted (oldest valid)
-                assert!(cache.contains(&"key3")); // Should remain
-                assert!(cache.contains(&"temp")); // Should remain
-                assert!(cache.contains(&"key4")); // Should be newly added
+            // Insert new item and verify it becomes newest
+            cache.insert("fifth", 5);
+            assert_eq!(cache.age_rank(&"second"), Some(0));
+            assert_eq!(cache.age_rank(&"third"), Some(1));
+            assert_eq!(cache.age_rank(&"fourth"), Some(2));
+            assert_eq!(cache.age_rank(&"fifth"), Some(3)); // newest
 
-                // Test that further operations continue to work correctly
-                cache.insert("key5", "value5");
-                assert_eq!(cache.len(), 3);
-                assert!(!cache.contains(&"key3")); // key3 should be evicted now
-                assert!(cache.contains(&"temp"));
-                assert!(cache.contains(&"key4"));
-                assert!(cache.contains(&"key5"));
-            }
+            // Test eviction maintains order - add item beyond capacity
+            cache.insert("sixth", 6);
+            // Should evict "second" (oldest)
+            assert!(!cache.contains(&"second"));
+            assert_eq!(cache.peek_oldest(), Some((&"third", &3)));
+            assert_eq!(cache.age_rank(&"third"), Some(0)); // now oldest
+            assert_eq!(cache.age_rank(&"fourth"), Some(1));
+            assert_eq!(cache.age_rank(&"fifth"), Some(2));
+            assert_eq!(cache.age_rank(&"sixth"), Some(3)); // newest
+        }
 
-            #[test]
-            fn test_insertion_order_consistency_with_stale_entries() {
-                let mut cache = FIFOCache::new(4);
+        #[test]
+        fn test_key_operations_consistency() {
+            let mut cache = FIFOCache::new(3);
 
-                // Fill cache
-                cache.insert("a", 1);
-                cache.insert("b", 2);
-                cache.insert("c", 3);
-                cache.insert("d", 4);
+            // Test consistency between contains, get, and len
+            assert_eq!(cache.len(), 0);
+            assert!(!cache.contains(&"key1"));
+            assert_eq!(cache.get(&"key1"), None);
 
-                // Verify initial age ranks
-                assert_eq!(cache.age_rank(&"a"), Some(0));
-                assert_eq!(cache.age_rank(&"b"), Some(1));
-                assert_eq!(cache.age_rank(&"c"), Some(2));
-                assert_eq!(cache.age_rank(&"d"), Some(3));
+            // Insert first item
+            cache.insert("key1", "value1");
+            assert_eq!(cache.len(), 1);
+            assert!(cache.contains(&"key1"));
+            assert_eq!(cache.get(&"key1"), Some(&"value1"));
+            assert!(!cache.contains(&"key2"));
+            assert_eq!(cache.get(&"key2"), None);
 
-                // Manually create stale entries by removing from HashMap
-                cache.remove_from_cache_only(&"a");
-                cache.remove_from_cache_only(&"c");
+            // Insert second item
+            cache.insert("key2", "value2");
+            assert_eq!(cache.len(), 2);
+            assert!(cache.contains(&"key1"));
+            assert!(cache.contains(&"key2"));
+            assert_eq!(cache.get(&"key1"), Some(&"value1"));
+            assert_eq!(cache.get(&"key2"), Some(&"value2"));
 
-                // Now "a" and "c" are stale entries in insertion_order
-                assert_eq!(cache.len(), 2); // Only "b" and "d" remain in HashMap
-                assert_eq!(cache.insertion_order_len(), 4); // All 4 still in insertion_order
+            // Update existing key - len should not change
+            let old_value = cache.insert("key1", "updated_value1");
+            assert_eq!(old_value, Some("value1"));
+            assert_eq!(cache.len(), 2); // Should remain 2
+            assert!(cache.contains(&"key1"));
+            assert_eq!(cache.get(&"key1"), Some(&"updated_value1"));
+            assert_eq!(cache.get(&"key2"), Some(&"value2"));
 
-                // age_rank should skip stale entries and give correct ranks for valid entries
-                assert_eq!(cache.age_rank(&"a"), None); // Stale, should return None
-                assert_eq!(cache.age_rank(&"b"), Some(0)); // First valid entry
-                assert_eq!(cache.age_rank(&"c"), None); // Stale, should return None
-                assert_eq!(cache.age_rank(&"d"), Some(1)); // Second valid entry
+            // Fill to capacity
+            cache.insert("key3", "value3");
+            assert_eq!(cache.len(), 3);
+            assert_eq!(cache.capacity(), 3);
+            assert!(cache.contains(&"key1"));
+            assert!(cache.contains(&"key2"));
+            assert!(cache.contains(&"key3"));
 
-                // peek_oldest should skip stale entries and return the oldest valid entry
-                assert_eq!(cache.peek_oldest(), Some((&"b", &2)));
+            // Trigger eviction - should evict key1 (oldest, even though updated)
+            // In true FIFO, updating a key does NOT change its insertion order position
+            cache.insert("key4", "value4");
+            assert_eq!(cache.len(), 3); // Should remain at capacity
+            assert!(!cache.contains(&"key1")); // Should be evicted (oldest insertion time)
+            assert!(cache.contains(&"key2")); // Should remain
+            assert!(cache.contains(&"key3"));
+            assert!(cache.contains(&"key4"));
+            assert_eq!(cache.get(&"key1"), None);
+            assert_eq!(cache.get(&"key4"), Some(&"value4"));
 
-                // pop_oldest should skip stale entries and pop the oldest valid entry
-                assert_eq!(cache.pop_oldest(), Some(("b", 2)));
+            // Test pop_oldest consistency - should pop key2 (now oldest)
+            let popped = cache.pop_oldest();
+            assert_eq!(popped, Some(("key2", "value2")));
+            assert_eq!(cache.len(), 2);
+            assert!(!cache.contains(&"key2"));
+            assert_eq!(cache.get(&"key2"), None);
 
-                // After popping "b", stale entries should be cleaned up
-                // and "d" should now be the oldest (and only) valid entry
-                assert_eq!(cache.len(), 1);
-                assert_eq!(cache.age_rank(&"d"), Some(0));
-                assert_eq!(cache.peek_oldest(), Some((&"d", &4)));
+            // Verify remaining items
+            assert!(cache.contains(&"key3"));
+            assert!(cache.contains(&"key4"));
 
-                // Add new items and verify order is maintained
-                cache.insert("e", 5);
-                cache.insert("f", 6);
-
-                assert_eq!(cache.age_rank(&"d"), Some(0)); // Still oldest
-                assert_eq!(cache.age_rank(&"e"), Some(1));
-                assert_eq!(cache.age_rank(&"f"), Some(2));
-            }
-
-            #[test]
-            fn test_lazy_deletion_behavior() {
-                let mut cache = FIFOCache::new(3);
-
-                // Test 1: Stale entries accumulate until cleanup operations
-                cache.insert("temp1", "value1");
-                cache.insert("temp2", "value2");
-                cache.insert("keep", "value_keep");
-
-                // Manually remove items to create stale entries
-                cache.remove_from_cache_only(&"temp1");
-                cache.remove_from_cache_only(&"temp2");
-
-                // Stale entries remain in insertion_order
-                assert_eq!(cache.len(), 1); // Only "keep" in HashMap
-                assert_eq!(cache.insertion_order_len(), 3); // All 3 in insertion_order
-
-                // Verify operations work correctly despite stale entries
-                assert_eq!(cache.peek_oldest(), Some((&"keep", &"value_keep")));
-                assert_eq!(cache.age_rank(&"keep"), Some(0));
-                assert!(!cache.contains(&"temp1"));
-                assert!(!cache.contains(&"temp2"));
-                assert!(cache.contains(&"keep"));
-
-                // Test 2: Lazy cleanup during pop_oldest
-                cache.insert("new1", "value_new1");
-                cache.insert("new2", "value_new2");
-
-                // Now we have: stale("temp1"), stale("temp2"), "keep", "new1", "new2"
-                assert_eq!(cache.len(), 3);
-                assert_eq!(cache.insertion_order_len(), 5);
-
-                // pop_oldest should skip stale entries and pop "keep"
-                assert_eq!(cache.pop_oldest(), Some(("keep", "value_keep")));
-
-                // After pop_oldest, some stale entries should be cleaned up
-                assert_eq!(cache.len(), 2);
-                // insertion_order length depends on how many stale entries were cleaned
-
-                // Test 3: Lazy cleanup during eviction
-                cache.insert("trigger_eviction", "value_trigger");
-
-                // This should trigger eviction, which should skip any remaining stale entries
-                assert_eq!(cache.len(), 3);
-                assert!(cache.contains(&"new1"));
-                assert!(cache.contains(&"new2"));
-                assert!(cache.contains(&"trigger_eviction"));
-
-                // Test 4: Multiple consecutive stale entries
-                cache.clear();
-                cache.insert("stale1", "v1");
-                cache.insert("stale2", "v2");
-                cache.insert("stale3", "v3");
-                cache.insert("valid", "valid_value");
-
-                // Remove first three to create consecutive stale entries
-                cache.remove_from_cache_only(&"stale1");
-                cache.remove_from_cache_only(&"stale2");
-                cache.remove_from_cache_only(&"stale3");
-
-                assert_eq!(cache.len(), 1); // Only "valid" in HashMap
-                // insertion_order might have any length >= 1 depending on cleanup behavior
-
-                // Operations should skip all stale entries and work with "valid"
-                assert_eq!(cache.peek_oldest(), Some((&"valid", &"valid_value")));
-                assert_eq!(cache.pop_oldest(), Some(("valid", "valid_value")));
-                assert_eq!(cache.len(), 0);
-                assert_eq!(cache.peek_oldest(), None);
-
-                // Cache should be functional after stale entry handling
-                cache.insert("new_after_stale", "new_value");
-                assert_eq!(cache.len(), 1);
-                assert!(cache.contains(&"new_after_stale"));
-            }
-
-            #[test]
-            fn test_stale_entry_cleanup_during_operations() {
-                let mut cache = FIFOCache::new(4);
-
-                // Setup: Create cache with mix of valid and future stale entries
-                cache.insert("will_be_stale1", "stale1");
-                cache.insert("will_be_stale2", "stale2");
-                cache.insert("valid1", "value1");
-                cache.insert("valid2", "value2");
-
-                // Create stale entries
-                cache.remove_from_cache_only(&"will_be_stale1");
-                cache.remove_from_cache_only(&"will_be_stale2");
-
-                assert_eq!(cache.len(), 2); // Only valid entries in HashMap
-                assert_eq!(cache.insertion_order_len(), 4); // All entries in insertion_order
-
-                // Test 1: pop_oldest cleans up stale entries as it encounters them
-                assert_eq!(cache.pop_oldest(), Some(("valid1", "value1")));
-
-                // Should have cleaned up stale entries encountered during traversal
-                assert_eq!(cache.len(), 1);
-                // insertion_order may be smaller after cleanup, depending on which stale entries were encountered
-                // The exact behavior depends on the order of traversal and which stale entries are cleaned up
-
-                // Test 2: pop_oldest_batch cleans up stale entries
-                cache.insert("new1", "new_value1");
-                cache.insert("new2", "new_value2");
-                cache.insert("new3", "new_value3");
-
-                // Create more stale entries
-                cache.remove_from_cache_only(&"new1");
-                cache.remove_from_cache_only(&"new3");
-
-                let batch = cache.pop_oldest_batch(2);
-                // Should get valid2 and new2 (skipping stale new1 and new3)
-                assert_eq!(batch.len(), 2);
-                assert!(batch.contains(&("valid2", "value2")));
-                assert!(batch.contains(&("new2", "new_value2")));
-
-                // Test 3: age_rank doesn't modify structure but handles stale entries
-                cache.insert("test1", "test_value1");
-                cache.insert("test2", "test_value2");
-                cache.insert("test3", "test_value3");
-
-                cache.remove_from_cache_only(&"test2"); // Make test2 stale
-
-                // age_rank should return correct ranks despite stale entry
-                assert_eq!(cache.age_rank(&"test1"), Some(0)); // First valid
-                assert_eq!(cache.age_rank(&"test2"), None); // Stale
-                assert_eq!(cache.age_rank(&"test3"), Some(1)); // Second valid
-
-                // Test 4: peek_oldest doesn't modify structure but finds valid entry
-                cache.remove_from_cache_only(&"test1"); // Make test1 also stale
-
-                // peek_oldest should find test3 despite two stale entries before it
-                assert_eq!(cache.peek_oldest(), Some((&"test3", &"test_value3")));
-
-                // The structure should remain unchanged after peek
-                assert_eq!(cache.len(), 1); // Only test3 is valid
-
-                // Test 5: Eviction during insertion handles stale entries
-                cache.insert("fill1", "f1");
-                cache.insert("fill2", "f2");
-                cache.insert("fill3", "f3");
-                // Now at capacity (4): test3, fill1, fill2, fill3
-
-                // Create stale entries
-                cache.remove_from_cache_only(&"fill1");
-                cache.remove_from_cache_only(&"fill2");
-
-                // Now we have test3, fill3 in HashMap (2 valid items)
-                assert_eq!(cache.len(), 2);
-
-                // Add items to get back to capacity so next insert will trigger eviction
-                cache.insert("temp1", "t1");
-                cache.insert("temp2", "t2");
-                assert_eq!(cache.len(), 4); // At capacity
-
-                // This insertion should trigger eviction
-                cache.insert("trigger", "trigger_value");
-
-                // Should have proper capacity and valid operations
-                assert_eq!(cache.len(), 4); // Still at capacity
-                assert!(cache.contains(&"trigger"));
-
-                // The cache should still function correctly regardless of internal stale entry cleanup
-                cache.insert("final", "final_value");
-                assert_eq!(cache.len(), 4); // Should remain at capacity
-                assert!(cache.contains(&"final"));
-
-                // Verify the cache maintains proper FIFO behavior
-                assert_eq!(cache.capacity(), 4);
-
-                // Test that operations still work normally after stale entry handling
-                let oldest = cache.peek_oldest();
-                assert!(oldest.is_some()); // Should have valid oldest entry
-
-                let popped = cache.pop_oldest();
-                assert!(popped.is_some()); // Should be able to pop
-                assert_eq!(cache.len(), 3);
-            }
+            // Clear and verify all operations report empty state
+            cache.clear();
+            assert_eq!(cache.len(), 0);
+            assert!(!cache.contains(&"key2"));
+            assert!(!cache.contains(&"key3"));
+            assert!(!cache.contains(&"key4"));
+            assert_eq!(cache.get(&"key2"), None);
+            assert_eq!(cache.get(&"key3"), None);
+            assert_eq!(cache.get(&"key4"), None);
+            assert_eq!(cache.peek_oldest(), None);
+            assert_eq!(cache.pop_oldest(), None);
         }
     }
 
-    // ==============================================
-    // CONCURRENCY TESTS MODULE
-    // ==============================================
-    mod concurrency {
+    // Edge Cases Tests
+    mod edge_cases {
         use super::*;
-        use std::sync::{Arc, Mutex};
-        use std::thread;
 
-        // Thread-Safe Wrapper Tests
-        mod thread_safe_wrapper {
-            use super::*;
-            use std::sync::atomic::{AtomicUsize, Ordering};
-            use std::time::{Duration, Instant};
-
-            // Helper type for thread-safe testing
-            type ThreadSafeFIFOCache<K, V> = Arc<Mutex<FIFOCache<K, V>>>;
-
-            #[test]
-            fn test_basic_thread_safe_operations() {
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(100)));
-                let num_threads = 8;
-                let operations_per_thread = 250;
-                let success_count = Arc::new(AtomicUsize::new(0));
-
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let success_count = success_count.clone();
-
-                        thread::spawn(move || {
-                            let mut thread_successes = 0;
-
-                            for i in 0..operations_per_thread {
-                                // Test different operations with proper synchronization
-                                match i % 4 {
-                                    0 => {
-                                        // Insert operation
-                                        let key = format!("thread_{}_{}", thread_id, i);
-                                        let value = format!("value_{}_{}", thread_id, i);
-
-                                        if let Ok(mut cache_guard) = cache.lock() {
-                                            cache_guard.insert(key, value);
-                                            thread_successes += 1;
-                                        }
-                                    }
-                                    1 => {
-                                        // Get operation
-                                        let key = format!("thread_{}_0", thread_id);
-
-                                        if let Ok(mut cache_guard) = cache.lock() {
-                                            let _ = cache_guard.get(&key);
-                                            thread_successes += 1;
-                                        }
-                                    }
-                                    2 => {
-                                        // Contains operation
-                                        let key = format!("thread_{}_{}", thread_id, i / 2);
-
-                                        if let Ok(cache_guard) = cache.lock() {
-                                            let _ = cache_guard.contains(&key);
-                                            thread_successes += 1;
-                                        }
-                                    }
-                                    _ => {
-                                        // FIFO-specific operations
-                                        if let Ok(mut cache_guard) = cache.lock() {
-                                            let _ = cache_guard.peek_oldest();
-                                            if i % 20 == 0 {
-                                                let _ = cache_guard.pop_oldest();
-                                            }
-                                            thread_successes += 1;
-                                        }
-                                    }
-                                }
-                            }
-
-                            success_count.fetch_add(thread_successes, Ordering::SeqCst);
-                        })
-                    })
-                    .collect();
-
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-
-                let total_successes = success_count.load(Ordering::SeqCst);
-                let expected_operations = num_threads * operations_per_thread;
-
-                println!(
-                    "Basic thread-safe operations: {}/{} successful",
-                    total_successes, expected_operations
-                );
-
-                // Verify cache consistency
-                let final_cache = cache.lock().unwrap();
-                let cache_len = final_cache.len();
-                let capacity = final_cache.capacity();
-
-                assert!(
-                    cache_len <= capacity,
-                    "Cache length should not exceed capacity"
-                );
-                assert!(
-                    total_successes > expected_operations / 2,
-                    "Most operations should succeed"
-                );
-
-                println!(
-                    "Final cache state: {} items, capacity {}",
-                    cache_len, capacity
-                );
-            }
-
-            #[test]
-            fn test_read_heavy_workload() {
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(200)));
-                let num_reader_threads = 12;
-                let num_writer_threads = 2;
-                let reads_per_thread = 500;
-                let writes_per_thread = 100;
-
-                let read_successes = Arc::new(AtomicUsize::new(0));
-                let write_successes = Arc::new(AtomicUsize::new(0));
-
-                // Pre-populate cache
-                {
-                    let mut cache_guard = cache.lock().unwrap();
-                    for i in 0..150 {
-                        cache_guard.insert(format!("initial_{}", i), format!("value_{}", i));
-                    }
-                }
-
-                // Spawn reader threads
-                let reader_handles: Vec<_> = (0..num_reader_threads)
-                    .map(|_thread_id| {
-                        let cache = cache.clone();
-
-                        thread::spawn({
-                            let value = read_successes.clone();
-                            move || {
-                                let mut successful_reads = 0;
-
-                                for i in 0..reads_per_thread {
-                                    let key = format!("initial_{}", i % 150);
-
-                                    if let Ok(mut cache_guard) = cache.lock() {
-                                        if cache_guard.get(&key).is_some() {
-                                            successful_reads += 1;
-                                        }
-
-                                        // Occasionally use FIFO read operations
-                                        if i % 10 == 0 {
-                                            let _ = cache_guard.peek_oldest();
-                                            let _ = cache_guard.age_rank(&key);
-                                        }
-                                    }
-                                }
-
-                                value.fetch_add(successful_reads, Ordering::SeqCst);
-                            }
-                        })
-                    })
-                    .collect();
-
-                // Spawn writer threads (fewer writers, occasional writes)
-                let writer_handles: Vec<_> = (0..num_writer_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let write_successes = write_successes.clone();
-
-                        thread::spawn(move || {
-                            let mut successful_writes = 0;
-
-                            for i in 0..writes_per_thread {
-                                let key = format!("writer_{}_{}", thread_id, i);
-                                let value = format!("writer_value_{}_{}", thread_id, i);
-
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    cache_guard.insert(key, value);
-                                    successful_writes += 1;
-
-                                    // Occasionally trigger eviction
-                                    if i % 50 == 0 {
-                                        let _ = cache_guard.pop_oldest();
-                                    }
-                                }
-
-                                // Writers sleep slightly to allow more reader access
-                                thread::sleep(Duration::from_millis(1));
-                            }
-
-                            write_successes.fetch_add(successful_writes, Ordering::SeqCst);
-                        })
-                    })
-                    .collect();
-
-                // Wait for all threads
-                for handle in reader_handles {
-                    handle.join().unwrap();
-                }
-                for handle in writer_handles {
-                    handle.join().unwrap();
-                }
-
-                let total_reads = read_successes.load(Ordering::SeqCst);
-                let total_writes = write_successes.load(Ordering::SeqCst);
-                let expected_reads = num_reader_threads * reads_per_thread;
-                let expected_writes = num_writer_threads * writes_per_thread;
-
-                println!(
-                    "Read-heavy workload: {} successful reads, {} successful writes",
-                    total_reads, total_writes
-                );
-
-                // Most reads should succeed since we pre-populated
-                assert!(
-                    total_reads > expected_reads / 3,
-                    "Should have many successful reads"
-                );
-                assert_eq!(total_writes, expected_writes, "All writes should succeed");
-
-                // Verify final state
-                let final_cache = cache.lock().unwrap();
-                assert!(final_cache.len() <= final_cache.capacity());
-            }
-
-            #[test]
-            fn test_write_heavy_workload() {
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(150)));
-                let num_threads = 10;
-                let writes_per_thread = 200;
-                let total_writes = Arc::new(AtomicUsize::new(0));
-                let evictions_triggered = Arc::new(AtomicUsize::new(0));
-
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let total_writes = total_writes.clone();
-                        let evictions_triggered = evictions_triggered.clone();
-
-                        thread::spawn(move || {
-                            let mut writes_count = 0;
-                            let mut evictions_count = 0;
-
-                            for i in 0..writes_per_thread {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    let len_before = cache_guard.len();
-
-                                    // Heavy insertion workload
-                                    let key = format!("heavy_{}_{}", thread_id, i);
-                                    let value = format!("data_{}_{}", thread_id, i);
-                                    cache_guard.insert(key, value);
-                                    writes_count += 1;
-
-                                    // Check if eviction occurred
-                                    let len_after = cache_guard.len();
-                                    let capacity = cache_guard.capacity();
-
-                                    if len_before == capacity && len_after == capacity {
-                                        evictions_count += 1;
-                                    }
-
-                                    // Occasionally use FIFO-specific operations
-                                    if i % 25 == 0 {
-                                        let _ = cache_guard.pop_oldest();
-                                        evictions_count += 1;
-                                    }
-
-                                    if i % 30 == 0 {
-                                        let _ = cache_guard.pop_oldest_batch(3);
-                                        evictions_count += 3;
-                                    }
-                                }
-                            }
-
-                            total_writes.fetch_add(writes_count, Ordering::SeqCst);
-                            evictions_triggered.fetch_add(evictions_count, Ordering::SeqCst);
-                        })
-                    })
-                    .collect();
-
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-
-                let writes = total_writes.load(Ordering::SeqCst);
-                let evictions = evictions_triggered.load(Ordering::SeqCst);
-                let expected_writes = num_threads * writes_per_thread;
-
-                println!(
-                    "Write-heavy workload: {} writes, {} evictions",
-                    writes, evictions
-                );
-
-                assert_eq!(writes, expected_writes, "All writes should succeed");
-                assert!(
-                    evictions > 0,
-                    "Should have triggered evictions under heavy write load"
-                );
-
-                // Verify final state
-                let final_cache = cache.lock().unwrap();
-                assert_eq!(
-                    final_cache.len(),
-                    final_cache.capacity(),
-                    "Cache should be at capacity after heavy writes"
-                );
-            }
-
-            #[test]
-            fn test_mixed_operations_concurrency() {
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(100)));
-                let num_threads = 16;
-                let operations_per_thread = 150;
-                let operation_counts = Arc::new(AtomicUsize::new(0));
-
-                // Pre-populate with some data
-                {
-                    let mut cache_guard = cache.lock().unwrap();
-                    for i in 0..50 {
-                        cache_guard.insert(format!("base_{}", i), format!("base_value_{}", i));
-                    }
-                }
-
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let operation_counts = operation_counts.clone();
-
-                        thread::spawn(move || {
-                            let mut ops_completed = 0;
-
-                            for i in 0..operations_per_thread {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    // Randomized operation mix
-                                    let operation = (thread_id + i) % 7;
-
-                                    match operation {
-                                        0 | 1 => {
-                                            // Insert (high frequency)
-                                            let key = format!("mixed_{}_{}", thread_id, i);
-                                            let value = format!("mixed_value_{}_{}", thread_id, i);
-                                            cache_guard.insert(key, value);
-                                        }
-                                        2 => {
-                                            // Get
-                                            let key = format!("base_{}", i % 50);
-                                            let _ = cache_guard.get(&key);
-                                        }
-                                        3 => {
-                                            // Contains
-                                            let key = format!("mixed_{}_{}", thread_id, i / 2);
-                                            let _ = cache_guard.contains(&key);
-                                        }
-                                        4 => {
-                                            // FIFO peek
-                                            let _ = cache_guard.peek_oldest();
-                                        }
-                                        5 => {
-                                            // FIFO pop
-                                            let _ = cache_guard.pop_oldest();
-                                        }
-                                        _ => {
-                                            // FIFO batch operations
-                                            let _ = cache_guard.pop_oldest_batch(2);
-                                            let key = format!("base_{}", i % 30);
-                                            let _ = cache_guard.age_rank(&key);
-                                        }
-                                    }
-
-                                    ops_completed += 1;
-                                }
-                            }
-
-                            operation_counts.fetch_add(ops_completed, Ordering::SeqCst);
-                        })
-                    })
-                    .collect();
-
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-
-                let total_operations = operation_counts.load(Ordering::SeqCst);
-                let expected_operations = num_threads * operations_per_thread;
-
-                println!(
-                    "Mixed operations concurrency: {}/{} operations completed",
-                    total_operations, expected_operations
-                );
-
-                assert_eq!(
-                    total_operations, expected_operations,
-                    "All operations should complete"
-                );
-
-                // Verify cache consistency
-                let final_cache = cache.lock().unwrap();
-                let cache_len = final_cache.len();
-                let capacity = final_cache.capacity();
-                let insertion_order_len = final_cache.insertion_order_len();
-
-                assert!(cache_len <= capacity, "Cache should not exceed capacity");
-                assert!(
-                    insertion_order_len >= cache_len,
-                    "Insertion order should track at least current entries"
-                );
-
-                println!(
-                    "Final state: {} items, {} in insertion order, capacity {}",
-                    cache_len, insertion_order_len, capacity
-                );
-            }
-
-            #[test]
-            fn test_deadlock_prevention() {
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(50)));
-                let num_threads = 20;
-                let timeout_duration = Duration::from_secs(10);
-                let start_time = Instant::now();
-                let completed_operations = Arc::new(AtomicUsize::new(0));
-
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let completed_operations = completed_operations.clone();
-
-                        thread::spawn(move || {
-                            let mut operations = 0;
-                            let thread_start = Instant::now();
-
-                            while thread_start.elapsed() < timeout_duration {
-                                // Try to acquire lock with timeout to detect deadlocks
-                                if let Ok(mut cache_guard) = cache.try_lock() {
-                                    // Perform operation that might cause deadlock in poorly designed code
-                                    let key = format!("deadlock_test_{}_{}", thread_id, operations);
-                                    let value = format!("value_{}", operations);
-
-                                    cache_guard.insert(key.clone(), value);
-                                    let _ = cache_guard.get(&key);
-                                    let _ = cache_guard.peek_oldest();
-
-                                    operations += 1;
-
-                                    // Don't hold lock too long
-                                    if operations % 10 == 0 {
-                                        drop(cache_guard);
-                                        thread::sleep(Duration::from_millis(1));
-                                    }
-                                } else {
-                                    // If we can't acquire lock, wait briefly and try again
-                                    thread::sleep(Duration::from_millis(1));
-                                }
-                            }
-
-                            completed_operations.fetch_add(operations, Ordering::SeqCst);
-                        })
-                    })
-                    .collect();
-
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-
-                let elapsed = start_time.elapsed();
-                let total_operations = completed_operations.load(Ordering::SeqCst);
-
-                println!(
-                    "Deadlock prevention test: {} operations in {:?}",
-                    total_operations, elapsed
-                );
-
-                // Test should complete within timeout (no deadlocks)
-                assert!(
-                    elapsed < timeout_duration + Duration::from_secs(1),
-                    "Test should complete without deadlocks"
-                );
-                assert!(total_operations > 0, "Should complete some operations");
-
-                // Verify cache is still functional
-                let final_cache = cache.lock().unwrap();
-                assert!(final_cache.len() <= final_cache.capacity());
-            }
-
-            #[test]
-            fn test_fairness_across_threads() {
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(80)));
-                let num_threads = 8;
-                let target_operations = 200;
-                let test_duration = Duration::from_secs(5);
-
-                let thread_operation_counts = Arc::new(Mutex::new(vec![0; num_threads]));
-                let start_time = Instant::now();
-
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let thread_operation_counts = thread_operation_counts.clone();
-
-                        thread::spawn(move || {
-                            let mut operations = 0;
-
-                            while start_time.elapsed() < test_duration
-                                && operations < target_operations
-                            {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    // Perform operation
-                                    let key = format!("fair_{}_{}", thread_id, operations);
-                                    let value = format!("value_{}_{}", thread_id, operations);
-                                    cache_guard.insert(key, value);
-
-                                    operations += 1;
-
-                                    // Release lock periodically to allow other threads
-                                    if operations % 5 == 0 {
-                                        drop(cache_guard);
-                                        thread::yield_now();
-                                    }
-                                } else {
-                                    thread::yield_now();
-                                }
-                            }
-
-                            // Record this thread's operation count
-                            if let Ok(mut counts) = thread_operation_counts.lock() {
-                                counts[thread_id] = operations;
-                            }
-                        })
-                    })
-                    .collect();
-
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-
-                let operation_counts = thread_operation_counts.lock().unwrap();
-                let total_operations: usize = operation_counts.iter().sum();
-                let min_operations = *operation_counts.iter().min().unwrap();
-                let max_operations = *operation_counts.iter().max().unwrap();
-                let avg_operations = total_operations as f64 / num_threads as f64;
-
-                println!("Fairness test results:");
-                println!("  Total operations: {}", total_operations);
-                println!("  Average per thread: {:.1}", avg_operations);
-                println!("  Min operations: {}", min_operations);
-                println!("  Max operations: {}", max_operations);
-                println!("  Operation counts: {:?}", *operation_counts);
-
-                // Check fairness - no thread should be starved
-                assert!(min_operations > 0, "No thread should be completely starved");
-
-                // Check that the difference between min and max isn't too extreme
-                let fairness_ratio = max_operations as f64 / min_operations.max(1) as f64;
-                assert!(
-                    fairness_ratio < 10.0,
-                    "Fairness ratio should be reasonable, got {:.2}",
-                    fairness_ratio
-                );
-
-                // Verify cache final state
-                let final_cache = cache.lock().unwrap();
-                assert_eq!(
-                    final_cache.len(),
-                    final_cache.capacity(),
-                    "Cache should be at capacity with high thread contention"
-                );
-            }
+        #[test]
+        fn test_empty_cache_operations() {
+            let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
+
+            assert_eq!(cache.get(&"nonexistent".to_string()), None);
+            assert!(!cache.contains(&"nonexistent".to_string()));
+            assert_eq!(cache.len(), 0);
+            assert_eq!(cache.capacity(), 5);
+
+            // Clear empty cache should work
+            cache.clear();
+            assert_eq!(cache.len(), 0);
         }
 
-        // Stress Testing
-        mod stress_testing {
-            use super::*;
-            use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-            use std::time::{Duration, Instant};
+        #[test]
+        fn test_single_item_cache() {
+            let mut cache = FIFOCache::new(1);
 
-            // Helper type for thread-safe testing
-            type ThreadSafeFIFOCache<K, V> = Arc<Mutex<FIFOCache<K, V>>>;
+            cache.insert("only", "value1");
+            assert_eq!(cache.len(), 1);
+            assert_eq!(cache.get(&"only"), Some(&"value1"));
 
-            #[test]
-            fn test_high_contention_scenario() {
-                // Many threads accessing same small set of keys
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(50)));
-                let num_threads = 20;
-                let operations_per_thread = 500;
-                let hot_keys = 10; // Small set of hotly contested keys
+            // Insert second item - should evict first
+            cache.insert("second", "value2");
+            assert_eq!(cache.len(), 1);
+            assert!(!cache.contains(&"only"));
+            assert!(cache.contains(&"second"));
+        }
 
-                let successful_ops = Arc::new(AtomicUsize::new(0));
-                let contention_detected = Arc::new(AtomicBool::new(false));
+        #[test]
+        fn test_zero_capacity_cache() {
+            let mut cache = FIFOCache::new(0);
 
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let successful_ops = successful_ops.clone();
-                        let contention_detected = contention_detected.clone();
+            // Should not be able to store anything
+            cache.insert("key", "value");
+            assert_eq!(cache.len(), 0);
+            assert!(!cache.contains(&"key"));
+            assert_eq!(cache.get(&"key"), None);
+        }
 
-                        thread::spawn(move || {
-                            let mut ops = 0;
-                            let mut lock_failures = 0;
+        #[test]
+        fn test_clear_operation() {
+            let mut cache = FIFOCache::new(3);
 
-                            for i in 0..operations_per_thread {
-                                // All threads compete for same hot keys
-                                let hot_key = format!("hot_key_{}", i % hot_keys);
-                                let value = format!("thread_{}_value_{}", thread_id, i);
+            cache.insert("key1", "value1");
+            cache.insert("key2", "value2");
+            assert_eq!(cache.len(), 2);
 
-                                // Try with timeout to detect high contention
-                                let start = Instant::now();
-                                match cache.try_lock() {
-                                    Ok(mut cache_guard) => {
-                                        cache_guard.insert(hot_key.clone(), value);
-                                        let _ = cache_guard.get(&hot_key);
-                                        ops += 1;
-                                    }
-                                    Err(_) => {
-                                        lock_failures += 1;
-                                        thread::sleep(Duration::from_millis(1));
-                                    }
-                                }
+            cache.clear();
+            assert_eq!(cache.len(), 0);
+            assert!(!cache.contains(&"key1"));
+            assert!(!cache.contains(&"key2"));
+            assert_eq!(cache.get(&"key1"), None);
+        }
 
-                                // Detect high contention
-                                if start.elapsed() > Duration::from_millis(10) {
-                                    contention_detected.store(true, Ordering::SeqCst);
-                                }
-                            }
+        #[test]
+        fn test_duplicate_key_handling() {
+            let mut cache = FIFOCache::new(3);
 
-                            successful_ops.fetch_add(ops, Ordering::SeqCst);
+            // Insert initial key
+            assert_eq!(cache.insert("key1", "value1"), None);
+            assert_eq!(cache.len(), 1);
+            assert!(cache.contains(&"key1"));
+            assert_eq!(cache.get(&"key1"), Some(&"value1"));
 
-                            println!(
-                                "Thread {}: {} successful ops, {} lock failures",
-                                thread_id, ops, lock_failures
-                            );
-                        })
-                    })
-                    .collect();
+            // Insert same key again - should update, not add new entry
+            assert_eq!(cache.insert("key1", "value1_updated"), Some("value1"));
+            assert_eq!(cache.len(), 1); // Length should remain the same
+            assert_eq!(cache.get(&"key1"), Some(&"value1_updated"));
 
-                for handle in handles {
-                    handle.join().unwrap();
-                }
+            // Add more keys
+            cache.insert("key2", "value2");
+            cache.insert("key3", "value3");
+            assert_eq!(cache.len(), 3);
 
-                let total_ops = successful_ops.load(Ordering::SeqCst);
-                let had_contention = contention_detected.load(Ordering::SeqCst);
+            // Update existing key multiple times
+            assert_eq!(cache.insert("key2", "value2_v2"), Some("value2"));
+            assert_eq!(cache.insert("key2", "value2_v3"), Some("value2_v2"));
+            assert_eq!(cache.len(), 3); // Should still be 3
+            assert_eq!(cache.get(&"key2"), Some(&"value2_v3"));
 
-                println!(
-                    "High contention test: {} operations completed, contention detected: {}",
-                    total_ops, had_contention
-                );
+            // Verify insertion order preserved (key1 should still be oldest)
+            assert_eq!(cache.age_rank(&"key1"), Some(0)); // Still oldest despite updates
+            assert_eq!(cache.age_rank(&"key2"), Some(1));
+            assert_eq!(cache.age_rank(&"key3"), Some(2));
 
-                // Verify system remained functional under high contention
-                assert!(
-                    total_ops > 0,
-                    "Should complete some operations despite contention"
-                );
+            // Fill to capacity and force eviction
+            cache.insert("key4", "value4");
+            assert_eq!(cache.len(), 3);
+            assert!(!cache.contains(&"key1")); // Oldest should be evicted
+            assert!(cache.contains(&"key2"));
+            assert!(cache.contains(&"key3"));
+            assert!(cache.contains(&"key4"));
 
-                // Verify final cache state is consistent
-                let final_cache = cache.lock().unwrap();
-                assert!(final_cache.len() <= final_cache.capacity());
+            // Update existing key after eviction
+            assert_eq!(cache.insert("key2", "value2_final"), Some("value2_v3"));
+            assert_eq!(cache.len(), 3);
+            assert_eq!(cache.get(&"key2"), Some(&"value2_final"));
 
-                println!("Final cache state: {} items", final_cache.len());
+            // Verify no duplicate entries in internal structures
+            let mut found_keys = HashSet::new();
+            let mut count = 0;
+            while let Some((key, _)) = cache.pop_oldest() {
+                assert!(found_keys.insert(key), "Duplicate key found: {}", key);
+                count += 1;
+            }
+            assert_eq!(count, 3); // Should have exactly 3 unique keys
+        }
+
+        #[test]
+        fn test_boundary_conditions() {
+            let mut cache = FIFOCache::new(2);
+
+            // Test exactly at capacity
+            cache.insert("key1", "value1");
+            assert_eq!(cache.len(), 1);
+            assert!(!cache.contains(&"key2"));
+
+            cache.insert("key2", "value2");
+            assert_eq!(cache.len(), 2); // Exactly at capacity
+            assert_eq!(cache.capacity(), 2);
+            assert!(cache.contains(&"key1"));
+            assert!(cache.contains(&"key2"));
+
+            // Test operations at capacity limit
+            assert_eq!(cache.peek_oldest(), Some((&"key1", &"value1")));
+            assert_eq!(cache.age_rank(&"key1"), Some(0));
+            assert_eq!(cache.age_rank(&"key2"), Some(1));
+
+            // Insert one more to trigger eviction (capacity + 1)
+            cache.insert("key3", "value3");
+            assert_eq!(cache.len(), 2); // Should remain at capacity
+            assert!(!cache.contains(&"key1")); // Oldest evicted
+            assert!(cache.contains(&"key2"));
+            assert!(cache.contains(&"key3"));
+
+            // Test boundary with updates at capacity
+            assert_eq!(cache.insert("key2", "value2_updated"), Some("value2"));
+            assert_eq!(cache.len(), 2); // Still at capacity
+            assert_eq!(cache.get(&"key2"), Some(&"value2_updated"));
+
+            // Test pop operations at boundary
+            assert_eq!(cache.pop_oldest(), Some(("key2", "value2_updated")));
+            assert_eq!(cache.len(), 1); // One below capacity
+
+            assert_eq!(cache.pop_oldest(), Some(("key3", "value3")));
+            assert_eq!(cache.len(), 0); // Empty
+
+            // Test operations on empty cache after reaching boundary
+            assert_eq!(cache.pop_oldest(), None);
+            assert_eq!(cache.peek_oldest(), None);
+            assert_eq!(cache.len(), 0);
+
+            // Test filling back to capacity
+            cache.insert("new1", "newval1");
+            cache.insert("new2", "newval2");
+            assert_eq!(cache.len(), 2); // Back to capacity
+
+            // Test batch operations at boundary
+            let batch = cache.pop_oldest_batch(3); // Request more than available
+            assert_eq!(batch.len(), 2); // Should get exactly what's available
+            assert_eq!(cache.len(), 0); // Should be empty
+        }
+
+        #[test]
+        fn test_empty_to_full_transition() {
+            let mut cache = FIFOCache::new(4);
+
+            // Start empty
+            assert_eq!(cache.len(), 0);
+            assert_eq!(cache.capacity(), 4);
+            assert_eq!(cache.peek_oldest(), None);
+            assert_eq!(cache.pop_oldest(), None);
+
+            // Fill step by step, verifying state at each step
+
+            // Step 1: Insert first item
+            cache.insert("item1", 1);
+            assert_eq!(cache.len(), 1);
+            assert!(cache.contains(&"item1"));
+            assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
+            assert_eq!(cache.age_rank(&"item1"), Some(0));
+
+            // Step 2: Insert second item
+            cache.insert("item2", 2);
+            assert_eq!(cache.len(), 2);
+            assert!(cache.contains(&"item1"));
+            assert!(cache.contains(&"item2"));
+            assert_eq!(cache.peek_oldest(), Some((&"item1", &1))); // Still oldest
+            assert_eq!(cache.age_rank(&"item1"), Some(0));
+            assert_eq!(cache.age_rank(&"item2"), Some(1));
+
+            // Step 3: Insert third item
+            cache.insert("item3", 3);
+            assert_eq!(cache.len(), 3);
+            assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
+            assert_eq!(cache.age_rank(&"item1"), Some(0));
+            assert_eq!(cache.age_rank(&"item2"), Some(1));
+            assert_eq!(cache.age_rank(&"item3"), Some(2));
+
+            // Step 4: Fill to capacity
+            cache.insert("item4", 4);
+            assert_eq!(cache.len(), 4); // Now at full capacity
+            assert_eq!(cache.capacity(), 4);
+
+            // Verify all items present and in correct order
+            assert!(cache.contains(&"item1"));
+            assert_eq!(cache.get(&"item1"), Some(&1));
+            assert_eq!(cache.age_rank(&"item1"), Some(0));
+
+            assert!(cache.contains(&"item2"));
+            assert_eq!(cache.get(&"item2"), Some(&2));
+            assert_eq!(cache.age_rank(&"item2"), Some(1));
+
+            assert!(cache.contains(&"item3"));
+            assert_eq!(cache.get(&"item3"), Some(&3));
+            assert_eq!(cache.age_rank(&"item3"), Some(2));
+
+            assert!(cache.contains(&"item4"));
+            assert_eq!(cache.get(&"item4"), Some(&4));
+            assert_eq!(cache.age_rank(&"item4"), Some(3));
+
+            // Verify oldest is still first
+            assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
+
+            // Test that we're truly at capacity - next insert should evict
+            cache.insert("item5", 5);
+            assert_eq!(cache.len(), 4); // Still at capacity
+            assert!(!cache.contains(&"item1")); // First item evicted
+            assert!(cache.contains(&"item5")); // New item added
+            assert_eq!(cache.peek_oldest(), Some((&"item2", &2))); // item2 now oldest
+        }
+
+        #[test]
+        fn test_full_to_empty_transition() {
+            // Helper function to create cache with same initial state (avoids cloning)
+            let create_test_cache = || {
+                let mut cache = FIFOCache::new(3);
+                cache.insert("item1", 1);
+                cache.insert("item2", 2);
+                cache.insert("item3", 3);
+                assert_eq!(cache.len(), 3);
+                assert_eq!(cache.capacity(), 3);
+                cache
+            };
+
+            // Method 1: Empty using pop_oldest one by one
+            let mut emptying_cache = create_test_cache();
+
+            // First pop
+            assert_eq!(emptying_cache.pop_oldest(), Some(("item1", 1)));
+            assert_eq!(emptying_cache.len(), 2);
+            assert!(!emptying_cache.contains(&"item1"));
+            assert!(emptying_cache.contains(&"item2"));
+            assert!(emptying_cache.contains(&"item3"));
+            assert_eq!(emptying_cache.peek_oldest(), Some((&"item2", &2)));
+
+            // Second pop
+            assert_eq!(emptying_cache.pop_oldest(), Some(("item2", 2)));
+            assert_eq!(emptying_cache.len(), 1);
+            assert!(!emptying_cache.contains(&"item2"));
+            assert!(emptying_cache.contains(&"item3"));
+            assert_eq!(emptying_cache.peek_oldest(), Some((&"item3", &3)));
+
+            // Third pop
+            assert_eq!(emptying_cache.pop_oldest(), Some(("item3", 3)));
+            assert_eq!(emptying_cache.len(), 0);
+            assert!(!emptying_cache.contains(&"item3"));
+            assert_eq!(emptying_cache.peek_oldest(), None);
+
+            // Fourth pop on empty cache
+            assert_eq!(emptying_cache.pop_oldest(), None);
+            assert_eq!(emptying_cache.len(), 0);
+
+            // Method 2: Empty using batch operation
+            let mut batch_cache = create_test_cache();
+            let batch = batch_cache.pop_oldest_batch(3);
+            assert_eq!(batch.len(), 3);
+            assert_eq!(batch[0], ("item1", 1));
+            assert_eq!(batch[1], ("item2", 2));
+            assert_eq!(batch[2], ("item3", 3));
+            assert_eq!(batch_cache.len(), 0);
+            assert_eq!(batch_cache.peek_oldest(), None);
+
+            // Method 3: Empty using clear operation
+            let mut clear_cache = create_test_cache();
+            clear_cache.clear();
+            assert_eq!(clear_cache.len(), 0);
+            assert_eq!(clear_cache.capacity(), 3); // Capacity unchanged
+            assert_eq!(clear_cache.peek_oldest(), None);
+            assert_eq!(clear_cache.pop_oldest(), None);
+
+            // Verify cache can be refilled after each emptying method
+            for mut test_cache in [emptying_cache, batch_cache, clear_cache] {
+                test_cache.insert("new1", 100);
+                assert_eq!(test_cache.len(), 1);
+                assert!(test_cache.contains(&"new1"));
+                assert_eq!(test_cache.peek_oldest(), Some((&"new1", &100)));
             }
 
-            #[test]
-            fn test_cache_thrashing_scenario() {
-                // Rapid insertions causing constant evictions (cache thrashing)
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(100)));
-                let num_threads = 15;
-                let operations_per_thread = 300;
-                let key_space_multiplier = 10; // 10x more keys than capacity
+            // Test partial emptying and refilling
+            let mut partial_cache = FIFOCache::new(4);
+            partial_cache.insert("a", 1);
+            partial_cache.insert("b", 2);
+            partial_cache.insert("c", 3);
+            partial_cache.insert("d", 4);
 
-                let evictions_detected = Arc::new(AtomicUsize::new(0));
-                let total_insertions = Arc::new(AtomicUsize::new(0));
+            // Remove 2 items
+            partial_cache.pop_oldest(); // Remove "a"
+            partial_cache.pop_oldest(); // Remove "b"
+            assert_eq!(partial_cache.len(), 2);
 
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let evictions_detected = evictions_detected.clone();
-                        let total_insertions = total_insertions.clone();
+            // Add 2 new items
+            partial_cache.insert("e", 5);
+            partial_cache.insert("f", 6);
+            assert_eq!(partial_cache.len(), 4); // Back to full
 
-                        thread::spawn(move || {
-                            let mut insertions = 0;
-                            let mut evictions = 0;
+            // Verify correct order maintained
+            assert_eq!(partial_cache.peek_oldest(), Some((&"c", &3))); // "c" should be oldest
+            assert_eq!(partial_cache.age_rank(&"c"), Some(0));
+            assert_eq!(partial_cache.age_rank(&"d"), Some(1));
+            assert_eq!(partial_cache.age_rank(&"e"), Some(2));
+            assert_eq!(partial_cache.age_rank(&"f"), Some(3));
+        }
+    }
 
-                            for i in 0..operations_per_thread {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    let len_before = cache_guard.len();
+    // FIFO Trait Methods Tests
+    mod trait_methods {
+        use super::*;
 
-                                    // Insert with large key space to force thrashing
-                                    let key_idx = (thread_id * operations_per_thread + i)
-                                        % (cache_guard.capacity() * key_space_multiplier);
-                                    let key = format!("thrash_key_{}", key_idx);
-                                    let value = format!("thrash_value_{}_{}", thread_id, i);
+        #[test]
+        fn test_pop_oldest() {
+            let mut cache = FIFOCache::new(3);
 
-                                    cache_guard.insert(key, value);
-                                    insertions += 1;
+            cache.insert("first", "value1");
+            cache.insert("second", "value2");
+            cache.insert("third", "value3");
 
-                                    let len_after = cache_guard.len();
-                                    let capacity = cache_guard.capacity();
+            // Pop oldest should return first inserted
+            assert_eq!(cache.pop_oldest(), Some(("first", "value1")));
+            assert_eq!(cache.len(), 2);
+            assert!(!cache.contains(&"first"));
 
-                                    // Detect if eviction occurred
-                                    if len_before == capacity && len_after == capacity {
-                                        evictions += 1;
-                                    }
+            // Next pop should return second oldest
+            assert_eq!(cache.pop_oldest(), Some(("second", "value2")));
+            assert_eq!(cache.len(), 1);
+        }
 
-                                    // Occasionally force more evictions
-                                    if i % 20 == 0 {
-                                        let _ = cache_guard.pop_oldest_batch(5);
-                                        evictions += 5;
-                                    }
-                                }
-                            }
+        #[test]
+        fn test_peek_oldest() {
+            let mut cache = FIFOCache::new(3);
 
-                            total_insertions.fetch_add(insertions, Ordering::SeqCst);
-                            evictions_detected.fetch_add(evictions, Ordering::SeqCst);
+            cache.insert("first", "value1");
+            cache.insert("second", "value2");
 
-                            println!(
-                                "Thread {}: {} insertions, {} evictions",
-                                thread_id, insertions, evictions
-                            );
-                        })
-                    })
-                    .collect();
+            // Peek should return oldest without removing
+            assert_eq!(cache.peek_oldest(), Some((&"first", &"value1")));
+            assert_eq!(cache.len(), 2); // Should not change length
+            assert!(cache.contains(&"first")); // Should still be present
 
-                for handle in handles {
-                    handle.join().unwrap();
-                }
+            // Multiple peeks should return same result
+            assert_eq!(cache.peek_oldest(), Some((&"first", &"value1")));
+        }
 
-                let insertions = total_insertions.load(Ordering::SeqCst);
-                let evictions = evictions_detected.load(Ordering::SeqCst);
-                let expected_insertions = num_threads * operations_per_thread;
+        #[test]
+        fn test_age_rank() {
+            let mut cache = FIFOCache::new(4);
 
-                println!(
-                    "Cache thrashing test: {} insertions, {} evictions",
-                    insertions, evictions
-                );
+            cache.insert("first", "value1"); // rank 0 (oldest)
+            cache.insert("second", "value2"); // rank 1
+            cache.insert("third", "value3"); // rank 2
+            cache.insert("fourth", "value4"); // rank 3 (newest)
 
-                assert_eq!(
-                    insertions, expected_insertions,
-                    "All insertions should complete"
-                );
-                assert!(
-                    evictions > insertions / 2,
-                    "Should have high eviction rate due to thrashing"
-                );
+            assert_eq!(cache.age_rank(&"first"), Some(0));
+            assert_eq!(cache.age_rank(&"second"), Some(1));
+            assert_eq!(cache.age_rank(&"third"), Some(2));
+            assert_eq!(cache.age_rank(&"fourth"), Some(3));
+            assert_eq!(cache.age_rank(&"nonexistent"), None);
+        }
 
-                // Verify cache remained stable despite thrashing
-                let final_cache = cache.lock().unwrap();
-                assert_eq!(
-                    final_cache.len(),
-                    final_cache.capacity(),
-                    "Cache should be at capacity after thrashing"
-                );
+        #[test]
+        fn test_pop_oldest_batch() {
+            let mut cache = FIFOCache::new(5);
+
+            for i in 1..=5 {
+                cache.insert(format!("key{}", i), format!("value{}", i));
             }
 
-            #[test]
-            fn test_long_running_stability() {
-                // Verify stability over extended periods with continuous load
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(200)));
-                let num_threads = 8;
-                let test_duration = Duration::from_secs(15); // Extended test
-                let stability_check_interval = Duration::from_secs(3);
-
-                let operations_completed = Arc::new(AtomicUsize::new(0));
-                let consistency_violations = Arc::new(AtomicUsize::new(0));
-                let stop_signal = Arc::new(AtomicBool::new(false));
-
-                // Stability checker thread
-                let cache_checker = cache.clone();
-                let consistency_violations_checker = consistency_violations.clone();
-                let stop_signal_checker = stop_signal.clone();
-
-                let checker_handle = thread::spawn(move || {
-                    let mut check_count = 0;
-
-                    while !stop_signal_checker.load(Ordering::SeqCst) {
-                        if let Ok(cache_guard) = cache_checker.try_lock() {
-                            let len = cache_guard.len();
-                            let capacity = cache_guard.capacity();
-                            let insertion_order_len = cache_guard.insertion_order_len();
-
-                            // Check consistency invariants
-                            if len > capacity
-                                || (len > 0 && insertion_order_len == 0)
-                                || insertion_order_len > capacity * 3
-                            {
-                                // Allow for stale entries
-                                consistency_violations_checker.fetch_add(1, Ordering::SeqCst);
-                            }
-
-                            check_count += 1;
-                        }
-
-                        thread::sleep(stability_check_interval);
-                    }
-
-                    println!("Stability checker completed {} checks", check_count);
-                });
-
-                // Worker threads
-                let start_time = Instant::now();
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let operations_completed = operations_completed.clone();
-
-                        thread::spawn(move || {
-                            let mut ops = 0;
-                            let thread_start = Instant::now();
-
-                            while thread_start.elapsed() < test_duration {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    // Varied workload over time
-                                    let phase = (thread_start.elapsed().as_secs() / 5) % 3;
-
-                                    match phase {
-                                        0 => {
-                                            // Insert phase
-                                            let key = format!("stable_{}_{}", thread_id, ops);
-                                            let value =
-                                                format!("stable_value_{}_{}", thread_id, ops);
-                                            cache_guard.insert(key, value);
-                                        }
-                                        1 => {
-                                            // Mixed operations phase
-                                            if ops % 3 == 0 {
-                                                let _ = cache_guard.pop_oldest();
-                                            } else {
-                                                let key =
-                                                    format!("stable_{}_{}", thread_id, ops / 2);
-                                                let _ = cache_guard.get(&key);
-                                            }
-                                        }
-                                        _ => {
-                                            // FIFO operations phase
-                                            let _ = cache_guard.peek_oldest();
-                                            if ops % 10 == 0 {
-                                                let _ = cache_guard.pop_oldest_batch(3);
-                                            }
-                                        }
-                                    }
-
-                                    ops += 1;
-                                }
-
-                                // Brief pause to prevent overwhelming
-                                if ops % 100 == 0 {
-                                    thread::sleep(Duration::from_millis(10));
-                                }
-                            }
-
-                            operations_completed.fetch_add(ops, Ordering::SeqCst);
-                            println!("Thread {} completed {} operations", thread_id, ops);
-                        })
-                    })
-                    .collect();
-
-                // Wait for all worker threads
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-
-                // Stop checker and wait
-                stop_signal.store(true, Ordering::SeqCst);
-                checker_handle.join().unwrap();
-
-                let total_ops = operations_completed.load(Ordering::SeqCst);
-                let violations = consistency_violations.load(Ordering::SeqCst);
-                let elapsed = start_time.elapsed();
-
-                println!(
-                    "Long-running stability test: {} operations in {:?}, {} violations",
-                    total_ops, elapsed, violations
-                );
-
-                assert!(
-                    total_ops > 1000,
-                    "Should complete substantial number of operations"
-                );
-                assert_eq!(violations, 0, "Should maintain consistency throughout test");
-                assert!(elapsed >= test_duration, "Should run for full duration");
-
-                // Final consistency check
-                let final_cache = cache.lock().unwrap();
-                assert!(final_cache.len() <= final_cache.capacity());
-            }
-
-            #[test]
-            fn test_memory_pressure_scenario() {
-                // Test behavior with large cache and memory-intensive operations
-                let large_capacity = 5000;
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(large_capacity)));
-                let num_threads = 12;
-                let operations_per_thread = 500;
-
-                let memory_operations = Arc::new(AtomicUsize::new(0));
-                let large_value_size = 1024; // 1KB values to increase memory pressure
-
-                let handles: Vec<_> = (0..num_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let memory_operations = memory_operations.clone();
-
-                        thread::spawn(move || {
-                            let mut ops = 0;
-
-                            for i in 0..operations_per_thread {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    // Create large values to increase memory pressure
-                                    let large_value = "x".repeat(large_value_size);
-                                    let key = format!("memory_{}_{}", thread_id, i);
-                                    let value = format!("{}_{}", large_value, i);
-
-                                    cache_guard.insert(key.clone(), value);
-
-                                    // Occasionally read back to test memory access
-                                    if i % 10 == 0 {
-                                        let _ = cache_guard.get(&key);
-                                    }
-
-                                    // Trigger evictions to test memory cleanup
-                                    if i % 50 == 0 {
-                                        let _ = cache_guard.pop_oldest_batch(10);
-                                    }
-
-                                    ops += 1;
-                                }
-                            }
-
-                            memory_operations.fetch_add(ops, Ordering::SeqCst);
-                            println!("Thread {} completed {} memory operations", thread_id, ops);
-                        })
-                    })
-                    .collect();
-
-                for handle in handles {
-                    handle.join().unwrap();
-                }
-
-                let total_memory_ops = memory_operations.load(Ordering::SeqCst);
-                let expected_ops = num_threads * operations_per_thread;
-
-                println!(
-                    "Memory pressure test: {} operations with large values",
-                    total_memory_ops
-                );
-
-                assert_eq!(
-                    total_memory_ops, expected_ops,
-                    "All memory operations should complete"
-                );
-
-                // Verify cache handles memory pressure correctly
-                let final_cache = cache.lock().unwrap();
-                let final_len = final_cache.len();
-
-                assert!(
-                    final_len <= large_capacity,
-                    "Cache should not exceed capacity under memory pressure"
-                );
-                println!(
-                    "Final cache state: {} items (capacity {})",
-                    final_len, large_capacity
-                );
-
-                // Estimate memory usage
-                let estimated_memory = final_len * large_value_size;
-                println!("Estimated memory usage: ~{} KB", estimated_memory / 1024);
-            }
-
-            #[test]
-            fn test_rapid_thread_creation_destruction() {
-                // Test with threads being created and destroyed rapidly
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(150)));
-                let num_thread_waves = 20;
-                let threads_per_wave = 10;
-                let operations_per_thread = 50;
-
-                let total_operations = Arc::new(AtomicUsize::new(0));
-                let thread_creation_count = Arc::new(AtomicUsize::new(0));
-
-                for wave in 0..num_thread_waves {
-                    let wave_handles: Vec<_> = (0..threads_per_wave)
-                        .map(|thread_id| {
-                            let cache = cache.clone();
-                            let total_operations = total_operations.clone();
-                            let thread_creation_count = thread_creation_count.clone();
-
-                            thread_creation_count.fetch_add(1, Ordering::SeqCst);
-
-                            thread::spawn(move || {
-                                let mut ops = 0;
-
-                                for i in 0..operations_per_thread {
-                                    if let Ok(mut cache_guard) = cache.lock() {
-                                        let key = format!("rapid_{}_{}_{}", wave, thread_id, i);
-                                        let value = format!("rapid_value_{}", i);
-                                        cache_guard.insert(key, value);
-
-                                        // Mix in some reads and FIFO operations
-                                        if i % 5 == 0 {
-                                            let _ = cache_guard.peek_oldest();
-                                        }
-                                        if i % 15 == 0 {
-                                            let _ = cache_guard.pop_oldest();
-                                        }
-
-                                        ops += 1;
-                                    }
-                                }
-
-                                total_operations.fetch_add(ops, Ordering::SeqCst);
-                            })
-                        })
-                        .collect();
-
-                    // Wait for this wave to complete before starting next
-                    for handle in wave_handles {
-                        handle.join().unwrap();
-                    }
-
-                    // Brief pause between waves
-                    thread::sleep(Duration::from_millis(50));
-                }
-
-                let total_ops = total_operations.load(Ordering::SeqCst);
-                let thread_count = thread_creation_count.load(Ordering::SeqCst);
-                let expected_ops = num_thread_waves * threads_per_wave * operations_per_thread;
-                let expected_threads = num_thread_waves * threads_per_wave;
-
-                println!(
-                    "Rapid thread creation test: {} threads created, {} operations",
-                    thread_count, total_ops
-                );
-
-                assert_eq!(
-                    thread_count, expected_threads,
-                    "Should create expected number of threads"
-                );
-                assert_eq!(total_ops, expected_ops, "All operations should complete");
-
-                // Verify cache consistency after rapid thread churn
-                let final_cache = cache.lock().unwrap();
-                assert!(final_cache.len() <= final_cache.capacity());
-
-                println!(
-                    "Final cache state after rapid thread churn: {} items",
-                    final_cache.len()
-                );
-            }
-
-            #[test]
-            fn test_burst_load_handling() {
-                // Test handling of sudden burst loads
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(300)));
-                let burst_threads = 25;
-                let operations_per_burst_thread = 100;
-                let background_threads = 5;
-                let background_operations = 200;
-
-                let burst_operations = Arc::new(AtomicUsize::new(0));
-                let background_operations_count = Arc::new(AtomicUsize::new(0));
-                let burst_start_signal = Arc::new(AtomicBool::new(false));
-
-                // Start background threads first (steady load)
-                let background_handles: Vec<_> = (0..background_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let background_operations_count = background_operations_count.clone();
-                        let burst_start_signal = burst_start_signal.clone();
-
-                        thread::spawn(move || {
-                            let mut ops = 0;
-
-                            for i in 0..background_operations {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    let key = format!("background_{}_{}", thread_id, i);
-                                    let value = format!("bg_value_{}", i);
-                                    cache_guard.insert(key, value);
-                                    ops += 1;
-                                }
-
-                                // Signal burst to start midway through background load
-                                if i == background_operations / 2 && thread_id == 0 {
-                                    burst_start_signal.store(true, Ordering::SeqCst);
-                                }
-
-                                thread::sleep(Duration::from_millis(10)); // Steady pace
-                            }
-
-                            background_operations_count.fetch_add(ops, Ordering::SeqCst);
-                        })
-                    })
-                    .collect();
-
-                // Wait for burst signal
-                while !burst_start_signal.load(Ordering::SeqCst) {
-                    thread::sleep(Duration::from_millis(10));
-                }
-
-                // Create sudden burst of threads
-                println!("Starting burst load...");
-                let burst_start_time = Instant::now();
-
-                let burst_handles: Vec<_> = (0..burst_threads)
-                    .map(|thread_id| {
-                        let cache = cache.clone();
-                        let burst_operations = burst_operations.clone();
-
-                        thread::spawn(move || {
-                            let mut ops = 0;
-
-                            for i in 0..operations_per_burst_thread {
-                                if let Ok(mut cache_guard) = cache.lock() {
-                                    let key = format!("burst_{}_{}", thread_id, i);
-                                    let value = format!("burst_value_{}_{}", thread_id, i);
-                                    cache_guard.insert(key, value);
-
-                                    // High-frequency operations during burst
-                                    if i % 3 == 0 {
-                                        let _ = cache_guard.pop_oldest();
-                                    }
-
-                                    ops += 1;
-                                }
-                            }
-
-                            burst_operations.fetch_add(ops, Ordering::SeqCst);
-                        })
-                    })
-                    .collect();
-
-                // Wait for burst to complete
-                for handle in burst_handles {
-                    handle.join().unwrap();
-                }
-
-                let burst_duration = burst_start_time.elapsed();
-                println!("Burst completed in {:?}", burst_duration);
-
-                // Wait for background threads to complete
-                for handle in background_handles {
-                    handle.join().unwrap();
-                }
-
-                let total_burst_ops = burst_operations.load(Ordering::SeqCst);
-                let total_bg_ops = background_operations_count.load(Ordering::SeqCst);
-                let expected_burst_ops = burst_threads * operations_per_burst_thread;
-                let expected_bg_ops = background_threads * background_operations;
-
-                println!(
-                    "Burst load test: {} burst operations, {} background operations",
-                    total_burst_ops, total_bg_ops
-                );
-
-                assert_eq!(
-                    total_burst_ops, expected_burst_ops,
-                    "All burst operations should complete"
-                );
-                assert_eq!(
-                    total_bg_ops, expected_bg_ops,
-                    "Background operations should not be disrupted"
-                );
-
-                // Verify system handled burst gracefully
-                assert!(
-                    burst_duration < Duration::from_secs(30),
-                    "Burst should complete in reasonable time"
-                );
-
-                let final_cache = cache.lock().unwrap();
-                assert!(
-                    final_cache.len() <= final_cache.capacity(),
-                    "Cache should remain consistent after burst"
-                );
-            }
-
-            #[test]
-            fn test_gradual_load_increase() {
-                // Test behavior as load gradually increases
-                let cache: ThreadSafeFIFOCache<String, String> =
-                    Arc::new(Mutex::new(FIFOCache::new(200)));
-                let max_threads = 20;
-                let operations_per_thread = 100;
-                let ramp_up_steps = 10;
-
-                let mut total_operations = 0;
-                let mut performance_metrics = Vec::new();
-
-                for step in 1..=ramp_up_steps {
-                    let num_threads = (max_threads * step) / ramp_up_steps;
-                    let step_operations = Arc::new(AtomicUsize::new(0));
-
-                    println!(
-                        "Load step {}/{}: {} threads",
-                        step, ramp_up_steps, num_threads
-                    );
-
-                    let step_start = Instant::now();
-
-                    let handles: Vec<_> = (0..num_threads)
-                        .map(|thread_id| {
-                            let cache = cache.clone();
-                            let step_operations = step_operations.clone();
-
-                            thread::spawn(move || {
-                                let mut ops = 0;
-
-                                for i in 0..operations_per_thread {
-                                    if let Ok(mut cache_guard) = cache.lock() {
-                                        let key = format!("gradual_{}_{}_{}", step, thread_id, i);
-                                        let value = format!("gradual_value_{}", i);
-                                        cache_guard.insert(key, value);
-
-                                        // Mix operations based on load level
-                                        if step > 5 {
-                                            // Higher load levels
-                                            if i % 7 == 0 {
-                                                let _ = cache_guard.pop_oldest();
-                                            }
-                                        }
-
-                                        ops += 1;
-                                    }
-                                }
-
-                                step_operations.fetch_add(ops, Ordering::SeqCst);
-                            })
-                        })
-                        .collect();
-
-                    for handle in handles {
-                        handle.join().unwrap();
-                    }
-
-                    let step_duration = step_start.elapsed();
-                    let step_ops = step_operations.load(Ordering::SeqCst);
-                    let ops_per_sec = step_ops as f64 / step_duration.as_secs_f64();
-
-                    performance_metrics.push((step, num_threads, step_ops, ops_per_sec));
-                    total_operations += step_ops;
-
-                    println!(
-                        "  Completed {} operations in {:?} ({:.1} ops/sec)",
-                        step_ops, step_duration, ops_per_sec
-                    );
-
-                    // Brief pause between load increases
-                    thread::sleep(Duration::from_millis(200));
-                }
-
-                println!("\nGradual load increase results:");
-                for (step, threads, ops, ops_per_sec) in &performance_metrics {
-                    println!(
-                        "  Step {}: {} threads, {} ops, {:.1} ops/sec",
-                        step, threads, ops, ops_per_sec
-                    );
-                }
-
-                let expected_total_ops = (1..=ramp_up_steps)
-                    .map(|step| ((max_threads * step) / ramp_up_steps) * operations_per_thread)
-                    .sum::<usize>();
-
-                assert_eq!(
-                    total_operations, expected_total_ops,
-                    "All operations should complete"
-                );
-
-                // Verify performance doesn't degrade catastrophically with load
-                let first_step_perf = performance_metrics[0].3;
-                let last_step_perf = performance_metrics.last().unwrap().3;
-                let performance_ratio = last_step_perf / first_step_perf;
-
-                println!("Performance ratio (last/first): {:.2}", performance_ratio);
-                assert!(
-                    performance_ratio > 0.1,
-                    "Performance shouldn't degrade too severely with load"
-                );
-
-                // Verify final cache state
-                let final_cache = cache.lock().unwrap();
-                assert_eq!(
-                    final_cache.len(),
-                    final_cache.capacity(),
-                    "Cache should be at capacity after gradual load increase"
-                );
-            }
+            // Pop batch of 3 items
+            let batch = cache.pop_oldest_batch(3);
+            assert_eq!(batch.len(), 3);
+            assert_eq!(batch[0], ("key1".to_string(), "value1".to_string()));
+            assert_eq!(batch[1], ("key2".to_string(), "value2".to_string()));
+            assert_eq!(batch[2], ("key3".to_string(), "value3".to_string()));
+
+            // Cache should have 2 items left
+            assert_eq!(cache.len(), 2);
+            assert!(cache.contains(&"key4".to_string()));
+            assert!(cache.contains(&"key5".to_string()));
+        }
+
+        #[test]
+        fn test_pop_oldest_batch_more_than_available() {
+            let mut cache = FIFOCache::new(3);
+
+            cache.insert("key1", "value1");
+            cache.insert("key2", "value2");
+
+            // Request more than available
+            let batch = cache.pop_oldest_batch(5);
+            assert_eq!(batch.len(), 2); // Should only return what's available
+            assert_eq!(cache.len(), 0); // Cache should be empty
+        }
+
+        #[test]
+        fn test_pop_oldest_empty_cache() {
+            let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
+
+            // Pop from empty cache should return None
+            assert_eq!(cache.pop_oldest(), None);
+            assert_eq!(cache.len(), 0);
+
+            // Multiple pops should still return None
+            assert_eq!(cache.pop_oldest(), None);
+            assert_eq!(cache.pop_oldest(), None);
+            assert_eq!(cache.len(), 0);
+
+            // Add one item, pop it, then pop from empty again
+            cache.insert("key1".to_string(), "value1".to_string());
+            assert_eq!(cache.len(), 1);
+
+            let popped = cache.pop_oldest();
+            assert_eq!(popped, Some(("key1".to_string(), "value1".to_string())));
+            assert_eq!(cache.len(), 0);
+
+            // Now it's empty again
+            assert_eq!(cache.pop_oldest(), None);
+            assert_eq!(cache.len(), 0);
+        }
+
+        #[test]
+        fn test_peek_oldest_empty_cache() {
+            let cache: FIFOCache<String, String> = FIFOCache::new(5);
+
+            // Peek at empty cache should return None
+            assert_eq!(cache.peek_oldest(), None);
+            assert_eq!(cache.len(), 0);
+
+            // Multiple peeks should still return None
+            assert_eq!(cache.peek_oldest(), None);
+            assert_eq!(cache.peek_oldest(), None);
+            assert_eq!(cache.len(), 0);
+
+            // Test peek after clear
+            let mut test_cache = FIFOCache::new(3);
+            test_cache.insert("key1".to_string(), "value1".to_string());
+            test_cache.insert("key2".to_string(), "value2".to_string());
+
+            // Should have content
+            assert!(test_cache.peek_oldest().is_some());
+            assert_eq!(test_cache.len(), 2);
+
+            // Clear and peek again
+            test_cache.clear();
+            assert_eq!(test_cache.peek_oldest(), None);
+            assert_eq!(test_cache.len(), 0);
+        }
+
+        #[test]
+        fn test_age_rank_after_eviction() {
+            let mut cache = FIFOCache::new(3);
+
+            // Fill cache
+            cache.insert("first", 1);
+            cache.insert("second", 2);
+            cache.insert("third", 3);
+
+            // Verify initial ranks
+            assert_eq!(cache.age_rank(&"first"), Some(0));
+            assert_eq!(cache.age_rank(&"second"), Some(1));
+            assert_eq!(cache.age_rank(&"third"), Some(2));
+
+            // Trigger eviction by adding fourth item
+            cache.insert("fourth", 4);
+
+            // "first" should be evicted, ranks should shift
+            assert_eq!(cache.age_rank(&"first"), None); // Evicted
+            assert_eq!(cache.age_rank(&"second"), Some(0)); // Now oldest
+            assert_eq!(cache.age_rank(&"third"), Some(1));
+            assert_eq!(cache.age_rank(&"fourth"), Some(2)); // Newest
+
+            // Add another item to trigger another eviction
+            cache.insert("fifth", 5);
+
+            // "second" should be evicted, ranks shift again
+            assert_eq!(cache.age_rank(&"first"), None); // Still evicted
+            assert_eq!(cache.age_rank(&"second"), None); // Now evicted
+            assert_eq!(cache.age_rank(&"third"), Some(0)); // Now oldest
+            assert_eq!(cache.age_rank(&"fourth"), Some(1));
+            assert_eq!(cache.age_rank(&"fifth"), Some(2)); // Newest
+
+            // Test manual eviction with pop_oldest
+            let popped = cache.pop_oldest();
+            assert_eq!(popped, Some(("third", 3)));
+
+            // Ranks should shift after manual pop
+            assert_eq!(cache.age_rank(&"third"), None); // Just popped
+            assert_eq!(cache.age_rank(&"fourth"), Some(0)); // Now oldest
+            assert_eq!(cache.age_rank(&"fifth"), Some(1)); // Now newest
+
+            // Test batch eviction
+            cache.insert("sixth", 6);
+            cache.insert("seventh", 7);
+            assert_eq!(cache.len(), 3);
+
+            let batch = cache.pop_oldest_batch(2);
+            assert_eq!(batch.len(), 2);
+            assert_eq!(cache.len(), 1);
+
+            // Only "seventh" should remain
+            assert_eq!(cache.age_rank(&"fourth"), None);
+            assert_eq!(cache.age_rank(&"fifth"), None);
+            assert_eq!(cache.age_rank(&"sixth"), None);
+            assert_eq!(cache.age_rank(&"seventh"), Some(0)); // Only remaining item
+        }
+
+        #[test]
+        fn test_batch_operations_edge_cases() {
+            let mut cache = FIFOCache::new(3);
+
+            // Test batch with count = 0
+            cache.insert("key1", "value1");
+            cache.insert("key2", "value2");
+
+            let batch = cache.pop_oldest_batch(0);
+            assert_eq!(batch.len(), 0);
+            assert_eq!(cache.len(), 2); // Nothing should be removed
+            assert!(cache.contains(&"key1"));
+            assert!(cache.contains(&"key2"));
+
+            // Test batch on empty cache
+            let mut empty_cache: FIFOCache<String, String> = FIFOCache::new(5);
+            let empty_batch = empty_cache.pop_oldest_batch(3);
+            assert_eq!(empty_batch.len(), 0);
+            assert_eq!(empty_cache.len(), 0);
+
+            // Test batch with count = 1 (single item)
+            let batch_one = cache.pop_oldest_batch(1);
+            assert_eq!(batch_one.len(), 1);
+            assert_eq!(batch_one[0], ("key1", "value1"));
+            assert_eq!(cache.len(), 1);
+            assert!(!cache.contains(&"key1"));
+            assert!(cache.contains(&"key2"));
+
+            // Test batch equal to cache size
+            cache.insert("key3", "value3");
+            cache.insert("key4", "value4");
+            assert_eq!(cache.len(), 3);
+
+            let all_batch = cache.pop_oldest_batch(3);
+            assert_eq!(all_batch.len(), 3);
+            assert_eq!(all_batch[0], ("key2", "value2"));
+            assert_eq!(all_batch[1], ("key3", "value3"));
+            assert_eq!(all_batch[2], ("key4", "value4"));
+            assert_eq!(cache.len(), 0);
+
+            // Verify cache is completely empty
+            assert_eq!(cache.peek_oldest(), None);
+            assert_eq!(cache.pop_oldest(), None);
+
+            // Test large batch request on small cache
+            cache.insert("only", "item");
+            let large_batch = cache.pop_oldest_batch(100);
+            assert_eq!(large_batch.len(), 1);
+            assert_eq!(large_batch[0], ("only", "item"));
+            assert_eq!(cache.len(), 0);
+
+            // Test batch on cache that became empty during operation
+            cache.insert("a", "1");
+            cache.insert("b", "2");
+
+            // First, empty the cache manually
+            cache.clear();
+
+            // Then try batch operation on now-empty cache
+            let post_clear_batch = cache.pop_oldest_batch(5);
+            assert_eq!(post_clear_batch.len(), 0);
+            assert_eq!(cache.len(), 0);
+        }
+    }
+
+    // Stale Entry Handling Tests
+    mod stale_entries {
+        use super::*;
+
+        #[test]
+        fn test_stale_entry_skipping_during_eviction() {
+            let mut cache = FIFOCache::new(3);
+
+            // Fill cache to capacity
+            cache.insert("key1", "value1");
+            cache.insert("key2", "value2");
+            cache.insert("key3", "value3");
+            assert_eq!(cache.len(), 3);
+
+            // Manually remove key1 from HashMap but leave it in insertion_order
+            // This simulates how stale entries would occur in a more complex scenario
+            cache.remove_from_cache_only(&"key1");
+            assert_eq!(cache.len(), 2); // HashMap now has 2 items
+
+            // The insertion_order VecDeque still has 3 entries, but "key1" is now stale
+            assert_eq!(cache.insertion_order_len(), 3);
+            assert!(!cache.contains(&"key1")); // key1 is not in cache anymore
+            assert!(cache.contains(&"key2")); // key2 is still valid
+            assert!(cache.contains(&"key3")); // key3 is still valid
+
+            // Add another item to get back to capacity (so next insert will trigger eviction)
+            cache.insert("temp", "temp_value");
+            assert_eq!(cache.len(), 3);
+
+            // Now trigger eviction by inserting a new item
+            // This should skip over the stale "key1" entry and evict "key2" instead
+            cache.insert("key4", "value4");
+
+            // Verify the eviction skipped stale entry and evicted the next valid entry
+            assert_eq!(cache.len(), 3); // Should remain at capacity
+            assert!(!cache.contains(&"key1")); // Still not present (was stale)
+            assert!(!cache.contains(&"key2")); // Should be evicted (oldest valid)
+            assert!(cache.contains(&"key3")); // Should remain
+            assert!(cache.contains(&"temp")); // Should remain
+            assert!(cache.contains(&"key4")); // Should be newly added
+
+            // Test that further operations continue to work correctly
+            cache.insert("key5", "value5");
+            assert_eq!(cache.len(), 3);
+            assert!(!cache.contains(&"key3")); // key3 should be evicted now
+            assert!(cache.contains(&"temp"));
+            assert!(cache.contains(&"key4"));
+            assert!(cache.contains(&"key5"));
+        }
+
+        #[test]
+        fn test_insertion_order_consistency_with_stale_entries() {
+            let mut cache = FIFOCache::new(4);
+
+            // Fill cache
+            cache.insert("a", 1);
+            cache.insert("b", 2);
+            cache.insert("c", 3);
+            cache.insert("d", 4);
+
+            // Verify initial age ranks
+            assert_eq!(cache.age_rank(&"a"), Some(0));
+            assert_eq!(cache.age_rank(&"b"), Some(1));
+            assert_eq!(cache.age_rank(&"c"), Some(2));
+            assert_eq!(cache.age_rank(&"d"), Some(3));
+
+            // Manually create stale entries by removing from HashMap
+            cache.remove_from_cache_only(&"a");
+            cache.remove_from_cache_only(&"c");
+
+            // Now "a" and "c" are stale entries in insertion_order
+            assert_eq!(cache.len(), 2); // Only "b" and "d" remain in HashMap
+            assert_eq!(cache.insertion_order_len(), 4); // All 4 still in insertion_order
+
+            // age_rank should skip stale entries and give correct ranks for valid entries
+            assert_eq!(cache.age_rank(&"a"), None); // Stale, should return None
+            assert_eq!(cache.age_rank(&"b"), Some(0)); // First valid entry
+            assert_eq!(cache.age_rank(&"c"), None); // Stale, should return None
+            assert_eq!(cache.age_rank(&"d"), Some(1)); // Second valid entry
+
+            // peek_oldest should skip stale entries and return the oldest valid entry
+            assert_eq!(cache.peek_oldest(), Some((&"b", &2)));
+
+            // pop_oldest should skip stale entries and pop the oldest valid entry
+            assert_eq!(cache.pop_oldest(), Some(("b", 2)));
+
+            // After popping "b", stale entries should be cleaned up
+            // and "d" should now be the oldest (and only) valid entry
+            assert_eq!(cache.len(), 1);
+            assert_eq!(cache.age_rank(&"d"), Some(0));
+            assert_eq!(cache.peek_oldest(), Some((&"d", &4)));
+
+            // Add new items and verify order is maintained
+            cache.insert("e", 5);
+            cache.insert("f", 6);
+
+            assert_eq!(cache.age_rank(&"d"), Some(0)); // Still oldest
+            assert_eq!(cache.age_rank(&"e"), Some(1));
+            assert_eq!(cache.age_rank(&"f"), Some(2));
+        }
+
+        #[test]
+        fn test_lazy_deletion_behavior() {
+            let mut cache = FIFOCache::new(3);
+
+            // Test 1: Stale entries accumulate until cleanup operations
+            cache.insert("temp1", "value1");
+            cache.insert("temp2", "value2");
+            cache.insert("keep", "value_keep");
+
+            // Manually remove items to create stale entries
+            cache.remove_from_cache_only(&"temp1");
+            cache.remove_from_cache_only(&"temp2");
+
+            // Stale entries remain in insertion_order
+            assert_eq!(cache.len(), 1); // Only "keep" in HashMap
+            assert_eq!(cache.insertion_order_len(), 3); // All 3 in insertion_order
+
+            // Verify operations work correctly despite stale entries
+            assert_eq!(cache.peek_oldest(), Some((&"keep", &"value_keep")));
+            assert_eq!(cache.age_rank(&"keep"), Some(0));
+            assert!(!cache.contains(&"temp1"));
+            assert!(!cache.contains(&"temp2"));
+            assert!(cache.contains(&"keep"));
+
+            // Test 2: Lazy cleanup during pop_oldest
+            cache.insert("new1", "value_new1");
+            cache.insert("new2", "value_new2");
+
+            // Now we have: stale("temp1"), stale("temp2"), "keep", "new1", "new2"
+            assert_eq!(cache.len(), 3);
+            assert_eq!(cache.insertion_order_len(), 5);
+
+            // pop_oldest should skip stale entries and pop "keep"
+            assert_eq!(cache.pop_oldest(), Some(("keep", "value_keep")));
+
+            // After pop_oldest, some stale entries should be cleaned up
+            assert_eq!(cache.len(), 2);
+            // insertion_order length depends on how many stale entries were cleaned
+
+            // Test 3: Lazy cleanup during eviction
+            cache.insert("trigger_eviction", "value_trigger");
+
+            // This should trigger eviction, which should skip any remaining stale entries
+            assert_eq!(cache.len(), 3);
+            assert!(cache.contains(&"new1"));
+            assert!(cache.contains(&"new2"));
+            assert!(cache.contains(&"trigger_eviction"));
+
+            // Test 4: Multiple consecutive stale entries
+            cache.clear();
+            cache.insert("stale1", "v1");
+            cache.insert("stale2", "v2");
+            cache.insert("stale3", "v3");
+            cache.insert("valid", "valid_value");
+
+            // Remove first three to create consecutive stale entries
+            cache.remove_from_cache_only(&"stale1");
+            cache.remove_from_cache_only(&"stale2");
+            cache.remove_from_cache_only(&"stale3");
+
+            assert_eq!(cache.len(), 1); // Only "valid" in HashMap
+            // insertion_order might have any length >= 1 depending on cleanup behavior
+
+            // Operations should skip all stale entries and work with "valid"
+            assert_eq!(cache.peek_oldest(), Some((&"valid", &"valid_value")));
+            assert_eq!(cache.pop_oldest(), Some(("valid", "valid_value")));
+            assert_eq!(cache.len(), 0);
+            assert_eq!(cache.peek_oldest(), None);
+
+            // Cache should be functional after stale entry handling
+            cache.insert("new_after_stale", "new_value");
+            assert_eq!(cache.len(), 1);
+            assert!(cache.contains(&"new_after_stale"));
+        }
+
+        #[test]
+        fn test_stale_entry_cleanup_during_operations() {
+            let mut cache = FIFOCache::new(4);
+
+            // Setup: Create cache with mix of valid and future stale entries
+            cache.insert("will_be_stale1", "stale1");
+            cache.insert("will_be_stale2", "stale2");
+            cache.insert("valid1", "value1");
+            cache.insert("valid2", "value2");
+
+            // Create stale entries
+            cache.remove_from_cache_only(&"will_be_stale1");
+            cache.remove_from_cache_only(&"will_be_stale2");
+
+            assert_eq!(cache.len(), 2); // Only valid entries in HashMap
+            assert_eq!(cache.insertion_order_len(), 4); // All entries in insertion_order
+
+            // Test 1: pop_oldest cleans up stale entries as it encounters them
+            assert_eq!(cache.pop_oldest(), Some(("valid1", "value1")));
+
+            // Should have cleaned up stale entries encountered during traversal
+            assert_eq!(cache.len(), 1);
+            // insertion_order may be smaller after cleanup, depending on which stale entries were encountered
+            // The exact behavior depends on the order of traversal and which stale entries are cleaned up
+
+            // Test 2: pop_oldest_batch cleans up stale entries
+            cache.insert("new1", "new_value1");
+            cache.insert("new2", "new_value2");
+            cache.insert("new3", "new_value3");
+
+            // Create more stale entries
+            cache.remove_from_cache_only(&"new1");
+            cache.remove_from_cache_only(&"new3");
+
+            let batch = cache.pop_oldest_batch(2);
+            // Should get valid2 and new2 (skipping stale new1 and new3)
+            assert_eq!(batch.len(), 2);
+            assert!(batch.contains(&("valid2", "value2")));
+            assert!(batch.contains(&("new2", "new_value2")));
+
+            // Test 3: age_rank doesn't modify structure but handles stale entries
+            cache.insert("test1", "test_value1");
+            cache.insert("test2", "test_value2");
+            cache.insert("test3", "test_value3");
+
+            cache.remove_from_cache_only(&"test2"); // Make test2 stale
+
+            // age_rank should return correct ranks despite stale entry
+            assert_eq!(cache.age_rank(&"test1"), Some(0)); // First valid
+            assert_eq!(cache.age_rank(&"test2"), None); // Stale
+            assert_eq!(cache.age_rank(&"test3"), Some(1)); // Second valid
+
+            // Test 4: peek_oldest doesn't modify structure but finds valid entry
+            cache.remove_from_cache_only(&"test1"); // Make test1 also stale
+
+            // peek_oldest should find test3 despite two stale entries before it
+            assert_eq!(cache.peek_oldest(), Some((&"test3", &"test_value3")));
+
+            // The structure should remain unchanged after peek
+            assert_eq!(cache.len(), 1); // Only test3 is valid
+
+            // Test 5: Eviction during insertion handles stale entries
+            cache.insert("fill1", "f1");
+            cache.insert("fill2", "f2");
+            cache.insert("fill3", "f3");
+            // Now at capacity (4): test3, fill1, fill2, fill3
+
+            // Create stale entries
+            cache.remove_from_cache_only(&"fill1");
+            cache.remove_from_cache_only(&"fill2");
+
+            // Now we have test3, fill3 in HashMap (2 valid items)
+            assert_eq!(cache.len(), 2);
+
+            // Add items to get back to capacity so next insert will trigger eviction
+            cache.insert("temp1", "t1");
+            cache.insert("temp2", "t2");
+            assert_eq!(cache.len(), 4); // At capacity
+
+            // This insertion should trigger eviction
+            cache.insert("trigger", "trigger_value");
+
+            // Should have proper capacity and valid operations
+            assert_eq!(cache.len(), 4); // Still at capacity
+            assert!(cache.contains(&"trigger"));
+
+            // The cache should still function correctly regardless of internal stale entry cleanup
+            cache.insert("final", "final_value");
+            assert_eq!(cache.len(), 4); // Should remain at capacity
+            assert!(cache.contains(&"final"));
+
+            // Verify the cache maintains proper FIFO behavior
+            assert_eq!(cache.capacity(), 4);
+
+            // Test that operations still work normally after stale entry handling
+            let oldest = cache.peek_oldest();
+            assert!(oldest.is_some()); // Should have valid oldest entry
+
+            let popped = cache.pop_oldest();
+            assert!(popped.is_some()); // Should be able to pop
+            assert_eq!(cache.len(), 3);
         }
     }
 }
