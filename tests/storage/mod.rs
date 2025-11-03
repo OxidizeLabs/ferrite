@@ -1,3 +1,4 @@
+pub mod fifo_concurrency;
 pub mod lfu_concurrency;
 pub mod lfu_performance;
 pub mod lru_concurrency;
