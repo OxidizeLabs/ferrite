@@ -1532,7 +1532,14 @@ mod tests {
             cache.remove(&"key5".to_string());
             assert_eq!(cache.len(), 3);
 
-            cache.remove(&"key4".to_string());
+            // Eviction tie-breaking among same-frequency items is non-deterministic.
+            // Remove any one of the remaining original keys that still exists.
+            for candidate in ["key1", "key2", "key3", "key4"] {
+                if cache.contains(&candidate.to_string()) {
+                    cache.remove(&candidate.to_string());
+                    break;
+                }
+            }
             assert_eq!(cache.len(), 2);
 
             // Test removing non-existent key doesn't change length
