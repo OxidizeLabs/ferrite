@@ -94,7 +94,7 @@ pub fn open_direct_io<P: AsRef<Path>>(
 
 /// Check if a buffer is properly aligned for direct I/O
 pub fn is_aligned(buffer: &[u8], alignment: usize) -> bool {
-    (buffer.as_ptr() as usize).is_multiple_of(alignment)
+    (buffer.as_ptr() as usize) % alignment == 0
 }
 
 /// Create an aligned buffer for direct I/O operations
