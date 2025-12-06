@@ -281,7 +281,7 @@ async fn test_cross_join() {
 
     match &plan.children[0].plan_type {
         LogicalPlanType::NestedLoopJoin { join_type, .. } => {
-            assert!(matches!(join_type, JoinOperator::CrossJoin));
+            assert!(matches!(join_type, JoinOperator::CrossJoin(_)));
         }
         _ => panic!("Expected NestedLoopJoin node"),
     }

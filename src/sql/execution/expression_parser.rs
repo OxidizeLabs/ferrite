@@ -1491,13 +1491,13 @@ impl ExpressionParser {
                 )))
             }
 
-            Expr::TypedString { data_type, value } => {
+            Expr::TypedString(typed_string) => {
                 Ok(Expression::TypedString(TypedStringExpression::new(
-                    data_type.to_string(),
-                    value.to_string(),
+                    typed_string.to_string(),
+                    typed_string.value.to_string(),
                     Column::new(
                         "typed_string",
-                        match data_type {
+                        match typed_string.data_type {
                             DataType::Timestamp(_, _) => TypeId::Timestamp,
                             DataType::Date => TypeId::Date,
                             DataType::Time(_, _) => TypeId::Time,
@@ -1576,7 +1576,7 @@ impl ExpressionParser {
                             DataType::Datetime(_) => TypeId::Timestamp,
                             DataType::Datetime64(_, _) => TypeId::Timestamp,
                             DataType::TimestampNtz => TypeId::Timestamp,
-                            DataType::Interval => TypeId::Interval,
+                            DataType::Interval { fields: _, precision: _ } => TypeId::Interval,
                             DataType::JSON => TypeId::JSON,
                             DataType::JSONB => TypeId::JSON,
                             DataType::Regclass => TypeId::Integer,
@@ -1608,6 +1608,12 @@ impl ExpressionParser {
                             DataType::NamedTable { .. } => TypeId::Invalid,
                             DataType::TsVector => TypeId::Invalid,
                             DataType::TsQuery => TypeId::Invalid,
+                            DataType::DecimalUnsigned(_) => TypeId::Decimal,
+                            DataType::DecUnsigned(_) => TypeId::Decimal,
+                            DataType::FloatUnsigned(_) => TypeId::Float,
+                            DataType::RealUnsigned => TypeId::Float,
+                            DataType::DoubleUnsigned(_) => TypeId::Decimal,
+                            DataType::DoublePrecisionUnsigned => TypeId::Decimal
                         },
                     ),
                 )))
@@ -2133,13 +2139,13 @@ impl ExpressionParser {
                 )?;
                 Ok((predicate, join_operator.clone()))
             }
-            JoinOperator::CrossJoin => {
-                // For CROSS JOIN, we create a constant TRUE predicate
-                let predicate = Expression::Constant(ConstantExpression::new(
-                    Value::new(true),
-                    Column::new("TRUE", TypeId::Boolean),
-                    vec![],
-                ));
+            JoinOperator::CrossJoin(constraint) => {
+                let predicate = self.process_join_constraint(
+                    constraint,
+                    left_schema,
+                    right_schema,
+                    &combined_schema,
+                )?;
                 Ok((predicate, join_operator.clone()))
             }
             JoinOperator::Semi(constraint) => {
@@ -2729,23 +2735,23 @@ impl ExpressionParser {
 
         // For typed string timestamps, we need to ensure they output RFC3339 format
         let timestamp_expr = match timestamp {
-            Expr::TypedString { data_type, value } => {
+            Expr::TypedString(typed_string) => {
                 debug!(
                     "Processing typed string timestamp: type={:?}, value={}",
-                    data_type, value
+                    typed_string.data_type, typed_string.value
                 );
                 // Only allow TIMESTAMP typed strings
-                if !matches!(data_type, DataType::Timestamp(_, _)) {
-                    debug!("Invalid timestamp data type: {:?}", data_type);
+                if !matches!(typed_string.data_type, DataType::Timestamp(_, _)) {
+                    debug!("Invalid timestamp data type: {:?}", typed_string.data_type);
                     return Err(format!(
                         "AT TIME ZONE timestamp must be a timestamp type, got {:?}",
-                        data_type
+                        typed_string.data_type
                     ));
                 }
                 // Create a TypedStringExpression that outputs VarChar for AT TIME ZONE
                 Arc::new(Expression::TypedString(TypedStringExpression::new(
                     "TIMESTAMP".to_string(),
-                    value.to_string(),
+                    typed_string.value.to_string(),
                     Column::new("timestamp", TypeId::Timestamp),
                 )))
             }
@@ -4475,7 +4481,7 @@ mod tests {
         );
 
         // Test CROSS JOIN
-        let cross_join = JoinOperator::CrossJoin;
+        let cross_join = JoinOperator::CrossJoin(JoinConstraint::None);
         let result = ctx.expression_parser().process_join_operator(
             &cross_join,
             &schema,

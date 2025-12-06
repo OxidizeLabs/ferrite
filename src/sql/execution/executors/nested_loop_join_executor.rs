@@ -408,7 +408,7 @@ impl JoinTypeHandler {
             JoinType::FullOuter(_) => {
                 self.handle_full_outer_join(Some(left_tuple), Some(right_tuple), state)
             }
-            JoinType::CrossJoin => {
+            JoinType::CrossJoin(_) => {
                 state.mark_left_matched();
                 Ok(Some(self.handle_cross_join(left_tuple, right_tuple)))
             }
@@ -979,7 +979,7 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
     use std::sync::Arc;
-
+    use sqlparser::ast::JoinConstraint;
     // =============================================================================
     // HELPER FUNCTIONS
     // =============================================================================
@@ -1315,7 +1315,7 @@ mod tests {
         let predicate_evaluator =
             JoinPredicateEvaluator::new(create_boolean_predicate(true), left_schema, right_schema);
         let handler =
-            JoinTypeHandler::new(JoinType::CrossJoin, tuple_combiner, predicate_evaluator);
+            JoinTypeHandler::new(JoinType::CrossJoin(JoinConstraint::Natural), tuple_combiner, predicate_evaluator);
 
         let (left_tuple, right_tuple) = create_test_tuples();
         let mut state = JoinState::new();
@@ -1581,7 +1581,7 @@ mod tests {
             right_schema,
         );
         let handler =
-            JoinTypeHandler::new(JoinType::CrossJoin, tuple_combiner, predicate_evaluator);
+            JoinTypeHandler::new(JoinType::CrossJoin(JoinConstraint::Natural), tuple_combiner, predicate_evaluator);
 
         let (left_tuple, right_tuple) = create_test_tuples();
         let mut state = JoinState::new();
@@ -1726,7 +1726,7 @@ mod tests {
             JoinPredicateEvaluator::new(create_boolean_predicate(false), left_schema, right_schema);
 
         let handler =
-            JoinTypeHandler::new(JoinType::CrossJoin, tuple_combiner, predicate_evaluator);
+            JoinTypeHandler::new(JoinType::CrossJoin(JoinConstraint::Natural), tuple_combiner, predicate_evaluator);
 
         let (left_tuple, right_tuple) = create_test_tuples();
         let mut state = JoinState::new();
@@ -1765,11 +1765,11 @@ mod tests {
 
         // Test different join types with matching predicate
         let join_types = vec![
-            JoinType::Inner(sqlparser::ast::JoinConstraint::None),
-            JoinType::LeftOuter(sqlparser::ast::JoinConstraint::None),
-            JoinType::RightOuter(sqlparser::ast::JoinConstraint::None),
-            JoinType::FullOuter(sqlparser::ast::JoinConstraint::None),
-            JoinType::CrossJoin,
+            JoinType::Inner(JoinConstraint::None),
+            JoinType::LeftOuter(JoinConstraint::None),
+            JoinType::RightOuter(JoinConstraint::None),
+            JoinType::FullOuter(JoinConstraint::None),
+            JoinType::CrossJoin(JoinConstraint::None),
         ];
 
         for join_type in join_types {
@@ -2096,14 +2096,14 @@ mod tests {
 
         // Test all supported join types
         let supported_join_types = vec![
-            JoinType::Inner(sqlparser::ast::JoinConstraint::None),
-            JoinType::Join(sqlparser::ast::JoinConstraint::None),
-            JoinType::Left(sqlparser::ast::JoinConstraint::None),
-            JoinType::LeftOuter(sqlparser::ast::JoinConstraint::None),
-            JoinType::Right(sqlparser::ast::JoinConstraint::None),
-            JoinType::RightOuter(sqlparser::ast::JoinConstraint::None),
-            JoinType::FullOuter(sqlparser::ast::JoinConstraint::None),
-            JoinType::CrossJoin,
+            JoinType::Inner(JoinConstraint::None),
+            JoinType::Join(JoinConstraint::None),
+            JoinType::Left(JoinConstraint::None),
+            JoinType::LeftOuter(JoinConstraint::None),
+            JoinType::Right(JoinConstraint::None),
+            JoinType::RightOuter(JoinConstraint::None),
+            JoinType::FullOuter(JoinConstraint::None),
+            JoinType::CrossJoin(JoinConstraint::None),
         ];
 
         for join_type in supported_join_types {
