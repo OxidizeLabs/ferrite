@@ -222,6 +222,13 @@ pub struct CacheManager {
     prefetch_predictions: Arc<RwLock<HashMap<PageId, Instant>>>,
     prefetch_hits: AtomicU64,
     prefetch_total: AtomicU64,
+
+    // Cache hit/miss tracking
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
+    hot_cache_hits: AtomicU64,
+    warm_cache_hits: AtomicU64,
+    cold_cache_hits: AtomicU64,
 }
 
 impl CacheManager {
@@ -283,6 +290,11 @@ impl CacheManager {
             prefetch_predictions,
             prefetch_hits,
             prefetch_total,
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
+            hot_cache_hits: AtomicU64::new(0),
+            warm_cache_hits: AtomicU64::new(0),
+            cold_cache_hits: AtomicU64::new(0),
         }
     }
 
@@ -310,6 +322,8 @@ impl CacheManager {
                 Arc<Vec<u8>>,
             >>::get(&mut hot_cache, &page_id)
         {
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            self.hot_cache_hits.fetch_add(1, Ordering::Relaxed);
             if let Some(metrics) = metrics_collector {
                 metrics.record_cache_operation("hot", true);
             }
@@ -326,6 +340,8 @@ impl CacheManager {
                 )
         {
             // Promote to hot cache on hit - share the Arc, no data copying
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            self.warm_cache_hits.fetch_add(1, Ordering::Relaxed);
             self.promotion_count.fetch_add(1, Ordering::Relaxed);
             let data_arc = Arc::clone(&page_data.data);
             if let Ok(mut hot_cache) = self.hot_cache.try_write() {
@@ -352,6 +368,8 @@ impl CacheManager {
                 )
         {
             // Promote to warm cache on hit - clone the PageData (cheap with Arc)
+            self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            self.cold_cache_hits.fetch_add(1, Ordering::Relaxed);
             self.promotion_count.fetch_add(1, Ordering::Relaxed);
             if let Ok(mut warm_cache) = self.warm_cache.try_write() {
                 <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
@@ -369,6 +387,7 @@ impl CacheManager {
         }
 
         // Cache miss - record for metrics
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
         if let Some(metrics) = metrics_collector {
             metrics.record_cache_operation("all", false);
         }
@@ -743,12 +762,39 @@ impl CacheManager {
         // Use our integrated prefetch accuracy tracking
         let prefetch_accuracy = self.get_prefetch_accuracy();
 
-        // Simplified statistics - the cache implementations don't have hit_ratio() and stats() methods
-        // For now, we'll provide placeholder values
-        let hot_hit_ratio = 0.0;
-        let warm_hit_ratio = 0.0;
-        let cold_hit_ratio = 0.0;
-        let total_hits = 0.0;
+        // Calculate hit ratios from tracked counters
+        let total_hits = self.cache_hits.load(Ordering::Relaxed);
+        let total_misses = self.cache_misses.load(Ordering::Relaxed);
+        let total_accesses = total_hits + total_misses;
+
+        let overall_hit_ratio = if total_accesses > 0 {
+            total_hits as f64 / total_accesses as f64
+        } else {
+            0.0
+        };
+
+        // Calculate per-tier hit ratios
+        let hot_hits = self.hot_cache_hits.load(Ordering::Relaxed);
+        let warm_hits = self.warm_cache_hits.load(Ordering::Relaxed);
+        let cold_hits = self.cold_cache_hits.load(Ordering::Relaxed);
+
+        let hot_hit_ratio = if total_accesses > 0 {
+            hot_hits as f64 / total_accesses as f64
+        } else {
+            0.0
+        };
+
+        let warm_hit_ratio = if total_accesses > 0 {
+            warm_hits as f64 / total_accesses as f64
+        } else {
+            0.0
+        };
+
+        let cold_hit_ratio = if total_accesses > 0 {
+            cold_hits as f64 / total_accesses as f64
+        } else {
+            0.0
+        };
 
         CacheStatistics {
             hot_cache_size: self.hot_cache_size,
@@ -760,7 +806,7 @@ impl CacheManager {
             hot_cache_hit_ratio: hot_hit_ratio,
             warm_cache_hit_ratio: warm_hit_ratio,
             cold_cache_hit_ratio: cold_hit_ratio,
-            overall_hit_ratio: total_hits,
+            overall_hit_ratio,
             promotion_count: self.promotion_count.load(Ordering::Relaxed),
             demotion_count: self.demotion_count.load(Ordering::Relaxed),
             prefetch_accuracy,
