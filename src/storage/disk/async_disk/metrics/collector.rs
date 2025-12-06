@@ -1048,8 +1048,9 @@ mod tests {
         collector.record_write(1000, 4096); // 1μs, 4KB
         collector.record_read(2000, 8192, true); // 2μs, 8KB
 
-        // Allow some time to pass for time-based calculations
-        std::thread::sleep(Duration::from_millis(100));
+        // Allow at least 1 second to pass for time-based calculations
+        // (update_performance_counters uses as_secs() which requires >= 1 second)
+        std::thread::sleep(Duration::from_secs(1));
 
         // Update performance counters
         collector.update_performance_counters();
@@ -1110,8 +1111,9 @@ mod tests {
         );
 
         // Record errors (should further reduce health score)
+        // Use same high latency to avoid improving average latency
         for _ in 0..5 {
-            collector.record_read(1000000, 4096, false); // Failed operations
+            collector.record_read(60000000, 4096, false); // Failed operations with 60ms latency
         }
 
         let health_score_final = collector.calculate_health_score();
@@ -1298,7 +1300,10 @@ mod tests {
         // Abort the background task
         handle.abort();
 
-        // Verify the task was created and can be aborted without panic
+        // Give the runtime a moment to process the abort
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Verify the task was aborted (is_finished returns true after abort is processed)
         assert!(
             handle.is_finished(),
             "Background task should be finished after abort"
