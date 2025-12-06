@@ -301,13 +301,13 @@ impl SchemaManager {
             }
 
             // Float types with precision
-            DataType::Float(precision) => {
-                let prec = precision.map(|p| if p > u8::MAX as u64 { u8::MAX } else { p as u8 });
+            DataType::Float(exact_info) => {
+                let (precision, _) = self.extract_precision_scale(exact_info)?;
                 Ok(Column::from_sql_info(
                     column_name,
                     type_id,
                     None,
-                    prec,
+                    precision,
                     None,
                     is_primary_key,
                     is_not_null,
@@ -442,10 +442,10 @@ impl SchemaManager {
                         u8::MAX
                     ));
                 }
-                if *scale > u8::MAX as u64 {
-                    return Err(format!("Scale {} is too large (max {})", scale, u8::MAX));
+                if *scale < 0 || *scale > u8::MAX as i64 {
+                    return Err(format!("Scale {} is out of valid range (0-{})", scale, u8::MAX));
                 }
-                if *scale > *precision {
+                if *scale as u64 > *precision {
                     return Err(format!(
                         "Scale {} cannot be greater than precision {}",
                         scale, precision
@@ -565,7 +565,7 @@ impl SchemaManager {
             DataType::Datetime(_) => Ok(TypeId::Timestamp),
             DataType::Datetime64(_, _) => Ok(TypeId::Timestamp),
             DataType::TimestampNtz => Ok(TypeId::Timestamp),
-            DataType::Interval => Ok(TypeId::Interval),
+            DataType::Interval { fields: _, precision: _ } => Ok(TypeId::Interval),
             // Special types
             DataType::JSON => Ok(TypeId::JSON),
             DataType::JSONB => Ok(TypeId::JSON),
@@ -604,6 +604,13 @@ impl SchemaManager {
             DataType::NamedTable { .. } => Err(format!("Unsupported SQL type: {:?}", sql_type)),
             DataType::TsVector => Err(format!("Unsupported SQL type: {:?}", sql_type)),
             DataType::TsQuery => Err(format!("Unsupported SQL type: {:?}", sql_type)),
+            // Unsigned numeric types
+            DataType::DecimalUnsigned(_) => Ok(TypeId::Decimal),
+            DataType::DecUnsigned(_) => Ok(TypeId::Decimal),
+            DataType::FloatUnsigned(_) => Ok(TypeId::Float),
+            DataType::RealUnsigned => Ok(TypeId::Float),
+            DataType::DoubleUnsigned(_) => Ok(TypeId::Decimal),
+            DataType::DoublePrecisionUnsigned => Ok(TypeId::Decimal),
         }
     }
 
@@ -1653,7 +1660,7 @@ mod tests {
         let schema_manager = SchemaManager::new();
 
         // Test FLOAT with precision
-        let float_type = DataType::Float(Some(7));
+        let float_type = DataType::Float(ExactNumberInfo::Precision(7));
         let column = schema_manager
             .create_column_from_sql_type_with_constraints(
                 "measurement",
@@ -1674,7 +1681,7 @@ mod tests {
         assert_eq!(column.get_scale(), None);
 
         // Test FLOAT without precision
-        let float_type = DataType::Float(None);
+        let float_type = DataType::Float(ExactNumberInfo::None);
         let column = schema_manager
             .create_column_from_sql_type_with_constraints(
                 "ratio",
@@ -2466,7 +2473,9 @@ mod tests {
             TypeId::Time
         );
         assert_eq!(
-            manager.convert_sql_type(&DataType::Interval).unwrap(),
+            manager
+                .convert_sql_type(&DataType::Interval { fields: None, precision: None })
+                .unwrap(),
             TypeId::Interval
         );
         assert_eq!(

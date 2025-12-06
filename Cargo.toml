@@ -19,7 +19,7 @@ prettytable-rs = "0.10"
 md5 = "0.8"
 thiserror = "2.0"
 libc = "0.2"
-mockall = { version = "0.13", optional = true }
+mockall = { version = "0.14", optional = true }
 
 # Time and random utilities
 chrono = "0.4"
@@ -39,15 +39,15 @@ rustyline = "17.0.0"
 clap = { version = "4.5", features = ["derive"] }
 
 # Async runtime and concurrency
-tokio = { version = "1.47", default-features = false, features = [
+tokio = { version = "1.48", default-features = false, features = [
     "rt", "io-util", "net", "rt-multi-thread", "signal", "macros", "sync", "fs", "time"
 ] }
 crossbeam-channel = "0.5"
 futures = "0.3"
 
 # SQL parsing and processing
-sqlparser = "0.58"
-regex = "1.11"
+sqlparser = "0.59"
+regex = "1.12"
 hex = "0.4"
 
 # System utilities
@@ -70,11 +70,11 @@ num_cpus = "1.17"
 
 [dev-dependencies]
 # Enhanced tokio for testing
-tokio = { version = "1.47", features = ["full", "test-util"] }
+tokio = { version = "1.48", features = ["full", "test-util"] }
 
 # Testing framework dependencies
-mockall = "0.13"
-tempfile = "3.20"
+mockall = "0.14"
+tempfile = "3.23"
 sqllogictest = "0.28"
 test-tag = "0.1"
 

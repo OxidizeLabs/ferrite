@@ -46,6 +46,7 @@ impl QueryPlanner {
                 selection,
                 returning,
                 or,
+                limit
             } => self.plan_builder.build_update_plan(
                 table,
                 assignments,
@@ -53,6 +54,7 @@ impl QueryPlanner {
                 selection,
                 returning,
                 or,
+                limit
             ),
             Statement::Delete(_) => self.plan_builder.build_delete_plan(stmt),
             Statement::Explain { .. } => self.plan_builder.build_explain_plan(stmt),
@@ -97,6 +99,22 @@ impl QueryPlanner {
                 if_not_exists,
                 location,
                 managed_location,
+                or_replace,
+                transient,
+                clone,
+                data_retention_time_in_days,
+                max_data_extension_time_in_days,
+                external_volume,
+                catalog,
+                replace_invalid_characters,
+                default_ddl_collation,
+                storage_serialization_policy,
+                comment,
+                catalog_sync,
+                catalog_sync_namespace_mode,
+                catalog_sync_namespace_flatten_delimiter,
+                with_tags,
+                with_contacts,
             } => self.plan_builder.build_create_database_plan(
                 db_name,
                 if_not_exists,
@@ -110,7 +128,7 @@ impl QueryPlanner {
                 operations,
                 location,
                 on_cluster,
-                iceberg: false,
+                iceberg: false, end_token,
             } => self
                 .plan_builder
                 .build_alter_table_plan(name, if_exists, only, operations, location, on_cluster),
@@ -118,8 +136,8 @@ impl QueryPlanner {
                 or_alter,
                 or_replace,
                 materialized,
-                name,
-                columns,
+                secure, name,
+                name_before_not_exists, columns,
                 query,
                 options,
                 cluster_by,

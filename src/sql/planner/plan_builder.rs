@@ -15,6 +15,7 @@ use log::debug;
 use parking_lot::RwLock;
 use sqlparser::ast::*;
 use std::sync::Arc;
+use sqlparser::ast::RenameTableNameKind::{As, To};
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -48,7 +49,8 @@ impl LogicalPlanBuilder {
                     selection,
                     returning,
                     or,
-                } => self.build_update_plan(table, assignments, from, selection, returning, or)?,
+                    limit,
+                } => self.build_update_plan(table, assignments, from, selection, returning, or, limit)?,
                 _ => return Err("Expected Update statement".to_string()),
             },
             SetExpr::Delete(_) => return Err("DELETE is not supported in this context".to_string()),
@@ -68,6 +70,9 @@ impl LogicalPlanBuilder {
                     "Table expressions are not yet supported: {:?}",
                     table
                 ));
+            }
+            SetExpr::Merge(_) => {
+                return Err("MERGE is not supported in this context".to_string());
             }
         };
 
@@ -999,7 +1004,7 @@ impl LogicalPlanBuilder {
                             Column::new("TRUE", TypeId::Boolean),
                             vec![],
                         ))),
-                        join_type: JoinOperator::CrossJoin,
+                        join_type: JoinOperator::CrossJoin(JoinConstraint::None),
                     },
                     vec![existing_plan, table_plan],
                 )));
@@ -1029,68 +1034,24 @@ impl LogicalPlanBuilder {
             // Get the join condition if it exists
             let predicate = match &join.join_operator {
                 JoinOperator::Inner(constraint)
+                | JoinOperator::CrossJoin(constraint)
                 | JoinOperator::LeftOuter(constraint)
                 | JoinOperator::RightOuter(constraint)
-                | JoinOperator::FullOuter(constraint) => match constraint {
-                    JoinConstraint::On(expr) => self
-                        .expression_parser
-                        .parse_expression(expr, &joined_schema)?,
-                    _ => return Err("Only ON constraints are supported for joins".to_string()),
-                },
-                JoinOperator::CrossJoin => Expression::Constant(ConstantExpression::new(
-                    Value::new(true),
-                    Column::new("TRUE", TypeId::Boolean),
-                    vec![],
-                )),
-                JoinOperator::LeftSemi(constraint)
+                | JoinOperator::FullOuter(constraint)
+                | JoinOperator::LeftSemi(constraint)
                 | JoinOperator::RightSemi(constraint)
                 | JoinOperator::LeftAnti(constraint)
-                | JoinOperator::RightAnti(constraint) => match constraint {
+                | JoinOperator::RightAnti(constraint)
+                | JoinOperator::Join(constraint)
+                | JoinOperator::Left(constraint)
+                | JoinOperator::Right(constraint)
+                | JoinOperator::Semi(constraint)
+                | JoinOperator::Anti(constraint)
+                | JoinOperator::StraightJoin(constraint) => match constraint {
                     JoinConstraint::On(expr) => self
                         .expression_parser
                         .parse_expression(expr, &joined_schema)?,
-                    _ => {
-                        return Err(
-                            "Only ON constraints are supported for semi/anti joins".to_string()
-                        );
-                    }
-                },
-                // Simple synonym for Inner join
-                JoinOperator::Join(constraint) => match constraint {
-                    JoinConstraint::On(expr) => self
-                        .expression_parser
-                        .parse_expression(expr, &joined_schema)?,
-                    _ => return Err("Only ON constraints are supported for joins".to_string()),
-                },
-                // Simple synonym for LeftOuter join
-                JoinOperator::Left(constraint) => match constraint {
-                    JoinConstraint::On(expr) => self
-                        .expression_parser
-                        .parse_expression(expr, &joined_schema)?,
-                    _ => return Err("Only ON constraints are supported for LEFT joins".to_string()),
-                },
-                // Simple synonym for RightOuter join
-                JoinOperator::Right(constraint) => match constraint {
-                    JoinConstraint::On(expr) => self
-                        .expression_parser
-                        .parse_expression(expr, &joined_schema)?,
-                    _ => {
-                        return Err("Only ON constraints are supported for RIGHT joins".to_string());
-                    }
-                },
-                // Simple synonym for LeftSemi join
-                JoinOperator::Semi(constraint) => match constraint {
-                    JoinConstraint::On(expr) => self
-                        .expression_parser
-                        .parse_expression(expr, &joined_schema)?,
-                    _ => return Err("Only ON constraints are supported for SEMI joins".to_string()),
-                },
-                // Simple synonym for LeftAnti join
-                JoinOperator::Anti(constraint) => match constraint {
-                    JoinConstraint::On(expr) => self
-                        .expression_parser
-                        .parse_expression(expr, &joined_schema)?,
-                    _ => return Err("Only ON constraints are supported for ANTI joins".to_string()),
+                    _ => return Err("Only ON constraints are supported".to_string()),
                 },
                 // APPLY joins require a table function on the right
                 JoinOperator::CrossApply => {
@@ -1103,17 +1064,6 @@ impl LogicalPlanBuilder {
                 JoinOperator::AsOf { .. } => {
                     return Err("AS OF joins are not yet supported".to_string());
                 }
-                // MySQL-specific join
-                JoinOperator::StraightJoin(constraint) => match constraint {
-                    JoinConstraint::On(expr) => self
-                        .expression_parser
-                        .parse_expression(expr, &joined_schema)?,
-                    _ => {
-                        return Err(
-                            "Only ON constraints are supported for STRAIGHT_JOIN".to_string()
-                        );
-                    }
-                },
             };
 
             current_plan = Box::new(LogicalPlan::new(
@@ -1543,9 +1493,25 @@ impl LogicalPlanBuilder {
                 AlterTableOperation::RenameTable {
                     table_name: new_table,
                 } => {
-                    let new_name = match &new_table.0[0] {
-                        ObjectNamePart::Identifier(ident) => ident.value.clone(),
-                        ObjectNamePart::Function(func) => func.name.value.clone(),
+                    let new_name = match new_table {
+                        As(object_name) => {
+                            if object_name.0.is_empty() {
+                                return Err("New table name cannot be empty".to_string());
+                            }
+                            match &object_name.0[0] {
+                                ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                                ObjectNamePart::Function(func) => func.name.value.clone(),
+                            }
+                        }
+                        To(object_name) => {
+                            if object_name.0.is_empty() {
+                                return Err("New table name cannot be empty".to_string());
+                            }
+                            match &object_name.0[0] {
+                                ObjectNamePart::Identifier(ident) => ident.value.clone(),
+                                ObjectNamePart::Function(func) => func.name.value.clone(),
+                            }
+                        }
                     };
                     format!("RENAME TO {}", new_name)
                 }
@@ -1805,6 +1771,7 @@ impl LogicalPlanBuilder {
             SetExpr::Update(_) => operation.push_str("UPDATE ..."),
             SetExpr::Delete(_) => operation.push_str("DELETE ..."),
             SetExpr::Table(_) => operation.push_str("TABLE ..."),
+            SetExpr::Merge(_) => operation.push_str("MERGE ..."),
         };
 
         // Add WITH options if specified
@@ -2361,6 +2328,7 @@ impl LogicalPlanBuilder {
         selection: &Option<Expr>,
         _returning: &Option<Vec<SelectItem>>,
         _or: &Option<SqliteOnConflict>,
+        _limit: &Option<Expr>,
     ) -> Result<Box<LogicalPlan>, String> {
         let table_name = match &table.relation {
             TableFactor::Table { name, .. } => name.to_string(),
