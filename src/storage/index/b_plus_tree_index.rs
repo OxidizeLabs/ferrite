@@ -4,6 +4,9 @@ use crate::common::{
     rid::RID,
 };
 use crate::storage::index::IndexInfo;
+use crate::storage::index::latch_crabbing::{
+    LatchContext, LockingProtocol, NodeSafety, OperationType, OptimisticResult, TraversalResult,
+};
 use crate::storage::index::types::comparators::{I32Comparator, i32_comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
 use crate::storage::page::page_guard::PageGuard;
@@ -12,6 +15,7 @@ use crate::storage::page::page_types::{
     b_plus_tree_leaf_page::BPlusTreeLeafPage,
 };
 use crate::types_db::type_id::TypeId;
+use log::debug;
 use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -233,6 +237,11 @@ where
     }
 
     /// Insert a key-value pair into the B+ tree
+    ///
+    /// # Thread Safety
+    /// This implementation provides basic thread safety through page-level locking,
+    /// but does not implement full latch crabbing. For high-concurrency workloads,
+    /// consider using external synchronization or a concurrent B+ tree variant.
     pub fn insert(&self, key: K, value: V) -> Result<(), BPlusTreeError> {
         // If tree is not initialized, initialize it first
         if self.header_page_id == INVALID_PAGE_ID {
@@ -241,62 +250,24 @@ where
             ));
         }
 
-        // Get header page to determine root page id
-        let header_page = self
-            .buffer_pool_manager
-            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
-            .ok_or_else(|| {
-                BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
-            })?;
-
-        let root_page_id;
-        let num_keys;
-
-        {
-            let header = header_page.read();
-            root_page_id = header.get_root_page_id();
-            num_keys = header.get_num_keys();
-        }
+        // Read header info and release immediately to reduce contention
+        let root_page_id = {
+            let header_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                .ok_or_else(|| {
+                    BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
+                })?;
+            header_page.read().get_root_page_id()
+        };
 
         // If tree is empty (root is INVALID_PAGE_ID), create first leaf page as root
         if root_page_id == INVALID_PAGE_ID {
-            // Allocate a new leaf page with the comparator
-            let comparator = self.comparator.clone();
-            let leaf_max_size = self.calculate_leaf_max_size();
-            let new_leaf_page = self
-                .buffer_pool_manager
-                .new_page_with_options(|page_id| {
-                    BPlusTreeLeafPage::<K, V, C>::new_with_options(
-                        page_id,
-                        leaf_max_size,
-                        comparator,
-                    )
-                })
-                .ok_or(BPlusTreeError::PageAllocationFailed)?;
-
-            let new_page_id = new_leaf_page.get_page_id();
-
-            // Initialize the leaf page
-            {
-                let mut leaf_write = new_leaf_page.write();
-                // Insert the key-value pair
-                leaf_write.insert_key_value(key, value);
-                leaf_write.set_root_status(true);
-            }
-
-            // Update the header page with the new root
-            {
-                let mut header_write = header_page.write();
-                header_write.set_root_page_id(new_page_id);
-                header_write.set_tree_height(1); // Height is 1 with just a root leaf
-                header_write.set_num_keys(1); // We inserted 1 key
-            }
-
-            return Ok(());
+            return self.insert_into_empty_tree(key, value);
         }
 
-        // For existing tree, find the leaf page where the key should be inserted
-        let leaf_page = self.find_leaf_page(&key)?;
+        // For existing tree, find the leaf page and track the path for potential splits
+        let (leaf_page, path) = self.find_leaf_page_with_path(&key)?;
 
         // Handle the key insertion
         let mut inserted = false;
@@ -338,8 +309,7 @@ where
         if inserted {
             // Update num_keys in header if we added a new key
             if new_key_added {
-                let mut header_write = header_page.write();
-                header_write.set_num_keys(num_keys + 1);
+                self.increment_num_keys()?;
             }
             return Ok(());
         }
@@ -352,16 +322,67 @@ where
                 leaf_write.insert_key_value_with_overflow(key, value);
             }
 
-            // Then split the page
-            self.split_leaf_page(&leaf_page)?;
+            // Then split the page, passing the path for O(1) parent lookup
+            self.split_leaf_page(&leaf_page, &path)?;
 
             // Update num_keys in header
-            {
-                let mut header_write = header_page.write();
-                header_write.set_num_keys(num_keys + 1);
-            }
+            self.increment_num_keys()?;
         }
 
+        Ok(())
+    }
+
+    /// Helper method to insert into an empty tree (creates the first root leaf)
+    fn insert_into_empty_tree(&self, key: K, value: V) -> Result<(), BPlusTreeError> {
+        // Allocate a new leaf page with the comparator
+        let comparator = self.comparator.clone();
+        let leaf_max_size = self.calculate_leaf_max_size();
+        let new_leaf_page = self
+            .buffer_pool_manager
+            .new_page_with_options(|page_id| {
+                BPlusTreeLeafPage::<K, V, C>::new_with_options(page_id, leaf_max_size, comparator)
+            })
+            .ok_or(BPlusTreeError::PageAllocationFailed)?;
+
+        let new_page_id = new_leaf_page.get_page_id();
+
+        // Initialize the leaf page
+        {
+            let mut leaf_write = new_leaf_page.write();
+            leaf_write.insert_key_value(key, value);
+            leaf_write.set_root_status(true);
+        }
+
+        // Update the header page with the new root
+        let header_page = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| {
+                BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
+            })?;
+
+        {
+            let mut header_write = header_page.write();
+            header_write.set_root_page_id(new_page_id);
+            header_write.set_tree_height(1);
+            header_write.set_num_keys(1);
+        }
+
+        Ok(())
+    }
+
+    /// Helper method to atomically increment num_keys in the header
+    fn increment_num_keys(&self) -> Result<(), BPlusTreeError> {
+        let header_page = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| {
+                BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
+            })?;
+
+        let mut header_write = header_page.write();
+        let current = header_write.get_num_keys();
+        header_write.set_num_keys(current + 1);
         Ok(())
     }
 
@@ -428,9 +449,9 @@ where
             return Ok(false);
         }
 
-        // Find the leaf page containing the key
-        let leaf_page = match self.find_leaf_page(key) {
-            Ok(page) => page,
+        // Find the leaf page containing the key, tracking path for potential rebalancing
+        let (leaf_page, path) = match self.find_leaf_page_with_path(key) {
+            Ok(result) => result,
             Err(BPlusTreeError::KeyNotFound) => return Ok(false),
             Err(e) => return Err(e),
         };
@@ -472,8 +493,8 @@ where
 
         // Perform rebalancing if needed
         if needs_rebalancing {
-            // Call the rebalancing logic
-            let _ = self.check_and_handle_underflow(leaf_page_id, true)?;
+            // Call the rebalancing logic with the path for O(1) parent lookup
+            let _ = self.check_and_handle_underflow(leaf_page_id, true, &path)?;
         }
 
         Ok(true)
@@ -551,7 +572,20 @@ where
         &self,
         key: &K,
     ) -> Result<PageGuard<BPlusTreeLeafPage<K, V, C>>, BPlusTreeError> {
-        // Fetch the header page to get the root_page_id
+        // Use the path-tracking version but discard the path
+        let (leaf_page, _path) = self.find_leaf_page_with_path(key)?;
+        Ok(leaf_page)
+    }
+
+    /// Find the leaf page that should contain the key, also returning the path of ancestor page IDs.
+    ///
+    /// The path is ordered from root to the parent of the leaf (not including the leaf itself).
+    /// This enables O(1) parent lookups instead of O(n) BFS traversal.
+    fn find_leaf_page_with_path(
+        &self,
+        key: &K,
+    ) -> Result<(PageGuard<BPlusTreeLeafPage<K, V, C>>, Vec<PageId>), BPlusTreeError> {
+        // Fetch the header page to get the root_page_id and tree_height
         let header_page = self
             .buffer_pool_manager
             .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
@@ -559,82 +593,570 @@ where
                 BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
             })?;
 
-        let root_page_id;
-        let tree_height;
-
-        {
+        let (root_page_id, tree_height) = {
             let header = header_page.read();
-            root_page_id = header.get_root_page_id();
-            tree_height = header.get_tree_height();
+            (header.get_root_page_id(), header.get_tree_height())
+        };
 
-            // Check if root_page_id is valid
-            if root_page_id == INVALID_PAGE_ID {
-                return Err(BPlusTreeError::KeyNotFound);
-            }
-        }
-
-        // Drop header page early
+        // Drop header page early to avoid holding it during traversal
         drop(header_page);
 
-        // Start with the root page
-        let mut current_page_id = root_page_id;
-
-        // If tree height is 1, the root is a leaf
-        if tree_height == 1 {
-            let leaf_page = self
-                .buffer_pool_manager
-                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-                .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
-            return Ok(leaf_page);
+        // Check if root_page_id is valid
+        if root_page_id == INVALID_PAGE_ID {
+            return Err(BPlusTreeError::KeyNotFound);
         }
 
-        // Traverse down to leaf
-        if tree_height > 1 {
-            loop {
-                // First try as an internal page (since we know height > 1 and we're not at leaf level yet)
-                let internal_page = self
-                    .buffer_pool_manager
-                    .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
-                    .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
+        // If tree height is 1, the root is a leaf (no ancestors in path)
+        if tree_height == 1 {
+            let leaf = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(root_page_id)
+                .ok_or(BPlusTreeError::PageNotFound(root_page_id))?;
+            return Ok((leaf, Vec::new()));
+        }
 
-                // Find the child page id for the key
-                let child_page_id;
-                {
-                    let internal = internal_page.read();
-                    // Find the appropriate child page for the key
-                    child_page_id = internal.find_child_for_key(key);
+        // Track the path of ancestors (internal pages visited)
+        let mut path = Vec::with_capacity((tree_height - 1) as usize);
+
+        // Traverse down to leaf using explicit depth tracking
+        let mut current_page_id = root_page_id;
+        let mut current_depth = 1; // Start at depth 1 (root level)
+
+        while current_depth < tree_height {
+            // Record this internal page in the path
+            path.push(current_page_id);
+
+            // At this depth, we're at an internal page
+            let internal_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
+                .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
+
+            // Find the child page id for the key
+            let child_page_id = {
+                let internal = internal_page.read();
+                internal.find_child_for_key(key)
+            };
+
+            // Get the child page id before dropping the internal page
+            let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+
+            // Drop the internal page before continuing to next level
+            drop(internal_page);
+
+            current_page_id = next_page_id;
+            current_depth += 1;
+        }
+
+        // At this point, current_depth == tree_height, so current_page_id is a leaf
+        let leaf = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
+            .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
+
+        Ok((leaf, path))
+    }
+
+    /// Get the parent page ID from a pre-computed path.
+    ///
+    /// The path should be ordered from root to ancestors (as returned by find_leaf_page_with_path).
+    /// Returns the last element of the path (immediate parent) or an error if the path is empty.
+    fn get_parent_from_path(path: &[PageId]) -> Result<PageId, BPlusTreeError> {
+        path.last().copied().ok_or_else(|| {
+            BPlusTreeError::BufferPoolError("Path is empty - node is root".to_string())
+        })
+    }
+
+    /// Get the path to a parent (all ancestors except the immediate parent).
+    ///
+    /// Useful for recursive operations that need to propagate up the tree.
+    fn get_grandparent_path(path: &[PageId]) -> Vec<PageId> {
+        if path.len() <= 1 {
+            Vec::new()
+        } else {
+            path[..path.len() - 1].to_vec()
+        }
+    }
+
+    // ============================================================================
+    // LATCH CRABBING IMPLEMENTATION
+    // ============================================================================
+
+    /// Traverse to leaf page using optimistic latch crabbing protocol.
+    ///
+    /// This method acquires read latches going down, then upgrades to write latch
+    /// only on the leaf page. If the leaf is not safe for the operation, the caller
+    /// should retry with pessimistic protocol.
+    ///
+    /// # Protocol
+    /// 1. Acquire read latch on header, read root_page_id and tree_height
+    /// 2. Release header latch
+    /// 3. For each level: acquire read latch on child, release parent
+    /// 4. At leaf: acquire write latch (for Insert/Delete) or keep read (for Search)
+    ///
+    /// # Returns
+    /// - `Ok(TraversalResult)` with the leaf page, context, and safety status
+    /// - `Err` if traversal fails
+    fn traverse_optimistic(
+        &self,
+        key: &K,
+        operation: OperationType,
+    ) -> Result<TraversalResult<K, V, C>, BPlusTreeError> {
+        debug!(
+            "Starting optimistic traversal for key {:?}, operation {:?}",
+            key, operation
+        );
+
+        let mut context = LatchContext::new(operation, LockingProtocol::Optimistic);
+
+        // Step 1: Read header to get root and height
+        let (root_page_id, tree_height) = {
+            let header_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                .ok_or_else(|| {
+                    BPlusTreeError::BufferPoolError(format!(
+                        "Failed to fetch header page {}",
+                        self.header_page_id
+                    ))
+                })?;
+            let header = header_page.read();
+            (header.get_root_page_id(), header.get_tree_height())
+            // Header page guard dropped here, releasing read latch
+        };
+
+        // Check if tree is empty
+        if root_page_id == INVALID_PAGE_ID {
+            return Err(BPlusTreeError::KeyNotFound);
+        }
+
+        // Step 2: If tree height is 1, root is a leaf
+        if tree_height == 1 {
+            let leaf = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(root_page_id)
+                .ok_or(BPlusTreeError::PageNotFound(root_page_id))?;
+
+            let is_safe = {
+                let leaf_read = leaf.read();
+                leaf_read.is_safe_for(operation)
+            };
+
+            debug!(
+                "Optimistic traversal reached root leaf, is_safe={}",
+                is_safe
+            );
+
+            return Ok(TraversalResult {
+                leaf_page: leaf,
+                context,
+                is_safe,
+            });
+        }
+
+        // Step 3: Traverse internal pages with read latches
+        let mut current_page_id = root_page_id;
+        let mut current_depth = 1;
+
+        while current_depth < tree_height {
+            context.push_path(current_page_id);
+
+            // Fetch internal page with read latch
+            let internal_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
+                .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
+
+            // Find child while holding read latch
+            let child_page_id = {
+                let internal = internal_page.read();
+                internal.find_child_for_key(key)
+            };
+            // Read latch released when internal_page goes out of scope
+
+            let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+
+            // Drop internal page guard (releases read latch)
+            drop(internal_page);
+
+            current_page_id = next_page_id;
+            current_depth += 1;
+        }
+
+        // Step 4: Fetch leaf page
+        let leaf = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
+            .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
+
+        let is_safe = {
+            let leaf_read = leaf.read();
+            leaf_read.is_safe_for(operation)
+        };
+
+        debug!(
+            "Optimistic traversal reached leaf {}, is_safe={}",
+            current_page_id, is_safe
+        );
+
+        Ok(TraversalResult {
+            leaf_page: leaf,
+            context,
+            is_safe,
+        })
+    }
+
+    /// Traverse to leaf page using pessimistic latch crabbing protocol.
+    ///
+    /// This method acquires write latches going down, but releases ancestor
+    /// latches once a "safe" node is found.
+    ///
+    /// # Protocol
+    /// 1. Acquire write latch on header, read root_page_id and tree_height
+    /// 2. Acquire write latch on root
+    /// 3. If root is safe, release header latch
+    /// 4. For each level:
+    ///    - Acquire write latch on child
+    ///    - If child is safe, release all ancestor latches
+    ///    - Otherwise, keep holding ancestor latches
+    ///
+    /// # Returns
+    /// - `Ok(TraversalResult)` with the leaf page, context with held ancestors, and safety status
+    /// - `Err` if traversal fails
+    fn traverse_pessimistic(
+        &self,
+        key: &K,
+        operation: OperationType,
+    ) -> Result<TraversalResult<K, V, C>, BPlusTreeError> {
+        debug!(
+            "Starting pessimistic traversal for key {:?}, operation {:?}",
+            key, operation
+        );
+
+        let mut context = LatchContext::new(operation, LockingProtocol::Pessimistic);
+
+        // Step 1: Read header to get root and height
+        // We use read latch for header since we don't modify it during traversal
+        let (root_page_id, tree_height) = {
+            let header_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                .ok_or_else(|| {
+                    BPlusTreeError::BufferPoolError(format!(
+                        "Failed to fetch header page {}",
+                        self.header_page_id
+                    ))
+                })?;
+            let header = header_page.read();
+            (header.get_root_page_id(), header.get_tree_height())
+        };
+
+        if root_page_id == INVALID_PAGE_ID {
+            return Err(BPlusTreeError::KeyNotFound);
+        }
+
+        // Step 2: If tree height is 1, root is a leaf
+        if tree_height == 1 {
+            let leaf = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeLeafPage<K, V, C>>(root_page_id)
+                .ok_or(BPlusTreeError::PageNotFound(root_page_id))?;
+
+            // For pessimistic mode, we always consider safe since we hold write latch
+            debug!("Pessimistic traversal reached root leaf");
+
+            return Ok(TraversalResult {
+                leaf_page: leaf,
+                context,
+                is_safe: true, // Root leaf is always safe (can have any size)
+            });
+        }
+
+        // Step 3: Traverse internal pages with write latches
+        let mut current_page_id = root_page_id;
+        let mut current_depth = 1;
+
+        while current_depth < tree_height {
+            context.push_path(current_page_id);
+
+            // Fetch internal page
+            let internal_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
+                .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
+
+            // Check if this node is safe (under write latch)
+            let (is_safe, child_page_id) = {
+                let internal = internal_page.write();
+                let safe = internal.is_safe_for(operation);
+                let child = internal.find_child_for_key(key);
+                (safe, child)
+            };
+
+            let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+
+            // If current node is safe, release all ancestor latches
+            if is_safe {
+                debug!(
+                    "Node {} is safe, releasing {} ancestors",
+                    current_page_id,
+                    context.held_count()
+                );
+                context.release_safe_ancestors();
+            } else {
+                // Node is not safe, keep holding it for potential modifications
+                debug!(
+                    "Node {} is NOT safe, holding latch (ancestors held: {})",
+                    current_page_id,
+                    context.held_count()
+                );
+                context.hold_internal_page(internal_page);
+            }
+
+            current_page_id = next_page_id;
+            current_depth += 1;
+        }
+
+        // Step 4: Fetch leaf page
+        let leaf = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
+            .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
+
+        // Check if leaf is safe
+        let is_safe = {
+            let leaf_write = leaf.write();
+            leaf_write.is_safe_for(operation)
+        };
+
+        if is_safe {
+            debug!(
+                "Leaf {} is safe, releasing {} ancestors",
+                current_page_id,
+                context.held_count()
+            );
+            context.release_safe_ancestors();
+        }
+
+        debug!(
+            "Pessimistic traversal reached leaf {}, ancestors still held: {}",
+            current_page_id,
+            context.held_count()
+        );
+
+        Ok(TraversalResult {
+            leaf_page: leaf,
+            context,
+            is_safe,
+        })
+    }
+
+    /// Insert a key-value pair using latch crabbing protocol.
+    ///
+    /// This method uses optimistic latch crabbing for insertions that don't cause splits.
+    /// When splits are needed, it falls back to the standard insert path which provides
+    /// consistent behavior.
+    ///
+    /// # Thread Safety
+    /// - **Optimistic case (no split)**: Uses read latches going down, write latch only on leaf.
+    ///   This is safe for concurrent reads and non-splitting writes.
+    /// - **Pessimistic case (split needed)**: Falls back to standard insert which provides
+    ///   page-level locking during tree modifications.
+    ///
+    /// # Note
+    /// For fully concurrent access with guaranteed isolation, consider using external
+    /// synchronization or a lock-based wrapper around the tree.
+    pub fn insert_with_latch_crabbing(&self, key: K, value: V) -> Result<(), BPlusTreeError> {
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Err(BPlusTreeError::BufferPoolError(
+                "Tree not initialized".to_string(),
+            ));
+        }
+
+        // Check if tree is empty first
+        let root_page_id = {
+            let header_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                .ok_or_else(|| {
+                    BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
+                })?;
+            header_page.read().get_root_page_id()
+        };
+
+        if root_page_id == INVALID_PAGE_ID {
+            return self.insert_into_empty_tree(key, value);
+        }
+
+        // Try optimistic insert first (fast path for non-splitting inserts)
+        match self.try_optimistic_insert(key.clone(), value.clone())? {
+            OptimisticResult::Success(()) => Ok(()),
+            OptimisticResult::NeedRestart => {
+                // Fall back to standard insert which handles splits correctly
+                debug!("Optimistic insert not safe, using standard insert path");
+                self.insert(key, value)
+            }
+        }
+    }
+
+    /// Attempt optimistic insert (read latches down, write latch on leaf only)
+    ///
+    /// This is the fast path for insertions that don't cause splits.
+    fn try_optimistic_insert(
+        &self,
+        key: K,
+        value: V,
+    ) -> Result<OptimisticResult<()>, BPlusTreeError> {
+        let traversal = self.traverse_optimistic(&key, OperationType::Insert)?;
+
+        if !traversal.is_safe {
+            // Leaf would split, need to use standard insert path
+            return Ok(OptimisticResult::NeedRestart);
+        }
+
+        // Leaf is safe (won't split), perform insert under write latch
+        let leaf_page = traversal.leaf_page;
+        let mut new_key_added = false;
+
+        {
+            let mut leaf = leaf_page.write();
+
+            // Check if key already exists
+            let key_index = leaf.find_key_index(&key);
+            if key_index < leaf.get_size() {
+                if let Some(existing_key) = leaf.get_key_at(key_index) {
+                    if (self.comparator)(&key, existing_key) == Ordering::Equal {
+                        // Update existing value
+                        leaf.set_value_at(key_index, value);
+                        return Ok(OptimisticResult::Success(()));
+                    }
                 }
+            }
 
-                // Get the child page id before dropping the internal page
-                let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
+            // Insert new key-value pair
+            leaf.insert_key_value(key, value);
+            new_key_added = true;
+        }
 
-                // Drop the internal page before continuing to next level
-                drop(internal_page);
+        // Update key count if we added a new key
+        if new_key_added {
+            self.increment_num_keys()?;
+        }
 
-                // Try to fetch the child as a leaf page
-                if let Some(leaf_page) = self
-                    .buffer_pool_manager
-                    .fetch_page::<BPlusTreeLeafPage<K, V, C>>(next_page_id)
-                {
-                    // If we successfully fetched a leaf page, return it
-                    return Ok(leaf_page);
-                }
+        Ok(OptimisticResult::Success(()))
+    }
 
-                // Continue with this child (it's another internal page)
-                current_page_id = next_page_id;
+    /// Remove a key-value pair using latch crabbing protocol.
+    ///
+    /// This method uses optimistic latch crabbing for removals that don't cause underflow.
+    /// When rebalancing is needed, it falls back to the standard remove path.
+    ///
+    /// # Thread Safety
+    /// - **Optimistic case (no underflow)**: Uses read latches going down, write latch only on leaf.
+    /// - **Pessimistic case (underflow)**: Falls back to standard remove which handles rebalancing.
+    pub fn remove_with_latch_crabbing(&self, key: &K) -> Result<bool, BPlusTreeError> {
+        if self.header_page_id == INVALID_PAGE_ID {
+            return Ok(false);
+        }
+
+        // Check if tree is empty
+        {
+            let header_page = self
+                .buffer_pool_manager
+                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+                .ok_or_else(|| {
+                    BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
+                })?;
+            let header = header_page.read();
+            if header.is_empty() {
+                return Ok(false);
             }
         }
 
-        // If we get here without finding a leaf, try one more time
-        self.buffer_pool_manager
-            .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
-            .ok_or(BPlusTreeError::PageNotFound(current_page_id))
+        // Try optimistic remove first (fast path for non-underflowing removals)
+        match self.try_optimistic_remove(key)? {
+            OptimisticResult::Success(removed) => Ok(removed),
+            OptimisticResult::NeedRestart => {
+                // Fall back to standard remove which handles rebalancing correctly
+                debug!("Optimistic remove not safe, using standard remove path");
+                self.remove(key)
+            }
+        }
     }
 
+    /// Attempt optimistic remove (read latches down, write latch on leaf only)
+    ///
+    /// This is the fast path for removals that don't cause underflow.
+    fn try_optimistic_remove(&self, key: &K) -> Result<OptimisticResult<bool>, BPlusTreeError> {
+        let traversal = match self.traverse_optimistic(key, OperationType::Delete) {
+            Ok(t) => t,
+            Err(BPlusTreeError::KeyNotFound) => return Ok(OptimisticResult::Success(false)),
+            Err(e) => return Err(e),
+        };
+
+        if !traversal.is_safe {
+            // Leaf would underflow, need to use standard remove path
+            return Ok(OptimisticResult::NeedRestart);
+        }
+
+        // Leaf is safe (won't underflow), perform remove under write latch
+        let leaf_page = traversal.leaf_page;
+
+        {
+            let mut leaf = leaf_page.write();
+
+            // Find the key
+            let key_index = leaf.find_key_index(key);
+            if key_index >= leaf.get_size() {
+                return Ok(OptimisticResult::Success(false));
+            }
+
+            if let Some(existing_key) = leaf.get_key_at(key_index) {
+                if (self.comparator)(key, existing_key) != Ordering::Equal {
+                    return Ok(OptimisticResult::Success(false));
+                }
+            } else {
+                return Ok(OptimisticResult::Success(false));
+            }
+
+            // Remove the key
+            leaf.remove_key_value_at(key_index);
+        }
+
+        // Decrement key count
+        self.decrement_num_keys()?;
+
+        Ok(OptimisticResult::Success(true))
+    }
+
+    /// Helper method to decrement num_keys in the header
+    fn decrement_num_keys(&self) -> Result<(), BPlusTreeError> {
+        let header_page = self
+            .buffer_pool_manager
+            .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
+            .ok_or_else(|| {
+                BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
+            })?;
+
+        let mut header = header_page.write();
+        let current = header.get_num_keys();
+        header.set_num_keys(current.saturating_sub(1));
+        Ok(())
+    }
+
+    // ============================================================================
+    // END LATCH CRABBING IMPLEMENTATION
+    // ============================================================================
+
     /// Split a leaf page when it becomes full
+    ///
+    /// # Arguments
+    /// * `leaf_page` - The leaf page to split
+    /// * `path` - The path of ancestor page IDs from root to parent of this leaf
     fn split_leaf_page(
         &self,
         leaf_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        path: &[PageId],
     ) -> Result<(), BPlusTreeError> {
         // Get the max size based on order
         let leaf_max_size = self.calculate_leaf_max_size();
@@ -712,19 +1234,8 @@ where
             let mut leaf_write = leaf_page.write();
             leaf_write.set_root_status(false);
         } else {
-            // Get the header page to find the root
-            let header_page = self
-                .buffer_pool_manager
-                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
-                .ok_or_else(|| {
-                    BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
-                })?;
-
-            let root_page_id = header_page.read().get_root_page_id();
-            drop(header_page);
-
-            // Find the parent page of the leaf
-            let parent_page_id = self.find_parent_page_id(original_page_id, root_page_id)?;
+            // Get parent page ID from the path (O(1) instead of O(n) BFS)
+            let parent_page_id = Self::get_parent_from_path(path)?;
             let parent_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeInternalPage<K, C>>(parent_page_id)
@@ -741,8 +1252,11 @@ where
                 // Release parent write lock first
                 drop(parent_write);
 
+                // Get the path to the parent's ancestors for recursive split
+                let grandparent_path = Self::get_grandparent_path(path);
+
                 // Recursively split the parent
-                self.split_internal_page(&parent_page)?;
+                self.split_internal_page(&parent_page, &grandparent_path)?;
             }
         }
 
@@ -750,9 +1264,14 @@ where
     }
 
     /// Split an internal page when it becomes full
+    ///
+    /// # Arguments
+    /// * `internal_page` - The internal page to split
+    /// * `path` - The path of ancestor page IDs from root to parent of this internal page
     fn split_internal_page(
         &self,
         internal_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        path: &[PageId],
     ) -> Result<(), BPlusTreeError> {
         // Get the max size based on order
         let internal_max_size = self.calculate_internal_max_size();
@@ -842,19 +1361,8 @@ where
             // Create a new root with the middle key
             self.create_new_root(original_page_id, middle_key, new_page_id)?;
         } else {
-            // Get the header page to find the root
-            let header_page = self
-                .buffer_pool_manager
-                .fetch_page::<BPlusTreeHeaderPage>(self.header_page_id)
-                .ok_or_else(|| {
-                    BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
-                })?;
-
-            let root_page_id = header_page.read().get_root_page_id();
-            drop(header_page);
-
-            // Find the parent page of the internal page being split
-            let parent_page_id = self.find_parent_page_id(original_page_id, root_page_id)?;
+            // Get parent page ID from the path (O(1) instead of O(n) BFS)
+            let parent_page_id = Self::get_parent_from_path(path)?;
             let parent_page = self
                 .buffer_pool_manager
                 .fetch_page::<BPlusTreeInternalPage<K, C>>(parent_page_id)
@@ -871,8 +1379,11 @@ where
                 // Release parent write lock first
                 drop(parent_write);
 
+                // Get the path to the parent's ancestors for recursive split
+                let grandparent_path = Self::get_grandparent_path(path);
+
                 // Recursively split the parent
-                self.split_internal_page(&parent_page)?;
+                self.split_internal_page(&parent_page, &grandparent_path)?;
             }
         }
 
@@ -880,12 +1391,16 @@ where
     }
 
     /// Merge two leaf pages when they become too empty
+    ///
+    /// # Arguments
+    /// * `grandparent_path` - Path from root to grandparent (parent's ancestors)
     fn merge_leaf_pages(
         &self,
         left_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
         right_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
         parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
+        grandparent_path: &[PageId],
     ) -> Result<(), BPlusTreeError> {
         // Store page IDs before acquiring any locks
         let left_page_id = left_page.get_page_id();
@@ -999,8 +1514,8 @@ where
 
         // Check if parent needs rebalancing after removing a key
         if parent_needs_rebalancing {
-            // Recursively handle parent underflow
-            self.check_and_handle_underflow(parent_page_id, false)?;
+            // Recursively handle parent underflow using grandparent_path
+            self.check_and_handle_underflow(parent_page_id, false, grandparent_path)?;
         }
 
         Ok(())
@@ -1080,61 +1595,56 @@ where
                 ));
             }
         } else {
-            // Move keys from left to right
+            // Move keys from left to right - O(n) implementation
             let keys_to_move = left_size - target_size;
             let start_index = left_size - keys_to_move;
 
-            // Create a temporary vector to store the keys/values to move
-            let mut keys_values = Vec::with_capacity(keys_to_move);
+            // Step 1: Collect keys to move from left page (O(k) where k = keys_to_move)
+            let mut keys_to_insert = Vec::with_capacity(keys_to_move);
             for i in start_index..left_size {
-                let key_to_move = left_write.get_key_at(i).cloned();
-                let value_to_move = left_write.get_value_at(i).cloned();
-
-                if let (Some(key), Some(value)) = (key_to_move, value_to_move) {
-                    keys_values.push((key, value));
+                if let (Some(key), Some(value)) = (
+                    left_write.get_key_at(i).cloned(),
+                    left_write.get_value_at(i).cloned(),
+                ) {
+                    keys_to_insert.push((key, value));
                 }
             }
 
-            // Insert keys at the beginning of right page
-            // Fix: Use available methods instead of insert_key_value_at
-            for (key, value) in keys_values.iter().rev() {
-                // Get all existing keys and values in the right page
-                let right_size = right_write.get_size();
-                let mut right_keys_values = Vec::with_capacity(right_size);
-
-                for j in 0..right_size {
-                    let k = right_write.get_key_at(j).cloned();
-                    let v = right_write.get_value_at(j).cloned();
-                    if let (Some(key), Some(val)) = (k, v) {
-                        right_keys_values.push((key, val));
-                    }
-                }
-
-                // Clear the right page
-                for _ in 0..right_size {
-                    right_write.remove_key_value_at(0);
-                }
-
-                // Insert the new key-value at the beginning
-                right_write.insert_key_value(key.clone(), value.clone());
-
-                // Re-insert the original keys
-                for (k, v) in right_keys_values {
-                    right_write.insert_key_value(k, v);
+            // Step 2: Collect existing keys from right page ONCE (O(r) where r = right_size)
+            let right_size = right_write.get_size();
+            let mut existing_right_keys = Vec::with_capacity(right_size);
+            for i in 0..right_size {
+                if let (Some(key), Some(value)) = (
+                    right_write.get_key_at(i).cloned(),
+                    right_write.get_value_at(i).cloned(),
+                ) {
+                    existing_right_keys.push((key, value));
                 }
             }
 
-            // Remove the moved keys from left page
-            // Store size first to avoid borrowing issues
-            let current_left_size = left_write.get_size();
-            for index in 0..keys_to_move {
-                left_write.remove_key_value_at(current_left_size - 1 - index);
+            // Step 3: Clear the right page ONCE (O(r))
+            for _ in 0..right_size {
+                right_write.remove_key_value_at(0);
             }
 
-            // Update the separator key in parent to the first key in right page
+            // Step 4: Insert moved keys first (they go at the beginning) (O(k))
+            for (key, value) in keys_to_insert {
+                right_write.insert_key_value(key, value);
+            }
+
+            // Step 5: Re-insert original right page keys (O(r))
+            for (key, value) in existing_right_keys {
+                right_write.insert_key_value(key, value);
+            }
+
+            // Step 6: Remove moved keys from left page (O(k))
+            for _ in 0..keys_to_move {
+                left_write.remove_key_value_at(start_index);
+            }
+
+            // Step 7: Update the separator key in parent to the first key in right page
             let new_separator = right_write.get_key_at(0).cloned();
             if let Some(new_sep) = new_separator {
-                // Fix: Replace set_key_at with proper method to update a key
                 if parent_write.get_key_at(parent_key_index).is_some() {
                     parent_write.remove_key_value_at(parent_key_index);
                     parent_write.insert_key_value(new_sep, right_page.get_page_id());
@@ -1151,12 +1661,16 @@ where
     }
 
     /// Merge two internal pages when they become too empty
+    ///
+    /// # Arguments
+    /// * `grandparent_path` - Path from root to grandparent (parent's ancestors)
     fn merge_internal_pages(
         &self,
         left_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         right_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
+        grandparent_path: &[PageId],
     ) -> Result<(), BPlusTreeError> {
         // Store page IDs before acquiring any locks
         let left_page_id = left_page.get_page_id();
@@ -1270,8 +1784,8 @@ where
 
         // 8. Check if parent needs rebalancing after removing a key
         if parent_needs_rebalancing {
-            // Recursively handle parent underflow
-            self.check_and_handle_underflow(parent_page_id, false)?;
+            // Recursively handle parent underflow using grandparent_path
+            self.check_and_handle_underflow(parent_page_id, false, grandparent_path)?;
         }
 
         Ok(())
@@ -1658,10 +2172,16 @@ where
     }
 
     /// Check if a page needs rebalancing after removal
+    ///
+    /// # Arguments
+    /// * `page_id` - The page that may need rebalancing
+    /// * `is_leaf` - Whether the page is a leaf page
+    /// * `path` - The path of ancestor page IDs from root to parent of this page
     pub fn check_and_handle_underflow(
         &self,
         page_id: PageId,
         is_leaf: bool,
+        path: &[PageId],
     ) -> Result<bool, BPlusTreeError> {
         // 1. Fetch the header page to get basic tree info
         let header_page = self
@@ -1671,14 +2191,16 @@ where
                 BPlusTreeError::BufferPoolError("Failed to fetch header page".to_string())
             })?;
 
-        let root_page_id = header_page.read().get_root_page_id();
-        let tree_height = header_page.read().get_tree_height();
+        let (root_page_id, tree_height) = {
+            let header = header_page.read();
+            (header.get_root_page_id(), header.get_tree_height())
+        };
 
         // Drop header page to avoid resource conflicts
         drop(header_page);
 
-        // 2. Check if page is the root
-        if page_id == root_page_id {
+        // 2. Check if page is the root (path would be empty)
+        if page_id == root_page_id || path.is_empty() {
             // If this is the root page, handle special cases
             return if is_leaf {
                 // If root is a leaf, it can have any number of keys (no underflow)
@@ -1820,8 +2342,8 @@ where
             drop(page);
         }
 
-        // 4. Page needs rebalancing - find the parent page
-        let parent_page_id = self.find_parent_page_id(page_id, root_page_id)?;
+        // 4. Page needs rebalancing - get parent from path (O(1) instead of O(n) BFS)
+        let parent_page_id = Self::get_parent_from_path(path)?;
         let parent_page = self
             .buffer_pool_manager
             .fetch_page::<BPlusTreeInternalPage<K, C>>(parent_page_id)
@@ -1852,11 +2374,20 @@ where
         drop(parent_read);
 
         // 6. Find a sibling for redistribution or merging
-        let (sibling_index, sibling_id) = self.find_sibling(&parent_page, child_index, true)?;
+        // find_sibling returns (separator_key_index, sibling_page_id)
+        // where separator_key_index is the index of the key in parent that separates
+        // the current page from its sibling
+        let (separator_key_index, sibling_page_id) =
+            self.find_sibling(&parent_page, child_index, true)?;
+
+        // Determine if sibling is to the left or right of current page
+        // If separator_key_index < child_index, sibling is to the left
+        let sibling_is_left = separator_key_index < child_index;
+
+        // Compute grandparent_path once for use in merge operations and recursive rebalancing
+        let grandparent_path = Self::get_grandparent_path(path);
 
         // 7. Decide whether to merge or redistribute
-        let sibling_page_id = sibling_id;
-
         if is_leaf {
             // Get leaf pages
             let current_page = self
@@ -1879,59 +2410,39 @@ where
 
             // Determine if merge or redistribution is needed
             if total_size <= max_size {
-                // Merge the pages
-                let parent_key_index = if sibling_index < child_index {
-                    // Sibling is to the left
-                    child_index - 1
-                } else {
-                    // Sibling is to the right
-                    sibling_index - 1
-                };
-
-                // Ensure left page is always first argument, right page is second
-                if sibling_index < child_index {
-                    // Sibling is on the left
+                // Merge the pages - ensure left page is always first argument
+                if sibling_is_left {
                     self.merge_leaf_pages(
                         &sibling_page,
                         &current_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
+                        &grandparent_path,
                     )?;
                 } else {
-                    // Sibling is on the right
                     self.merge_leaf_pages(
                         &current_page,
                         &sibling_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
+                        &grandparent_path,
                     )?;
                 }
             } else {
-                // Redistribute keys
-                let parent_key_index = if sibling_index < child_index {
-                    // Sibling is to the left
-                    child_index - 1
-                } else {
-                    // Sibling is to the right
-                    sibling_index - 1
-                };
-
-                // Ensure left page is always first argument, right page is second
-                if sibling_index < child_index {
-                    // Sibling is on the left
+                // Redistribute keys - ensure left page is always first argument
+                if sibling_is_left {
                     self.redistribute_leaf_pages(
                         &sibling_page,
                         &current_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
                     )?;
                 } else {
-                    // Sibling is on the right
                     self.redistribute_leaf_pages(
                         &current_page,
                         &sibling_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
                     )?;
                 }
             }
@@ -1959,59 +2470,39 @@ where
 
             // Determine if merge or redistribution is needed
             if total_entries <= max_size {
-                // Merge the pages
-                let parent_key_index = if sibling_index < child_index {
-                    // Sibling is to the left
-                    child_index - 1
-                } else {
-                    // Sibling is to the right
-                    sibling_index - 1
-                };
-
-                // Ensure left page is always first argument, right page is second
-                if sibling_index < child_index {
-                    // Sibling is on the left
+                // Merge the pages - ensure left page is always first argument
+                if sibling_is_left {
                     self.merge_internal_pages(
                         &sibling_page,
                         &current_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
+                        &grandparent_path,
                     )?;
                 } else {
-                    // Sibling is on the right
                     self.merge_internal_pages(
                         &current_page,
                         &sibling_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
+                        &grandparent_path,
                     )?;
                 }
             } else {
-                // Redistribute keys
-                let parent_key_index = if sibling_index < child_index {
-                    // Sibling is to the left
-                    child_index - 1
-                } else {
-                    // Sibling is to the right
-                    sibling_index - 1
-                };
-
-                // Ensure left page is always first argument, right page is second
-                if sibling_index < child_index {
-                    // Sibling is on the left
+                // Redistribute keys - ensure left page is always first argument
+                if sibling_is_left {
                     self.redistribute_internal_pages(
                         &sibling_page,
                         &current_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
                     )?;
                 } else {
-                    // Sibling is on the right
                     self.redistribute_internal_pages(
                         &current_page,
                         &sibling_page,
                         &parent_page,
-                        parent_key_index,
+                        separator_key_index,
                     )?;
                 }
             }
@@ -2020,14 +2511,21 @@ where
         // 8. Check if parent needs rebalancing (it lost a key during merge)
         let parent_size = parent_page.read().get_size();
         if parent_size < min_size && parent_page_id != root_page_id {
-            // Recursively handle parent underflow
-            self.check_and_handle_underflow(parent_page_id, false)?;
+            // Recursively handle parent underflow (grandparent_path already computed above)
+            self.check_and_handle_underflow(parent_page_id, false, &grandparent_path)?;
         }
 
         Ok(true) // Rebalancing occurred
     }
 
-    /// Helper method to find the parent page ID of a given page
+    /// Helper method to find the parent page ID of a given page using BFS.
+    ///
+    /// **Deprecated**: This method uses O(n) BFS traversal. Prefer using `find_leaf_page_with_path`
+    /// and `get_parent_from_path` for O(1) parent lookup during normal operations.
+    ///
+    /// This method is retained for edge cases where the path is not available
+    /// (e.g., debugging, validation, or recovery scenarios).
+    #[allow(dead_code)]
     fn find_parent_page_id(
         &self,
         child_page_id: PageId,
@@ -2769,8 +3267,11 @@ pub fn create_index(
             buffer_pool_manager,
         )),
         TypeId::VarChar => {
-            // Create string index
-            todo!()
+            // VarChar index not yet implemented
+            Err(format!(
+                "VarChar index type not yet implemented (key_type: {:?})",
+                key_type
+            ))
         }
         // Other types
         _ => Err(format!("Unsupported index key type: {:?}", key_type)),
@@ -3204,5 +3705,168 @@ mod tests {
         assert_eq!(metadata_ref.get_index_name(), "test_validation_index");
 
         println!("All validation tests passed!");
+    }
+
+    // ============================================================================
+    // LATCH CRABBING TESTS
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_latch_crabbing_optimistic_insert() {
+        // Test the optimistic fast path for latch crabbing
+        // This uses read latches going down and write latch only on leaf
+        let ctx = TestContext::new("test_latch_crabbing_optimistic").await;
+        let bpm = ctx.bpm;
+
+        let key_schema = Schema::new(vec![]);
+        let metadata = IndexInfo::new(
+            key_schema,
+            "latch_crabbing_optimistic_test".to_string(),
+            1,
+            "test_table".to_string(),
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+            vec![0],
+        );
+
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm);
+        // Use larger order to ensure most inserts use optimistic path
+        assert!(tree.init_with_order(10).is_ok());
+
+        // Insert keys - with order 10, most inserts will use optimistic path
+        for i in 1..=8 {
+            let result = tree.insert_with_latch_crabbing(i, RID::new(1, i as u32));
+            assert!(result.is_ok(), "Failed to insert key {}", i);
+        }
+
+        // Verify all keys exist
+        for i in 1..=8 {
+            let result = tree.search(&i).unwrap();
+            assert!(result.is_some(), "Key {} should exist", i);
+            assert_eq!(result.unwrap(), RID::new(1, i as u32));
+        }
+
+        println!("Latch crabbing optimistic insert test passed!");
+    }
+
+    #[tokio::test]
+    async fn test_latch_crabbing_optimistic_remove() {
+        // Test the optimistic fast path for remove
+        let ctx = TestContext::new("test_latch_crabbing_remove").await;
+        let bpm = ctx.bpm;
+
+        let key_schema = Schema::new(vec![]);
+        let metadata = IndexInfo::new(
+            key_schema,
+            "latch_crabbing_remove_test".to_string(),
+            1,
+            "test_table".to_string(),
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+            vec![0],
+        );
+
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm);
+        // Use larger order to ensure removes use optimistic path
+        assert!(tree.init_with_order(10).is_ok());
+
+        // Insert keys
+        for i in 1..=8 {
+            assert!(tree.insert_with_latch_crabbing(i, RID::new(1, i as u32)).is_ok());
+        }
+
+        // Remove keys using latch crabbing (optimistic path since leaf won't underflow)
+        for i in [1, 3, 5] {
+            let result = tree.remove_with_latch_crabbing(&i);
+            assert!(result.is_ok(), "Failed to remove key {}", i);
+            assert!(result.unwrap(), "Key {} should have been removed", i);
+        }
+
+        // Verify removed keys don't exist
+        for i in [1, 3, 5] {
+            assert!(tree.search(&i).unwrap().is_none(), "Key {} should be gone", i);
+        }
+
+        // Verify remaining keys exist
+        for i in [2, 4, 6, 7, 8] {
+            assert!(tree.search(&i).unwrap().is_some(), "Key {} should exist", i);
+        }
+
+        println!("Latch crabbing optimistic remove test passed!");
+    }
+
+    #[tokio::test]
+    async fn test_latch_crabbing_fallback_to_standard() {
+        // Test that when optimistic path fails, we correctly fall back to standard insert
+        let ctx = TestContext::new("test_latch_crabbing_fallback").await;
+        let bpm = ctx.bpm;
+
+        let key_schema = Schema::new(vec![]);
+        let metadata = IndexInfo::new(
+            key_schema,
+            "latch_crabbing_fallback_test".to_string(),
+            1,
+            "test_table".to_string(),
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+            vec![0],
+        );
+
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm);
+        assert!(tree.init_with_order(4).is_ok());
+
+        // Insert keys using latch crabbing - will use optimistic when possible,
+        // standard insert when splits are needed
+        for i in 1..=6 {
+            let result = tree.insert_with_latch_crabbing(i, RID::new(1, i as u32));
+            assert!(result.is_ok(), "Failed to insert key {}", i);
+        }
+
+        // Verify all keys
+        for i in 1..=6 {
+            let result = tree.search(&i).unwrap();
+            assert!(result.is_some(), "Key {} should exist", i);
+        }
+
+        println!("Latch crabbing fallback test passed!");
+    }
+
+    #[tokio::test]
+    async fn test_latch_crabbing_update_existing_key() {
+        // Test that updating an existing key works correctly
+        let ctx = TestContext::new("test_latch_crabbing_update").await;
+        let bpm = ctx.bpm;
+
+        let key_schema = Schema::new(vec![]);
+        let metadata = IndexInfo::new(
+            key_schema,
+            "latch_crabbing_update_test".to_string(),
+            1,
+            "test_table".to_string(),
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+            vec![0],
+        );
+
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm);
+        assert!(tree.init_with_order(10).is_ok());
+
+        // Insert a key
+        assert!(tree.insert_with_latch_crabbing(5, RID::new(1, 100)).is_ok());
+        assert_eq!(tree.search(&5).unwrap(), Some(RID::new(1, 100)));
+
+        // Update the same key with a different value
+        assert!(tree.insert_with_latch_crabbing(5, RID::new(1, 200)).is_ok());
+        assert_eq!(tree.search(&5).unwrap(), Some(RID::new(1, 200)));
+
+        println!("Latch crabbing update test passed!");
     }
 }
