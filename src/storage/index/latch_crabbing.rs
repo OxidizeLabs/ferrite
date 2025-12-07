@@ -33,7 +33,7 @@ use crate::storage::page::page_types::{
     b_plus_tree_leaf_page::BPlusTreeLeafPage,
 };
 use crate::storage::index::types::{KeyComparator, KeyType};
-use std::cmp::Ordering;
+use log::trace;
 use std::fmt::{Debug, Display};
 
 /// Trait alias for B+ tree key type requirements.
@@ -49,9 +49,10 @@ impl<T> BPlusTreeKeyBound for T where T: KeyType + Send + Sync + Debug + Display
 /// Trait alias for B+ tree comparator requirements.
 ///
 /// This combines all the bounds needed for key comparators in B+ tree operations.
-pub trait BPlusTreeComparatorBound<K: KeyType>: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone {}
+/// Note: `KeyComparator<K>` already implies `Fn(&K, &K) -> Ordering`.
+pub trait BPlusTreeComparatorBound<K: KeyType>: KeyComparator<K> + Send + Sync + 'static + Clone {}
 
-impl<K: KeyType, T> BPlusTreeComparatorBound<K> for T where T: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone {}
+impl<K: KeyType, T> BPlusTreeComparatorBound<K> for T where T: KeyComparator<K> + Send + Sync + 'static + Clone {}
 
 /// Represents the type of operation being performed, used to determine safety criteria
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +161,10 @@ where
 
     /// Hold an internal page guard (for pessimistic mode)
     pub fn hold_internal_page(&mut self, page: PageGuard<BPlusTreeInternalPage<K, C>>) {
+        trace!(
+            "Latch crabbing: holding internal page guard, total held: {}",
+            self.held_internal_pages.len() + 1
+        );
         self.held_internal_pages.push(page);
     }
 
@@ -173,11 +178,22 @@ where
     pub fn release_safe_ancestors(&mut self) {
         // Release all held internal pages - they are no longer needed
         // since the current node is safe
+        let count = self.held_internal_pages.len();
+        if count > 0 {
+            trace!(
+                "Latch crabbing: releasing {} ancestor latches (node is safe)",
+                count
+            );
+        }
         self.held_internal_pages.clear();
     }
 
     /// Release all held latches and clear the path
     pub fn release_all(&mut self) {
+        let count = self.held_internal_pages.len();
+        if count > 0 {
+            trace!("Latch crabbing: releasing all {} held latches", count);
+        }
         self.held_internal_pages.clear();
         self.path.clear();
     }
@@ -224,9 +240,9 @@ pub trait NodeSafety {
 
 impl<K, V, C> NodeSafety for BPlusTreeLeafPage<K, V, C>
 where
-    K: Clone + Send + Sync + 'static + KeyType + bincode::Encode + bincode::Decode<()> + Debug,
+    K: BPlusTreeKeyBound,
     V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
-    C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static,
+    C: BPlusTreeComparatorBound<K>,
 {
     fn is_safe_for(&self, operation: OperationType) -> bool {
         match operation {
@@ -249,8 +265,8 @@ where
 
 impl<K, C> NodeSafety for BPlusTreeInternalPage<K, C>
 where
-    K: Clone + Sync + Send + Debug + 'static + Display,
-    C: Fn(&K, &K) -> Ordering + Sync + Send + 'static + Clone,
+    K: BPlusTreeKeyBound,
+    C: BPlusTreeComparatorBound<K>,
 {
     fn is_safe_for(&self, operation: OperationType) -> bool {
         match operation {
@@ -289,8 +305,34 @@ where
     /// **Important**: This is a snapshot taken during traversal. If the leaf page
     /// is modified after traversal (e.g., by concurrent operations), this value
     /// may become stale. For the most accurate safety check, call
-    /// `leaf_page.read().is_safe_for(context.operation())` directly.
+    /// `leaf_page.is_safe_for(context.operation())` directly on the guard.
     pub is_safe: bool,
+}
+
+impl<K, V, C> TraversalResult<K, V, C>
+where
+    K: BPlusTreeKeyBound,
+    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
+    C: BPlusTreeComparatorBound<K>,
+{
+    /// Create a new traversal result.
+    ///
+    /// # Arguments
+    /// * `leaf_page` - The leaf page guard found during traversal
+    /// * `context` - The latch context with path information
+    /// * `is_safe` - Whether the leaf was safe for the operation at traversal time
+    #[must_use]
+    pub fn new(
+        leaf_page: PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        context: LatchContext<K, C>,
+        is_safe: bool,
+    ) -> Self {
+        Self {
+            leaf_page,
+            context,
+            is_safe,
+        }
+    }
 }
 
 #[cfg(test)]
