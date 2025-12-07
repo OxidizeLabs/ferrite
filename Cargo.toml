@@ -13,7 +13,7 @@ categories = ["database-implementations", "asynchronous", "concurrency"]
 [dependencies]
 # Core runtime dependencies
 log = "0.4"
-parking_lot = "0.12"
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 env_logger = "0.11"
 prettytable-rs = "0.10"
 md5 = "0.8"
