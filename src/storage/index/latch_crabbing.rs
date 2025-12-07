@@ -337,6 +337,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
     use super::*;
 
     // Test LatchContext basic functionality
