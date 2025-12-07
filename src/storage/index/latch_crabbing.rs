@@ -34,7 +34,15 @@ use crate::storage::page::page_types::{
 };
 use crate::storage::index::types::{KeyComparator, KeyType};
 use log::trace;
+use parking_lot::lock_api::ArcRwLockWriteGuard;
+use parking_lot::{RawRwLock, RwLock};
 use std::fmt::{Debug, Display};
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
+
+/// Type alias for the Arc-owned write guard.
+/// This is returned by `RwLock::write_arc()` when using the `arc_lock` feature.
+type InternalPageWriteGuard<K, C> = ArcRwLockWriteGuard<RawRwLock, BPlusTreeInternalPage<K, C>>;
 
 /// Trait alias for B+ tree key type requirements.
 ///
@@ -53,6 +61,140 @@ impl<T> BPlusTreeKeyBound for T where T: KeyType + Send + Sync + Debug + Display
 pub trait BPlusTreeComparatorBound<K: KeyType>: KeyComparator<K> + Send + Sync + 'static + Clone {}
 
 impl<K: KeyType, T> BPlusTreeComparatorBound<K> for T where T: KeyComparator<K> + Send + Sync + 'static + Clone {}
+
+/// A write-locked internal page that properly holds the write latch.
+///
+/// This struct owns the `PageGuard` (for buffer pool pin management) AND holds
+/// the write lock via an `ArcRwLockWriteGuard`. The write lock is held for the
+/// entire lifetime of this struct, which is essential for correct latch crabbing
+/// behavior.
+///
+/// # Design
+///
+/// The struct stores:
+/// - A `PageGuard` which keeps the page pinned in the buffer pool
+/// - An `ArcRwLockWriteGuard` which actually holds the write lock
+///
+/// The `ArcRwLockWriteGuard` owns a cloned `Arc<RwLock<T>>` from the `PageGuard`,
+/// so the lock is genuinely held and not just borrowed.
+///
+/// # Thread Safety
+///
+/// While this struct exists, no other thread can acquire a read or write
+/// lock on the underlying page. This is the key invariant for pessimistic
+/// latch crabbing.
+pub struct HeldWriteLock<K, C>
+where
+    K: BPlusTreeKeyBound,
+    C: BPlusTreeComparatorBound<K>,
+{
+    /// The page guard keeps the page pinned in the buffer pool.
+    /// This must be dropped AFTER the write guard to ensure proper cleanup order.
+    _page_guard: PageGuard<BPlusTreeInternalPage<K, C>>,
+    /// The write guard that owns a cloned Arc and holds the write lock.
+    /// Using ArcRwLockWriteGuard allows us to own the Arc while holding the lock,
+    /// avoiding lifetime issues that would occur with a borrowed RwLockWriteGuard.
+    write_guard: ArcRwLockWriteGuard<RawRwLock, BPlusTreeInternalPage<K, C>>,
+    /// The page ID (cached for quick access without dereferencing)
+    page_id: PageId,
+}
+
+impl<K, C> HeldWriteLock<K, C>
+where
+    K: BPlusTreeKeyBound,
+    C: BPlusTreeComparatorBound<K>,
+{
+    /// Create a new held write lock from a PageGuard.
+    ///
+    /// This acquires the write lock immediately and holds it until the
+    /// HeldWriteLock is dropped. The PageGuard ensures the page stays
+    /// pinned in the buffer pool.
+    ///
+    /// # Arguments
+    /// * `page_guard` - The page guard for the internal page
+    pub fn new(page_guard: PageGuard<BPlusTreeInternalPage<K, C>>) -> Self {
+        let page_id = page_guard.get_page_id();
+        // Clone the Arc so the write guard owns it independently
+        let arc = Arc::clone(page_guard.get_page());
+        // Acquire the write lock using write_arc() which returns an ArcRwLockWriteGuard
+        // that owns the Arc and holds the write lock
+        let write_guard = RwLock::write_arc(&arc);
+        Self {
+            _page_guard: page_guard,
+            write_guard,
+            page_id,
+        }
+    }
+
+    /// Try to create a new held write lock without blocking.
+    ///
+    /// Returns `None` if the lock is currently held by another thread.
+    pub fn try_new(page_guard: PageGuard<BPlusTreeInternalPage<K, C>>) -> Option<Self> {
+        let page_id = page_guard.get_page_id();
+        let arc = Arc::clone(page_guard.get_page());
+        let write_guard = RwLock::try_write_arc(&arc)?;
+        Some(Self {
+            _page_guard: page_guard,
+            write_guard,
+            page_id,
+        })
+    }
+
+    /// Get the page ID
+    #[inline]
+    pub fn page_id(&self) -> PageId {
+        self.page_id
+    }
+
+    /// Get a reference to the underlying page data
+    #[inline]
+    pub fn get(&self) -> &BPlusTreeInternalPage<K, C> {
+        &self.write_guard
+    }
+
+    /// Get a mutable reference to the underlying page data
+    #[inline]
+    pub fn get_mut(&mut self) -> &mut BPlusTreeInternalPage<K, C> {
+        &mut self.write_guard
+    }
+}
+
+impl<K, C> Deref for HeldWriteLock<K, C>
+where
+    K: BPlusTreeKeyBound,
+    C: BPlusTreeComparatorBound<K>,
+{
+    type Target = BPlusTreeInternalPage<K, C>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.write_guard
+    }
+}
+
+impl<K, C> DerefMut for HeldWriteLock<K, C>
+where
+    K: BPlusTreeKeyBound,
+    C: BPlusTreeComparatorBound<K>,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.write_guard
+    }
+}
+
+impl<K, C> Drop for HeldWriteLock<K, C>
+where
+    K: BPlusTreeKeyBound,
+    C: BPlusTreeComparatorBound<K>,
+{
+    fn drop(&mut self) {
+        trace!(
+            "Releasing held write lock on internal page {}",
+            self.page_id
+        );
+        // The ArcRwLockWriteGuard automatically releases the lock when dropped.
+        // Then _page_guard drops, unpinning the page in the buffer pool.
+    }
+}
 
 /// Represents the type of operation being performed, used to determine safety criteria
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,13 +237,16 @@ pub enum OptimisticResult<T> {
 ///   populated during traversal regardless of locking protocol, and is useful for debugging
 ///   and understanding the traversal path. It is NOT cleared by `release_safe_ancestors()`.
 ///
-/// - `held_internal_pages`: Active page guards held during pessimistic traversal. These are
+/// - `held_write_locks`: Active write locks held during pessimistic traversal. These are
 ///   only populated in pessimistic mode and represent pages we still hold write latches on.
 ///   When a "safe" node is encountered, these are cleared to release ancestor latches early.
+///   
+///   **Important**: Unlike the previous `PageGuard`-based implementation, these locks are
+///   *actually held* - the write latch is maintained for the lifetime of the `HeldWriteLock`.
 ///
 /// # Thread Safety
 ///
-/// `LatchContext` is `Send` if the underlying `PageGuard` is `Send`. It should only be used
+/// `LatchContext` is `Send` if the underlying `HeldWriteLock` is `Send`. It should only be used
 /// by a single thread during a traversal operation.
 pub struct LatchContext<K, C>
 where
@@ -112,9 +257,10 @@ where
     operation: OperationType,
     /// The locking protocol being used
     protocol: LockingProtocol,
-    /// Stack of held internal page guards (for pessimistic mode only).
+    /// Stack of held write locks (for pessimistic mode only).
     /// Pages are stored from root to current position. Cleared when a safe node is found.
-    held_internal_pages: Vec<PageGuard<BPlusTreeInternalPage<K, C>>>,
+    /// These locks are *actually held* until released or the context is dropped.
+    held_write_locks: Vec<HeldWriteLock<K, C>>,
     /// Path of page IDs for tracking ancestors (read-only record, always populated).
     /// This is informational and not cleared by `release_safe_ancestors()`.
     path: Vec<PageId>,
@@ -131,7 +277,7 @@ where
         Self {
             operation,
             protocol,
-            held_internal_pages: Vec::new(),
+            held_write_locks: Vec::new(),
             path: Vec::new(),
         }
     }
@@ -159,13 +305,42 @@ where
         self.path.push(page_id);
     }
 
-    /// Hold an internal page guard (for pessimistic mode)
-    pub fn hold_internal_page(&mut self, page: PageGuard<BPlusTreeInternalPage<K, C>>) {
+    /// Hold a write lock on an internal page (for pessimistic mode).
+    ///
+    /// This method acquires a write lock on the page and holds it until
+    /// either `release_safe_ancestors()` or `release_all()` is called,
+    /// or the context is dropped.
+    ///
+    /// The PageGuard keeps the page pinned in the buffer pool, while the
+    /// internal write guard holds the actual write lock.
+    ///
+    /// # Arguments
+    /// * `page_guard` - The PageGuard for the internal page
+    pub fn hold_write_lock(
+        &mut self,
+        page_guard: PageGuard<BPlusTreeInternalPage<K, C>>,
+    ) {
+        let page_id = page_guard.get_page_id();
         trace!(
-            "Latch crabbing: holding internal page guard, total held: {}",
-            self.held_internal_pages.len() + 1
+            "Latch crabbing: acquiring and holding write lock on page {}, total held: {}",
+            page_id,
+            self.held_write_locks.len() + 1
         );
-        self.held_internal_pages.push(page);
+        let held_lock = HeldWriteLock::new(page_guard);
+        self.held_write_locks.push(held_lock);
+    }
+
+    /// Hold an already-acquired write lock (for pessimistic mode).
+    ///
+    /// Use this when you've already created a HeldWriteLock and want to
+    /// transfer ownership to this context.
+    pub fn hold_existing_lock(&mut self, held_lock: HeldWriteLock<K, C>) {
+        trace!(
+            "Latch crabbing: holding existing write lock on page {}, total held: {}",
+            held_lock.page_id(),
+            self.held_write_locks.len() + 1
+        );
+        self.held_write_locks.push(held_lock);
     }
 
     /// Release all ancestor latches that are safe to release.
@@ -173,43 +348,57 @@ where
     /// In pessimistic mode, once we determine a node is "safe" (won't propagate
     /// changes upward), we can release all ancestor latches.
     ///
-    /// Note: This only clears `held_internal_pages`. The `path` is preserved
+    /// Note: This only clears `held_write_locks`. The `path` is preserved
     /// as it serves as a read-only traversal record.
     pub fn release_safe_ancestors(&mut self) {
-        // Release all held internal pages - they are no longer needed
-        // since the current node is safe
-        let count = self.held_internal_pages.len();
+        let count = self.held_write_locks.len();
         if count > 0 {
             trace!(
-                "Latch crabbing: releasing {} ancestor latches (node is safe)",
+                "Latch crabbing: releasing {} ancestor write locks (node is safe)",
                 count
             );
         }
-        self.held_internal_pages.clear();
+        // Dropping the HeldWriteLock releases the write lock
+        self.held_write_locks.clear();
     }
 
     /// Release all held latches and clear the path
     pub fn release_all(&mut self) {
-        let count = self.held_internal_pages.len();
+        let count = self.held_write_locks.len();
         if count > 0 {
-            trace!("Latch crabbing: releasing all {} held latches", count);
+            trace!("Latch crabbing: releasing all {} held write locks", count);
         }
-        self.held_internal_pages.clear();
+        self.held_write_locks.clear();
         self.path.clear();
     }
 
-    /// Get the number of held internal pages
+    /// Get the number of held write locks
     #[must_use]
     pub fn held_count(&self) -> usize {
-        self.held_internal_pages.len()
+        self.held_write_locks.len()
     }
 
-    /// Take ownership of all held internal pages.
+    /// Get a reference to the held write locks.
+    ///
+    /// This allows reading or modifying the pages while keeping the locks held.
+    #[must_use]
+    pub fn held_locks(&self) -> &[HeldWriteLock<K, C>] {
+        &self.held_write_locks
+    }
+
+    /// Get a mutable reference to the held write locks.
+    ///
+    /// This allows modifying the pages while keeping the locks held.
+    pub fn held_locks_mut(&mut self) -> &mut [HeldWriteLock<K, C>] {
+        &mut self.held_write_locks
+    }
+
+    /// Take ownership of all held write locks.
     ///
     /// After calling this, `held_count()` will return 0.
     #[must_use]
-    pub fn take_held_pages(&mut self) -> Vec<PageGuard<BPlusTreeInternalPage<K, C>>> {
-        std::mem::take(&mut self.held_internal_pages)
+    pub fn take_held_locks(&mut self) -> Vec<HeldWriteLock<K, C>> {
+        std::mem::take(&mut self.held_write_locks)
     }
 }
 
@@ -219,7 +408,16 @@ where
     C: BPlusTreeComparatorBound<K>,
 {
     fn drop(&mut self) {
+        // Log if we're dropping with held locks (might indicate a bug)
+        let count = self.held_write_locks.len();
+        if count > 0 {
+            trace!(
+                "LatchContext dropped with {} held write locks - releasing all",
+                count
+            );
+        }
         // Ensure all latches are released when context is dropped
+        // (Vec::drop will drop each HeldWriteLock, releasing the locks)
         self.release_all();
     }
 }
@@ -449,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    fn test_latch_context_take_held_pages() {
+    fn test_latch_context_take_held_locks() {
         let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
             LatchContext::new(OperationType::Insert, LockingProtocol::Pessimistic);
         
@@ -457,11 +655,22 @@ mod tests {
         assert_eq!(ctx.held_count(), 0);
         
         // Take should return empty vec and leave context unchanged
-        let pages = ctx.take_held_pages();
-        assert!(pages.is_empty());
+        let locks = ctx.take_held_locks();
+        assert!(locks.is_empty());
         assert_eq!(ctx.held_count(), 0);
         
-        // Note: Can't easily test with actual PageGuards without buffer pool setup,
-        // but we verify the method works correctly with empty state
+        // Note: Testing with actual HeldWriteLocks requires buffer pool setup.
+        // The key difference from before is that HeldWriteLock *actually* holds 
+        // the write lock, whereas PageGuard only provided access to acquire locks.
+    }
+
+    #[test]
+    fn test_latch_context_held_locks_accessors() {
+        let ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
+            LatchContext::new(OperationType::Delete, LockingProtocol::Pessimistic);
+        
+        // Verify held_locks() accessor works
+        assert!(ctx.held_locks().is_empty());
+        assert_eq!(ctx.held_count(), 0);
     }
 }
