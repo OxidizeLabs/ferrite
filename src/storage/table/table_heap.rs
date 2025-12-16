@@ -1,6 +1,6 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
-use crate::common::config::{INVALID_PAGE_ID, PageId, TableOidT};
+use crate::common::config::{INVALID_PAGE_ID, INVALID_TXN_ID, PageId, TableOidT};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
@@ -211,12 +211,13 @@ impl TableHeap {
                 vec![true; tuple.get_column_count()],
                 Arc::from(current_tuple), // Keep the old version
                 undo_ts,
-                UndoLink::new(
-                    current_meta.get_creator_txn_id(),
-                    current_meta
-                        .try_get_undo_log_idx()
-                        .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?,
-                ),
+                match current_meta
+                    .try_get_undo_log_idx_opt()
+                    .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?
+                {
+                    Some(idx) => UndoLink::new(current_meta.get_creator_txn_id(), idx),
+                    None => UndoLink::new(INVALID_TXN_ID, 0),
+                },
             );
 
             // Append the undo log to the transaction and get its index

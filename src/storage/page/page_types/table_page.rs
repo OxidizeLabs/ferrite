@@ -421,9 +421,12 @@ impl TablePage {
                 let mut owned_meta =
                     TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
                 owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
-                owned_meta
-                    .set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?;
+                match meta.try_get_undo_log_idx_opt().map_err(|e| e.to_string())? {
+                    Some(idx) => owned_meta
+                        .set_undo_log_idx(idx)
+                        .map_err(|e| e.to_string())?,
+                    None => owned_meta.clear_undo_log_idx(),
+                }
                 Ok((owned_meta, tuple))
             }
             Err(e) => Err(format!("Failed to deserialize tuple: {}", e)),
@@ -445,9 +448,12 @@ impl TablePage {
         let mut owned_meta =
             TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
         owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
-        owned_meta
-            .set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        match meta.try_get_undo_log_idx_opt().map_err(|e| e.to_string())? {
+            Some(idx) => owned_meta
+                .set_undo_log_idx(idx)
+                .map_err(|e| e.to_string())?,
+            None => owned_meta.clear_undo_log_idx(),
+        }
         Ok(owned_meta)
     }
 
