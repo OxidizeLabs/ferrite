@@ -7,6 +7,15 @@ use crate::types_db::value::Value;
 use bincode::config;
 use std::fmt::{Display, Formatter};
 
+/// Bincode configuration for persisted tuple / tuple-meta encodings.
+///
+/// Keep this centralized so on-disk formats don’t accidentally diverge across call sites.
+#[inline]
+pub(crate) fn storage_bincode_config() -> bincode::config::Configuration {
+    // NOTE: If/when we change this, it is an on-disk format change.
+    config::standard()
+}
+
 /// Metadata associated with a tuple.
 #[derive(Debug, PartialEq, Copy, Clone, bincode::Encode, bincode::Decode)]
 pub struct TupleMeta {
@@ -68,13 +77,7 @@ impl TupleMeta {
 
     /// Returns whether the tuple is committed.
     pub fn is_committed(&self) -> bool {
-        let committed = self.commit_timestamp.is_some();
-        log::trace!(
-            "TupleMeta.is_committed(): commit_ts={:?}, is_committed={}",
-            self.commit_timestamp,
-            committed
-        );
-        committed
+        self.commit_timestamp.is_some()
     }
 
     /// Returns whether the tuple is marked as deleted.
@@ -93,56 +96,44 @@ impl TupleMeta {
     /// low-watermark used for GC, since that would incorrectly hide versions from newer readers
     /// when an older reader is still active.
     pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
-        log::trace!(
-            "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={:?}, deleted={}, read_ts={}",
-            self.creator_txn_id,
-            txn_id,
-            self.commit_timestamp,
-            self.deleted,
-            read_ts
-        );
-
         // If this tuple version was created by the current transaction, it's visible as long as
         // it isn't deleted by the same transaction.
         if self.creator_txn_id == txn_id {
-            log::trace!("Tuple visible: created by current transaction");
             return !self.deleted;
         }
 
         // If the tuple is deleted, it's not visible
         if self.deleted {
-            log::trace!("Tuple not visible: deleted");
             return false;
         }
 
         // If the tuple is not committed, it's not visible
         if !self.is_committed() {
-            log::trace!("Tuple not visible: not committed");
             return false;
         }
 
         // The tuple is visible if its commit timestamp is <= the reader's snapshot.
-        let visible = self
-            .commit_timestamp
-            .is_some_and(|commit_ts| commit_ts <= read_ts);
-        log::trace!(
-            "Tuple visibility based on read_ts: commit_ts={:?} <= read_ts={} = {}",
-            self.commit_timestamp,
-            read_ts,
-            visible
-        );
-        visible
+        self.commit_timestamp
+            .is_some_and(|commit_ts| commit_ts <= read_ts)
     }
 
     /// Gets the undo log index for this tuple version
-    pub fn get_undo_log_idx(&self) -> usize {
+    pub fn try_get_undo_log_idx(&self) -> Result<usize, TupleError> {
         usize::try_from(self.undo_log_idx)
-            .unwrap_or_else(|_| panic!("undo_log_idx={} does not fit in usize", self.undo_log_idx))
+            .map_err(|_| TupleError::UndoLogIndexOverflow(self.undo_log_idx))
     }
 
     /// Sets the undo log index for this tuple version
     pub fn set_undo_log_idx(&mut self, idx: usize) {
         self.undo_log_idx = idx as u64;
+    }
+
+    /// Gets the raw, fixed-width undo log index stored in the tuple metadata.
+    ///
+    /// This is intended for debugging/diagnostics and for on-disk format stability. Most callers
+    /// should use `try_get_undo_log_idx()` (since in-memory undo logs are indexed by `usize`).
+    pub fn get_undo_log_idx_raw(&self) -> u64 {
+        self.undo_log_idx
     }
 
     /// Sets the creator transaction ID for this tuple
@@ -201,7 +192,7 @@ impl<'de, C> bincode::BorrowDecode<'de, C> for Tuple {
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        // First compare RIDs for efficiency (avoid lock acquisition if RIDs differ)
+        // First compare RIDs for efficiency (avoid value comparisons if RIDs differ).
         if self.rid != other.rid {
             return false;
         }
@@ -238,8 +229,7 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
-        let config = config::standard();
-        bincode::encode_into_slice(self, storage, config).map_err(|e| match e {
+        bincode::encode_into_slice(self, storage, storage_bincode_config()).map_err(|e| match e {
             // bincode 2.x uses this variant when the destination slice is too small.
             bincode::error::EncodeError::UnexpectedEnd => TupleError::BufferTooSmall,
             other => TupleError::SerializationError(other.to_string()),
@@ -252,8 +242,7 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
-        let config = config::standard();
-        bincode::decode_from_slice(storage, config)
+        bincode::decode_from_slice(storage, storage_bincode_config())
             .map_err(|e| TupleError::DeserializationError(e.to_string()))
             .map(|(tuple, _)| tuple)
     }
@@ -274,8 +263,7 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
-        let config = config::standard();
-        bincode::encode_to_vec(self, config)
+        bincode::encode_to_vec(self, storage_bincode_config())
             .map(|vec| vec.len())
             .map_err(|e| TupleError::SerializationError(e.to_string()))
     }
@@ -289,12 +277,24 @@ impl Tuple {
         self.values[column_index].clone()
     }
 
+    /// Borrow the value at the given column index.
+    ///
+    /// This avoids cloning and is preferred for hot paths like scans/predicates.
+    pub fn get_value_ref(&self, column_index: usize) -> &Value {
+        &self.values[column_index]
+    }
+
     pub fn set_values(&mut self, values: Vec<Value>) {
         self.values = values;
     }
 
     pub fn get_values(&self) -> Vec<Value> {
         self.values.clone()
+    }
+
+    /// Borrow all values in the tuple without cloning.
+    pub fn values(&self) -> &[Value] {
+        &self.values
     }
 
     pub fn get_values_mut(&mut self) -> &mut Vec<Value> {
@@ -353,7 +353,7 @@ impl Tuple {
                 let col_name = schema
                     .get_column(i)
                     .map(|col| col.get_name().to_string())
-                    .unwrap_or_else(|| format!("Column_{}", i));
+                    .unwrap_or_else(|| format!("col_{}", i));
                 format!("{}: {}", col_name, value)
             })
             .collect::<Vec<String>>()
@@ -362,8 +362,9 @@ impl Tuple {
 
     /// Combines this tuple with another tuple by appending the other tuple's values
     pub fn combine(&self, other: &Tuple) -> Self {
-        let mut combined_values = self.get_values();
-        combined_values.extend(other.get_values());
+        let mut combined_values = Vec::with_capacity(self.values.len() + other.values.len());
+        combined_values.extend(self.values.iter().cloned());
+        combined_values.extend(other.values.iter().cloned());
 
         Self {
             values: combined_values,

@@ -3,7 +3,7 @@ use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::Page;
 use crate::storage::page::{PAGE_ID_OFFSET, PAGE_TYPE_OFFSET, PageTrait, PageType, PageTypeId};
-use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::storage::table::tuple::{storage_bincode_config, Tuple, TupleMeta};
 use bincode::{Decode, Encode};
 use log::{debug, error};
 use std::any::Any;
@@ -415,13 +415,13 @@ impl TablePage {
         let end = start + *size as usize;
 
         // Deserialize tuple data
-        match bincode::decode_from_slice(&self.data[start..end], bincode::config::standard()) {
+        match bincode::decode_from_slice(&self.data[start..end], storage_bincode_config()) {
             Ok((tuple, _)) => {
                 // Create owned TupleMeta by copying fields instead of cloning
                 let mut owned_meta =
                     TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
                 owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
-                owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
+                owned_meta.set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?);
                 Ok((owned_meta, tuple))
             }
             Err(e) => Err(format!("Failed to deserialize tuple: {}", e)),
@@ -443,7 +443,7 @@ impl TablePage {
         let mut owned_meta =
             TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
         owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
-        owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
+        owned_meta.set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?);
         Ok(owned_meta)
     }
 

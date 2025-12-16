@@ -496,7 +496,10 @@ impl TransactionalTableHeap {
         if meta.is_deleted() {
             fixed_meta.set_deleted(true);
         }
-        fixed_meta.set_undo_log_idx(meta.get_undo_log_idx());
+        fixed_meta.set_undo_log_idx(
+            meta.try_get_undo_log_idx()
+                .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?,
+        );
 
         // Perform insert using internal method
         let rid = self
@@ -566,6 +569,10 @@ impl TransactionalTableHeap {
             current_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
+        let current_prev_log_idx = current_meta
+            .try_get_undo_log_idx()
+            .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?;
+
         // Create undo log that points to the original version
         let undo_log = UndoLog {
             is_deleted: false,
@@ -574,7 +581,7 @@ impl TransactionalTableHeap {
             ts: current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
             prev_version: UndoLink {
                 prev_txn: current_meta.get_creator_txn_id(),
-                prev_log_idx: current_meta.get_undo_log_idx(),
+                prev_log_idx: current_prev_log_idx,
             },
             original_rid: Some(rid),
         };
@@ -596,7 +603,7 @@ impl TransactionalTableHeap {
             current_version_link,
             txn.get_transaction_id(),
             current_meta.get_creator_txn_id(),
-            current_meta.get_undo_log_idx()
+            current_meta.get_undo_log_idx_raw()
         );
 
         // Update the undo link to point to the current version
@@ -610,7 +617,7 @@ impl TransactionalTableHeap {
         log::debug!(
             "Created new meta: creator={}, idx={}, commit_ts={}",
             new_meta.get_creator_txn_id(),
-            new_meta.get_undo_log_idx(),
+            new_meta.get_undo_log_idx_raw(),
             new_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
@@ -693,7 +700,7 @@ impl TransactionalTableHeap {
                 prev_meta.get_creator_txn_id(),
                 prev_meta.get_commit_timestamp().expect("Commit timestamp is required"),
                 prev_meta.is_deleted(),
-                prev_meta.get_undo_log_idx()
+                prev_meta.get_undo_log_idx_raw()
             );
 
             // Update current version
@@ -773,6 +780,10 @@ impl TransactionalTableHeap {
             current_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
+        let current_prev_log_idx = current_meta
+            .try_get_undo_log_idx()
+            .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?;
+
         // Create undo log that points to the original version, now with RID for proper restoration
         let undo_log = UndoLog::new_for_delete(
             false, // Not deleted in the previous version
@@ -781,7 +792,7 @@ impl TransactionalTableHeap {
             current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
             UndoLink {
                 prev_txn: current_meta.get_creator_txn_id(),
-                prev_log_idx: current_meta.get_undo_log_idx(),
+                prev_log_idx: current_prev_log_idx,
             },
             rid,
         );
@@ -806,7 +817,7 @@ impl TransactionalTableHeap {
         log::debug!(
             "Created new meta: creator={}, idx={}, commit_ts={}, deleted=true",
             new_meta.get_creator_txn_id(),
-            new_meta.get_undo_log_idx(),
+            new_meta.get_undo_log_idx_raw(),
             new_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
