@@ -1,9 +1,9 @@
-use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
+use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::Page;
 use crate::storage::page::{PAGE_ID_OFFSET, PAGE_TYPE_OFFSET, PageTrait, PageType, PageTypeId};
-use crate::storage::table::tuple::{storage_bincode_config, Tuple, TupleMeta};
+use crate::storage::table::tuple::{Tuple, TupleMeta};
 use bincode::{Decode, Encode};
 use log::{debug, error};
 use std::any::Any;
@@ -181,7 +181,7 @@ impl TablePage {
         }
 
         // Then serialize the tuple to get its actual size
-        let tuple_data = match bincode::encode_to_vec(tuple, bincode::config::standard()) {
+        let tuple_data = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
             Ok(data) => data,
             Err(_) => return None,
         };
@@ -229,7 +229,7 @@ impl TablePage {
         }
 
         // Serialize the new tuple data
-        let tuple_data = bincode::encode_to_vec(tuple, bincode::config::standard())
+        let tuple_data = bincode::encode_to_vec(tuple, storage_bincode_config())
             .map_err(|_| PageError::SerializationError)?;
         let new_size = tuple_data.len() as u16;
 
@@ -421,7 +421,9 @@ impl TablePage {
                 let mut owned_meta =
                     TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
                 owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
-                owned_meta.set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?);
+                owned_meta
+                    .set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
                 Ok((owned_meta, tuple))
             }
             Err(e) => Err(format!("Failed to deserialize tuple: {}", e)),
@@ -443,7 +445,9 @@ impl TablePage {
         let mut owned_meta =
             TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
         owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
-        owned_meta.set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?);
+        owned_meta
+            .set_undo_log_idx(meta.try_get_undo_log_idx().map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
         Ok(owned_meta)
     }
 
@@ -499,7 +503,7 @@ impl TablePage {
             .tuple_info
             .iter()
             .map(|(_, _, meta)| {
-                4 + bincode::encode_to_vec(meta, bincode::config::standard())
+                4 + bincode::encode_to_vec(meta, storage_bincode_config())
                     .expect("Failed to serialize meta")
                     .len()
             })
@@ -540,7 +544,7 @@ impl TablePage {
             offset += 4;
 
             // Write tuple meta
-            let meta_bytes = bincode::encode_to_vec(meta, bincode::config::standard())
+            let meta_bytes = bincode::encode_to_vec(meta, storage_bincode_config())
                 .expect("Failed to serialize meta");
 
             // Check if we have room for meta plus end magic
@@ -658,7 +662,7 @@ impl TablePage {
 
             // Read meta - use actual decoding to get the exact size consumed
             let meta_result: Result<(TupleMeta, usize), _> =
-                bincode::decode_from_slice(&bytes[offset..], bincode::config::standard());
+                bincode::decode_from_slice(&bytes[offset..], storage_bincode_config());
 
             let (meta, meta_size) =
                 meta_result.map_err(|e| format!("Failed to deserialize meta: {}", e))?;
@@ -760,7 +764,7 @@ impl TablePage {
         }
 
         // Serialize the new tuple data
-        let tuple_data = bincode::encode_to_vec(tuple, bincode::config::standard())
+        let tuple_data = bincode::encode_to_vec(tuple, storage_bincode_config())
             .map_err(|e| format!("Failed to serialize tuple: {}", e))?;
 
         // Get current tuple info
@@ -838,7 +842,7 @@ impl TablePage {
     // Add a method to check if tuple is too large for any page
     pub fn is_tuple_too_large(&self, tuple: &Tuple) -> bool {
         // Get serialized size directly from the tuple to be more accurate
-        let serialized_size = match bincode::encode_to_vec(tuple, bincode::config::standard()) {
+        let serialized_size = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
             Ok(data) => data.len(),
             Err(_) => return true, // If we can't serialize it, consider it too large
         };
@@ -897,7 +901,7 @@ impl TablePage {
         }
 
         // Serialize tuple data
-        let tuple_data = match bincode::encode_to_vec(tuple, bincode::config::standard()) {
+        let tuple_data = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
             Ok(data) => {
                 debug!("Serialized tuple data length: {}", data.len());
                 data
@@ -982,7 +986,7 @@ impl TablePage {
         // Skip RID validation - use the provided RID
 
         // Serialize tuple data
-        let tuple_data = match bincode::encode_to_vec(tuple, bincode::config::standard()) {
+        let tuple_data = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
             Ok(data) => {
                 debug!("Serialized tuple data length: {}", data.len());
                 data

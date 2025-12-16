@@ -341,7 +341,9 @@ impl TransactionManager {
                         let mut meta = TupleMeta::new(undo_link.prev_txn);
                         meta.set_commit_timestamp(undo_log.ts);
                         meta.set_deleted(false); // Explicitly set to false for restored tuples
-                        meta.set_undo_log_idx(undo_link.prev_log_idx);
+                        meta.set_undo_log_idx(undo_link.prev_log_idx)
+                            .map_err(|e| format!("Invalid undo log index during restore: {}", e))
+                            .unwrap();
 
                         // For deleted tuples, we need a different approach
                         // First get the page directly to bypass the deletion check
@@ -390,7 +392,9 @@ impl TransactionManager {
                         let mut meta = TupleMeta::new(undo_link.prev_txn);
                         meta.set_commit_timestamp(undo_log.ts);
                         meta.set_deleted(undo_log.is_deleted);
-                        meta.set_undo_log_idx(undo_link.prev_log_idx);
+                        meta.set_undo_log_idx(undo_link.prev_log_idx)
+                            .map_err(|e| format!("Invalid undo log index during rollback: {}", e))
+                            .unwrap();
 
                         // Use a reference to the Arc<Tuple> without cloning
                         log::debug!(
@@ -423,7 +427,8 @@ impl TransactionManager {
                     // Mark it as deleted since it was part of an aborted transaction
                     let mut meta = TupleMeta::new(txn.get_transaction_id());
                     meta.set_deleted(true);
-                    meta.set_commit_timestamp(0); // Set to 0 to ensure it's not visible
+                    // Uncommitted/aborted versions should not have a commit timestamp.
+                    meta.set_commit_timestamp_opt(None);
 
                     // Update the tuple metadata to mark it as deleted
                     if let Some(page_guard) = table_heap

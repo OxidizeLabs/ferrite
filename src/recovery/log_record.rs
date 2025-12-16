@@ -3,7 +3,7 @@ use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
+use crate::common::config::{storage_bincode_config, INVALID_LSN, Lsn, PageId, TxnId};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use bincode::{Decode, Encode};
@@ -354,7 +354,7 @@ impl LogRecord {
     /// # Returns
     /// A vector of bytes representing the serialized log record, or an error if serialization fails.
     pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::error::EncodeError> {
-        bincode::encode_to_vec(self, bincode::config::standard())
+        bincode::encode_to_vec(self, storage_bincode_config())
     }
 
     /// Deserializes a log record from bytes using bincode 2.0.
@@ -365,7 +365,7 @@ impl LogRecord {
     /// # Returns
     /// A deserialized log record, or an error if deserialization fails.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
-        let (record, _) = bincode::decode_from_slice(bytes, bincode::config::standard())?;
+        let (record, _) = bincode::decode_from_slice(bytes, storage_bincode_config())?;
         Ok(record)
     }
 }

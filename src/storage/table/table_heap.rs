@@ -224,7 +224,9 @@ impl TableHeap {
 
             // Create new meta with updated undo log index
             let mut new_meta = *meta;
-            new_meta.set_undo_log_idx(txn.get_undo_log_num() - 1);
+            new_meta
+                .set_undo_log_idx(txn.get_undo_log_num() - 1)
+                .map_err(|e| format!("Invalid undo log index: {}", e))?;
             let new_meta_arc = Arc::new(new_meta);
 
             // Update the version chain

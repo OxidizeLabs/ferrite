@@ -372,13 +372,16 @@ impl Transaction {
 
     /// Enhanced tuple visibility check that considers watermark
     pub fn is_tuple_visible(&self, meta: &TupleMeta) -> bool {
+        let commit_ts_dbg = meta.get_commit_timestamp();
         debug!(
             "Transaction.is_tuple_visible(): txn_id={}, isolation={:?}, read_ts={}, meta={{creator={}, commit_ts={}, deleted={}}}",
             self.txn_id,
             self.isolation_level,
             *self.read_ts.read(),
             meta.get_creator_txn_id(),
-            meta.get_commit_timestamp().expect("Commit timestamp is required"),
+            commit_ts_dbg
+                .map(|ts| ts.to_string())
+                .unwrap_or_else(|| "None".to_string()),
             meta.is_deleted()
         );
 
@@ -396,7 +399,9 @@ impl Transaction {
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
                 let visible = meta.is_committed()
-                    && meta.get_commit_timestamp().expect("Commit timestamp is required") <= *self.read_ts.read()
+                    && meta
+                        .get_commit_timestamp()
+                        .is_some_and(|ts| ts <= *self.read_ts.read())
                     && !meta.is_deleted();
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
