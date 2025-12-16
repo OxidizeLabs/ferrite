@@ -2,9 +2,11 @@
 //
 // This module handles the actual execution of I/O operations,
 // including file operations for both database and log files.
+// Supports direct I/O with properly aligned buffers for optimal performance.
 
 use super::operations::{IOOperation, IOOperationType};
 use crate::common::config::{DB_PAGE_SIZE, PageId};
+use crate::storage::disk::direct_io::{AlignedBuffer, DirectIOConfig};
 use std::io::Result as IoResult;
 use std::sync::Arc;
 use tokio::fs::File;
@@ -18,6 +20,10 @@ use tokio::sync::Mutex;
 /// - Reading and writing log entries
 /// - Syncing files to disk
 /// - Managing file handles safely across async operations
+///
+/// When direct I/O is enabled, all operations use properly aligned buffers
+/// to ensure optimal performance and compatibility with O_DIRECT on Linux,
+/// F_NOCACHE on macOS, and FILE_FLAG_NO_BUFFERING on Windows.
 #[derive(Debug)]
 pub struct IOOperationExecutor {
     /// Database file handle for page operations
@@ -25,6 +31,9 @@ pub struct IOOperationExecutor {
 
     /// Log file handle for log operations
     log_file: Arc<Mutex<File>>,
+
+    /// Direct I/O configuration
+    direct_io_config: DirectIOConfig,
 }
 
 impl IOOperationExecutor {
@@ -34,7 +43,44 @@ impl IOOperationExecutor {
     /// * `db_file` - Shared database file handle
     /// * `log_file` - Shared log file handle
     pub fn new(db_file: Arc<Mutex<File>>, log_file: Arc<Mutex<File>>) -> Self {
-        Self { db_file, log_file }
+        Self {
+            db_file,
+            log_file,
+            direct_io_config: DirectIOConfig::default(),
+        }
+    }
+
+    /// Creates a new I/O operation executor with direct I/O configuration
+    ///
+    /// # Arguments
+    /// * `db_file` - Shared database file handle
+    /// * `log_file` - Shared log file handle
+    /// * `direct_io_config` - Configuration for direct I/O operations
+    pub fn with_config(
+        db_file: Arc<Mutex<File>>,
+        log_file: Arc<Mutex<File>>,
+        direct_io_config: DirectIOConfig,
+    ) -> Self {
+        log::debug!(
+            "Creating IOOperationExecutor with direct_io={}, alignment={}",
+            direct_io_config.enabled,
+            direct_io_config.alignment
+        );
+        Self {
+            db_file,
+            log_file,
+            direct_io_config,
+        }
+    }
+
+    /// Returns whether direct I/O is enabled
+    pub fn is_direct_io_enabled(&self) -> bool {
+        self.direct_io_config.enabled
+    }
+
+    /// Returns the alignment requirement for direct I/O
+    pub fn alignment(&self) -> usize {
+        self.direct_io_config.alignment
     }
 
     /// Executes a single I/O operation
@@ -96,6 +142,9 @@ impl IOOperationExecutor {
 
     /// Reads a page from the database file
     ///
+    /// When direct I/O is enabled, uses aligned buffers to ensure
+    /// compatibility with O_DIRECT and similar mechanisms.
+    ///
     /// # Arguments
     /// * `page_id` - The page identifier to read
     ///
@@ -103,15 +152,28 @@ impl IOOperationExecutor {
     /// The page data as a vector of bytes
     async fn execute_read_page(&self, page_id: PageId) -> IoResult<Vec<u8>> {
         let offset = page_id * DB_PAGE_SIZE;
-        let mut buffer = vec![0u8; DB_PAGE_SIZE as usize];
+        let size = DB_PAGE_SIZE as usize;
 
         let mut file = self.db_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
-        file.read_exact(&mut buffer).await?;
-        Ok(buffer)
+
+        if self.direct_io_config.enabled {
+            // Use aligned buffer for direct I/O
+            let mut aligned_buf = AlignedBuffer::new(size, self.direct_io_config.alignment);
+            file.read_exact(aligned_buf.as_mut_slice()).await?;
+            Ok(aligned_buf.to_vec())
+        } else {
+            // Use standard buffer for buffered I/O
+            let mut buffer = vec![0u8; size];
+            file.read_exact(&mut buffer).await?;
+            Ok(buffer)
+        }
     }
 
     /// Writes a page to the database file
+    ///
+    /// When direct I/O is enabled, uses aligned buffers to ensure
+    /// compatibility with O_DIRECT and similar mechanisms.
     ///
     /// # Arguments
     /// * `page_id` - The page identifier to write to
@@ -124,15 +186,27 @@ impl IOOperationExecutor {
         // Debug: Check file size before write
         let file_size_before = file.metadata().await?.len();
         log::debug!(
-            "execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}",
+            "execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}, direct_io={}",
             page_id,
             offset,
             data.len(),
-            file_size_before
+            file_size_before,
+            self.direct_io_config.enabled
         );
 
         file.seek(std::io::SeekFrom::Start(offset)).await?;
-        file.write_all(data).await?;
+
+        if self.direct_io_config.enabled {
+            // Use aligned buffer for direct I/O
+            // DB_PAGE_SIZE (4096) is already aligned, but we ensure the buffer is aligned
+            let aligned_buf =
+                AlignedBuffer::from_slice_with_size(data, DB_PAGE_SIZE as usize, self.direct_io_config.alignment);
+            file.write_all(aligned_buf.as_slice()).await?;
+        } else {
+            // Use standard write for buffered I/O
+            file.write_all(data).await?;
+        }
+
         file.flush().await?; // Ensure data is flushed to OS buffers
 
         // Debug: Check file size after write and flush
@@ -148,6 +222,10 @@ impl IOOperationExecutor {
 
     /// Reads data from the log file at a specific offset
     ///
+    /// When direct I/O is enabled, uses aligned buffers. Note that for
+    /// log operations with non-aligned sizes, the buffer is allocated
+    /// with aligned size but only the requested bytes are returned.
+    ///
     /// # Arguments
     /// * `offset` - Byte offset in the log file
     /// * `size` - Number of bytes to read
@@ -155,28 +233,59 @@ impl IOOperationExecutor {
     /// # Returns
     /// The log data as a vector of bytes
     async fn execute_read_log(&self, offset: u64, size: usize) -> IoResult<Vec<u8>> {
-        let mut buffer = vec![0u8; size];
+        if size == 0 {
+            return Ok(Vec::new());
+        }
 
         let mut file = self.log_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
-        file.read_exact(&mut buffer).await?;
-        Ok(buffer)
+
+        if self.direct_io_config.enabled {
+            // For direct I/O, we need to read aligned amounts
+            // but return only the requested size
+            let alignment = self.direct_io_config.alignment;
+            let aligned_size = crate::storage::disk::direct_io::round_up_to_alignment(size, alignment);
+            let mut aligned_buf = AlignedBuffer::new(aligned_size, alignment);
+            file.read_exact(aligned_buf.as_mut_slice()).await?;
+            // Return only the requested size
+            Ok(aligned_buf.as_slice()[..size].to_vec())
+        } else {
+            let mut buffer = vec![0u8; size];
+            file.read_exact(&mut buffer).await?;
+            Ok(buffer)
+        }
     }
 
     /// Writes data to the log file at a specific offset
+    ///
+    /// When direct I/O is enabled, uses aligned buffers.
     ///
     /// # Arguments
     /// * `data` - The data to write
     /// * `offset` - Byte offset in the log file
     async fn execute_write_log(&self, data: &[u8], offset: u64) -> IoResult<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+
         let mut file = self.log_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
-        file.write_all(data).await?;
+
+        if self.direct_io_config.enabled {
+            // Use aligned buffer for direct I/O
+            let aligned_buf = AlignedBuffer::from_slice(data, self.direct_io_config.alignment);
+            file.write_all(aligned_buf.as_slice()).await?;
+        } else {
+            file.write_all(data).await?;
+        }
+
         file.flush().await?; // Ensure data is flushed to OS buffers
         Ok(())
     }
 
     /// Appends data to the end of the log file
+    ///
+    /// When direct I/O is enabled, uses aligned buffers.
     ///
     /// # Arguments
     /// * `data` - The data to append
@@ -186,8 +295,18 @@ impl IOOperationExecutor {
     async fn execute_append_log(&self, data: &[u8]) -> IoResult<u64> {
         let mut file = self.log_file.lock().await;
         let offset = file.seek(std::io::SeekFrom::End(0)).await?;
-        file.write_all(data).await?;
-        file.flush().await?; // Ensure data is flushed to OS buffers
+
+        if !data.is_empty() {
+            if self.direct_io_config.enabled {
+                // Use aligned buffer for direct I/O
+                let aligned_buf = AlignedBuffer::from_slice(data, self.direct_io_config.alignment);
+                file.write_all(aligned_buf.as_slice()).await?;
+            } else {
+                file.write_all(data).await?;
+            }
+            file.flush().await?; // Ensure data is flushed to OS buffers
+        }
+
         Ok(offset)
     }
 

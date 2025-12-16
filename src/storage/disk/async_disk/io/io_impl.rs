@@ -1,9 +1,11 @@
 // Async I/O Engine implementation
 // Refactored into separate modules for better organization
+// Supports direct I/O with aligned buffers for optimal performance
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::io::completion::CompletionTracker;
 use crate::storage::disk::async_disk::io::metrics;
+use crate::storage::disk::direct_io::DirectIOConfig;
 use std::io::Result as IoResult;
 use std::sync::Arc;
 use tokio::fs::File;
@@ -18,6 +20,9 @@ use super::worker::IOWorkerManager;
 // All the modular components are now in separate files
 
 /// Async I/O engine with tokio
+///
+/// This engine supports direct I/O for bypassing the OS page cache,
+/// which is essential for databases that manage their own caching.
 #[derive(Debug)]
 pub struct AsyncIOEngine {
     // Queue management - separated responsibility
@@ -34,10 +39,34 @@ pub struct AsyncIOEngine {
 }
 
 impl AsyncIOEngine {
-    /// Creates a new async I/O engine
+    /// Creates a new async I/O engine with default (buffered) I/O
     pub fn new(db_file: Arc<Mutex<File>>, log_file: Arc<Mutex<File>>) -> IoResult<Self> {
+        Self::with_config(db_file, log_file, DirectIOConfig::default())
+    }
+
+    /// Creates a new async I/O engine with direct I/O configuration
+    ///
+    /// # Arguments
+    /// * `db_file` - Shared database file handle (should be opened with direct I/O flags)
+    /// * `log_file` - Shared log file handle (should be opened with direct I/O flags)
+    /// * `direct_io_config` - Configuration for direct I/O operations
+    pub fn with_config(
+        db_file: Arc<Mutex<File>>,
+        log_file: Arc<Mutex<File>>,
+        direct_io_config: DirectIOConfig,
+    ) -> IoResult<Self> {
+        log::debug!(
+            "Creating AsyncIOEngine with direct_io={}, alignment={}",
+            direct_io_config.enabled,
+            direct_io_config.alignment
+        );
+
         let queue_manager = Arc::new(IOQueueManager::new());
-        let executor = Arc::new(IOOperationExecutor::new(db_file, log_file));
+        let executor = Arc::new(IOOperationExecutor::with_config(
+            db_file,
+            log_file,
+            direct_io_config,
+        ));
         let worker_manager = IOWorkerManager::new(64); // Allow up to 64 concurrent I/O operations
         let completion_tracker = Arc::new(CompletionTracker::new());
 
@@ -47,6 +76,11 @@ impl AsyncIOEngine {
             worker_manager,
             completion_tracker,
         })
+    }
+
+    /// Returns whether direct I/O is enabled for this engine
+    pub fn is_direct_io_enabled(&self) -> bool {
+        self.executor.is_direct_io_enabled()
     }
 
     /// Starts the I/O engine with specified number of worker threads
