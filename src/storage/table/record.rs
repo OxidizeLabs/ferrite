@@ -147,22 +147,28 @@ impl Record {
     }
 
     /// Returns a detailed string representation of the record.
-    pub fn to_string_detailed(&self, schema: Schema) -> String {
+    pub fn to_string_detailed(&self, schema: &Schema) -> String {
         format!(
             "RID: {}, {}",
             self.rid,
             self.tuple.to_string_detailed(schema)
         )
     }
+
+    /// Compatibility helper for older call sites that pass `Schema` by value.
+    pub fn to_string_detailed_owned(&self, schema: Schema) -> String {
+        self.to_string_detailed(&schema)
+    }
 }
 
 impl Display for Record {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let schema = self.tuple.get_schema();
         write!(
             f,
             "RID: {}, {}",
             self.rid,
-            self.tuple.to_string_detailed(self.tuple.get_schema())
+            self.tuple.to_string_detailed(&schema)
         )
     }
 }
@@ -215,7 +221,7 @@ mod tests {
     fn test_record_to_string_detailed() {
         let (record, schema) = create_sample_record();
         let expected = "RID: page_id: 0 slot_num: 0, id: 1, name: Alice, age: 30, is_student: true";
-        assert_eq!(record.to_string_detailed(schema), expected);
+        assert_eq!(record.to_string_detailed(&schema), expected);
     }
 
     #[test]

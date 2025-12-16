@@ -6,9 +6,7 @@ use crate::common::rid::RID;
 use crate::types_db::value::Value;
 use bincode::config;
 use log;
-use parking_lot::{RwLock, RwLockWriteGuard};
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 /// Metadata associated with a tuple.
 #[derive(Debug, PartialEq, Copy, Clone, bincode::Encode, bincode::Decode)]
@@ -16,7 +14,10 @@ pub struct TupleMeta {
     creator_txn_id: TxnId,
     commit_timestamp: Timestamp,
     deleted: bool,
-    undo_log_idx: usize,
+    /// Index into the owning transaction's undo log chain.
+    ///
+    /// Stored as a fixed-width integer to keep the on-disk format stable across architectures.
+    undo_log_idx: u64,
 }
 
 impl TupleMeta {
@@ -58,7 +59,7 @@ impl TupleMeta {
     /// Returns whether the tuple is committed.
     pub fn is_committed(&self) -> bool {
         let committed = self.commit_timestamp != Timestamp::MAX;
-        log::debug!(
+        log::trace!(
             "TupleMeta.is_committed(): commit_ts={}, is_committed={}",
             self.commit_timestamp,
             committed
@@ -82,7 +83,7 @@ impl TupleMeta {
     /// low-watermark used for GC, since that would incorrectly hide versions from newer readers
     /// when an older reader is still active.
     pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
-        log::debug!(
+        log::trace!(
             "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={}, deleted={}, read_ts={}",
             self.creator_txn_id,
             txn_id,
@@ -94,25 +95,25 @@ impl TupleMeta {
         // If this tuple version was created by the current transaction, it's visible as long as
         // it isn't deleted by the same transaction.
         if self.creator_txn_id == txn_id {
-            log::debug!("Tuple visible: created by current transaction");
+            log::trace!("Tuple visible: created by current transaction");
             return !self.deleted;
         }
 
         // If the tuple is deleted, it's not visible
         if self.deleted {
-            log::debug!("Tuple not visible: deleted");
+            log::trace!("Tuple not visible: deleted");
             return false;
         }
 
         // If the tuple is not committed, it's not visible
         if !self.is_committed() {
-            log::debug!("Tuple not visible: not committed");
+            log::trace!("Tuple not visible: not committed");
             return false;
         }
 
         // The tuple is visible if its commit timestamp is <= the reader's snapshot.
         let visible = self.commit_timestamp <= read_ts;
-        log::debug!(
+        log::trace!(
             "Tuple visibility based on read_ts: commit_ts={} <= read_ts={} = {}",
             self.commit_timestamp,
             read_ts,
@@ -123,12 +124,13 @@ impl TupleMeta {
 
     /// Gets the undo log index for this tuple version
     pub fn get_undo_log_idx(&self) -> usize {
-        self.undo_log_idx
+        usize::try_from(self.undo_log_idx)
+            .unwrap_or_else(|_| panic!("undo_log_idx={} does not fit in usize", self.undo_log_idx))
     }
 
     /// Sets the undo log index for this tuple version
     pub fn set_undo_log_idx(&mut self, idx: usize) {
-        self.undo_log_idx = idx;
+        self.undo_log_idx = idx as u64;
     }
 
     /// Sets the creator transaction ID for this tuple
@@ -140,7 +142,8 @@ impl TupleMeta {
 /// Represents a tuple in the database.
 #[derive(Debug, Clone)]
 pub struct Tuple {
-    values: Arc<RwLock<Vec<Value>>>,
+    /// Tuple values. `Tuple` has value semantics: cloning a tuple clones its values.
+    values: Vec<Value>,
     rid: RID,
 }
 
@@ -150,8 +153,8 @@ impl bincode::Encode for Tuple {
         &self,
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
-        let values = self.values.read().clone();
-        (values, self.rid).encode(encoder)
+        self.values.encode(encoder)?;
+        self.rid.encode(encoder)
     }
 }
 
@@ -160,9 +163,10 @@ impl<C> bincode::Decode<C> for Tuple {
     fn decode<D: bincode::de::Decoder<Context = C>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
-        let (values, rid): (Vec<Value>, RID) = bincode::Decode::decode(decoder)?;
+        let values: Vec<Value> = bincode::Decode::decode(decoder)?;
+        let rid: RID = bincode::Decode::decode(decoder)?;
         Ok(Self {
-            values: Arc::new(RwLock::new(values)),
+            values,
             rid,
         })
     }
@@ -174,9 +178,10 @@ impl<'de, C> bincode::BorrowDecode<'de, C> for Tuple {
     where
         D: bincode::de::BorrowDecoder<'de, Context = C>,
     {
-        let (values, rid): (Vec<Value>, RID) = bincode::BorrowDecode::borrow_decode(decoder)?;
+        let values: Vec<Value> = bincode::BorrowDecode::borrow_decode(decoder)?;
+        let rid: RID = bincode::BorrowDecode::borrow_decode(decoder)?;
         Ok(Self {
-            values: Arc::new(RwLock::new(values)),
+            values,
             rid,
         })
     }
@@ -189,12 +194,7 @@ impl PartialEq for Tuple {
             return false;
         }
 
-        // Compare the contents of values by acquiring read locks
-        let self_values = self.values.read();
-        let other_values = other.values.read();
-
-        // Compare the contents of the vectors
-        *self_values == *other_values
+        self.values == other.values
     }
 }
 
@@ -215,7 +215,7 @@ impl Tuple {
         );
 
         Self {
-            values: Arc::new(RwLock::new(values.to_vec())),
+            values: values.to_vec(),
             rid,
         }
     }
@@ -227,15 +227,24 @@ impl Tuple {
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
         let config = config::standard();
-        let serialized = bincode::encode_to_vec(self, config)
-            .map_err(|e| TupleError::SerializationError(e.to_string()))?;
-
-        if storage.len() < serialized.len() {
-            return Err(TupleError::BufferTooSmall);
+        match bincode::encode_into_slice(self, storage, config) {
+            Ok(written) => Ok(written),
+            Err(e) => {
+                // bincode doesn't expose a stable "buffer too small" error classification across
+                // all versions/configs; detect the common "unexpected end" cases.
+                let msg = e.to_string();
+                let msg_lower = msg.to_lowercase();
+                if msg_lower.contains("unexpected end")
+                    || msg_lower.contains("unexpectedend")
+                    || msg_lower.contains("end of buffer")
+                    || msg_lower.contains("end of slice")
+                {
+                    Err(TupleError::BufferTooSmall)
+                } else {
+                    Err(TupleError::SerializationError(msg))
+                }
+            }
         }
-
-        storage[..serialized.len()].copy_from_slice(&serialized);
-        Ok(serialized.len())
     }
 
     /// Deserializes a tuple from the given storage buffer.
@@ -267,8 +276,7 @@ impl Tuple {
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
         let config = config::standard();
-        let values = self.values.read().clone();
-        bincode::encode_to_vec(&(values, self.rid), config)
+        bincode::encode_to_vec(self, config)
             .map(|vec| vec.len())
             .map_err(|e| TupleError::SerializationError(e.to_string()))
     }
@@ -279,27 +287,27 @@ impl Tuple {
     ///
     /// Panics if the index is out of bounds.
     pub fn get_value(&self, column_index: usize) -> Value {
-        self.values.read()[column_index].clone()
+        self.values[column_index].clone()
     }
 
     pub fn set_values(&mut self, values: Vec<Value>) {
-        *self.values.write() = values;
+        self.values = values;
     }
 
     pub fn get_values(&self) -> Vec<Value> {
-        self.values.read().clone()
+        self.values.clone()
     }
 
-    pub fn get_values_mut(&mut self) -> RwLockWriteGuard<'_, Vec<Value>> {
-        self.values.write()
+    pub fn get_values_mut(&mut self) -> &mut Vec<Value> {
+        &mut self.values
     }
 
     /// Returns a reference to the schema of this tuple.
     ///
     /// This method constructs a schema based on the types of values in the tuple.
     pub fn get_schema(&self) -> Schema {
-        let values = self.values.read();
-        let columns: Vec<Column> = values
+        let columns: Vec<Column> = self
+            .values
             .iter()
             .enumerate()
             .map(|(i, value)| Column::new(&format!("col_{}", i), value.get_type_id()))
@@ -310,25 +318,36 @@ impl Tuple {
 
     /// Creates a new tuple containing only the key attributes.
     pub fn keys_from_tuple(&self, key_attrs: &[usize]) -> Vec<Value> {
-        let values = self.values.read();
-        key_attrs.iter().map(|&attr| values[attr].clone()).collect()
+        key_attrs
+            .iter()
+            .map(|&attr| self.values[attr].clone())
+            .collect()
     }
 
     /// Returns a string representation of the tuple.
-    pub fn to_string(&self, schema: Schema) -> String {
-        self.to_string_with_schema(&schema)
+    pub fn to_string(&self, schema: &Schema) -> String {
+        self.to_string_with_schema(schema)
     }
 
     /// Returns a detailed string representation of the tuple.
-    pub fn to_string_detailed(&self, schema: Schema) -> String {
+    pub fn to_string_detailed(&self, schema: &Schema) -> String {
         // Currently identical to `to_string`; keep this entrypoint for compatibility.
-        self.to_string_with_schema(&schema)
+        self.to_string_with_schema(schema)
+    }
+
+    /// Compatibility helper for older call sites that pass `Schema` by value.
+    pub fn to_string_owned(&self, schema: Schema) -> String {
+        self.to_string(&schema)
+    }
+
+    /// Compatibility helper for older call sites that pass `Schema` by value.
+    pub fn to_string_detailed_owned(&self, schema: Schema) -> String {
+        self.to_string_detailed(&schema)
     }
 
     /// Like `to_string`, but avoids moving/cloning the schema.
     pub fn to_string_with_schema(&self, schema: &Schema) -> String {
-        let values = self.values.read();
-        values
+        self.values
             .iter()
             .enumerate()
             .map(|(i, value)| {
@@ -348,20 +367,21 @@ impl Tuple {
         combined_values.extend(other.get_values());
 
         Self {
-            values: Arc::new(RwLock::new(combined_values)),
+            values: combined_values,
             rid: self.rid, // Keep the left tuple's RID
         }
     }
 
     /// Gets the number of columns in this tuple
     pub fn get_column_count(&self) -> usize {
-        self.values.read().len()
+        self.values.len()
     }
 }
 
 impl Display for Tuple {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string_detailed(self.get_schema()))
+        let schema = self.get_schema();
+        write!(f, "{}", self.to_string_detailed(&schema))
     }
 }
 
@@ -404,11 +424,34 @@ mod tests {
     }
 
     #[test]
+    fn test_tuple_clone_is_independent() {
+        let (tuple, schema) = create_sample_tuple();
+        let mut cloned = tuple.clone();
+
+        // Mutate the clone in-place.
+        cloned.get_values_mut()[0] = Value::new(999);
+
+        // Original must remain unchanged (value semantics).
+        assert_eq!(tuple.get_value(0), Value::new(1));
+        assert_eq!(cloned.get_value(0), Value::new(999));
+
+        // Both should still serialize/format correctly.
+        assert_eq!(
+            tuple.to_string(&schema),
+            "id: 1, name: Alice, age: 30, is_student: true"
+        );
+        assert_eq!(
+            cloned.to_string(&schema),
+            "id: 999, name: Alice, age: 30, is_student: true"
+        );
+    }
+
+    #[test]
     fn test_tuple_to_string_detailed() {
         let (tuple, _) = create_sample_tuple();
         let schema = create_sample_schema();
         let expected = "id: 1, name: Alice, age: 30, is_student: true";
-        assert_eq!(tuple.to_string_detailed(schema), expected);
+        assert_eq!(tuple.to_string_detailed(&schema), expected);
     }
 
     #[test]
@@ -444,7 +487,7 @@ mod tests {
         let (tuple, _) = create_sample_tuple();
         let schema = create_sample_schema();
         let expected = "id: 1, name: Alice, age: 30, is_student: true";
-        assert_eq!(tuple.to_string(schema), expected);
+        assert_eq!(tuple.to_string(&schema), expected);
     }
 
     #[test]
