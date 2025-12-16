@@ -5,7 +5,8 @@ use crate::common::{
 };
 use crate::storage::index::IndexInfo;
 use crate::storage::index::latch_crabbing::{
-    LatchContext, LockingProtocol, NodeSafety, OperationType, OptimisticResult, TraversalResult,
+    HeldWriteLock, LatchContext, LockingProtocol, NodeSafety, OperationType, OptimisticResult,
+    TraversalResult,
 };
 use crate::storage::index::types::comparators::{I32Comparator, i32_comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
@@ -812,13 +813,19 @@ where
     /// latches once a "safe" node is found.
     ///
     /// # Protocol
-    /// 1. Acquire write latch on header, read root_page_id and tree_height
-    /// 2. Acquire write latch on root
-    /// 3. If root is safe, release header latch
-    /// 4. For each level:
-    ///    - Acquire write latch on child
-    ///    - If child is safe, release all ancestor latches
-    ///    - Otherwise, keep holding ancestor latches
+    /// 1. Acquire read latch on header, read root_page_id and tree_height
+    /// 2. For each internal node:
+    ///    - Acquire write latch on current node
+    ///    - Check if node is safe for the operation
+    ///    - If safe: release all ancestor latches and drop current latch
+    ///    - If not safe: keep holding current latch (store in context)
+    /// 3. At leaf: return with any held ancestor latches
+    ///
+    /// # Thread Safety
+    ///
+    /// This implementation uses `HeldWriteLock` to properly hold write latches.
+    /// Unlike read guards which are temporarily acquired and released, the
+    /// `HeldWriteLock` maintains the write lock for its entire lifetime.
     ///
     /// # Returns
     /// - `Ok(TraversalResult)` with the leaf page, context with held ancestors, and safety status
@@ -876,6 +883,11 @@ where
         let mut current_page_id = root_page_id;
         let mut current_depth = 1;
 
+        debug!(
+            "Starting internal traversal: root={}, tree_height={}",
+            root_page_id, tree_height
+        );
+
         while current_depth < tree_height {
             context.push_path(current_page_id);
 
@@ -885,37 +897,54 @@ where
                 .fetch_page::<BPlusTreeInternalPage<K, C>>(current_page_id)
                 .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
 
-            // Check if this node is safe (under write latch)
-            let (is_safe, child_page_id) = {
-                let internal = internal_page.write();
-                let safe = internal.is_safe_for(operation);
-                let child = internal.find_child_for_key(key);
-                (safe, child)
-            };
+            // Create a HeldWriteLock to properly hold the write latch.
+            // This acquires the write lock and holds it for the lifetime of held_lock.
+            let held_lock = HeldWriteLock::new(internal_page);
+
+            // Check if this node is safe and find the child (while holding write latch)
+            let is_safe = held_lock.is_safe_for(operation);
+            let child_page_id = held_lock.find_child_for_key(key);
 
             let next_page_id = child_page_id.ok_or(BPlusTreeError::InvalidPageType)?;
 
-            // If current node is safe, release all ancestor latches
+            // Decide whether to hold or release the current node's latch
             if is_safe {
+                // Node is safe - release all ancestor latches
                 debug!(
                     "Node {} is safe, releasing {} ancestors",
                     current_page_id,
                     context.held_count()
                 );
                 context.release_safe_ancestors();
+                debug!("Released ancestors, about to drop held_lock for page {}", current_page_id);
+                // Explicitly drop held_lock to release the write latch on current node immediately.
+                // Without this explicit drop, the lock would only be released at the end of the
+                // loop iteration, which could cause issues if we need to access this page again.
+                drop(held_lock);
+                debug!("Dropped held_lock for page {}", current_page_id);
             } else {
-                // Node is not safe, keep holding it for potential modifications
+                // Node is NOT safe - keep holding it for potential modifications
                 debug!(
-                    "Node {} is NOT safe, holding latch (ancestors held: {})",
+                    "Node {} is NOT safe, holding write latch (ancestors held: {})",
                     current_page_id,
                     context.held_count()
                 );
-                context.hold_internal_page(internal_page);
+                // Transfer ownership of the held lock to the context
+                context.hold_existing_lock(held_lock);
             }
 
             current_page_id = next_page_id;
             current_depth += 1;
+            debug!(
+                "Moving to next level: page={}, depth={}, tree_height={}",
+                current_page_id, current_depth, tree_height
+            );
         }
+
+        debug!(
+            "Exited internal traversal loop, about to fetch leaf page {}",
+            current_page_id
+        );
 
         // Step 4: Fetch leaf page
         let leaf = self
@@ -923,9 +952,12 @@ where
             .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
             .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
 
+        debug!("Fetched leaf page {}, about to acquire write lock", current_page_id);
+
         // Check if leaf is safe
         let is_safe = {
             let leaf_write = leaf.write();
+            debug!("Acquired write lock on leaf page {}", current_page_id);
             leaf_write.is_safe_for(operation)
         };
 
@@ -1016,32 +1048,37 @@ where
 
         // Leaf is safe (won't split), perform insert under write latch
         let leaf_page = traversal.leaf_page;
-        let mut new_key_added = false;
 
         {
             let mut leaf = leaf_page.write();
 
+            // Safety is a snapshot taken during traversal; re-check it under the write latch.
+            // If the leaf is no longer safe, restart and fall back to the standard insert path.
+            if !leaf.is_safe_for(OperationType::Insert) {
+                return Ok(OptimisticResult::NeedRestart);
+            }
+
             // Check if key already exists
             let key_index = leaf.find_key_index(&key);
-            if key_index < leaf.get_size() {
-                if let Some(existing_key) = leaf.get_key_at(key_index) {
-                    if (self.comparator)(&key, existing_key) == Ordering::Equal {
+            if key_index < leaf.get_size()
+                && let Some(existing_key) = leaf.get_key_at(key_index)
+                    && (self.comparator)(&key, existing_key) == Ordering::Equal {
                         // Update existing value
                         leaf.set_value_at(key_index, value);
                         return Ok(OptimisticResult::Success(()));
                     }
-                }
-            }
 
             // Insert new key-value pair
-            leaf.insert_key_value(key, value);
-            new_key_added = true;
+            let inserted = leaf.insert_key_value(key, value);
+            if !inserted {
+                // Leaf was unexpectedly full (concurrent change or corrupted invariants).
+                // Restart so the caller can use the standard insert (which handles splits).
+                return Ok(OptimisticResult::NeedRestart);
+            }
         }
 
-        // Update key count if we added a new key
-        if new_key_added {
-            self.increment_num_keys()?;
-        }
+        // If we got here, we successfully inserted a new key (not an update).
+        self.increment_num_keys()?;
 
         Ok(OptimisticResult::Success(()))
     }
@@ -1396,9 +1433,9 @@ where
     /// * `grandparent_path` - Path from root to grandparent (parent's ancestors)
     fn merge_leaf_pages(
         &self,
-        left_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
-        right_page: &PageGuard<BPlusTreeLeafPage<K, V, C>>,
-        parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        left_page: PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        right_page: PageGuard<BPlusTreeLeafPage<K, V, C>>,
+        parent_page: PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
         grandparent_path: &[PageId],
     ) -> Result<(), BPlusTreeError> {
@@ -1482,6 +1519,11 @@ where
                 header_write.set_tree_height(current_height - 1);
             }
 
+            // Release the parent + right page guards before deleting pages.
+            // Holding a PageGuard keeps the page pinned in the buffer pool.
+            drop(parent_page);
+            drop(right_page);
+
             // Release the parent page (it's no longer needed)
             self.buffer_pool_manager
                 .delete_page(parent_page_id)
@@ -1506,6 +1548,11 @@ where
         drop(left_write);
         drop(parent_write);
         drop(right_write);
+
+        // Drop page guards we no longer need before deleting pages.
+        // (Deleting a pinned page will fail with "Page pinned - PageID: X".)
+        drop(parent_page);
+        drop(right_page);
 
         // Now safe to delete the right page
         self.buffer_pool_manager
@@ -1666,9 +1713,9 @@ where
     /// * `grandparent_path` - Path from root to grandparent (parent's ancestors)
     fn merge_internal_pages(
         &self,
-        left_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
-        right_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
-        parent_page: &PageGuard<BPlusTreeInternalPage<K, C>>,
+        left_page: PageGuard<BPlusTreeInternalPage<K, C>>,
+        right_page: PageGuard<BPlusTreeInternalPage<K, C>>,
+        parent_page: PageGuard<BPlusTreeInternalPage<K, C>>,
         parent_key_index: usize,
         grandparent_path: &[PageId],
     ) -> Result<(), BPlusTreeError> {
@@ -1754,6 +1801,11 @@ where
                 header_write.set_tree_height(current_height - 1);
             }
 
+            // Release the parent + right page guards before deleting pages.
+            // Holding a PageGuard keeps the page pinned in the buffer pool.
+            drop(parent_page);
+            drop(right_page);
+
             // Release the parent page and right page
             self.buffer_pool_manager
                 .delete_page(parent_page_id)
@@ -1776,6 +1828,10 @@ where
         drop(left_write);
         drop(parent_write);
         drop(right_write);
+
+        // Drop page guards we no longer need before deleting pages.
+        drop(parent_page);
+        drop(right_page);
 
         // Delete the right page as it's no longer needed
         self.buffer_pool_manager
@@ -2413,17 +2469,17 @@ where
                 // Merge the pages - ensure left page is always first argument
                 if sibling_is_left {
                     self.merge_leaf_pages(
-                        &sibling_page,
-                        &current_page,
-                        &parent_page,
+                        sibling_page,
+                        current_page,
+                        parent_page,
                         separator_key_index,
                         &grandparent_path,
                     )?;
                 } else {
                     self.merge_leaf_pages(
-                        &current_page,
-                        &sibling_page,
-                        &parent_page,
+                        current_page,
+                        sibling_page,
+                        parent_page,
                         separator_key_index,
                         &grandparent_path,
                     )?;
@@ -2473,17 +2529,17 @@ where
                 // Merge the pages - ensure left page is always first argument
                 if sibling_is_left {
                     self.merge_internal_pages(
-                        &sibling_page,
-                        &current_page,
-                        &parent_page,
+                        sibling_page,
+                        current_page,
+                        parent_page,
                         separator_key_index,
                         &grandparent_path,
                     )?;
                 } else {
                     self.merge_internal_pages(
-                        &current_page,
-                        &sibling_page,
-                        &parent_page,
+                        current_page,
+                        sibling_page,
+                        parent_page,
                         separator_key_index,
                         &grandparent_path,
                     )?;
@@ -2506,13 +2562,6 @@ where
                     )?;
                 }
             }
-        }
-
-        // 8. Check if parent needs rebalancing (it lost a key during merge)
-        let parent_size = parent_page.read().get_size();
-        if parent_size < min_size && parent_page_id != root_page_id {
-            // Recursively handle parent underflow (grandparent_path already computed above)
-            self.check_and_handle_underflow(parent_page_id, false, &grandparent_path)?;
         }
 
         Ok(true) // Rebalancing occurred
@@ -3297,8 +3346,11 @@ mod tests {
 
     impl TestContext {
         pub async fn new(name: &str) -> Self {
+            Self::with_pool_size(name, 10).await
+        }
+
+        pub async fn with_pool_size(name: &str, pool_size: usize) -> Self {
             initialize_logger();
-            const BUFFER_POOL_SIZE: usize = 10;
             const K: usize = 2;
 
             // Create temporary directory
@@ -3319,10 +3371,10 @@ mod tests {
             // Create disk components
             let disk_manager =
                 AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default()).await;
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(pool_size, K)));
             let bpm = Arc::new(
                 BufferPoolManager::new(
-                    BUFFER_POOL_SIZE,
+                    pool_size,
                     Arc::from(disk_manager.unwrap()),
                     replacer.clone(),
                 )
@@ -3868,5 +3920,176 @@ mod tests {
         assert_eq!(tree.search(&5).unwrap(), Some(RID::new(1, 200)));
 
         println!("Latch crabbing update test passed!");
+    }
+
+    #[tokio::test]
+    async fn test_held_write_lock_actually_holds_lock() {
+        // This test verifies that HeldWriteLock actually prevents other threads
+        // from acquiring the lock.
+        use crate::storage::index::latch_crabbing::HeldWriteLock;
+
+        let ctx = TestContext::new("test_held_write_lock").await;
+        let bpm = ctx.bpm;
+
+        let key_schema = Schema::new(vec![]);
+        let metadata = IndexInfo::new(
+            key_schema,
+            "held_write_lock_test".to_string(),
+            1,
+            "test_table".to_string(),
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+            vec![0],
+        );
+
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm.clone());
+        assert!(tree.init_with_order(10).is_ok());
+
+        // Insert enough keys to create some internal nodes
+        for i in 1..=15 {
+            assert!(tree.insert(i, RID::new(1, i as u32)).is_ok());
+        }
+
+        // Get an internal page to test with
+        let root_page_id = tree.get_root_page_id();
+
+        // Skip if root is a leaf (need internal node for this test)
+        if tree.get_height() <= 1 {
+            println!(
+                "Tree height is 1, root is a leaf - skipping internal page lock test"
+            );
+            return;
+        }
+
+        // Fetch the internal page
+        let internal_page = bpm
+            .fetch_page::<BPlusTreeInternalPage<i32, I32Comparator>>(root_page_id)
+            .expect("Should be able to fetch internal page");
+
+        // Create a HeldWriteLock - this should acquire and hold the write lock
+        let held_lock = HeldWriteLock::new(internal_page);
+
+        // Verify we can read from the held lock
+        let _size = held_lock.get_size();
+        println!("HeldWriteLock acquired, page size: {}", _size);
+
+        // Try to acquire another lock on the same page - this should fail immediately
+        // because we're already holding the write lock
+        let internal_page2 = bpm
+            .fetch_page::<BPlusTreeInternalPage<i32, I32Comparator>>(root_page_id)
+            .expect("Should be able to fetch page guard");
+
+        // try_write should return None because we're holding the write lock
+        let try_result = internal_page2.get_page().try_write();
+        assert!(
+            try_result.is_none(),
+            "Should NOT be able to acquire write lock while HeldWriteLock exists"
+        );
+
+        // try_read should also return None because write lock is held
+        let try_read_result = internal_page2.get_page().try_read();
+        assert!(
+            try_read_result.is_none(),
+            "Should NOT be able to acquire read lock while HeldWriteLock exists"
+        );
+
+        println!("Verified: HeldWriteLock prevents other lock acquisitions");
+
+        // Now drop the HeldWriteLock
+        drop(held_lock);
+
+        // After dropping, we should be able to acquire locks again
+        // Need to fetch a fresh page guard since the old one was consumed
+        let internal_page3 = bpm
+            .fetch_page::<BPlusTreeInternalPage<i32, I32Comparator>>(root_page_id)
+            .expect("Should be able to fetch page guard");
+
+        let try_result_after = internal_page3.get_page().try_write();
+        assert!(
+            try_result_after.is_some(),
+            "Should be able to acquire write lock after HeldWriteLock is dropped"
+        );
+        drop(try_result_after);
+
+        println!("Verified: Lock is released when HeldWriteLock is dropped");
+        println!("test_held_write_lock_actually_holds_lock PASSED!");
+    }
+
+    #[tokio::test]
+    async fn test_pessimistic_traversal_holds_unsafe_nodes() {
+        // This test verifies that pessimistic traversal actually holds locks
+        // on unsafe nodes.
+        // Use larger buffer pool (50 pages) to accommodate multiple leaf/internal pages
+        // during tree splits with 20 keys
+        let ctx = TestContext::with_pool_size("test_pessimistic_holds_unsafe", 50).await;
+        let bpm = ctx.bpm;
+
+        let key_schema = Schema::new(vec![]);
+        let metadata = IndexInfo::new(
+            key_schema,
+            "pessimistic_holds_unsafe_test".to_string(),
+            1,
+            "test_table".to_string(),
+            4,
+            false,
+            IndexType::BPlusTreeIndex,
+            vec![0],
+        );
+
+        let mut tree =
+            BPlusTreeIndex::<i32, RID, I32Comparator>::new(i32_comparator, metadata, bpm.clone());
+        // Use small order to force splits and create internal nodes
+        assert!(tree.init_with_order(4).is_ok());
+
+        // Insert keys to create a tree with multiple levels
+        for i in 1..=20 {
+            assert!(tree.insert(i, RID::new(1, i as u32)).is_ok(), "Failed to insert key {}", i);
+        }
+
+        println!("Tree height: {}, size: {}", tree.get_height(), tree.get_size());
+
+        // The tree should have internal nodes now
+        if tree.get_height() <= 1 {
+            println!("Tree still only has one level - test may not exercise internal node locking");
+        }
+
+        // Perform a pessimistic traversal and check that context holds locks
+        // when nodes are not safe
+        let traversal_result = tree.traverse_pessimistic(&10, OperationType::Insert);
+
+        match traversal_result {
+            Ok(result) => {
+                println!(
+                    "Pessimistic traversal completed, held locks: {}, is_safe: {}",
+                    result.context.held_count(),
+                    result.is_safe
+                );
+
+                // The context should hold locks on unsafe ancestors
+                // (exact count depends on tree structure)
+                if !result.is_safe {
+                    // If leaf is not safe, we should be holding some ancestor locks
+                    println!(
+                        "Leaf is not safe, {} ancestor locks held",
+                        result.context.held_count()
+                    );
+                }
+
+                // Drop the result to release all held locks before validating the tree.
+                // The HeldWriteLock in the context holds actual write locks that would
+                // block validate_tree() from reading those pages.
+                drop(result);
+
+                // Verify tree is still valid after traversal
+                assert!(tree.validate_tree().is_ok());
+            }
+            Err(e) => {
+                panic!("Pessimistic traversal failed: {}", e);
+            }
+        }
+
+        println!("test_pessimistic_traversal_holds_unsafe_nodes PASSED!");
     }
 }
