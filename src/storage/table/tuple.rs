@@ -293,49 +293,37 @@ impl Tuple {
     ///
     /// This method constructs a schema based on the types of values in the tuple.
     pub fn get_schema(&self) -> Schema {
-        let columns: Vec<Column> = self
-            .get_values()
+        let values = self.values.read();
+        let columns: Vec<Column> = values
             .iter()
             .enumerate()
-            .map(|(i, value)| {
-                Column::new(
-                    &format!("col_{}", i), // Default column name
-                    value.get_type_id(),   // Get TypeId from the Value
-                )
-            })
+            .map(|(i, value)| Column::new(&format!("col_{}", i), value.get_type_id()))
             .collect();
 
         Schema::new(columns)
     }
 
     /// Creates a new tuple containing only the key attributes.
-    pub fn keys_from_tuple(&self, key_attrs: Vec<usize>) -> Vec<Value> {
-        let key_values: Vec<Value> = key_attrs
-            .iter()
-            .map(|&attr| self.get_value(attr).clone())
-            .collect();
-        key_values
+    pub fn keys_from_tuple(&self, key_attrs: &[usize]) -> Vec<Value> {
+        let values = self.values.read();
+        key_attrs.iter().map(|&attr| values[attr].clone()).collect()
     }
 
     /// Returns a string representation of the tuple.
     pub fn to_string(&self, schema: Schema) -> String {
-        self.get_values()
-            .iter()
-            .enumerate()
-            .map(|(i, value)| {
-                let col_name = schema
-                    .get_column(i)
-                    .map(|col| col.get_name().to_string())
-                    .unwrap_or_else(|| format!("Column_{}", i));
-                format!("{}: {}", col_name, value)
-            })
-            .collect::<Vec<String>>()
-            .join(", ")
+        self.to_string_with_schema(&schema)
     }
 
     /// Returns a detailed string representation of the tuple.
     pub fn to_string_detailed(&self, schema: Schema) -> String {
-        self.get_values()
+        // Currently identical to `to_string`; keep this entrypoint for compatibility.
+        self.to_string_with_schema(&schema)
+    }
+
+    /// Like `to_string`, but avoids moving/cloning the schema.
+    pub fn to_string_with_schema(&self, schema: &Schema) -> String {
+        let values = self.values.read();
+        values
             .iter()
             .enumerate()
             .map(|(i, value)| {
@@ -362,7 +350,7 @@ impl Tuple {
 
     /// Gets the number of columns in this tuple
     pub fn get_column_count(&self) -> usize {
-        self.get_values().len()
+        self.values.read().len()
     }
 }
 
@@ -440,7 +428,7 @@ mod tests {
         let (tuple, _schema) = create_sample_tuple();
 
         let key_attrs = vec![0, 2];
-        let keys = tuple.keys_from_tuple(key_attrs);
+        let keys = tuple.keys_from_tuple(&key_attrs);
 
         assert_eq!(keys[0], Value::new(1));
         assert_eq!(keys[1], Value::new(30));
