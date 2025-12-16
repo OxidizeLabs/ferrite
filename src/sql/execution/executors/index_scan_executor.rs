@@ -353,8 +353,19 @@ impl AbstractExecutor for IndexScanExecutor {
             None => return Ok(None),
         };
 
-        // Keep trying until we find a valid tuple or reach the end
-        for rid in iter.by_ref() {
+        // Keep trying until we find a valid tuple or reach the end.
+        //
+        // Use the fallible iterator API so index scan failures don't look like "empty results".
+        loop {
+            let rid = match iter.try_next() {
+                Ok(Some(rid)) => rid,
+                Ok(None) => break,
+                Err(e) => {
+                    error!("Index iterator error: {}", e);
+                    return Err(DBError::Execution(format!("index iterator error: {e}")));
+                }
+            };
+
             debug!("Found RID {:?} in index", rid);
 
             // Use RID to fetch tuple from table heap with transaction context

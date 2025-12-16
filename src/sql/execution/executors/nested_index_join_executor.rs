@@ -669,10 +669,7 @@ mod tests {
                 while let Ok(Some((tuple, rid))) = right_executor.next() {
                     // Extract the key value (id) from the tuple
                     let key_columns = vec![0]; // column index for "id"
-                    let mut key_values = Vec::new();
-                    for &col_idx in &key_columns {
-                        key_values.push(tuple.get_values()[col_idx].clone());
-                    }
+                    let key_values = tuple.keys_from_tuple_checked(&key_columns).unwrap();
 
                     // Extract the key value for the B+ tree
                     let key_value = key_values[0].clone();
