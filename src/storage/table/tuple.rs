@@ -12,7 +12,11 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug, PartialEq, Copy, Clone, bincode::Encode, bincode::Decode)]
 pub struct TupleMeta {
     creator_txn_id: TxnId,
-    commit_timestamp: Timestamp,
+    /// Commit timestamp for this tuple version.
+    ///
+    /// `None` means the version is uncommitted (in-progress) and must not be treated as having
+    /// any real commit timestamp.
+    commit_timestamp: Option<Timestamp>,
     deleted: bool,
     /// Index into the owning transaction's undo log chain.
     ///
@@ -25,7 +29,7 @@ impl TupleMeta {
     pub fn new(txn_id: TxnId) -> Self {
         Self {
             creator_txn_id: txn_id,
-            commit_timestamp: Timestamp::MAX, // Start with MAX to indicate uncommitted
+            commit_timestamp: None,
             deleted: false,
             undo_log_idx: 0,
         }
@@ -35,7 +39,7 @@ impl TupleMeta {
     pub fn new_with_delete(txn_id: TxnId, deleted: bool) -> Self {
         Self {
             creator_txn_id: txn_id,
-            commit_timestamp: Timestamp::MAX, // Start with MAX to indicate uncommitted
+            commit_timestamp: None,
             deleted,
             undo_log_idx: 0,
         }
@@ -46,21 +50,21 @@ impl TupleMeta {
         self.creator_txn_id
     }
 
-    /// Returns the commit timestamp when the tuple became visible.
-    pub fn get_commit_timestamp(&self) -> Timestamp {
+    /// Returns the commit timestamp when the tuple became visible (if committed).
+    pub fn get_commit_timestamp(&self) -> Option<Timestamp> {
         self.commit_timestamp
     }
 
     /// Sets the commit timestamp when the tuple became visible.
     pub fn set_commit_timestamp(&mut self, ts: Timestamp) {
-        self.commit_timestamp = ts;
+        self.commit_timestamp = Some(ts);
     }
 
     /// Returns whether the tuple is committed.
     pub fn is_committed(&self) -> bool {
-        let committed = self.commit_timestamp != Timestamp::MAX;
+        let committed = self.commit_timestamp.is_some();
         log::trace!(
-            "TupleMeta.is_committed(): commit_ts={}, is_committed={}",
+            "TupleMeta.is_committed(): commit_ts={:?}, is_committed={}",
             self.commit_timestamp,
             committed
         );
@@ -84,7 +88,7 @@ impl TupleMeta {
     /// when an older reader is still active.
     pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
         log::trace!(
-            "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={}, deleted={}, read_ts={}",
+            "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={:?}, deleted={}, read_ts={}",
             self.creator_txn_id,
             txn_id,
             self.commit_timestamp,
@@ -112,9 +116,11 @@ impl TupleMeta {
         }
 
         // The tuple is visible if its commit timestamp is <= the reader's snapshot.
-        let visible = self.commit_timestamp <= read_ts;
+        let visible = self
+            .commit_timestamp
+            .is_some_and(|commit_ts| commit_ts <= read_ts);
         log::trace!(
-            "Tuple visibility based on read_ts: commit_ts={} <= read_ts={} = {}",
+            "Tuple visibility based on read_ts: commit_ts={:?} <= read_ts={} = {}",
             self.commit_timestamp,
             read_ts,
             visible
