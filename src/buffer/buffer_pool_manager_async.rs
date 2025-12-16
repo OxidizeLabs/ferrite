@@ -3,7 +3,7 @@ use crate::common::config::INVALID_PAGE_ID;
 use crate::common::config::{DB_PAGE_SIZE, FrameId, PageId};
 use crate::common::exception::DeletePageError;
 use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::page_guard::{PageGuard, PageUnpinner};
 use crate::storage::page::{PAGE_TYPE_OFFSET, PageType};
 use crate::storage::page::{Page, PageTrait};
 use log::{error, info, trace, warn};
@@ -132,7 +132,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional new page.
-    pub fn new_page<T: Page>(&self) -> Option<PageGuard<T>> {
+    pub fn new_page<T: Page>(self: &Arc<Self>) -> Option<PageGuard<T>> {
         trace!("Creating new page of type: {:?}", T::TYPE_ID);
 
         let frame_id = self.get_available_frame()?;
@@ -147,7 +147,13 @@ impl BufferPoolManager {
         self.update_page_metadata(frame_id, new_page_id, &new_page);
 
         trace!("Created new page {} in frame {}", new_page_id, frame_id);
-        Some(PageGuard::new_for_new_page(new_page, new_page_id))
+        let unpinner: Arc<BufferPoolManager> = Arc::clone(self);
+        let unpinner: Arc<dyn PageUnpinner> = unpinner;
+        Some(PageGuard::new_for_new_page(
+            new_page,
+            new_page_id,
+            Some(unpinner),
+        ))
     }
 
     /// Creates a new page with custom options using a provided constructor function.
@@ -157,7 +163,10 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `PageGuard<T>`.
-    pub fn new_page_with_options<T: Page, F>(&self, constructor: F) -> Option<PageGuard<T>>
+    pub fn new_page_with_options<T: Page, F>(
+        self: &Arc<Self>,
+        constructor: F,
+    ) -> Option<PageGuard<T>>
     where
         F: FnOnce(PageId) -> T,
     {
@@ -181,7 +190,13 @@ impl BufferPoolManager {
             "Created new page {} in frame {} with custom options",
             new_page_id, frame_id
         );
-        Some(PageGuard::new_for_new_page(new_page, new_page_id))
+        let unpinner: Arc<BufferPoolManager> = Arc::clone(self);
+        let unpinner: Arc<dyn PageUnpinner> = unpinner;
+        Some(PageGuard::new_for_new_page(
+            new_page,
+            new_page_id,
+            Some(unpinner),
+        ))
     }
 
     /// Writes data to the page with the given page ID.
@@ -233,7 +248,7 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `PageGuard<T>`.
-    pub fn fetch_page<T: Page + 'static>(&self, page_id: PageId) -> Option<PageGuard<T>> {
+    pub fn fetch_page<T: Page + 'static>(self: &Arc<Self>, page_id: PageId) -> Option<PageGuard<T>> {
         trace!("Fetching page {} of type {:?}", page_id, T::TYPE_ID);
 
         if page_id == INVALID_PAGE_ID || page_id >= self.next_page_id.load(Ordering::SeqCst) {
@@ -267,13 +282,22 @@ impl BufferPoolManager {
                 return None;
             }
 
+            // Mark frame as non-evictable while pinned and record access.
+            if let Some(&frame_id) = self.page_table.read().get(&page_id) {
+                let mut replacer = self.replacer.write();
+                replacer.record_access(frame_id, AccessType::Unknown);
+                replacer.set_evictable(frame_id, false);
+            }
+
             // Create new guard (which will increment pin count)
             let typed_page = unsafe {
                 let raw = Arc::into_raw(page) as *const RwLock<T>;
                 Arc::from_raw(raw)
             };
 
-            return Some(PageGuard::new(typed_page, page_id));
+            let unpinner: Arc<BufferPoolManager> = Arc::clone(self);
+            let unpinner: Arc<dyn PageUnpinner> = unpinner;
+            return Some(PageGuard::new(typed_page, page_id, Some(unpinner)));
         }
 
         // Page not in memory, need to load from disk
@@ -281,7 +305,10 @@ impl BufferPoolManager {
     }
 
     /// Enhanced page loading with coordinated caching
-    fn load_page_from_disk<T: Page + 'static>(&self, page_id: PageId) -> Option<PageGuard<T>> {
+    fn load_page_from_disk<T: Page + 'static>(
+        self: &Arc<Self>,
+        page_id: PageId,
+    ) -> Option<PageGuard<T>> {
         trace!("Loading page {} with cache coordination", page_id);
 
         // Get available frame
@@ -345,7 +372,7 @@ impl BufferPoolManager {
 
     /// Creates a page from raw data with proper type checking
     fn create_page_from_data<T: Page + 'static>(
-        &self,
+        self: &Arc<Self>,
         page_id: PageId,
         data: Vec<u8>,
     ) -> Option<PageGuard<T>> {
@@ -393,7 +420,13 @@ impl BufferPoolManager {
             }
         }
 
-        Some(PageGuard::new(page_arc, page_id))
+        let unpinner: Arc<BufferPoolManager> = Arc::clone(self);
+        let unpinner: Arc<dyn PageUnpinner> = unpinner;
+        Some(PageGuard::new_for_new_page(
+            page_arc,
+            page_id,
+            Some(unpinner),
+        ))
     }
 
     /// Unpins a page with the given page ID.
@@ -938,7 +971,7 @@ impl BufferPoolManager {
 
     /// Enhanced batch page loading for better performance
     pub async fn load_pages_batch<T: Page + 'static>(
-        &self,
+        self: &Arc<Self>,
         page_ids: Vec<PageId>,
     ) -> Vec<Option<PageGuard<T>>> {
         if page_ids.is_empty() {
@@ -1005,7 +1038,7 @@ impl BufferPoolManager {
 
     /// Creates a guard from an existing page in memory
     fn create_guard_from_existing<T: Page + 'static>(
-        &self,
+        self: &Arc<Self>,
         page_id: PageId,
         page: Arc<RwLock<dyn PageTrait>>,
     ) -> Option<PageGuard<T>> {
@@ -1026,13 +1059,22 @@ impl BufferPoolManager {
             return None;
         }
 
+        // Mark frame as non-evictable while pinned and record access.
+        if let Some(&frame_id) = self.page_table.read().get(&page_id) {
+            let mut replacer = self.replacer.write();
+            replacer.record_access(frame_id, AccessType::Unknown);
+            replacer.set_evictable(frame_id, false);
+        }
+
         // Create typed page arc
         let typed_page = unsafe {
             let raw = Arc::into_raw(page) as *const RwLock<T>;
             Arc::from_raw(raw)
         };
 
-        Some(PageGuard::new(typed_page, page_id))
+        let unpinner: Arc<BufferPoolManager> = Arc::clone(self);
+        let unpinner: Arc<dyn PageUnpinner> = unpinner;
+        Some(PageGuard::new(typed_page, page_id, Some(unpinner)))
     }
 
     /// Enhanced batch flush using async disk manager
@@ -1433,6 +1475,13 @@ impl Clone for BufferPoolManager {
             use_disk_manager_cache: self.use_disk_manager_cache,
             bypass_disk_cache_for_pinned: self.bypass_disk_cache_for_pinned,
         }
+    }
+}
+
+impl PageUnpinner for BufferPoolManager {
+    fn unpin_page(&self, page_id: PageId, is_dirty: bool) -> bool {
+        // Delegate to the BPM's unpin logic so the replacer gets updated.
+        self.unpin_page(page_id, is_dirty, AccessType::Unknown)
     }
 }
 

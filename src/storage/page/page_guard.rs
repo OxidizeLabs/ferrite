@@ -2,36 +2,76 @@ use crate::common::config::PageId;
 use crate::storage::page::{Page, PageTrait, PageType};
 use log::trace;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// A callback interface used by `PageGuard` to notify the buffer pool manager
+/// when the guard is dropped (i.e., when the page should be unpinned).
+///
+/// This is intentionally minimal to avoid tight coupling between the storage
+/// layer and a specific buffer pool implementation.
+pub trait PageUnpinner: Send + Sync {
+    /// Unpin the page.
+    ///
+    /// Returns `true` if the page was successfully unpinned.
+    fn unpin_page(&self, page_id: PageId, is_dirty: bool) -> bool;
+}
 
 pub struct PageGuard<P: ?Sized + PageTrait> {
     page: Arc<RwLock<P>>,
     page_id: PageId,
+    unpinner: Option<Arc<dyn PageUnpinner>>,
+    /// Tracks whether *this guard* performed a mutable access (and therefore
+    /// should mark the page dirty on unpin).
+    dirty: AtomicBool,
 }
 
 impl<P: Page + 'static> PageGuard<P> {
     /// Creates a new page guard for an existing page, incrementing the pin count
-    pub fn new(page: Arc<RwLock<P>>, page_id: PageId) -> Self {
+    pub(crate) fn new(
+        page: Arc<RwLock<P>>,
+        page_id: PageId,
+        unpinner: Option<Arc<dyn PageUnpinner>>,
+    ) -> Self {
         // Increment pin count when creating a guard for an existing page
-        page.write().increment_pin_count(); // Increment instead of setting to 1
+        let pin_count = {
+            let mut page_guard = page.write();
+            page_guard.increment_pin_count(); // Increment instead of setting to 1
+            page_guard.get_pin_count()
+        };
         trace!(
             "Created new page guard for page {} with pin count {}",
             page_id,
-            page.read().get_pin_count()
+            pin_count
         );
 
-        Self { page, page_id }
+        Self {
+            page,
+            page_id,
+            unpinner,
+            dirty: AtomicBool::new(false),
+        }
     }
 
     /// Creates a new page guard for a newly created page (pin count already set)
-    pub fn new_for_new_page(page: Arc<RwLock<P>>, page_id: PageId) -> Self {
+    pub(crate) fn new_for_new_page(
+        page: Arc<RwLock<P>>,
+        page_id: PageId,
+        unpinner: Option<Arc<dyn PageUnpinner>>,
+    ) -> Self {
+        let pin_count = page.read().get_pin_count();
         trace!(
             "Created new page guard for new page {} with pin count {}",
             page_id,
-            page.read().get_pin_count()
+            pin_count
         );
 
-        Self { page, page_id }
+        Self {
+            page,
+            page_id,
+            unpinner,
+            dirty: AtomicBool::new(false),
+        }
     }
 
     pub fn read(&self) -> RwLockReadGuard<'_, P> {
@@ -39,7 +79,12 @@ impl<P: Page + 'static> PageGuard<P> {
     }
 
     pub fn write(&self) -> RwLockWriteGuard<'_, P> {
-        self.page.write()
+        // "Typical" DB buffer-pool semantics: if you obtain a mutable page guard,
+        // we conservatively treat the page as dirty.
+        self.dirty.store(true, Ordering::Relaxed);
+        let mut guard = self.page.write();
+        guard.set_dirty(true);
+        guard
     }
 
     pub fn get_page_type(&self) -> PageType {
@@ -50,67 +95,73 @@ impl<P: Page + 'static> PageGuard<P> {
         self.page_id
     }
 
-    pub fn get_page(&self) -> &Arc<RwLock<P>> {
+    pub(crate) fn get_page(&self) -> &Arc<RwLock<P>> {
         &self.page
     }
 }
 
 impl<P: PageTrait + ?Sized> PageGuard<P> {
-    fn unpin(&self, is_dirty: bool) {
-        let pin_count = self.page.read().get_pin_count();
-        trace!(
-            "Unpinning page {} with pin count {}, dirty: {}",
-            self.page_id, pin_count, is_dirty
-        );
-
-        // Decrement pin count
-        let mut page = self.page.write();
-        page.decrement_pin_count();
-
-        if is_dirty {
-            page.set_dirty(true);
-        }
-
-        // If pin count reaches zero, mark page as evictable
-        if page.get_pin_count() == 0 {
-            trace!("Page {} is now evictable", self.page_id);
-            // The buffer pool manager will handle marking the page as evictable
-            // when it processes the unpin
-        }
-    }
+    // NOTE: We intentionally do not expose unpin publicly. Dropping the guard
+    // is the only supported way to unpin.
 }
 
 impl<P: PageTrait + ?Sized> Drop for PageGuard<P> {
     fn drop(&mut self) {
-        let initial_pin_count = self.page.read().get_pin_count();
-        let was_dirty = self.page.read().is_dirty();
+        let is_dirty = self.dirty.load(Ordering::Relaxed);
 
+        if let Some(unpinner) = &self.unpinner {
+            trace!(
+                "Dropping page {} (delegating unpin; dirty={})",
+                self.page_id,
+                is_dirty
+            );
+            let ok = unpinner.unpin_page(self.page_id, is_dirty);
+            trace!("Unpin delegated for page {} -> {}", self.page_id, ok);
+            return;
+        }
+
+        // Fallback: maintain pin count in-page (used for tests or non-BPM pages).
+        // Do not auto-dirty on last unpin; dirty is determined by write access.
+        let mut page = self.page.write();
+        let initial_pin_count = page.get_pin_count();
+        let was_dirty = page.is_dirty();
+        page.decrement_pin_count();
+        if is_dirty {
+            page.set_dirty(true);
+        }
         trace!(
-            "Dropping page {} with pin count {}, dirty: {}",
-            self.page_id, initial_pin_count, was_dirty
-        );
-
-        // If pin count reaches zero, mark page as dirty to ensure it's written back
-        let should_mark_dirty = initial_pin_count == 1;
-
-        // Unpin the page
-        self.unpin(should_mark_dirty);
-
-        let final_state = self.page.read();
-        trace!(
-            "Page {} dropped, pin count: {} -> {}, dirty: {} -> {}",
+            "Page {} dropped (local unpin), pin count: {} -> {}, dirty: {} -> {}",
             self.page_id,
             initial_pin_count,
-            final_state.get_pin_count(),
+            page.get_pin_count(),
             was_dirty,
-            final_state.is_dirty()
+            page.is_dirty()
         );
     }
 }
 
 impl PageGuard<dyn PageTrait> {
-    pub fn new_untyped(page: Arc<RwLock<dyn PageTrait>>, page_id: PageId) -> Self {
-        Self { page, page_id }
+    pub(crate) fn new_untyped(
+        page: Arc<RwLock<dyn PageTrait>>,
+        page_id: PageId,
+        unpinner: Option<Arc<dyn PageUnpinner>>,
+    ) -> Self {
+        let pin_count = {
+            let mut page_guard = page.write();
+            page_guard.increment_pin_count();
+            page_guard.get_pin_count()
+        };
+        trace!(
+            "Created new untyped page guard for page {} with pin count {}",
+            page_id,
+            pin_count
+        );
+        Self {
+            page,
+            page_id,
+            unpinner,
+            dirty: AtomicBool::new(false),
+        }
     }
 
     pub fn read(&self) -> RwLockReadGuard<'_, dyn PageTrait> {
@@ -118,7 +169,10 @@ impl PageGuard<dyn PageTrait> {
     }
 
     pub fn write(&self) -> RwLockWriteGuard<'_, dyn PageTrait> {
-        self.page.write()
+        self.dirty.store(true, Ordering::Relaxed);
+        let mut guard = self.page.write();
+        guard.set_dirty(true);
+        guard
     }
 
     pub fn get_page_type(&self) -> PageType {
@@ -129,7 +183,7 @@ impl PageGuard<dyn PageTrait> {
         self.page_id
     }
 
-    pub fn get_page(&self) -> &Arc<RwLock<dyn PageTrait>> {
+    pub(crate) fn get_page(&self) -> &Arc<RwLock<dyn PageTrait>> {
         &self.page
     }
 }
@@ -150,6 +204,10 @@ mod tests {
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,
+        // Keep temp directory alive for the lifetime of the test context.
+        // If dropped early, the database/log paths can disappear while the disk manager
+        // is still using them.
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
@@ -186,7 +244,10 @@ mod tests {
                 .unwrap(),
             );
 
-            Self { bpm }
+            Self {
+                bpm,
+                _temp_dir: temp_dir,
+            }
         }
 
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
@@ -565,7 +626,8 @@ mod tests {
             {
                 let mut data = page_guard.write();
                 data.get_data_mut()[1] = 42; // Write to offset 1 to preserve page type
-                assert!(!data.is_dirty());
+                // With guard semantics, obtaining a write lock marks the page dirty.
+                assert!(data.is_dirty());
 
                 // Verify page type is preserved
                 assert_eq!(
@@ -579,20 +641,20 @@ mod tests {
 
             // Verify initial state
             assert_eq!(page_guard.read().get_pin_count(), 1);
-            assert!(!page_guard.read().is_dirty());
+            assert!(page_guard.read().is_dirty());
 
             id
-        }; // page_guard is dropped here - should mark as dirty since pin count reaches 0
+        }; // page_guard is dropped here - dirty state should be preserved
 
         // Fetch the page and verify state
         let fetched_guard = bpm
             .fetch_page::<BasicPage>(page_id)
             .expect("Failed to fetch page");
 
-        // Page should be marked dirty after being unpinned
+        // Page should remain dirty after being unpinned
         assert!(
             fetched_guard.read().is_dirty(),
-            "Page should be marked dirty when unpinned"
+            "Page should remain dirty when unpinned"
         );
         assert_eq!(fetched_guard.read().get_pin_count(), 1);
 
