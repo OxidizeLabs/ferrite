@@ -5,7 +5,6 @@ use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::types_db::value::Value;
 use bincode::config;
-use log;
 use std::fmt::{Display, Formatter};
 
 /// Metadata associated with a tuple.
@@ -58,6 +57,13 @@ impl TupleMeta {
     /// Sets the commit timestamp when the tuple became visible.
     pub fn set_commit_timestamp(&mut self, ts: Timestamp) {
         self.commit_timestamp = Some(ts);
+    }
+
+    /// Sets the commit timestamp (or clears it).
+    ///
+    /// `None` means the version is uncommitted/in-progress.
+    pub fn set_commit_timestamp_opt(&mut self, ts: Option<Timestamp>) {
+        self.commit_timestamp = ts;
     }
 
     /// Returns whether the tuple is committed.
@@ -233,24 +239,11 @@ impl Tuple {
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
         let config = config::standard();
-        match bincode::encode_into_slice(self, storage, config) {
-            Ok(written) => Ok(written),
-            Err(e) => {
-                // bincode doesn't expose a stable "buffer too small" error classification across
-                // all versions/configs; detect the common "unexpected end" cases.
-                let msg = e.to_string();
-                let msg_lower = msg.to_lowercase();
-                if msg_lower.contains("unexpected end")
-                    || msg_lower.contains("unexpectedend")
-                    || msg_lower.contains("end of buffer")
-                    || msg_lower.contains("end of slice")
-                {
-                    Err(TupleError::BufferTooSmall)
-                } else {
-                    Err(TupleError::SerializationError(msg))
-                }
-            }
-        }
+        bincode::encode_into_slice(self, storage, config).map_err(|e| match e {
+            // bincode 2.x uses this variant when the destination slice is too small.
+            bincode::error::EncodeError::UnexpectedEnd => TupleError::BufferTooSmall,
+            other => TupleError::SerializationError(other.to_string()),
+        })
     }
 
     /// Deserializes a tuple from the given storage buffer.

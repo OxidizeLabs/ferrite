@@ -336,15 +336,15 @@ impl TablePage {
 
         let old_meta = &self.tuple_info[tuple_id].2;
         debug!(
-            "Old meta - creator_txn: {}, commit_ts: {}, deleted: {}",
+            "Old meta - creator_txn: {}, commit_ts: {:?}, deleted: {}",
             old_meta.get_creator_txn_id(),
-            old_meta.get_commit_timestamp().expect("Commit timestamp is required"),
+            old_meta.get_commit_timestamp(),
             old_meta.is_deleted()
         );
         debug!(
-            "New meta - creator_txn: {}, commit_ts: {}, deleted: {}",
+            "New meta - creator_txn: {}, commit_ts: {:?}, deleted: {}",
             meta.get_creator_txn_id(),
-            meta.get_commit_timestamp().expect("Commit timestamp is required"),
+            meta.get_commit_timestamp(),
             meta.is_deleted()
         );
 
@@ -420,7 +420,7 @@ impl TablePage {
                 // Create owned TupleMeta by copying fields instead of cloning
                 let mut owned_meta =
                     TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
-                owned_meta.set_commit_timestamp(meta.get_commit_timestamp().expect("Commit timestamp is required"));
+                owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
                 owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
                 Ok((owned_meta, tuple))
             }
@@ -442,7 +442,7 @@ impl TablePage {
         let meta = &self.tuple_info[tuple_id].2;
         let mut owned_meta =
             TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
-        owned_meta.set_commit_timestamp(meta.get_commit_timestamp().expect("Commit timestamp is required"));
+        owned_meta.set_commit_timestamp_opt(meta.get_commit_timestamp());
         owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
         Ok(owned_meta)
     }

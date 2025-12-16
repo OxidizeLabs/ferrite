@@ -187,7 +187,7 @@ async fn tuple_meta_update_applies() {
         .update_tuple_meta(Arc::new(meta), rid)
         .expect("meta update");
     let retrieved_meta = table_heap.get_tuple_meta(rid).expect("get meta");
-    assert_eq!(retrieved_meta.get_commit_timestamp(), 100);
+    assert_eq!(retrieved_meta.get_commit_timestamp(), Some(100));
 }
 
 #[tokio::test]

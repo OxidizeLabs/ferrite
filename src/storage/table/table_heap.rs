@@ -203,11 +203,14 @@ impl TableHeap {
             let txn_manager = txn_ctx.get_transaction_manager();
 
             // Always create the undo log for any modification
+            let undo_ts = current_meta
+                .get_commit_timestamp()
+                .unwrap_or_else(|| txn.read_ts());
             let undo_log = UndoLog::new(
                 false,
                 vec![true; tuple.get_column_count()],
                 Arc::from(current_tuple), // Keep the old version
-                current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
+                undo_ts,
                 UndoLink::new(
                     current_meta.get_creator_txn_id(),
                     current_meta.get_undo_log_idx(),
