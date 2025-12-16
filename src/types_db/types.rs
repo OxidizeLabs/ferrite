@@ -25,7 +25,7 @@ use crate::types_db::vector_type;
 use std::mem::size_of;
 use std::sync::Arc;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum CmpBool {
     CmpFalse = 0,
     CmpTrue = 1,
@@ -121,6 +121,7 @@ pub trait Type {
                     | TypeId::Time
                     | TypeId::Interval
                     | TypeId::VarChar
+                    | TypeId::Char
             ),
             TypeId::Binary => type_id == TypeId::Binary,
             TypeId::JSON => type_id == TypeId::JSON || type_id == TypeId::VarChar,
@@ -360,7 +361,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
         TypeId::Char => 0,
         TypeId::Enum => 4,   // ID size, the string is variable
         TypeId::Point => 16, // Two f64 values
-        TypeId::Struct => 8, // Pointer size for struct
+        TypeId::Struct => size_of::<usize>() as u64, // Pointer size for struct
     }
 }
 
