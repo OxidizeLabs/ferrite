@@ -4,7 +4,7 @@ use crate::common::config::{storage_bincode_config, Timestamp, TxnId};
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::types_db::value::Value;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::io;
 
 /// MVCC visibility result for a particular tuple *version* at a reader's snapshot.
@@ -203,7 +203,7 @@ impl TupleMeta {
 }
 
 /// Represents a tuple in the database.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Tuple {
     /// Tuple values. `Tuple` has value semantics: cloning a tuple clones its values.
     values: Vec<Value>,
@@ -462,10 +462,28 @@ impl Tuple {
 
     /// Formats the tuple using the provided schema, in a "detailed" form.
     ///
-    /// Currently identical to `format_with_schema`, but kept as a separate entrypoint to avoid
-    /// churn if/when we decide to include extra metadata in detailed output.
+    /// Includes extra metadata useful for debugging, such as the RID and column types.
     pub fn format_with_schema_detailed(&self, schema: &Schema) -> String {
-        self.format_with_schema(schema)
+        let values_with_types = self
+            .values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| {
+                let (col_name, type_id) = match schema.get_column(i) {
+                    Some(col) => (col.get_name().to_string(), col.get_type()),
+                    None => (format!("col_{}", i), value.get_type_id()),
+                };
+                format!("{}({:?}): {}", col_name, type_id, value)
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        format!(
+            "RID: {}, cols: {}, {}",
+            self.rid,
+            self.values.len(),
+            values_with_types
+        )
     }
 
     /// Combines this tuple with another tuple by appending the other tuple's values
@@ -491,7 +509,15 @@ impl Tuple {
 impl Display for Tuple {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let schema = self.get_schema();
-        write!(f, "{}", self.format_with_schema_detailed(&schema))
+        write!(f, "{}", self.format_with_schema(&schema))
+    }
+}
+
+impl Debug for Tuple {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // When callers don't have an external schema, derive one from the stored values.
+        let schema = self.get_schema();
+        f.write_str(&self.format_with_schema_detailed(&schema))
     }
 }
 
@@ -560,7 +586,7 @@ mod tests {
     fn test_tuple_to_string_detailed() {
         let (tuple, _) = create_sample_tuple();
         let schema = create_sample_schema();
-        let expected = "id: 1, name: Alice, age: 30, is_student: true";
+        let expected = "RID: page_id: 0 slot_num: 0, cols: 4, id(Integer): 1, name(VarChar): Alice, age(Integer): 30, is_student(Boolean): true";
         assert_eq!(tuple.format_with_schema_detailed(&schema), expected);
     }
 
