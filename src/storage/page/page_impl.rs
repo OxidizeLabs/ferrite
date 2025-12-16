@@ -21,17 +21,18 @@ pub const PAGE_ID_OFFSET: usize = 1;
 // ... other header offsets
 
 #[derive(Debug, PartialEq, Copy, Clone)]
+#[repr(u8)]
 pub enum PageType {
-    Invalid = PAGE_TYPE_INVALID as isize,
-    Basic = PAGE_TYPE_BASIC as isize,
-    Table = PAGE_TYPE_TABLE as isize,
-    HashTableDirectory = PAGE_TYPE_HASH_TABLE_DIRECTORY as isize,
-    HashTableBucket = PAGE_TYPE_HASH_TABLE_BUCKET as isize,
-    HashTableHeader = PAGE_TYPE_HASH_TABLE_HEADER as isize,
-    BTreeHeader = PAGE_TYPE_BTREE_HEADER as isize,
-    BTreeInternal = PAGE_TYPE_BTREE_INTERNAL as isize,
-    BTreeLeaf = PAGE_TYPE_BTREE_LEAF as isize,
-    BTreeNode = PAGE_TYPE_BTREE_NODE as isize,
+    Invalid = PAGE_TYPE_INVALID,
+    Basic = PAGE_TYPE_BASIC,
+    Table = PAGE_TYPE_TABLE,
+    HashTableDirectory = PAGE_TYPE_HASH_TABLE_DIRECTORY,
+    HashTableBucket = PAGE_TYPE_HASH_TABLE_BUCKET,
+    HashTableHeader = PAGE_TYPE_HASH_TABLE_HEADER,
+    BTreeHeader = PAGE_TYPE_BTREE_HEADER,
+    BTreeInternal = PAGE_TYPE_BTREE_INTERNAL,
+    BTreeLeaf = PAGE_TYPE_BTREE_LEAF,
+    BTreeNode = PAGE_TYPE_BTREE_NODE,
 }
 
 // Keep PageTrait as the main trait for dynamic dispatch
@@ -99,6 +100,7 @@ impl PageType {
             PAGE_TYPE_BTREE_HEADER => Some(Self::BTreeHeader),
             PAGE_TYPE_BTREE_INTERNAL => Some(Self::BTreeInternal),
             PAGE_TYPE_BTREE_LEAF => Some(Self::BTreeLeaf),
+            PAGE_TYPE_BTREE_NODE => Some(Self::BTreeNode),
             _ => None,
         }
     }
@@ -212,6 +214,22 @@ mod tests {
             Some(PageType::HashTableHeader)
         );
         assert_eq!(
+            PageType::from_u8(PAGE_TYPE_BTREE_HEADER),
+            Some(PageType::BTreeHeader)
+        );
+        assert_eq!(
+            PageType::from_u8(PAGE_TYPE_BTREE_INTERNAL),
+            Some(PageType::BTreeInternal)
+        );
+        assert_eq!(
+            PageType::from_u8(PAGE_TYPE_BTREE_LEAF),
+            Some(PageType::BTreeLeaf)
+        );
+        assert_eq!(
+            PageType::from_u8(PAGE_TYPE_BTREE_NODE),
+            Some(PageType::BTreeNode)
+        );
+        assert_eq!(
             PageType::from_u8(PAGE_TYPE_INVALID),
             Some(PageType::Invalid)
         );
@@ -234,6 +252,10 @@ mod tests {
             PageType::HashTableHeader.to_u8(),
             PAGE_TYPE_HASH_TABLE_HEADER
         );
+        assert_eq!(PageType::BTreeHeader.to_u8(), PAGE_TYPE_BTREE_HEADER);
+        assert_eq!(PageType::BTreeInternal.to_u8(), PAGE_TYPE_BTREE_INTERNAL);
+        assert_eq!(PageType::BTreeLeaf.to_u8(), PAGE_TYPE_BTREE_LEAF);
+        assert_eq!(PageType::BTreeNode.to_u8(), PAGE_TYPE_BTREE_NODE);
         assert_eq!(PageType::Invalid.to_u8(), PAGE_TYPE_INVALID);
     }
 
@@ -432,6 +454,10 @@ mod tests {
             (PAGE_TYPE_HASH_TABLE_DIRECTORY, PageType::HashTableDirectory),
             (PAGE_TYPE_HASH_TABLE_BUCKET, PageType::HashTableBucket),
             (PAGE_TYPE_HASH_TABLE_HEADER, PageType::HashTableHeader),
+            (PAGE_TYPE_BTREE_HEADER, PageType::BTreeHeader),
+            (PAGE_TYPE_BTREE_INTERNAL, PageType::BTreeInternal),
+            (PAGE_TYPE_BTREE_LEAF, PageType::BTreeLeaf),
+            (PAGE_TYPE_BTREE_NODE, PageType::BTreeNode),
             (PAGE_TYPE_INVALID, PageType::Invalid),
         ];
 
