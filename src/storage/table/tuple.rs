@@ -3,7 +3,6 @@ use crate::catalog::schema::Schema;
 use crate::common::config::{Timestamp, TxnId};
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
-use crate::concurrency::watermark::Watermark;
 use crate::types_db::value::Value;
 use bincode::config;
 use log;
@@ -76,21 +75,27 @@ impl TupleMeta {
         self.deleted = deleted;
     }
 
-    /// Checks if this tuple is visible to the given transaction.
-    pub fn is_visible_to(&self, txn_id: TxnId, watermark: &Watermark) -> bool {
+    /// Checks if this tuple version is visible to the given transaction.
+    ///
+    /// `read_ts` is the *snapshot/read timestamp* of the transaction performing the read
+    /// (i.e., the timestamp the transaction should observe). This must **not** be the global
+    /// low-watermark used for GC, since that would incorrectly hide versions from newer readers
+    /// when an older reader is still active.
+    pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
         log::debug!(
-            "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={}, deleted={}, watermark={}",
+            "TupleMeta.is_visible_to(): creator_txn={}, current_txn={}, commit_ts={}, deleted={}, read_ts={}",
             self.creator_txn_id,
             txn_id,
             self.commit_timestamp,
             self.deleted,
-            watermark.get_watermark()
+            read_ts
         );
 
-        // If this tuple was created by the current transaction, it's visible
+        // If this tuple version was created by the current transaction, it's visible as long as
+        // it isn't deleted by the same transaction.
         if self.creator_txn_id == txn_id {
             log::debug!("Tuple visible: created by current transaction");
-            return true;
+            return !self.deleted;
         }
 
         // If the tuple is deleted, it's not visible
@@ -105,12 +110,12 @@ impl TupleMeta {
             return false;
         }
 
-        // The tuple is visible if its commit timestamp is less than the watermark
-        let visible = self.commit_timestamp <= watermark.get_watermark();
+        // The tuple is visible if its commit timestamp is <= the reader's snapshot.
+        let visible = self.commit_timestamp <= read_ts;
         log::debug!(
-            "Tuple visibility based on watermark: commit_ts={} <= watermark={} = {}",
+            "Tuple visibility based on read_ts: commit_ts={} <= read_ts={} = {}",
             self.commit_timestamp,
-            watermark.get_watermark(),
+            read_ts,
             visible
         );
         visible
@@ -497,6 +502,30 @@ mod tests {
 
         meta.set_deleted(true);
         assert!(meta.is_deleted());
+    }
+
+    #[test]
+    fn test_tuple_meta_visibility_rules() {
+        // Creator transaction sees its own uncommitted version (unless deleted).
+        let meta = TupleMeta::new(1);
+        assert!(meta.is_visible_to(1, 1));
+
+        let meta = TupleMeta::new_with_delete(1, true);
+        assert!(!meta.is_visible_to(1, 1));
+
+        // Other transactions do not see uncommitted versions.
+        let mut meta = TupleMeta::new(1);
+        assert!(!meta.is_visible_to(2, 100));
+
+        // Committed versions are visible based on the reader's snapshot timestamp.
+        meta.set_commit_timestamp(5);
+        assert!(meta.is_visible_to(2, 5));
+        assert!(meta.is_visible_to(2, 10));
+        assert!(!meta.is_visible_to(2, 4));
+
+        // Deletes are never visible to other transactions.
+        meta.set_deleted(true);
+        assert!(!meta.is_visible_to(2, 10));
     }
 
     #[test]
