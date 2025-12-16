@@ -1,9 +1,8 @@
 use crate::types_db::value::{Val, Value};
 use bincode::{Decode, Encode};
-use std::hash::{Hash, Hasher};
 
 // Every possible SQL type ID
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Encode, Decode, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash, Encode, Decode, Default)]
 pub enum TypeId {
     Boolean,
     TinyInt,
@@ -28,13 +27,6 @@ pub enum TypeId {
     #[default]
     Invalid,
     Struct,
-}
-
-impl Hash for TypeId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // Use the discriminant of the enum for hashing
-        std::mem::discriminant(self).hash(state);
-    }
 }
 
 impl TypeId {
@@ -65,34 +57,12 @@ impl TypeId {
             TypeId::Enum => Value::new(Val::Enum(0, String::new())),
             TypeId::Point => Value::new(Val::Point(0.0, 0.0)),
             TypeId::Invalid => Value::new(Val::Null),
-            TypeId::Struct => Value::new(Val::Null),
+            TypeId::Struct => Value::new_struct(Vec::<String>::new(), Vec::<Value>::new()),
         }
     }
 
     pub fn from_value(value: &Value) -> Self {
-        match value.get_val() {
-            Val::Boolean(_) => TypeId::Boolean,
-            Val::TinyInt(_) => TypeId::TinyInt,
-            Val::SmallInt(_) => TypeId::SmallInt,
-            Val::Integer(_) => TypeId::Integer,
-            Val::BigInt(_) => TypeId::BigInt,
-            Val::Decimal(_) => TypeId::Decimal,
-            Val::Float(_) => TypeId::Float,
-            Val::Timestamp(_) => TypeId::Timestamp,
-            Val::Date(_) => TypeId::Date,
-            Val::Time(_) => TypeId::Time,
-            Val::Interval(_) => TypeId::Interval,
-            Val::VarLen(_) => TypeId::VarChar,
-            Val::ConstLen(_) => TypeId::Char,
-            Val::Binary(_) => TypeId::Binary,
-            Val::JSON(_) => TypeId::JSON,
-            Val::UUID(_) => TypeId::UUID,
-            Val::Vector(_) => TypeId::Vector,
-            Val::Array(_) => TypeId::Array,
-            Val::Enum(_, _) => TypeId::Enum,
-            Val::Point(_, _) => TypeId::Point,
-            Val::Null => TypeId::Invalid,
-            Val::Struct => TypeId::Struct,
-        }
+        // Important: Value can carry a *typed* NULL (Val::Null with non-Invalid type_id_).
+        value.get_type_id()
     }
 }
