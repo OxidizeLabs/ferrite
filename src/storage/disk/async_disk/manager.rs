@@ -2,7 +2,7 @@
 // Refactored from the original async_disk_manager.rs file
 
 use super::config::DiskManagerConfig;
-use crate::common::config::PageId;
+use crate::common::config::{PageId, DB_PAGE_SIZE};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheManager;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
@@ -69,9 +69,10 @@ impl AsyncDiskManager {
         );
 
         // Create direct I/O configuration
+        // Use DB_PAGE_SIZE for alignment to ensure optimal direct I/O performance
         let direct_io_config = crate::storage::disk::direct_io::DirectIOConfig {
             enabled: config.direct_io,
-            alignment: 512,
+            alignment: DB_PAGE_SIZE as usize,
         };
 
         // Open database and log files with direct I/O support
@@ -101,9 +102,13 @@ impl AsyncDiskManager {
         )?;
         let log_file = Arc::new(Mutex::new(File::from_std(log_file_std)));
 
-        // Create IO engine
-        debug!("Initializing AsyncIOEngine");
-        let mut io_engine_instance = AsyncIOEngine::new(db_file.clone(), log_file.clone())?;
+        // Create IO engine with direct I/O configuration
+        debug!(
+            "Initializing AsyncIOEngine with direct_io={}, alignment={}",
+            direct_io_config.enabled, direct_io_config.alignment
+        );
+        let mut io_engine_instance =
+            AsyncIOEngine::with_config(db_file.clone(), log_file.clone(), direct_io_config)?;
 
         // Start the IO engine with configured number of worker threads
         debug!(
