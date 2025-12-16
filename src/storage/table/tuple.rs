@@ -441,29 +441,11 @@ impl Tuple {
         Ok(keys)
     }
 
-    /// Returns a string representation of the tuple.
-    pub fn to_string(&self, schema: &Schema) -> String {
-        self.to_string_with_schema(schema)
-    }
-
-    /// Returns a detailed string representation of the tuple.
-    pub fn to_string_detailed(&self, schema: &Schema) -> String {
-        // Currently identical to `to_string`; keep this entrypoint for compatibility.
-        self.to_string_with_schema(schema)
-    }
-
-    /// Compatibility helper for older call sites that pass `Schema` by value.
-    pub fn to_string_owned(&self, schema: Schema) -> String {
-        self.to_string(&schema)
-    }
-
-    /// Compatibility helper for older call sites that pass `Schema` by value.
-    pub fn to_string_detailed_owned(&self, schema: Schema) -> String {
-        self.to_string_detailed(&schema)
-    }
-
-    /// Like `to_string`, but avoids moving/cloning the schema.
-    pub fn to_string_with_schema(&self, schema: &Schema) -> String {
+    /// Formats the tuple using the provided schema (column names).
+    ///
+    /// This intentionally avoids the name `to_string` to prevent confusion with the standard
+    /// library's `ToString::to_string()` (which is implemented via `Display`).
+    pub fn format_with_schema(&self, schema: &Schema) -> String {
         self.values
             .iter()
             .enumerate()
@@ -476,6 +458,14 @@ impl Tuple {
             })
             .collect::<Vec<String>>()
             .join(", ")
+    }
+
+    /// Formats the tuple using the provided schema, in a "detailed" form.
+    ///
+    /// Currently identical to `format_with_schema`, but kept as a separate entrypoint to avoid
+    /// churn if/when we decide to include extra metadata in detailed output.
+    pub fn format_with_schema_detailed(&self, schema: &Schema) -> String {
+        self.format_with_schema(schema)
     }
 
     /// Combines this tuple with another tuple by appending the other tuple's values
@@ -501,7 +491,7 @@ impl Tuple {
 impl Display for Tuple {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let schema = self.get_schema();
-        write!(f, "{}", self.to_string_detailed(&schema))
+        write!(f, "{}", self.format_with_schema_detailed(&schema))
     }
 }
 
@@ -557,11 +547,11 @@ mod tests {
 
         // Both should still serialize/format correctly.
         assert_eq!(
-            tuple.to_string(&schema),
+            tuple.format_with_schema(&schema),
             "id: 1, name: Alice, age: 30, is_student: true"
         );
         assert_eq!(
-            cloned.to_string(&schema),
+            cloned.format_with_schema(&schema),
             "id: 999, name: Alice, age: 30, is_student: true"
         );
     }
@@ -571,7 +561,7 @@ mod tests {
         let (tuple, _) = create_sample_tuple();
         let schema = create_sample_schema();
         let expected = "id: 1, name: Alice, age: 30, is_student: true";
-        assert_eq!(tuple.to_string_detailed(&schema), expected);
+        assert_eq!(tuple.format_with_schema_detailed(&schema), expected);
     }
 
     #[test]
@@ -620,7 +610,7 @@ mod tests {
         let (tuple, _) = create_sample_tuple();
         let schema = create_sample_schema();
         let expected = "id: 1, name: Alice, age: 30, is_student: true";
-        assert_eq!(tuple.to_string(&schema), expected);
+        assert_eq!(tuple.format_with_schema(&schema), expected);
     }
 
     #[test]
@@ -689,20 +679,28 @@ mod tests {
 
         let meta = TupleMeta::new_with_delete(1, true);
         assert!(!meta.is_visible_to(1, 1));
+        assert_eq!(meta.visibility_status(1, 1), TupleVisibility::Deleted);
+        assert!(meta.is_applicable_to(1, 1));
 
         // Other transactions do not see uncommitted versions.
         let mut meta = TupleMeta::new(1);
         assert!(!meta.is_visible_to(2, 100));
+        assert_eq!(meta.visibility_status(2, 100), TupleVisibility::Invisible);
+        assert!(!meta.is_applicable_to(2, 100));
 
         // Committed versions are visible based on the reader's snapshot timestamp.
         meta.set_commit_timestamp(5);
         assert!(meta.is_visible_to(2, 5));
         assert!(meta.is_visible_to(2, 10));
         assert!(!meta.is_visible_to(2, 4));
+        assert_eq!(meta.visibility_status(2, 4), TupleVisibility::Invisible);
 
-        // Deletes are never visible to other transactions.
+        // Deletes are not returned as "live rows" (`is_visible_to` is false), but a committed
+        // delete marker is still *applicable* as a tombstone for version-chain traversal.
         meta.set_deleted(true);
         assert!(!meta.is_visible_to(2, 10));
+        assert_eq!(meta.visibility_status(2, 10), TupleVisibility::Deleted);
+        assert!(meta.is_applicable_to(2, 10));
     }
 
     #[test]

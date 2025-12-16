@@ -150,7 +150,7 @@ impl Record {
         format!(
             "RID: {}, {}",
             self.rid,
-            self.tuple.to_string_detailed(schema)
+            self.tuple.format_with_schema_detailed(schema)
         )
     }
 
@@ -167,7 +167,7 @@ impl Display for Record {
             f,
             "RID: {}, {}",
             self.rid,
-            self.tuple.to_string_detailed(&schema)
+            self.tuple.format_with_schema_detailed(&schema)
         )
     }
 }
