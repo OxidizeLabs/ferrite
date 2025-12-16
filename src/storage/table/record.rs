@@ -1,4 +1,5 @@
 use crate::catalog::schema::Schema;
+use crate::common::config::storage_bincode_config;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
@@ -94,8 +95,7 @@ impl Record {
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
-        let config = bincode::config::standard();
-        let serialized = bincode::encode_to_vec(self, config)
+        let serialized = bincode::encode_to_vec(self, storage_bincode_config())
             .map_err(|e| TupleError::SerializationError(e.to_string()))?;
 
         if storage.len() < serialized.len() {
@@ -112,8 +112,8 @@ impl Record {
     ///
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
-        let config = bincode::config::standard();
-        let (record, _): (Self, usize) = bincode::decode_from_slice(storage, config)
+        let (record, _): (Self, usize) =
+            bincode::decode_from_slice(storage, storage_bincode_config())
             .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
         Ok(record)
     }
@@ -134,9 +134,8 @@ impl Record {
     ///
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
-        let config = bincode::config::standard();
         let values = self.tuple.get_values();
-        let serialized = bincode::encode_to_vec(&(values, self.rid), config)
+        let serialized = bincode::encode_to_vec(&(values, self.rid), storage_bincode_config())
             .map_err(|e| TupleError::SerializationError(e.to_string()))?;
         Ok(serialized.len())
     }
@@ -261,12 +260,12 @@ mod tests {
     fn test_direct_bincode_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let (record, _) = create_sample_record();
 
-        let config = bincode::config::standard();
         // Directly use bincode 2.0 API
-        let serialized = bincode::encode_to_vec(&record, config)?;
+        let serialized = bincode::encode_to_vec(&record, storage_bincode_config())?;
 
         // Directly use bincode 2.0 API for deserialization
-        let (deserialized, _): (Record, usize) = bincode::decode_from_slice(&serialized, config)?;
+        let (deserialized, _): (Record, usize) =
+            bincode::decode_from_slice(&serialized, storage_bincode_config())?;
 
         // Verify the deserialized record matches the original
         assert_eq!(deserialized.get_rid(), record.get_rid());

@@ -948,7 +948,18 @@ impl BPlusTree {
     fn extract_key(&self, tuple: &Tuple) -> Value {
         let key_attrs = self.metadata.get_key_attrs();
         assert_eq!(key_attrs.len(), 1, "Only single key indices are supported");
-        tuple.get_value(key_attrs[0]).clone()
+        // Use checked extraction so mismatched tuple shapes fail loudly and with context.
+        tuple
+            .keys_from_tuple_checked(key_attrs)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to extract index key using key_attrs={key_attrs:?} from tuple (cols={}): {e}",
+                    tuple.get_column_count()
+                )
+            })
+            .into_iter()
+            .next()
+            .expect("key_attrs.len()==1 implies exactly one key value")
     }
 }
 
@@ -1090,9 +1101,9 @@ mod unit_tests {
         let tree = create_test_tree(4, Arc::from(index_info));
         let tree_read_guard = tree.read();
 
-        let binding = tuple1.keys_from_tuple(&[0]);
+        let binding = tuple1.keys_from_tuple_checked(&[0]).unwrap();
         let key1 = binding.first().unwrap();
-        let binding = tuple2.keys_from_tuple(&[0]);
+        let binding = tuple2.keys_from_tuple_checked(&[0]).unwrap();
         let key2 = binding.first().unwrap();
 
         assert_eq!(

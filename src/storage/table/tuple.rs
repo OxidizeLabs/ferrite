@@ -1,20 +1,11 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::common::config::{Timestamp, TxnId};
+use crate::common::config::{storage_bincode_config, Timestamp, TxnId};
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::types_db::value::Value;
-use bincode::config;
 use std::fmt::{Display, Formatter};
-
-/// Bincode configuration for persisted tuple / tuple-meta encodings.
-///
-/// Keep this centralized so on-disk formats don’t accidentally diverge across call sites.
-#[inline]
-pub(crate) fn storage_bincode_config() -> config::Configuration {
-    // NOTE: If/when we change this, it is an on-disk format change.
-    config::standard()
-}
+use std::io;
 
 /// Metadata associated with a tuple.
 #[derive(Debug, PartialEq, Copy, Clone, bincode::Encode, bincode::Decode)]
@@ -96,6 +87,9 @@ impl TupleMeta {
     /// (i.e., the timestamp the transaction should observe). This must **not** be the global
     /// low-watermark used for GC, since that would incorrectly hide versions from newer readers
     /// when an older reader is still active.
+    ///
+    /// Note: deleted versions act as tombstones. Readers that need “previous visible” semantics
+    /// must traverse the version chain (undo logs) to locate an older visible version.
     pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
         // If this tuple version was created by the current transaction, it's visible as long as
         // it isn't deleted by the same transaction.
@@ -125,8 +119,9 @@ impl TupleMeta {
     }
 
     /// Sets the undo log index for this tuple version
-    pub fn set_undo_log_idx(&mut self, idx: usize) {
-        self.undo_log_idx = idx as u64;
+    pub fn set_undo_log_idx(&mut self, idx: usize) -> Result<(), TupleError> {
+        self.undo_log_idx = u64::try_from(idx).map_err(|_| TupleError::UndoLogIndexU64Overflow(idx))?;
+        Ok(())
     }
 
     /// Gets the raw, fixed-width undo log index stored in the tuple metadata.
@@ -212,16 +207,22 @@ impl Tuple {
     ///
     /// Panics if the number of values doesn't match the schema's column count.
     pub fn new(values: &[Value], schema: &Schema, rid: RID) -> Self {
-        assert_eq!(
-            values.len(),
-            schema.get_column_count() as usize,
-            "Values length does not match schema column count"
-        );
+        Self::try_new(values, schema, rid).unwrap_or_else(|e| {
+            panic!("Values length does not match schema column count: {e}")
+        })
+    }
 
-        Self {
+    /// Fallible constructor that validates the value count against the schema.
+    pub fn try_new(values: &[Value], schema: &Schema, rid: RID) -> Result<Self, TupleError> {
+        let expected = schema.get_column_count() as usize;
+        let actual = values.len();
+        if actual != expected {
+            return Err(TupleError::ValueCountMismatch { expected, actual });
+        }
+        Ok(Self {
             values: values.to_vec(),
             rid,
-        }
+        })
     }
 
     /// Serializes the tuple into the given storage buffer.
@@ -264,9 +265,28 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
-        bincode::encode_to_vec(self, storage_bincode_config())
-            .map(|vec| vec.len())
-            .map_err(|e| TupleError::SerializationError(e.to_string()))
+        #[derive(Default)]
+        struct CountingWriter {
+            len: usize,
+        }
+
+        impl io::Write for CountingWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.len = self
+                    .len
+                    .checked_add(buf.len())
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "length overflow"))?;
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut writer = CountingWriter::default();
+        bincode::encode_into_std_write(self, &mut writer, storage_bincode_config())
+            .map_err(|e| TupleError::SerializationError(e.to_string()))?;
+        Ok(writer.len)
     }
 
     /// Returns a reference to the value at the given column index.
@@ -402,7 +422,9 @@ impl Tuple {
 
         Self {
             values: combined_values,
-            rid: self.rid, // Keep the left tuple's RID
+            // Combined tuples are derived values (e.g., joins) and do not correspond to a single
+            // base-table record. Use an invalid RID sentinel to avoid accidental misuse.
+            rid: RID::default(),
         }
     }
 

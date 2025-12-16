@@ -2,7 +2,6 @@ use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::config::INVALID_PAGE_ID;
 use crate::common::config::TableOidT;
-use crate::common::config::Timestamp;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
 use crate::concurrency::transaction::UndoLog;
@@ -496,10 +495,12 @@ impl TransactionalTableHeap {
         if meta.is_deleted() {
             fixed_meta.set_deleted(true);
         }
-        fixed_meta.set_undo_log_idx(
-            meta.try_get_undo_log_idx()
-                .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?,
-        );
+        fixed_meta
+            .set_undo_log_idx(
+                meta.try_get_undo_log_idx()
+                    .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?,
+            )
+            .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?;
 
         // Perform insert using internal method
         let rid = self
@@ -611,8 +612,11 @@ impl TransactionalTableHeap {
 
         // Create new meta with current transaction as creator
         let mut new_meta = TupleMeta::new(txn.get_transaction_id());
-        new_meta.set_commit_timestamp(Timestamp::MAX);
-        new_meta.set_undo_log_idx(txn.get_undo_log_num() - 1);
+        // Uncommitted versions should not have a commit timestamp.
+        new_meta.set_commit_timestamp_opt(None);
+        new_meta
+            .set_undo_log_idx(txn.get_undo_log_num() - 1)
+            .map_err(|e| format!("Invalid undo log index: {}", e))?;
 
         log::debug!(
             "Created new meta: creator={}, idx={}, commit_ts={}",
@@ -693,7 +697,9 @@ impl TransactionalTableHeap {
             let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
             prev_meta.set_commit_timestamp(undo_log.ts);
             prev_meta.set_deleted(undo_log.is_deleted);
-            prev_meta.set_undo_log_idx(undo_log.prev_version.prev_log_idx);
+            prev_meta
+                .set_undo_log_idx(undo_log.prev_version.prev_log_idx)
+                .map_err(|e| format!("Invalid undo log index in version chain: {}", e))?;
 
             log::debug!(
                 "Created previous version metadata: creator_txn={}, commit_ts={}, deleted={}, undo_idx={}",
@@ -811,8 +817,11 @@ impl TransactionalTableHeap {
         // Create new meta with current transaction as creator
         let mut new_meta = TupleMeta::new(txn.get_transaction_id());
         new_meta.set_deleted(true); // Mark as deleted
-        new_meta.set_commit_timestamp(Timestamp::MAX);
-        new_meta.set_undo_log_idx(txn.get_undo_log_num() - 1);
+        // Uncommitted versions should not have a commit timestamp.
+        new_meta.set_commit_timestamp_opt(None);
+        new_meta
+            .set_undo_log_idx(txn.get_undo_log_num() - 1)
+            .map_err(|e| format!("Invalid undo log index: {}", e))?;
 
         log::debug!(
             "Created new meta: creator={}, idx={}, commit_ts={}, deleted=true",

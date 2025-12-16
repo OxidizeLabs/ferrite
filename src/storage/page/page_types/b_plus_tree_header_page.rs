@@ -1,4 +1,4 @@
-use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
+use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 use std::any::Any;
@@ -130,7 +130,7 @@ impl BPlusTreeHeaderPage {
         };
 
         // Use bincode 2.0 API
-        bincode::encode_to_vec(&header_data, bincode::config::standard())
+        bincode::encode_to_vec(&header_data, storage_bincode_config())
             .expect("Failed to serialize BPlusTreeHeaderPage")
     }
 
@@ -138,7 +138,7 @@ impl BPlusTreeHeaderPage {
     pub fn deserialize(data: &[u8], page_id: PageId) -> Self {
         // Deserialize just the data fields
         let (header_data, _): (HeaderData, usize) =
-            bincode::decode_from_slice(data, bincode::config::standard())
+            bincode::decode_from_slice(data, storage_bincode_config())
                 .expect("Failed to deserialize BPlusTreeHeaderPage");
 
         // Create a new page with the deserialized data

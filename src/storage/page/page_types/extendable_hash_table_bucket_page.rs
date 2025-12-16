@@ -1,4 +1,4 @@
-use crate::common::config::{DB_PAGE_SIZE, PageId};
+use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
@@ -107,7 +107,7 @@ impl ExtendableHTableBucketPage {
         // Write entries
         for (value, rid) in &self.entries {
             // Serialize value
-            let value_bytes = bincode::encode_to_vec(value, bincode::config::standard())
+            let value_bytes = bincode::encode_to_vec(value, storage_bincode_config())
                 .map_err(|_| PageError::SerializationError)?;
             let value_size = value_bytes.len();
 
@@ -151,7 +151,7 @@ impl ExtendableHTableBucketPage {
             // Deserialize value
             let (value, _): (Value, _) = bincode::decode_from_slice(
                 &self.data[offset..offset + value_size as usize],
-                bincode::config::standard(),
+                storage_bincode_config(),
             )
             .map_err(|_| PageError::DeserializationError)?;
             offset += value_size as usize;

@@ -96,8 +96,10 @@ impl IndexIterator {
                     //
                     // NOTE: The B+ tree currently only supports a single key column.
                     // We still validate the attribute index against the tuple to avoid panics.
-                    let key_attrs = tree_guard.get_metadata().get_key_attrs();
-                    let key_attr = *key_attrs
+                    // Keep the metadata Arc alive while borrowing key attrs.
+                    let metadata = tree_guard.get_metadata();
+                    let key_attr = *metadata
+                        .get_key_attrs()
                         .first()
                         .expect("B+ tree metadata must have at least one key attribute");
 
@@ -180,7 +182,8 @@ impl IndexIterator {
         self.position = 0;
         self.exhausted = false;
         self.last_error = None;
-        self.fetch_next_batch();
+        // Ignore errors here; callers can observe them via `try_next()` which is fallible.
+        let _ = self.fetch_next_batch();
     }
 
     /// Fallible next() that surfaces iterator errors instead of silently ending the stream.

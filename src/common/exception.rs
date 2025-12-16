@@ -100,6 +100,8 @@ pub enum TupleError {
     DeserializationError(String),
     #[error("Undo log index does not fit in usize: {0}")]
     UndoLogIndexOverflow(u64),
+    #[error("Undo log index does not fit in u64: {0}")]
+    UndoLogIndexU64Overflow(usize),
     #[error("TupleID Out of Range")]
     OutOfRange,
     #[error("Tuple size mismatch")]
