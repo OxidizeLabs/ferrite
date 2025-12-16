@@ -4,10 +4,9 @@ use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
 /// Represents a tuple that has been stored in the database with a record ID.
-#[derive(Debug)]
 #[allow(dead_code)]
 pub struct Record {
     tuple: Tuple,
@@ -145,30 +144,57 @@ impl Record {
         self.tuple.get_value(column_index)
     }
 
-    /// Returns a detailed string representation of the record.
-    pub fn to_string_detailed(&self, schema: &Schema) -> String {
+    /// Formats the record using the provided schema (column names).
+    ///
+    /// This intentionally avoids the name `to_string` to prevent confusion with the standard
+    /// library's `ToString::to_string()` (which is implemented via `Display`).
+    pub fn format_with_schema(&self, schema: &Schema) -> String {
+        format!("RID: {}, {}", self.rid, self.tuple.format_with_schema(schema))
+    }
+
+    /// Formats the record using the provided schema, in a "detailed" form.
+    ///
+    /// Includes extra metadata useful for debugging. In particular, this prints both the record
+    /// RID and the tuple RID so mismatches are obvious (they should normally be identical).
+    pub fn format_with_schema_detailed(&self, schema: &Schema) -> String {
+        let tuple_rid = self.tuple.get_rid();
+        let rid_note = if tuple_rid == self.rid {
+            String::new()
+        } else {
+            format!(" (tuple_rid differs: {})", tuple_rid)
+        };
+
         format!(
-            "RID: {}, {}",
+            "Record {{ rid: {}{}, tuple: {} }}",
             self.rid,
+            rid_note,
             self.tuple.format_with_schema_detailed(schema)
         )
     }
 
     /// Compatibility helper for older call sites that pass `Schema` by value.
     pub fn to_string_detailed_owned(&self, schema: Schema) -> String {
-        self.to_string_detailed(&schema)
+        self.format_with_schema(&schema)
+    }
+
+    /// Compatibility helper for older call sites that still use `to_string_detailed`.
+    #[allow(clippy::wrong_self_convention)]
+    pub fn to_string_detailed(&self, schema: &Schema) -> String {
+        self.format_with_schema(schema)
     }
 }
 
 impl Display for Record {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let schema = self.tuple.get_schema();
-        write!(
-            f,
-            "RID: {}, {}",
-            self.rid,
-            self.tuple.format_with_schema_detailed(&schema)
-        )
+        write!(f, "{}", self.format_with_schema(&schema))
+    }
+}
+
+impl Debug for Record {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let schema = self.tuple.get_schema();
+        f.write_str(&self.format_with_schema_detailed(&schema))
     }
 }
 
@@ -220,7 +246,7 @@ mod tests {
     fn test_record_to_string_detailed() {
         let (record, schema) = create_sample_record();
         let expected = "RID: page_id: 0 slot_num: 0, id: 1, name: Alice, age: 30, is_student: true";
-        assert_eq!(record.to_string_detailed(&schema), expected);
+        assert_eq!(record.format_with_schema(&schema), expected);
     }
 
     #[test]
