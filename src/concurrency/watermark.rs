@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub struct Watermark {
     /// Set of active transaction Timestamps
     active_txns: HashSet<Timestamp>,
-    /// Current watermark value
+    /// Low watermark:
+    /// - If there are active transactions, this is the minimum active read timestamp.
+    /// - If there are no active transactions, this is the next timestamp that would be assigned.
     watermark: Timestamp,
     /// Next Timestamp to assign
     next_ts: AtomicU64,
@@ -43,8 +45,21 @@ impl Watermark {
 
     /// Updates the commit Timestamp for a transaction
     pub fn update_commit_ts(&mut self, ts: Timestamp) {
-        // Store the raw Timestamp value
-        self.next_ts.store(ts + 1, Ordering::SeqCst);
+        // Ensure the global timestamp allocator is always ahead of the latest commit timestamp.
+        // This must be monotonic: we never move next_ts backwards.
+        let desired = ts.saturating_add(1);
+        let mut current = self.next_ts.load(Ordering::SeqCst);
+        while current < desired {
+            match self.next_ts.compare_exchange(
+                current,
+                desired,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
         self.update_watermark();
     }
 
@@ -56,18 +71,7 @@ impl Watermark {
     /// Updates the watermark based on active transactions
     fn update_watermark(&mut self) {
         if self.active_txns.is_empty() {
-            let next_ts = self.next_ts.load(Ordering::SeqCst);
-            // For normal (non-commit) operation, watermark should be next_ts
-            // But for the post-commit case, use next_ts - 1 (which equals commit_ts)
-            // We distinguish between these cases based on next_ts value:
-            // - For normal operation, next_ts would be small (3 in our test)
-            // - For post-commit operation, next_ts would be large (11 in our test after setting to 10+1)
-            if next_ts > 5 {
-                // Arbitrary threshold to distinguish between regular and post-commit
-                self.watermark = next_ts - 1;
-            } else {
-                self.watermark = next_ts;
-            }
+            self.watermark = Timestamp::from(self.next_ts.load(Ordering::SeqCst));
         } else {
             self.watermark = *self.active_txns.iter().min().unwrap();
         }
@@ -275,40 +279,25 @@ mod tests {
         // Watermark should still be ts1 as it's the minimum active transaction
         assert_eq!(new_watermark, ts1);
 
-        // After removing all transactions, watermark should be the new commit ts
+        // After removing all transactions, watermark should be the next assignable timestamp
         watermark.remove_txn(ts1);
         watermark.remove_txn(ts2);
-        assert_eq!(watermark.get_watermark(), new_commit_ts);
+        assert_eq!(watermark.get_watermark(), new_commit_ts + 1);
     }
 
     #[test]
-    fn test_threshold_behavior() {
-        // Test behavior around our threshold value (5)
+    fn test_update_commit_ts_bumps_next_ts() {
         let mut watermark = Watermark::new();
 
         // Initialize with watermark = 1
         assert_eq!(watermark.get_watermark(), 1);
 
-        // First get some timestamps
-        for _ in 0..4 {
-            watermark.get_next_ts();
-        }
-
-        // Now next_ts should be 5
-        assert_eq!(watermark.get_next_ts(), 5);
-
-        // Next timestamp should be 6, but watermark hasn't been updated
-        // because we haven't added/removed any transactions
-
-        // Let's update the commit timestamp to force an update
+        // Bumping commit timestamp should bump the allocator (and thus watermark when no active txns)
         watermark.update_commit_ts(5);
-
-        // With no active transactions and commit_ts=5, watermark should be 5
-        assert_eq!(watermark.get_watermark(), 5);
-
-        // Update commit to above threshold
-        watermark.update_commit_ts(6);
         assert_eq!(watermark.get_watermark(), 6);
+
+        watermark.update_commit_ts(6);
+        assert_eq!(watermark.get_watermark(), 7);
     }
 
     #[test]
@@ -332,7 +321,7 @@ mod tests {
 
         // Remove last transaction
         watermark.remove_txn(ts2);
-        assert_eq!(watermark.get_watermark(), new_commit_ts);
+        assert_eq!(watermark.get_watermark(), new_commit_ts + 1);
     }
 
     #[test]
@@ -353,8 +342,8 @@ mod tests {
         watermark.remove_txn(ts1);
         watermark.remove_txn(ts2);
 
-        // Watermark should be commit timestamp
-        assert_eq!(watermark.get_watermark(), 5);
+        // Watermark should be the next assignable timestamp (commit_ts + 1)
+        assert_eq!(watermark.get_watermark(), 6);
     }
 
     #[test]
@@ -367,9 +356,8 @@ mod tests {
 
         // Get the actual watermark after setting large_ts
         let actual_watermark = watermark.get_watermark();
-        // The watermark should be related to the large timestamp
-        // It might be exactly large_ts or large_ts + 1 depending on implementation
-        assert!(actual_watermark <= large_ts + 1);
+        // With no active transactions, watermark should be next_ts = large_ts + 1 (saturating add)
+        assert_eq!(actual_watermark, large_ts.saturating_add(1));
 
         // Next timestamp should work and be greater than large_ts
         let next = watermark.get_next_ts();
@@ -381,9 +369,9 @@ mod tests {
 
         // Removing it should restore a large timestamp watermark
         watermark.remove_txn(1);
-        // Just check it's a large timestamp near our original value
-        let final_watermark = watermark.get_watermark();
-        assert!(final_watermark >= large_ts - 1 && final_watermark <= large_ts + 1);
+        // With no active transactions, watermark returns to next_ts.
+        // We already called get_next_ts() once above, so next_ts advanced by 1.
+        assert_eq!(watermark.get_watermark(), large_ts.saturating_add(2));
     }
 
     #[test]
@@ -443,8 +431,9 @@ mod tests {
         watermark.remove_txn(ts3);
         watermark.remove_txn(ts4);
 
-        // Watermark should now be commit timestamp
-        assert_eq!(watermark.get_watermark(), 10);
+        // With no active transactions, watermark should be the next assignable timestamp.
+        // update_commit_ts(10) bumps next_ts to 11.
+        assert_eq!(watermark.get_watermark(), 11);
     }
 
     #[test]
@@ -492,10 +481,10 @@ mod tests {
 
         // Update commit timestamp in sequence
         watermark.update_commit_ts(5);
-        assert_eq!(watermark.get_watermark(), 5);
+        assert_eq!(watermark.get_watermark(), 6);
 
         watermark.update_commit_ts(10);
-        assert_eq!(watermark.get_watermark(), 10);
+        assert_eq!(watermark.get_watermark(), 11);
 
         // Add a transaction
         watermark.add_txn(2);
@@ -505,9 +494,9 @@ mod tests {
         watermark.update_commit_ts(15);
         assert_eq!(watermark.get_watermark(), 2);
 
-        // Remove the transaction, watermark should now be the commit timestamp
+        // Remove the transaction, watermark should now be the next assignable timestamp
         watermark.remove_txn(2);
-        assert_eq!(watermark.get_watermark(), 15);
+        assert_eq!(watermark.get_watermark(), 16);
     }
 
     #[test]
@@ -516,17 +505,17 @@ mod tests {
 
         // Set a high commit timestamp
         watermark.update_commit_ts(20);
-        assert_eq!(watermark.get_watermark(), 20);
+        assert_eq!(watermark.get_watermark(), 21);
 
         // Try to set a lower commit timestamp
         watermark.update_commit_ts(10);
 
-        // Watermark should now be 10
-        assert_eq!(watermark.get_watermark(), 10);
+        // next_ts should never move backwards.
+        assert_eq!(watermark.get_watermark(), 21);
 
         // Check next timestamp is still sensible
         let next = watermark.get_next_ts();
-        assert!(next > 10);
+        assert!(next >= 21);
     }
 
     #[test]
@@ -622,8 +611,8 @@ mod tests {
 
         // Remove transaction
         watermark.remove_txn(1);
-        // After removing, should be related to commit ts
-        assert!(watermark.get_watermark() == 1 || watermark.get_watermark() == 2);
+        // After removing the last active txn, watermark should be next assignable timestamp
+        assert_eq!(watermark.get_watermark(), 2);
     }
 
     #[test]
@@ -652,11 +641,8 @@ mod tests {
             watermark.remove_txn(txns[i]);
         }
 
-        // All removed, watermark should be next_ts - 1 (because next_ts > 5 in our algorithm)
-        let final_watermark = watermark.get_watermark();
-        // After registering 100 transactions, next_ts should be 101
-        // But our algorithm sets watermark to next_ts - 1 when next_ts > 5 and no active transactions
-        assert_eq!(final_watermark, 100);
+        // All removed, watermark should be next_ts (after registering 100 txns, next_ts is 101)
+        assert_eq!(watermark.get_watermark(), 101);
     }
 
     #[test]
@@ -690,31 +676,6 @@ mod tests {
     }
 
     #[test]
-    fn test_threshold_boundary_exact() {
-        // This test specifically checks the behavior at our threshold boundary (5)
-        let mut watermark = Watermark::new();
-
-        // Set next_ts to exactly 5
-        for _ in 0..4 {
-            watermark.get_next_ts();
-        }
-
-        // Verify next_ts is 5
-        assert_eq!(watermark.get_next_ts(), 5);
-
-        // Force update of watermark with no active transactions
-        watermark.update_commit_ts(5);
-
-        // Observe behavior at threshold
-        let wm = watermark.get_watermark();
-        assert!(wm == 5 || wm == 6, "Expected 5 or 6, got {}", wm);
-
-        // Now go just above threshold
-        watermark.update_commit_ts(6);
-        assert_eq!(watermark.get_watermark(), 6);
-    }
-
-    #[test]
     fn test_rapid_operations() {
         // Test rapid sequence of mixed operations
         let mut watermark = Watermark::new();
@@ -745,11 +706,9 @@ mod tests {
         // Unregister and verify watermark
         let final_wm = watermark.unregister_txn(ts1);
 
-        // After unregistering all transactions, watermark should be based on the
-        // commit timestamp - exact value depends on implementation
-        // In our case: final_wm is 21 (not 20) because the update_commit_ts(20) sets next_ts to 21
-        // When we remove all transactions, watermark is based on next_ts
-        assert_eq!(final_wm, 21);
+        // After unregistering all transactions, watermark should be the next assignable timestamp.
+        // At this point we've allocated ts2 via get_next_ts(), so next_ts has advanced by 1.
+        assert_eq!(final_wm, 22);
     }
 
     #[test]
@@ -803,15 +762,15 @@ mod tests {
         // Remove transaction
         watermark.remove_txn(ts);
 
-        // Watermark should now be the last commit ts
-        assert_eq!(watermark.get_watermark(), 30);
+        // With no active transactions, watermark is the next assignable timestamp (last_commit_ts + 1).
+        assert_eq!(watermark.get_watermark(), 31);
 
         // More commit updates with no active transactions
         watermark.update_commit_ts(40);
-        assert_eq!(watermark.get_watermark(), 40);
+        assert_eq!(watermark.get_watermark(), 41);
 
         watermark.update_commit_ts(50);
-        assert_eq!(watermark.get_watermark(), 50);
+        assert_eq!(watermark.get_watermark(), 51);
     }
 
     #[test]
@@ -911,7 +870,8 @@ mod tests {
         assert_eq!(watermark.get_watermark(), ts1);
 
         watermark.remove_txn(ts1);
-        assert_eq!(watermark.get_watermark(), 20);
+        // With no active transactions, watermark is the next assignable timestamp.
+        assert_eq!(watermark.get_watermark(), 21);
     }
 
     #[test]
@@ -1025,9 +985,10 @@ mod concurrency_tests {
         }
 
         // After all threads complete, watermark should reflect next_ts
-        // With num_threads=5, next_ts=6, and since 6>5, watermark = next_ts-1 = 5
+        // With num_threads=5, we allocated timestamps 1..=5, so next_ts is now 6.
+        // With no active transactions, watermark is the next assignable timestamp.
         let final_watermark = watermark.lock().get_watermark();
-        assert_eq!(final_watermark, num_threads as u64);
+        assert_eq!(final_watermark, (num_threads as u64) + 1);
     }
 
     #[test]
