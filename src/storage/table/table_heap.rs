@@ -207,7 +207,7 @@ impl TableHeap {
                 false,
                 vec![true; tuple.get_column_count()],
                 Arc::from(current_tuple), // Keep the old version
-                current_meta.get_commit_timestamp(),
+                current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
                 UndoLink::new(
                     current_meta.get_creator_txn_id(),
                     current_meta.get_undo_log_idx(),
