@@ -10,7 +10,7 @@ use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::storage::table::tuple::{Tuple, TupleMeta, TupleVisibility};
 use crate::types_db::types::Type;
 use crate::types_db::value::Value;
 use log::{debug, info, warn};
@@ -489,26 +489,34 @@ impl TransactionalTableHeap {
             .lock_table(txn.clone(), LockMode::IntentionExclusive, self.table_oid)
             .map_err(|e| format!("Failed to acquire table lock: {}", e))?;
 
-        // Ensure the tuple's metadata reflects the current transaction as creator
-        let mut fixed_meta = TupleMeta::new(txn.get_transaction_id());
-        fixed_meta.set_commit_timestamp(meta.get_commit_timestamp().expect("Commit timestamp is required"));
-        if meta.is_deleted() {
-            fixed_meta.set_deleted(true);
+        // Use the metadata passed by the caller (do not rebuild it).
+        // This avoids silently changing caller intent and prevents unnecessary allocations.
+        //
+        // We do enforce basic invariants for inserts: this must be an uncommitted, non-deleted
+        // version created by the current transaction, with no undo-log link.
+        let txn_id = txn.get_transaction_id();
+        if meta.get_creator_txn_id() != txn_id {
+            return Err(format!(
+                "TupleMeta creator_txn_id {} does not match inserting txn_id {}",
+                meta.get_creator_txn_id(),
+                txn_id
+            ));
         }
-        match meta
-            .try_get_undo_log_idx_opt()
-            .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?
-        {
-            Some(idx) => fixed_meta
-                .set_undo_log_idx(idx)
-                .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?,
-            None => fixed_meta.clear_undo_log_idx(),
+        if meta.is_committed() {
+            return Err("Insert TupleMeta must be uncommitted (commit_timestamp must be None)"
+                .to_string());
+        }
+        if meta.is_deleted() {
+            return Err("Insert TupleMeta must not be deleted".to_string());
+        }
+        if meta.has_undo_log_idx() {
+            return Err("Insert TupleMeta must not have an undo log link".to_string());
         }
 
         // Perform insert using internal method
         let rid = self
             .table_heap
-            .insert_tuple_internal(Arc::new(fixed_meta), tuple)?;
+            .insert_tuple_internal(meta, tuple)?;
 
         // Transaction bookkeeping
         txn.append_write_set(self.table_oid, rid);
@@ -525,14 +533,31 @@ impl TransactionalTableHeap {
         let txn_manager = txn_ctx.get_transaction_manager();
 
         // Get latest version
-        let (meta, tuple) = self.table_heap.get_tuple_internal(rid, false)?;
+        // Important: allow reading deleted tuples so MVCC can interpret tombstones.
+        let (meta, tuple) = self.table_heap.get_tuple_internal(rid, true)?;
 
         // Handle visibility based on isolation level
         match txn.get_isolation_level() {
-            IsolationLevel::ReadUncommitted => Ok((meta, tuple)),
-            IsolationLevel::ReadCommitted => {
-                if meta.is_committed() || meta.get_creator_txn_id() == txn.get_transaction_id() {
+            IsolationLevel::ReadUncommitted => {
+                if meta.is_deleted() {
+                    Err("Tuple is deleted".to_string())
+                } else {
                     Ok((meta, tuple))
+                }
+            }
+            IsolationLevel::ReadCommitted => {
+                if meta.get_creator_txn_id() == txn.get_transaction_id() {
+                    if meta.is_deleted() {
+                        Err("Tuple is deleted".to_string())
+                    } else {
+                        Ok((meta, tuple))
+                    }
+                } else if meta.is_committed() {
+                    if meta.is_deleted() {
+                        Err("Tuple is deleted".to_string())
+                    } else {
+                        Ok((meta, tuple))
+                    }
                 } else {
                     Err("Tuple not visible".to_string())
                 }
@@ -653,18 +678,29 @@ impl TransactionalTableHeap {
         meta: Arc<TupleMeta>,
         tuple: Arc<Tuple>,
     ) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
+        let txn_id = txn.get_transaction_id();
+        let read_ts = txn.read_ts();
         log::debug!(
-            "Starting version chain traversal for RID {:?} - Latest version: creator_txn={}, commit_ts={}, txn_id={}",
+            "Starting version chain traversal for RID {:?} - Latest version: creator_txn={}, commit_ts={:?}, deleted={}, txn_id={}, read_ts={}",
             rid,
             meta.get_creator_txn_id(),
-            meta.get_commit_timestamp().expect("Commit timestamp is required"),
-            txn.get_transaction_id()
+            meta.get_commit_timestamp(),
+            meta.is_deleted(),
+            txn_id,
+            read_ts
         );
 
-        // First check if latest version is visible
-        if txn.is_tuple_visible(&meta) {
-            log::debug!("Latest version is visible, returning it");
-            return Ok((meta, tuple));
+        // First check if latest version is applicable/visible at this snapshot.
+        match meta.visibility_status(txn_id, read_ts) {
+            TupleVisibility::Visible => {
+                log::debug!("Latest version is visible, returning it");
+                return Ok((meta, tuple));
+            }
+            TupleVisibility::Deleted => {
+                log::debug!("Latest version is a visible tombstone; row is absent");
+                return Err("Tuple is deleted".to_string());
+            }
+            TupleVisibility::Invisible => { /* walk the chain */ }
         }
 
         // If the latest version isn't visible, check a version chain
@@ -727,13 +763,20 @@ impl TransactionalTableHeap {
             let current_meta = Arc::from(prev_meta);
             let current_tuple = undo_log.tuple.clone();
 
-            if txn.is_tuple_visible(&current_meta) {
-                log::debug!(
-                    "Found visible version: creator_txn={}, commit_ts={}",
-                    current_meta.get_creator_txn_id(),
-                    current_meta.get_commit_timestamp().expect("Commit timestamp is required")
-                );
-                return Ok((current_meta, current_tuple));
+            match current_meta.visibility_status(txn_id, read_ts) {
+                TupleVisibility::Visible => {
+                    log::debug!(
+                        "Found visible version: creator_txn={}, commit_ts={:?}",
+                        current_meta.get_creator_txn_id(),
+                        current_meta.get_commit_timestamp()
+                    );
+                    return Ok((current_meta, current_tuple));
+                }
+                TupleVisibility::Deleted => {
+                    log::debug!("Found visible tombstone in chain; row is absent");
+                    return Err("Tuple is deleted".to_string());
+                }
+                TupleVisibility::Invisible => { /* keep walking */ }
             }
 
             // Move to next version in chain using the undo log's prev_version
@@ -1194,15 +1237,13 @@ mod tests {
         }
     }
 
-    fn create_test_tuple() -> (TupleMeta, Tuple) {
+    fn create_test_tuple() -> Tuple {
         let schema = Schema::new(vec![
             Column::new("id", TypeId::Integer),
             Column::new("value", TypeId::Integer),
         ]);
         let values = vec![Value::new(1), Value::new(100)];
-        let tuple = Tuple::new(&values, &schema, RID::new(0, 0));
-        let meta = TupleMeta::new(0); // Initialize with 0, but this will be overwritten
-        (meta, tuple)
+        Tuple::new(&values, &schema, RID::new(0, 0))
     }
 
     #[tokio::test]
@@ -1307,7 +1348,8 @@ mod tests {
         let txn1 = txn_ctx1.get_transaction();
 
         // Insert initial version with txn1's ID
-        let (meta, tuple) = create_test_tuple();
+        let tuple = create_test_tuple();
+        let meta = TupleMeta::new(txn1.get_transaction_id());
 
         let rid = ctx
             .txn_heap
@@ -1348,6 +1390,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_delete_tombstone_visibility_allows_pre_delete_snapshot() {
+        let ctx =
+            TestContext::new("test_delete_tombstone_visibility_allows_pre_delete_snapshot").await;
+
+        let schema = TestContext::create_test_schema();
+
+        // Insert + commit initial version
+        let txn_ctx_insert = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
+        let txn_insert = txn_ctx_insert.get_transaction();
+        let rid = ctx
+            .txn_heap
+            .insert_tuple_from_values(vec![Value::new(1), Value::new(100)], &schema, txn_ctx_insert)
+            .expect("Insert failed");
+        ctx.txn_manager
+            .commit(txn_insert.clone(), ctx.txn_heap.get_table_heap().get_bpm())
+            .await;
+
+        // Begin a snapshot reader BEFORE the delete commits.
+        let txn_ctx_reader = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
+
+        // Delete + commit in a different transaction.
+        let txn_ctx_delete = ctx.create_transaction_context(IsolationLevel::ReadCommitted);
+        let txn_delete = txn_ctx_delete.get_transaction();
+        ctx.txn_heap
+            .delete_tuple(rid, txn_ctx_delete)
+            .expect("Delete failed");
+        ctx.txn_manager
+            .commit(txn_delete.clone(), ctx.txn_heap.get_table_heap().get_bpm())
+            .await;
+
+        // Reader (older snapshot) should still see the pre-delete version.
+        let (_meta, tuple) = ctx
+            .txn_heap
+            .get_tuple(rid, txn_ctx_reader.clone())
+            .expect("Reader should see pre-delete version");
+        assert_eq!(tuple.get_value(1), Value::new(100));
+
+        // A newer snapshot started after the delete commits should see the row as absent.
+        let txn_ctx_after = ctx.create_transaction_context(IsolationLevel::RepeatableRead);
+        let err = ctx.txn_heap.get_tuple(rid, txn_ctx_after).unwrap_err();
+        assert!(
+            err.to_lowercase().contains("deleted"),
+            "expected deleted error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_isolation_levels_with_values() {
         let ctx = TestContext::new("test_isolation_levels_with_values").await;
 
@@ -1384,9 +1473,11 @@ mod tests {
 
         // Create READ_UNCOMMITTED transaction
         let txn_ctx1 = ctx.create_transaction_context(IsolationLevel::ReadUncommitted);
+        let txn1 = txn_ctx1.get_transaction();
 
         // Insert tuple
-        let (meta, tuple) = create_test_tuple();
+        let tuple = create_test_tuple();
+        let meta = TupleMeta::new(txn1.get_transaction_id());
 
         let rid = ctx
             .txn_heap

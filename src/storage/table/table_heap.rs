@@ -13,7 +13,7 @@ use crate::storage::page::page_guard::PageGuard;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::page::{Page, PageTrait};
 use crate::storage::table::table_iterator::TableIterator;
-use crate::storage::table::tuple::{Tuple, TupleMeta};
+use crate::storage::table::tuple::{Tuple, TupleMeta, TupleVisibility};
 use crate::types_db::value::Value;
 use log::debug;
 use parking_lot::RwLock;
@@ -320,41 +320,80 @@ impl TableHeap {
         txn_ctx: Arc<TransactionContext>,
     ) -> Result<(Arc<TupleMeta>, Arc<Tuple>), String> {
         let txn = txn_ctx.get_transaction();
+        let txn_id = txn.get_transaction_id();
 
         // First get the latest version
         let page_guard = self.get_page(rid.get_page_id())?;
         let page = page_guard.read();
-        let (meta, tuple) = page.get_tuple(&rid, false)?;
-
-        // Check if the tuple is deleted
-        if meta.is_deleted() {
-            return Err("Tuple is deleted".to_string());
-        }
+        // Important: allow reading deleted tuples so MVCC can interpret tombstones
+        // (and potentially return older versions for older snapshots).
+        let (meta, tuple) = page.get_tuple(&rid, true)?;
 
         // Always allow transaction to see its own changes
-        if meta.get_creator_txn_id() == txn.get_transaction_id() {
-            return Ok((Arc::new(meta), Arc::new(tuple)));
+        if meta.get_creator_txn_id() == txn_id {
+            return if meta.is_deleted() {
+                Err("Tuple is deleted".to_string())
+            } else {
+                Ok((Arc::new(meta), Arc::new(tuple)))
+            };
         }
 
         match txn.get_isolation_level() {
             IsolationLevel::ReadUncommitted => {
                 // For READ_UNCOMMITTED, return the latest version
-                Ok((Arc::new(meta), Arc::new(tuple)))
+                if meta.is_deleted() {
+                    Err("Tuple is deleted".to_string())
+                } else {
+                    Ok((Arc::new(meta), Arc::new(tuple)))
+                }
             }
 
             IsolationLevel::ReadCommitted => {
                 // For READ_COMMITTED, only return committed versions
                 if meta.is_committed() {
-                    Ok((Arc::new(meta), Arc::new(tuple)))
-                } else {
-                    Err("Tuple not visible".to_string())
+                    if meta.is_deleted() {
+                        Err("Tuple is deleted".to_string())
+                    } else {
+                        Ok((Arc::new(meta), Arc::new(tuple)))
+                    }
+                }
+                // If the latest version is uncommitted (update/delete) by another txn,
+                // walk the version chain to find the latest committed version.
+                else {
+                    let txn_manager = txn_ctx.get_transaction_manager();
+                    let mut current_link = txn_manager.get_undo_link(rid);
+
+                    while let Some(ref undo_link) = current_link {
+                        let undo_log = txn_manager.get_undo_log(undo_link.clone());
+
+                        let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
+                        prev_meta.set_commit_timestamp(undo_log.ts);
+                        prev_meta.set_deleted(undo_log.is_deleted);
+                        if undo_log.prev_version.is_valid() {
+                            prev_meta
+                                .set_undo_log_idx(undo_log.prev_version.prev_log_idx)
+                                .map_err(|e| e.to_string())?;
+                        } else {
+                            prev_meta.clear_undo_log_idx();
+                        }
+
+                        if prev_meta.is_deleted() {
+                            return Err("Tuple is deleted".to_string());
+                        }
+                        // First committed version in chain is what READ_COMMITTED should see.
+                        return Ok((Arc::new(prev_meta), undo_log.tuple.clone()));
+                    }
+
+                    Err("No visible version found".to_string())
                 }
             }
 
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
-                // For REPEATABLE_READ and SERIALIZABLE, check timestamp visibility
-                if txn.is_tuple_visible(&meta) {
-                    return Ok((Arc::new(meta), Arc::new(tuple)));
+                let read_ts = txn.read_ts();
+                match meta.visibility_status(txn_id, read_ts) {
+                    TupleVisibility::Visible => return Ok((Arc::new(meta), Arc::new(tuple))),
+                    TupleVisibility::Deleted => return Err("Tuple is deleted".to_string()),
+                    TupleVisibility::Invisible => { /* continue into version chain */ }
                 }
 
                 // If the latest version isn't visible, check the version chain
@@ -364,20 +403,30 @@ impl TableHeap {
                 while let Some(ref undo_link) = current_link {
                     let undo_log = txn_manager.get_undo_log(undo_link.clone());
 
-                    let mut prev_meta = TupleMeta::new(undo_link.prev_txn);
+                    let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
                     prev_meta.set_commit_timestamp(undo_log.ts);
                     prev_meta.set_deleted(undo_log.is_deleted);
-
-                    if txn.is_tuple_visible(&prev_meta) {
-                        return Ok((Arc::new(prev_meta), undo_log.tuple.clone()));
+                    if undo_log.prev_version.is_valid() {
+                        prev_meta
+                            .set_undo_log_idx(undo_log.prev_version.prev_log_idx)
+                            .map_err(|e| e.to_string())?;
+                    } else {
+                        prev_meta.clear_undo_log_idx();
                     }
 
-                    // Get the next link from the undo log's prev_version
-                    let prev_version = undo_log.prev_version.clone();
-                    if !prev_version.is_valid() {
-                        break;
+                    match prev_meta.visibility_status(txn_id, read_ts) {
+                        TupleVisibility::Visible => {
+                            return Ok((Arc::new(prev_meta), undo_log.tuple.clone()))
+                        }
+                        TupleVisibility::Deleted => return Err("Tuple is deleted".to_string()),
+                        TupleVisibility::Invisible => { /* keep walking */ }
                     }
-                    current_link = Some(prev_version);
+
+                    current_link = if undo_log.prev_version.is_valid() {
+                        Some(undo_log.prev_version.clone())
+                    } else {
+                        None
+                    };
                 }
 
                 Err("No visible version found".to_string())
@@ -386,7 +435,11 @@ impl TableHeap {
             IsolationLevel::Snapshot => {
                 // For SNAPSHOT, assume similar behavior to SERIALIZABLE for now
                 // This may involve checking for a consistent snapshot version
-                Ok((Arc::new(meta), Arc::new(tuple)))
+                if meta.is_deleted() {
+                    Err("Tuple is deleted".to_string())
+                } else {
+                    Ok((Arc::new(meta), Arc::new(tuple)))
+                }
             }
         }
     }
