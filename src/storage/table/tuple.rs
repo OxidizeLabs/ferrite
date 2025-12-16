@@ -19,9 +19,10 @@ pub struct TupleMeta {
     deleted: bool,
     /// Index into the owning transaction's undo log chain.
     ///
-    /// Stored as a `u64` (not `usize`) to keep the on-disk representation stable across
-    /// architectures.
-    undo_log_idx: u64,
+    /// Stored as a `u64` (not `usize`) to keep representation stable across architectures.
+    ///
+    /// `None` means this tuple version has no undo-log link (i.e., the version chain ends here).
+    undo_log_idx: Option<u64>,
 }
 
 impl TupleMeta {
@@ -31,7 +32,7 @@ impl TupleMeta {
             creator_txn_id: txn_id,
             commit_timestamp: None,
             deleted: false,
-            undo_log_idx: 0,
+            undo_log_idx: None,
         }
     }
 
@@ -41,7 +42,7 @@ impl TupleMeta {
             creator_txn_id: txn_id,
             commit_timestamp: None,
             deleted,
-            undo_log_idx: 0,
+            undo_log_idx: None,
         }
     }
 
@@ -114,21 +115,44 @@ impl TupleMeta {
 
     /// Gets the undo log index for this tuple version
     pub fn try_get_undo_log_idx(&self) -> Result<usize, TupleError> {
-        usize::try_from(self.undo_log_idx)
-            .map_err(|_| TupleError::UndoLogIndexOverflow(self.undo_log_idx))
+        self.try_get_undo_log_idx_opt()?
+            .ok_or(TupleError::UndoLogIndexMissing)
+    }
+
+    /// Gets the undo log index for this tuple version, if present.
+    ///
+    /// Returns `Ok(None)` if this tuple version has no undo-log link.
+    pub fn try_get_undo_log_idx_opt(&self) -> Result<Option<usize>, TupleError> {
+        let Some(raw) = self.undo_log_idx else {
+            return Ok(None);
+        };
+        usize::try_from(raw)
+            .map(Some)
+            .map_err(|_| TupleError::UndoLogIndexOverflow(raw))
     }
 
     /// Sets the undo log index for this tuple version
     pub fn set_undo_log_idx(&mut self, idx: usize) -> Result<(), TupleError> {
-        self.undo_log_idx = u64::try_from(idx).map_err(|_| TupleError::UndoLogIndexU64Overflow(idx))?;
+        self.undo_log_idx =
+            Some(u64::try_from(idx).map_err(|_| TupleError::UndoLogIndexU64Overflow(idx))?);
         Ok(())
+    }
+
+    /// Clears the undo log index for this tuple version (meaning "no undo-log link").
+    pub fn clear_undo_log_idx(&mut self) {
+        self.undo_log_idx = None;
+    }
+
+    /// Returns whether this tuple version has an undo-log link.
+    pub fn has_undo_log_idx(&self) -> bool {
+        self.undo_log_idx.is_some()
     }
 
     /// Gets the raw, fixed-width undo log index stored in the tuple metadata.
     ///
     /// This is intended for debugging/diagnostics and for on-disk format stability. Most callers
     /// should use `try_get_undo_log_idx()` (since in-memory undo logs are indexed by `usize`).
-    pub fn get_undo_log_idx_raw(&self) -> u64 {
+    pub fn get_undo_log_idx_raw_opt(&self) -> Option<u64> {
         self.undo_log_idx
     }
 
@@ -611,6 +635,7 @@ mod tests {
         assert_eq!(meta.get_creator_txn_id(), 1);
         assert!(!meta.is_committed());
         assert!(!meta.is_deleted());
+        assert!(!meta.has_undo_log_idx());
 
         meta.set_deleted(true);
         assert!(meta.is_deleted());
