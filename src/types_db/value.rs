@@ -193,9 +193,39 @@ impl Value {
     }
 
     pub fn new_with_type(val: Val, type_id: TypeId) -> Self {
+        // `new_with_type` is primarily used for typed NULLs and for constructors that already
+        // ensure the `Val` variant matches the `TypeId`. Catch accidental mismatches in debug builds.
+        debug_assert!(
+            matches!(val, Val::Null)
+                || match &val {
+                    Val::Boolean(_) => type_id == TypeId::Boolean,
+                    Val::TinyInt(_) => type_id == TypeId::TinyInt,
+                    Val::SmallInt(_) => type_id == TypeId::SmallInt,
+                    Val::Integer(_) => type_id == TypeId::Integer,
+                    Val::BigInt(_) => type_id == TypeId::BigInt,
+                    Val::Decimal(_) => type_id == TypeId::Decimal,
+                    Val::Float(_) => type_id == TypeId::Float,
+                    Val::Timestamp(_) => type_id == TypeId::Timestamp,
+                    Val::Date(_) => type_id == TypeId::Date,
+                    Val::Time(_) => type_id == TypeId::Time,
+                    Val::Interval(_) => type_id == TypeId::Interval,
+                    Val::VarLen(_) => type_id == TypeId::VarChar,
+                    Val::ConstLen(_) => type_id == TypeId::Char,
+                    Val::Binary(_) => type_id == TypeId::Binary,
+                    Val::JSON(_) => type_id == TypeId::JSON,
+                    Val::UUID(_) => type_id == TypeId::UUID,
+                    Val::Vector(_) => type_id == TypeId::Vector,
+                    Val::Array(_) => type_id == TypeId::Array,
+                    Val::Enum(_, _) => type_id == TypeId::Enum,
+                    Val::Point(_, _) => type_id == TypeId::Point,
+                    Val::Struct => type_id == TypeId::Struct,
+                    Val::Null => true,
+                },
+            "mismatched Val/TypeId passed to Value::new_with_type: val={val:?}, type_id={type_id:?}"
+        );
         Self {
             value_: val,
-            size_: type_id.get_value().size_,
+            size_: Size::Length(get_type_size(type_id) as usize),
             manage_data_: false,
             type_id_: type_id,
             struct_data: None,
