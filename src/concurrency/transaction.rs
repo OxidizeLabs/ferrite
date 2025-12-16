@@ -378,7 +378,7 @@ impl Transaction {
             self.isolation_level,
             *self.read_ts.read(),
             meta.get_creator_txn_id(),
-            meta.get_commit_timestamp(),
+            meta.get_commit_timestamp().expect("Commit timestamp is required"),
             meta.is_deleted()
         );
 
@@ -396,7 +396,7 @@ impl Transaction {
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
                 let visible = meta.is_committed()
-                    && meta.get_commit_timestamp() <= *self.read_ts.read()
+                    && meta.get_commit_timestamp() <= Some(*self.read_ts.read())
                     && !meta.is_deleted();
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible

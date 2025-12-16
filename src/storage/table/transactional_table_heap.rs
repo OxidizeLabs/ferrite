@@ -492,7 +492,7 @@ impl TransactionalTableHeap {
 
         // Ensure the tuple's metadata reflects the current transaction as creator
         let mut fixed_meta = TupleMeta::new(txn.get_transaction_id());
-        fixed_meta.set_commit_timestamp(meta.get_commit_timestamp());
+        fixed_meta.set_commit_timestamp(meta.get_commit_timestamp().expect("Commit timestamp is required"));
         if meta.is_deleted() {
             fixed_meta.set_deleted(true);
         }
@@ -563,7 +563,7 @@ impl TransactionalTableHeap {
         log::debug!(
             "Creating undo log for update. Current version: creator_txn={}, commit_ts={}",
             current_meta.get_creator_txn_id(),
-            current_meta.get_commit_timestamp()
+            current_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
         // Create undo log that points to the original version
@@ -571,7 +571,7 @@ impl TransactionalTableHeap {
             is_deleted: false,
             modified_fields: vec![true; tuple.get_column_count()],
             tuple: current_tuple,
-            ts: current_meta.get_commit_timestamp(),
+            ts: current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
             prev_version: UndoLink {
                 prev_txn: current_meta.get_creator_txn_id(),
                 prev_log_idx: current_meta.get_undo_log_idx(),
@@ -611,7 +611,7 @@ impl TransactionalTableHeap {
             "Created new meta: creator={}, idx={}, commit_ts={}",
             new_meta.get_creator_txn_id(),
             new_meta.get_undo_log_idx(),
-            new_meta.get_commit_timestamp()
+            new_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
         // Perform update
@@ -636,7 +636,7 @@ impl TransactionalTableHeap {
             "Starting version chain traversal for RID {:?} - Latest version: creator_txn={}, commit_ts={}, txn_id={}",
             rid,
             meta.get_creator_txn_id(),
-            meta.get_commit_timestamp(),
+            meta.get_commit_timestamp().expect("Commit timestamp is required"),
             txn.get_transaction_id()
         );
 
@@ -691,7 +691,7 @@ impl TransactionalTableHeap {
             log::debug!(
                 "Created previous version metadata: creator_txn={}, commit_ts={}, deleted={}, undo_idx={}",
                 prev_meta.get_creator_txn_id(),
-                prev_meta.get_commit_timestamp(),
+                prev_meta.get_commit_timestamp().expect("Commit timestamp is required"),
                 prev_meta.is_deleted(),
                 prev_meta.get_undo_log_idx()
             );
@@ -704,7 +704,7 @@ impl TransactionalTableHeap {
                 log::debug!(
                     "Found visible version: creator_txn={}, commit_ts={}",
                     current_meta.get_creator_txn_id(),
-                    current_meta.get_commit_timestamp()
+                    current_meta.get_commit_timestamp().expect("Commit timestamp is required")
                 );
                 return Ok((current_meta, current_tuple));
             }
@@ -770,7 +770,7 @@ impl TransactionalTableHeap {
         log::debug!(
             "Creating undo log for delete. Current version: creator_txn={}, commit_ts={}",
             current_meta.get_creator_txn_id(),
-            current_meta.get_commit_timestamp()
+            current_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
         // Create undo log that points to the original version, now with RID for proper restoration
@@ -778,7 +778,7 @@ impl TransactionalTableHeap {
             false, // Not deleted in the previous version
             vec![true; current_tuple.get_column_count()],
             current_tuple.clone(),
-            current_meta.get_commit_timestamp(),
+            current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
             UndoLink {
                 prev_txn: current_meta.get_creator_txn_id(),
                 prev_log_idx: current_meta.get_undo_log_idx(),
@@ -807,7 +807,7 @@ impl TransactionalTableHeap {
             "Created new meta: creator={}, idx={}, commit_ts={}, deleted=true",
             new_meta.get_creator_txn_id(),
             new_meta.get_undo_log_idx(),
-            new_meta.get_commit_timestamp()
+            new_meta.get_commit_timestamp().expect("Commit timestamp is required")
         );
 
         // Update the tuple with deleted metadata

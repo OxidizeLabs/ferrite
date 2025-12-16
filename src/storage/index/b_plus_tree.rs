@@ -1090,9 +1090,9 @@ mod unit_tests {
         let tree = create_test_tree(4, Arc::from(index_info));
         let tree_read_guard = tree.read();
 
-        let binding = tuple1.keys_from_tuple(vec![0]);
+        let binding = tuple1.keys_from_tuple(&[0]);
         let key1 = binding.first().unwrap();
-        let binding = tuple2.keys_from_tuple(vec![0]);
+        let binding = tuple2.keys_from_tuple(&[0]);
         let key2 = binding.first().unwrap();
 
         assert_eq!(

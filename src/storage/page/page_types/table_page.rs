@@ -338,13 +338,13 @@ impl TablePage {
         debug!(
             "Old meta - creator_txn: {}, commit_ts: {}, deleted: {}",
             old_meta.get_creator_txn_id(),
-            old_meta.get_commit_timestamp(),
+            old_meta.get_commit_timestamp().expect("Commit timestamp is required"),
             old_meta.is_deleted()
         );
         debug!(
             "New meta - creator_txn: {}, commit_ts: {}, deleted: {}",
             meta.get_creator_txn_id(),
-            meta.get_commit_timestamp(),
+            meta.get_commit_timestamp().expect("Commit timestamp is required"),
             meta.is_deleted()
         );
 
@@ -420,7 +420,7 @@ impl TablePage {
                 // Create owned TupleMeta by copying fields instead of cloning
                 let mut owned_meta =
                     TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
-                owned_meta.set_commit_timestamp(meta.get_commit_timestamp());
+                owned_meta.set_commit_timestamp(meta.get_commit_timestamp().expect("Commit timestamp is required"));
                 owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
                 Ok((owned_meta, tuple))
             }
@@ -442,7 +442,7 @@ impl TablePage {
         let meta = &self.tuple_info[tuple_id].2;
         let mut owned_meta =
             TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());
-        owned_meta.set_commit_timestamp(meta.get_commit_timestamp());
+        owned_meta.set_commit_timestamp(meta.get_commit_timestamp().expect("Commit timestamp is required"));
         owned_meta.set_undo_log_idx(meta.get_undo_log_idx());
         Ok(owned_meta)
     }
@@ -1755,7 +1755,7 @@ mod serialization_tests {
 
             // Verify initial insertion
             let (initial_meta, initial_tuple) = page_guard.get_tuple(&rid, false).unwrap();
-            assert_eq!(initial_meta.get_commit_timestamp(), 123);
+            assert_eq!(initial_meta.get_commit_timestamp().unwrap(), 123);
             assert_eq!(initial_tuple.get_value(0), Value::new(42));
         }
 
@@ -1807,7 +1807,7 @@ mod serialization_tests {
                 Ok(result) => {
                     let (timestamp, value) =
                         result.unwrap_or_else(|_| panic!("Thread {} failed to read tuple", i));
-                    assert_eq!(timestamp, 123);
+                    assert_eq!(timestamp.unwrap(), 123);
                     assert_eq!(value, Value::new(42));
                 }
                 Err(e) => {
