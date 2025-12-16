@@ -213,7 +213,9 @@ impl TableHeap {
                 undo_ts,
                 UndoLink::new(
                     current_meta.get_creator_txn_id(),
-                    current_meta.get_undo_log_idx(),
+                    current_meta
+                        .try_get_undo_log_idx()
+                        .map_err(|e| format!("Invalid undo log index in tuple meta: {}", e))?,
                 ),
             );
 
