@@ -7,6 +7,21 @@ use crate::types_db::value::Value;
 use std::fmt::{Display, Formatter};
 use std::io;
 
+/// MVCC visibility result for a particular tuple *version* at a reader's snapshot.
+///
+/// This is intentionally tri-state so callers walking a version chain can treat a visible
+/// tombstone (`Deleted`) as a terminal "row absent" state (instead of skipping it and
+/// incorrectly returning an older version).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TupleVisibility {
+    /// This version is not applicable/visible to the reader's snapshot.
+    Invisible,
+    /// This version is visible and represents a live row.
+    Visible,
+    /// This version is visible and represents a deletion tombstone (row is absent).
+    Deleted,
+}
+
 /// Metadata associated with a tuple.
 #[derive(Debug, PartialEq, Copy, Clone, bincode::Encode, bincode::Decode)]
 pub struct TupleMeta {
@@ -82,35 +97,60 @@ impl TupleMeta {
         self.deleted = deleted;
     }
 
-    /// Checks if this tuple version is visible to the given transaction.
+    /// Computes MVCC visibility status of this tuple version for the given reader snapshot.
     ///
     /// `read_ts` is the *snapshot/read timestamp* of the transaction performing the read
     /// (i.e., the timestamp the transaction should observe). This must **not** be the global
     /// low-watermark used for GC, since that would incorrectly hide versions from newer readers
     /// when an older reader is still active.
     ///
-    /// Note: deleted versions act as tombstones. Readers that need “previous visible” semantics
-    /// must traverse the version chain (undo logs) to locate an older visible version.
-    pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
-        // If this tuple version was created by the current transaction, it's visible as long as
-        // it isn't deleted by the same transaction.
+    /// Note: deleted versions act as tombstones. A visible tombstone must be treated as
+    /// terminal "row absent" when walking a version chain.
+    pub fn visibility_status(&self, txn_id: TxnId, read_ts: Timestamp) -> TupleVisibility {
+        // A transaction always observes its own latest version, even if uncommitted.
         if self.creator_txn_id == txn_id {
-            return !self.deleted;
+            return if self.deleted {
+                TupleVisibility::Deleted
+            } else {
+                TupleVisibility::Visible
+            };
         }
 
-        // If the tuple is deleted, it's not visible
-        if self.deleted {
-            return false;
-        }
-
-        // If the tuple is not committed, it's not visible
+        // Other transactions never observe uncommitted versions.
         if !self.is_committed() {
-            return false;
+            return TupleVisibility::Invisible;
         }
 
-        // The tuple is visible if its commit timestamp is <= the reader's snapshot.
-        self.commit_timestamp
+        // Committed versions are visible if commit_ts <= reader's snapshot.
+        if !self
+            .commit_timestamp
             .is_some_and(|commit_ts| commit_ts <= read_ts)
+        {
+            return TupleVisibility::Invisible;
+        }
+
+        if self.deleted {
+            TupleVisibility::Deleted
+        } else {
+            TupleVisibility::Visible
+        }
+    }
+
+    /// Returns `true` if this tuple version is applicable/visible to the reader snapshot,
+    /// including visible tombstones.
+    ///
+    /// Use this (or `visibility_status`) for version-chain traversal. If you instead walk
+    /// the chain using only `is_visible_to()` (which excludes tombstones), you can
+    /// incorrectly "resurrect" rows by skipping a visible delete marker.
+    pub fn is_applicable_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
+        !matches!(self.visibility_status(txn_id, read_ts), TupleVisibility::Invisible)
+    }
+
+    /// Returns `true` if this tuple version is visible and represents a live (non-deleted) row.
+    ///
+    /// This is appropriate for filtering scan output, but **not** for version-chain traversal.
+    pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
+        matches!(self.visibility_status(txn_id, read_ts), TupleVisibility::Visible)
     }
 
     /// Gets the undo log index for this tuple version
