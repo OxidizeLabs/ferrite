@@ -1,4 +1,3 @@
-use crate::types_db::value::Value;
 use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
@@ -55,9 +54,6 @@ where
                 hasher.write(key.downcast_ref::<String>().unwrap().as_bytes())
             }
             key if key.is::<&str>() => hasher.write(key.downcast_ref::<&str>().unwrap().as_bytes()),
-            key if key.is::<&Value>() => {
-                hasher.write(&key.downcast_ref::<Value>().unwrap().as_bytes())
-            }
             _ => {
                 // Fallback for types that implement `Hash`
                 key.hash(&mut hasher);

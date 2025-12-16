@@ -37,7 +37,7 @@ pub enum Size {
     ElemTypeId(TypeId),
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Encode, Decode)]
+#[derive(Clone, Encode, Decode)]
 pub struct Value {
     pub value_: Val,
     pub size_: Size,
@@ -1278,26 +1278,38 @@ impl Type for Value {
             (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 == *b),
             (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 == *b),
             (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+            (Val::TinyInt(a), Val::Float(b)) => CmpBool::from(*a as f32 == *b),
 
-            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as i16),
             (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 == *b),
             (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 == *b),
             (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+            (Val::SmallInt(a), Val::Float(b)) => CmpBool::from(*a as f32 == *b),
 
             (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as i32),
             (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a == *b as i32),
             (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 == *b),
             (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+            (Val::Integer(a), Val::Float(b)) => CmpBool::from(*a as f32 == *b),
 
             (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as i64),
             (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a == *b as i64),
             (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a == *b as i64),
             (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 == *b),
+            (Val::BigInt(a), Val::Float(b)) => CmpBool::from(*a as f32 == *b),
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as f64),
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a == *b as f64),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a == *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a == *b as f64),
+            (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a == *b as f64),
+
+            (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a == *b as f32),
+            (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a == *b as f32),
+            (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a == *b as f32),
+            (Val::Float(a), Val::BigInt(b)) => CmpBool::from(*a == *b as f32),
+            (Val::Float(a), Val::Decimal(b)) => CmpBool::from((*a as f64) == *b),
+            (Val::Float(a), Val::Float(b)) => CmpBool::from(*a == *b),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1317,26 +1329,38 @@ impl Type for Value {
             (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 != *b),
             (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 != *b),
             (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+            (Val::TinyInt(a), Val::Float(b)) => CmpBool::from(*a as f32 != *b),
 
-            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as i16),
             (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 != *b),
             (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 != *b),
             (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+            (Val::SmallInt(a), Val::Float(b)) => CmpBool::from(*a as f32 != *b),
 
             (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as i32),
             (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a != *b as i32),
             (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 != *b),
             (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+            (Val::Integer(a), Val::Float(b)) => CmpBool::from(*a as f32 != *b),
 
             (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as i64),
             (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a != *b as i64),
             (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a != *b as i64),
             (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 != *b),
+            (Val::BigInt(a), Val::Float(b)) => CmpBool::from(*a as f32 != *b),
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as f64),
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a != *b as f64),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a != *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a != *b as f64),
+            (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a != *b as f64),
+
+            (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a != *b as f32),
+            (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a != *b as f32),
+            (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a != *b as f32),
+            (Val::Float(a), Val::BigInt(b)) => CmpBool::from(*a != *b as f32),
+            (Val::Float(a), Val::Decimal(b)) => CmpBool::from((*a as f64) != *b),
+            (Val::Float(a), Val::Float(b)) => CmpBool::from(*a != *b),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1359,26 +1383,37 @@ impl Type for Value {
             (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) < *b),
             (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from((*a as i64) < *b),
             (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+            (Val::TinyInt(a), Val::Float(b)) => CmpBool::from((*a as f32) < *b),
 
-            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > (*b as i16)),
+            (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as i16)),
             (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from((*a as i32) < *b),
             (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from((*a as i64) < *b),
             (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+            (Val::SmallInt(a), Val::Float(b)) => CmpBool::from((*a as f32) < *b),
 
             (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as i32)),
             (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as i32)),
             (Val::Integer(a), Val::BigInt(b)) => CmpBool::from((*a as i64) < *b),
             (Val::Integer(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+            (Val::Integer(a), Val::Float(b)) => CmpBool::from((*a as f32) < *b),
 
             (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as i64)),
             (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as i64)),
             (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a < (*b as i64)),
             (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
+            (Val::BigInt(a), Val::Float(b)) => CmpBool::from((*a as f32) < *b),
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as f64)),
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as f64)),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a < (*b as f64)),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a < (*b as f64)),
+            (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a < (*b as f64)),
+
+            (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a < (*b as f32)),
+            (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a < (*b as f32)),
+            (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a < (*b as f32)),
+            (Val::Float(a), Val::BigInt(b)) => CmpBool::from(*a < (*b as f32)),
+            (Val::Float(a), Val::Decimal(b)) => CmpBool::from((*a as f64) < *b),
             _ => {
                 // Check if types match before comparing values
                 if self.type_id_ != other.type_id_ {
@@ -1456,26 +1491,38 @@ impl Type for Value {
             (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 > *b),
             (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
             (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+            (Val::TinyInt(a), Val::Float(b)) => CmpBool::from(*a as f32 > *b),
 
             (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i16),
             (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 > *b),
             (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
             (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+            (Val::SmallInt(a), Val::Float(b)) => CmpBool::from(*a as f32 > *b),
 
             (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i32),
             (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as i32),
             (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 > *b),
             (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+            (Val::Integer(a), Val::Float(b)) => CmpBool::from(*a as f32 > *b),
 
             (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as i64),
             (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as i64),
             (Val::BigInt(a), Val::Integer(b)) => CmpBool::from(*a > *b as i64),
             (Val::BigInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 > *b),
+            (Val::BigInt(a), Val::Float(b)) => CmpBool::from(*a as f32 > *b),
 
             (Val::Decimal(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as f64),
             (Val::Decimal(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as f64),
             (Val::Decimal(a), Val::Integer(b)) => CmpBool::from(*a > *b as f64),
             (Val::Decimal(a), Val::BigInt(b)) => CmpBool::from(*a > *b as f64),
+            (Val::Decimal(a), Val::Float(b)) => CmpBool::from(*a > *b as f64),
+
+            (Val::Float(a), Val::TinyInt(b)) => CmpBool::from(*a > *b as f32),
+            (Val::Float(a), Val::SmallInt(b)) => CmpBool::from(*a > *b as f32),
+            (Val::Float(a), Val::Integer(b)) => CmpBool::from(*a > *b as f32),
+            (Val::Float(a), Val::BigInt(b)) => CmpBool::from(*a > *b as f32),
+            (Val::Float(a), Val::Decimal(b)) => CmpBool::from((*a as f64) > *b),
+            (Val::Float(a), Val::Float(b)) => CmpBool::from(*a > *b),
 
             _ => {
                 // Check if types match before comparing values
@@ -1499,16 +1546,19 @@ impl Type for Value {
             (Val::TinyInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 >= *b),
             (Val::TinyInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 >= *b),
             (Val::TinyInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+            (Val::TinyInt(a), Val::Float(b)) => CmpBool::from(*a as f32 >= *b),
 
             (Val::SmallInt(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as i16),
             (Val::SmallInt(a), Val::Integer(b)) => CmpBool::from(*a as i32 >= *b),
             (Val::SmallInt(a), Val::BigInt(b)) => CmpBool::from(*a as i64 >= *b),
             (Val::SmallInt(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+            (Val::SmallInt(a), Val::Float(b)) => CmpBool::from(*a as f32 >= *b),
 
             (Val::Integer(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as i32),
             (Val::Integer(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as i32),
             (Val::Integer(a), Val::BigInt(b)) => CmpBool::from(*a as i64 >= *b),
             (Val::Integer(a), Val::Decimal(b)) => CmpBool::from(*a as f64 >= *b),
+            (Val::Integer(a), Val::Float(b)) => CmpBool::from(*a as f32 >= *b),
 
             (Val::BigInt(a), Val::TinyInt(b)) => CmpBool::from(*a >= *b as i64),
             (Val::BigInt(a), Val::SmallInt(b)) => CmpBool::from(*a >= *b as i64),
@@ -2195,51 +2245,144 @@ impl Debug for Value {
     }
 }
 
-impl Hash for Value {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.type_id_.hash(state);
-        match &self.value_ {
-            Val::Struct => {
-                if let Some(struct_data) = &self.struct_data {
-                    for value in struct_data {
-                        value.hash(state);
-                    }
-                }
+fn canonical_f32_bits(v: f32) -> u32 {
+    // Canonicalize -0.0 and all NaNs for stable Eq/Hash.
+    if v == 0.0 {
+        0.0f32.to_bits()
+    } else if v.is_nan() {
+        f32::NAN.to_bits()
+    } else {
+        v.to_bits()
+    }
+}
+
+fn canonical_f64_bits(v: f64) -> u64 {
+    // Canonicalize -0.0 and all NaNs for stable Eq/Hash.
+    if v == 0.0 {
+        0.0f64.to_bits()
+    } else if v.is_nan() {
+        f64::NAN.to_bits()
+    } else {
+        v.to_bits()
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        // Treat NULL as equal-to-NULL regardless of attached type id.
+        if matches!(self.value_, Val::Null) && matches!(other.value_, Val::Null) {
+            return true;
+        }
+
+        // For non-NULL values, type must match for equality/hash-map key semantics.
+        if self.type_id_ != other.type_id_ {
+            return false;
+        }
+
+        match (&self.value_, &other.value_) {
+            (Val::Decimal(a), Val::Decimal(b)) => canonical_f64_bits(*a) == canonical_f64_bits(*b),
+            (Val::Float(a), Val::Float(b)) => canonical_f32_bits(*a) == canonical_f32_bits(*b),
+            (Val::Point(ax, ay), Val::Point(bx, by)) => {
+                canonical_f64_bits(*ax) == canonical_f64_bits(*bx)
+                    && canonical_f64_bits(*ay) == canonical_f64_bits(*by)
             }
-            Val::Boolean(b) => b.hash(state),
-            Val::TinyInt(i) => i.hash(state),
-            Val::SmallInt(i) => i.hash(state),
-            Val::Integer(i) => i.hash(state),
-            Val::BigInt(i) => i.hash(state),
-            Val::Decimal(f) => f.to_bits().hash(state),
-            Val::Float(f) => f.to_bits().hash(state),
-            Val::Timestamp(t) => t.hash(state),
-            Val::Date(d) => d.hash(state),
-            Val::Time(t) => t.hash(state),
-            Val::Interval(i) => i.hash(state),
-            Val::VarLen(s) | Val::ConstLen(s) => s.hash(state),
-            Val::Binary(b) => b.hash(state),
-            Val::JSON(j) => j.hash(state),
-            Val::UUID(u) => u.hash(state),
-            Val::Vector(v) | Val::Array(v) => {
-                for value in v {
-                    value.hash(state);
-                }
-            }
-            Val::Enum(id, s) => {
-                id.hash(state);
-                s.hash(state);
-            }
-            Val::Point(x, y) => {
-                x.to_bits().hash(state);
-                y.to_bits().hash(state);
-            }
-            Val::Null => (), // Null doesn't need additional hashing
+            (Val::Struct, Val::Struct) => self.struct_data == other.struct_data,
+            _ => self.value_ == other.value_,
         }
     }
 }
 
 impl Eq for Value {}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // Ensure PartialOrd is consistent with our PartialEq.
+        if self == other {
+            return Some(std::cmp::Ordering::Equal);
+        }
+
+        // Provide a deterministic ordering for NULL (useful for ORDER BY).
+        match (&self.value_, &other.value_) {
+            (Val::Null, Val::Null) => return Some(std::cmp::Ordering::Equal),
+            (Val::Null, _) => return Some(std::cmp::Ordering::Less),
+            (_, Val::Null) => return Some(std::cmp::Ordering::Greater),
+            _ => {}
+        }
+
+        // For different (non-NULL) types, we keep a deterministic but non-SQL ordering
+        // based on the type id.
+        if self.type_id_ != other.type_id_ {
+            return self.type_id_.partial_cmp(&other.type_id_);
+        }
+
+        match (&self.value_, &other.value_) {
+            (Val::Decimal(a), Val::Decimal(b)) => a.partial_cmp(b),
+            (Val::Float(a), Val::Float(b)) => a.partial_cmp(b),
+            (Val::Point(ax, ay), Val::Point(bx, by)) => match ax.partial_cmp(bx) {
+                Some(std::cmp::Ordering::Equal) => ay.partial_cmp(by),
+                non_eq => non_eq,
+            },
+            (Val::Struct, Val::Struct) => self.struct_data.partial_cmp(&other.struct_data),
+            _ => self.value_.partial_cmp(&other.value_),
+        }
+    }
+}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match &self.value_ {
+            Val::Null => {
+                // Must match PartialEq: NULL hashes the same across type ids.
+                0u8.hash(state);
+            }
+            _ => {
+                self.type_id_.hash(state);
+                match &self.value_ {
+                    Val::Struct => {
+                        if let Some(struct_data) = &self.struct_data {
+                            struct_data.len().hash(state);
+                            for value in struct_data {
+                                value.hash(state);
+                            }
+                        } else {
+                            0usize.hash(state);
+                        }
+                    }
+                    Val::Boolean(b) => b.hash(state),
+                    Val::TinyInt(i) => i.hash(state),
+                    Val::SmallInt(i) => i.hash(state),
+                    Val::Integer(i) => i.hash(state),
+                    Val::BigInt(i) => i.hash(state),
+                    Val::Decimal(f) => canonical_f64_bits(*f).hash(state),
+                    Val::Float(f) => canonical_f32_bits(*f).hash(state),
+                    Val::Timestamp(t) => t.hash(state),
+                    Val::Date(d) => d.hash(state),
+                    Val::Time(t) => t.hash(state),
+                    Val::Interval(i) => i.hash(state),
+                    Val::VarLen(s) | Val::ConstLen(s) => s.hash(state),
+                    Val::Binary(b) => b.hash(state),
+                    Val::JSON(j) => j.hash(state),
+                    Val::UUID(u) => u.hash(state),
+                    Val::Vector(v) | Val::Array(v) => {
+                        v.len().hash(state);
+                        for value in v {
+                            value.hash(state);
+                        }
+                    }
+                    Val::Enum(id, s) => {
+                        id.hash(state);
+                        s.hash(state);
+                    }
+                    Val::Point(x, y) => {
+                        canonical_f64_bits(*x).hash(state);
+                        canonical_f64_bits(*y).hash(state);
+                    }
+                    Val::Null => unreachable!("handled above"),
+                }
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod unit_tests {
@@ -2541,6 +2684,29 @@ mod basic_behavior_tests {
         assert_eq!(val1.compare_not_equals(&val2), CmpBool::CmpTrue);
         assert_eq!(val1.compare_less_than(&val2), CmpBool::CmpTrue);
         assert_eq!(val2.compare_greater_than(&val1), CmpBool::CmpTrue);
+    }
+
+    #[test]
+    fn test_cross_type_numeric_regressions() {
+        // Regression: (SmallInt, TinyInt) had copy/paste bugs in equals/not-equals/less-than.
+        let small2 = Value::new(2i16);
+        let tiny1 = Value::new(1i8);
+        let tiny2 = Value::new(2i8);
+
+        assert_eq!(small2.compare_equals(&tiny1), CmpBool::CmpFalse);
+        assert_eq!(small2.compare_equals(&tiny2), CmpBool::CmpTrue);
+        assert_eq!(small2.compare_not_equals(&tiny1), CmpBool::CmpTrue);
+        assert_eq!(small2.compare_less_than(&tiny1), CmpBool::CmpFalse);
+        assert_eq!(tiny1.compare_less_than(&small2), CmpBool::CmpTrue);
+
+        // Regression: float cross-type comparisons should behave consistently.
+        let int1 = Value::new(1i32);
+        let flt1 = Value::new(1.0f32);
+        let flt2 = Value::new(2.0f32);
+        assert_eq!(int1.compare_equals(&flt1), CmpBool::CmpTrue);
+        assert_eq!(flt1.compare_equals(&int1), CmpBool::CmpTrue);
+        assert_eq!(int1.compare_less_than(&flt2), CmpBool::CmpTrue);
+        assert_eq!(flt2.compare_greater_than(&int1), CmpBool::CmpTrue);
     }
 
     #[test]
