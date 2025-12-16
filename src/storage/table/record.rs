@@ -5,12 +5,20 @@ use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
 use std::fmt::{Debug, Display, Formatter};
+use std::io;
+use std::sync::Arc;
 
 /// Represents a tuple that has been stored in the database with a record ID.
 #[allow(dead_code)]
 pub struct Record {
     tuple: Tuple,
     rid: RID,
+    /// Optional real schema metadata for human-friendly formatting.
+    ///
+    /// This is not serialized to disk; callers should attach the table schema
+    /// when constructing or loading records so Display/Debug can surface real
+    /// column names instead of synthetic ones.
+    schema: Option<Arc<Schema>>,
 }
 
 // Implement bincode's Encode trait for Record
@@ -19,8 +27,10 @@ impl bincode::Encode for Record {
         &self,
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
-        let values = self.tuple.get_values();
-        (values, self.rid).encode(encoder)
+        // Encode in the same format as `Tuple` (values then RID).
+        // This avoids cloning `Vec<Value>` (unlike `Tuple::get_values()`).
+        // Schema metadata is intentionally not serialized.
+        self.tuple.encode(encoder)
     }
 }
 
@@ -29,19 +39,13 @@ impl<C> bincode::Decode<C> for Record {
     fn decode<D: bincode::de::Decoder<Context = C>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
-        let (values, rid): (Vec<Value>, RID) = bincode::Decode::decode(decoder)?;
-        // Create a schema from the values - generate column names and types
-        let columns = values
-            .iter()
-            .enumerate()
-            .map(|(i, value)| {
-                use crate::catalog::column::Column;
-                Column::new(&format!("col_{}", i), value.get_type_id())
-            })
-            .collect();
-        let schema = Schema::new(columns);
-        let tuple = Tuple::new(&values, &schema, rid);
-        Ok(Self { tuple, rid })
+        let tuple: Tuple = bincode::Decode::decode(decoder)?;
+        let rid = tuple.get_rid();
+        Ok(Self {
+            tuple,
+            rid,
+            schema: None,
+        })
     }
 }
 
@@ -51,19 +55,13 @@ impl<'de, C> bincode::BorrowDecode<'de, C> for Record {
     where
         D: bincode::de::BorrowDecoder<'de, Context = C>,
     {
-        let (values, rid): (Vec<Value>, RID) = bincode::BorrowDecode::borrow_decode(decoder)?;
-        // Create a schema from the values - generate column names and types
-        let columns = values
-            .iter()
-            .enumerate()
-            .map(|(i, value)| {
-                use crate::catalog::column::Column;
-                Column::new(&format!("col_{}", i), value.get_type_id())
-            })
-            .collect();
-        let schema = Schema::new(columns);
-        let tuple = Tuple::new(&values, &schema, rid);
-        Ok(Self { tuple, rid })
+        let tuple: Tuple = bincode::BorrowDecode::borrow_decode(decoder)?;
+        let rid = tuple.get_rid();
+        Ok(Self {
+            tuple,
+            rid,
+            schema: None,
+        })
     }
 }
 
@@ -84,8 +82,25 @@ impl Eq for Record {}
 
 impl Record {
     /// Creates a new `Record` instance from a tuple and RID.
-    pub fn new(tuple: Tuple, rid: RID) -> Self {
-        Self { tuple, rid }
+    ///
+    /// Note: `Record` maintains the invariant that its `rid` matches the inner `Tuple` RID.
+    pub fn new(mut tuple: Tuple, rid: RID, schema: Arc<Schema>) -> Self {
+        tuple.set_rid(rid);
+        Self {
+            tuple,
+            rid,
+            schema: Some(schema),
+        }
+    }
+
+    /// Attaches schema metadata to this record so formatting can use real column names.
+    pub fn set_schema(&mut self, schema: Arc<Schema>) {
+        self.schema = Some(schema);
+    }
+
+    /// Returns the attached schema, if present.
+    pub fn get_schema(&self) -> Option<&Schema> {
+        self.schema.as_deref()
     }
 
     /// Serializes the record into the given storage buffer using bincode 2.0.
@@ -94,15 +109,11 @@ impl Record {
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
-        let serialized = bincode::encode_to_vec(self, storage_bincode_config())
-            .map_err(|e| TupleError::SerializationError(e.to_string()))?;
-
-        if storage.len() < serialized.len() {
-            return Err(TupleError::BufferTooSmall);
-        }
-
-        storage[..serialized.len()].copy_from_slice(&serialized);
-        Ok(serialized.len())
+        bincode::encode_into_slice(self, storage, storage_bincode_config()).map_err(|e| match e {
+            // bincode 2.x uses this variant when the destination slice is too small.
+            bincode::error::EncodeError::UnexpectedEnd => TupleError::BufferTooSmall,
+            other => TupleError::SerializationError(other.to_string()),
+        })
     }
 
     /// Deserializes a record from the given storage buffer using bincode 2.0.
@@ -111,9 +122,15 @@ impl Record {
     ///
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
-        let (record, _): (Self, usize) =
+        let (record, bytes_read): (Self, usize) =
             bincode::decode_from_slice(storage, storage_bincode_config())
             .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
+        if bytes_read != storage.len() {
+            return Err(TupleError::DeserializationError(format!(
+                "unexpected trailing bytes: consumed {bytes_read} of {}",
+                storage.len()
+            )));
+        }
         Ok(record)
     }
 
@@ -125,6 +142,7 @@ impl Record {
     /// Sets the RID of the record.
     pub fn set_rid(&mut self, rid: RID) {
         self.rid = rid;
+        self.tuple.set_rid(rid);
     }
 
     /// Returns the length of the serialized record using bincode 2.0.
@@ -133,10 +151,28 @@ impl Record {
     ///
     /// Returns a `TupleError` if serialization fails.
     pub fn get_length(&self) -> Result<usize, TupleError> {
-        let values = self.tuple.get_values();
-        let serialized = bincode::encode_to_vec(&(values, self.rid), storage_bincode_config())
+        #[derive(Default)]
+        struct CountingWriter {
+            len: usize,
+        }
+
+        impl io::Write for CountingWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.len = self
+                    .len
+                    .checked_add(buf.len())
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "length overflow"))?;
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut writer = CountingWriter::default();
+        bincode::encode_into_std_write(self, &mut writer, storage_bincode_config())
             .map_err(|e| TupleError::SerializationError(e.to_string()))?;
-        Ok(serialized.len())
+        Ok(writer.len)
     }
 
     /// Convenience method to get a value directly from the record.
@@ -174,27 +210,43 @@ impl Record {
 
     /// Compatibility helper for older call sites that pass `Schema` by value.
     pub fn to_string_detailed_owned(&self, schema: Schema) -> String {
-        self.format_with_schema(&schema)
+        self.format_with_schema_detailed(&schema)
     }
 
     /// Compatibility helper for older call sites that still use `to_string_detailed`.
     #[allow(clippy::wrong_self_convention)]
     pub fn to_string_detailed(&self, schema: &Schema) -> String {
-        self.format_with_schema(schema)
+        self.format_with_schema_detailed(schema)
     }
 }
 
 impl Display for Record {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let schema = self.tuple.get_schema();
-        write!(f, "{}", self.format_with_schema(&schema))
+        if let Some(schema) = self.schema.as_ref() {
+            write!(f, "{}", self.format_with_schema(schema))
+        } else {
+            // Fall back to synthetic schema names but make the absence explicit.
+            let schema = self.tuple.get_schema();
+            write!(
+                f,
+                "{} [schema unavailable; synthetic column names]",
+                self.format_with_schema(&schema)
+            )
+        }
     }
 }
 
 impl Debug for Record {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let schema = self.tuple.get_schema();
-        f.write_str(&self.format_with_schema_detailed(&schema))
+        if let Some(schema) = self.schema.as_ref() {
+            f.write_str(&self.format_with_schema_detailed(schema))
+        } else {
+            let schema = self.tuple.get_schema();
+            f.write_str(&format!(
+                "{} [schema unavailable; synthetic column names]",
+                self.format_with_schema_detailed(&schema)
+            ))
+        }
     }
 }
 
@@ -213,8 +265,8 @@ mod tests {
         ])
     }
 
-    fn create_sample_tuple() -> (Tuple, Schema) {
-        let schema = create_sample_schema();
+    fn create_sample_tuple() -> (Tuple, Arc<Schema>) {
+        let schema = Arc::new(create_sample_schema());
         let values = vec![
             Value::new(1),
             Value::new("Alice"),
@@ -225,10 +277,10 @@ mod tests {
         (Tuple::new(&values, &schema, rid), schema)
     }
 
-    fn create_sample_record() -> (Record, Schema) {
+    fn create_sample_record() -> (Record, Arc<Schema>) {
         let (tuple, schema) = create_sample_tuple();
         let rid = RID::new(0, 0);
-        (Record::new(tuple, rid), schema)
+        (Record::new(tuple, rid, schema.clone()), schema)
     }
 
     #[test]
@@ -240,6 +292,7 @@ mod tests {
         assert_eq!(record.get_value(2), Value::new(30));
         assert_eq!(record.get_value(3), Value::new(true));
         assert_eq!(record.get_rid(), RID::new(0, 0));
+        assert_eq!(record.tuple.get_rid(), record.get_rid());
     }
 
     #[test]
@@ -272,6 +325,22 @@ mod tests {
         let new_rid = RID::new(1, 1);
         record.set_rid(new_rid);
         assert_eq!(record.get_rid(), new_rid);
+        assert_eq!(record.tuple.get_rid(), new_rid);
+    }
+
+    #[test]
+    fn test_record_new_overwrites_tuple_rid() {
+        let schema = Arc::new(create_sample_schema());
+        let values = vec![Value::new(1), Value::new("Alice"), Value::new(30), Value::new(true)];
+
+        let tuple_rid = RID::new(9, 9);
+        let tuple = Tuple::new(&values, &schema, tuple_rid);
+
+        let record_rid = RID::new(1, 2);
+        let record = Record::new(tuple, record_rid, schema.clone());
+
+        assert_eq!(record.get_rid(), record_rid);
+        assert_eq!(record.tuple.get_rid(), record_rid);
     }
 
     #[test]
@@ -301,5 +370,26 @@ mod tests {
         assert_eq!(deserialized.get_value(3), record.get_value(3));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_record_display_uses_real_schema() {
+        let (record, _schema) = create_sample_record();
+        let rendered = record.to_string();
+        assert!(rendered.contains("id: 1"));
+        assert!(rendered.contains("name: Alice"));
+    }
+
+    #[test]
+    fn test_record_deserialize_rejects_trailing_bytes() {
+        let (record, _schema) = create_sample_record();
+        let mut storage = vec![0u8; 1000];
+        let serialized_len = record.serialize_to(&mut storage).unwrap();
+
+        let mut with_trailing = storage[..serialized_len].to_vec();
+        with_trailing.extend_from_slice(&[0u8, 1u8, 2u8]);
+
+        let err = Record::deserialize_from(&with_trailing).unwrap_err();
+        assert!(matches!(err, TupleError::DeserializationError(_)));
     }
 }
