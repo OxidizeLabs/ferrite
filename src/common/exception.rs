@@ -90,6 +90,10 @@ pub enum TupleError {
     BufferTooSmall,
     #[error("Column not found: {0}")]
     ColumnNotFound(usize),
+    #[error("Tuple value count mismatch: expected {expected}, got {actual}")]
+    ValueCountMismatch { expected: usize, actual: usize },
+    #[error("Key attribute index {attr} is out of bounds (tuple column count: {column_count})")]
+    KeyAttrOutOfBounds { attr: usize, column_count: usize },
     #[error("SerializationError: {0}")]
     SerializationError(String),
     #[error("DeserializationError: {0}")]

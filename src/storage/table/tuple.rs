@@ -11,7 +11,7 @@ use std::fmt::{Display, Formatter};
 ///
 /// Keep this centralized so on-disk formats don’t accidentally diverge across call sites.
 #[inline]
-pub(crate) fn storage_bincode_config() -> bincode::config::Configuration {
+pub(crate) fn storage_bincode_config() -> config::Configuration {
     // NOTE: If/when we change this, it is an on-disk format change.
     config::standard()
 }
@@ -28,7 +28,8 @@ pub struct TupleMeta {
     deleted: bool,
     /// Index into the owning transaction's undo log chain.
     ///
-    /// Stored as a fixed-width integer to keep the on-disk format stable across architectures.
+    /// Stored as a `u64` (not `usize`) to keep the on-disk representation stable across
+    /// architectures.
     undo_log_idx: u64,
 }
 
@@ -284,8 +285,27 @@ impl Tuple {
         &self.values[column_index]
     }
 
+    /// Replaces this tuple's values **without** validating against any schema.
+    ///
+    /// This can temporarily put the tuple in a state that doesn't match a particular `Schema`.
+    /// Prefer `set_values_checked()` when you have the intended schema available.
     pub fn set_values(&mut self, values: Vec<Value>) {
         self.values = values;
+    }
+
+    /// Replaces this tuple's values, validating the value count against the given schema.
+    pub fn set_values_checked(
+        &mut self,
+        values: Vec<Value>,
+        schema: &Schema,
+    ) -> Result<(), TupleError> {
+        let expected = schema.get_column_count() as usize;
+        let actual = values.len();
+        if actual != expected {
+            return Err(TupleError::ValueCountMismatch { expected, actual });
+        }
+        self.values = values;
+        Ok(())
     }
 
     pub fn get_values(&self) -> Vec<Value> {
@@ -321,6 +341,20 @@ impl Tuple {
             .iter()
             .map(|&attr| self.values[attr].clone())
             .collect()
+    }
+
+    /// Creates a new tuple containing only the key attributes, returning an error if any key
+    /// attribute index is out of bounds.
+    pub fn keys_from_tuple_checked(&self, key_attrs: &[usize]) -> Result<Vec<Value>, TupleError> {
+        let column_count = self.values.len();
+        let mut keys = Vec::with_capacity(key_attrs.len());
+        for &attr in key_attrs {
+            if attr >= column_count {
+                return Err(TupleError::KeyAttrOutOfBounds { attr, column_count });
+            }
+            keys.push(self.values[attr].clone());
+        }
+        Ok(keys)
     }
 
     /// Returns a string representation of the tuple.
@@ -476,10 +510,23 @@ mod tests {
         let (tuple, _schema) = create_sample_tuple();
 
         let key_attrs = vec![0, 2];
-        let keys = tuple.keys_from_tuple(&key_attrs);
+        let keys = tuple.keys_from_tuple_checked(&key_attrs).unwrap();
 
         assert_eq!(keys[0], Value::new(1));
         assert_eq!(keys[1], Value::new(30));
+    }
+
+    #[test]
+    fn test_tuple_keys_from_tuple_checked_out_of_bounds() {
+        let (tuple, _schema) = create_sample_tuple();
+        let err = tuple.keys_from_tuple_checked(&[999]).unwrap_err();
+        match err {
+            TupleError::KeyAttrOutOfBounds { attr, column_count } => {
+                assert_eq!(attr, 999);
+                assert_eq!(column_count, tuple.get_column_count());
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
@@ -518,7 +565,7 @@ mod tests {
     #[test]
     fn test_direct_bincode_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let (tuple, _) = create_sample_tuple();
-        let config = config::standard();
+        let config = storage_bincode_config();
 
         // Directly use bincode with the Encode trait
         let serialized = bincode::encode_to_vec(&tuple, config)?;
@@ -574,7 +621,7 @@ mod tests {
     #[test]
     fn test_tuple_meta_serialization() -> Result<(), Box<dyn std::error::Error>> {
         let meta = TupleMeta::new(1234567890);
-        let config = config::standard();
+        let config = storage_bincode_config();
         let serialized = bincode::encode_to_vec(meta, config)?;
         let (deserialized, _): (TupleMeta, usize) =
             bincode::decode_from_slice(&serialized, config)?;

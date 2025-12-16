@@ -16,6 +16,7 @@ pub struct IndexIterator {
     end_key: Option<Arc<Tuple>>,
     exhausted: bool,
     last_key: Option<Value>, // Track the last key we've processed
+    last_error: Option<String>,
 }
 
 impl IndexIterator {
@@ -33,11 +34,22 @@ impl IndexIterator {
             end_key,
             exhausted: false,
             last_key: None,
+            last_error: None,
         };
 
         // Fetch first batch
-        iterator.fetch_next_batch();
+        let _ = iterator.fetch_next_batch();
         iterator
+    }
+
+    /// Returns the last iterator error, if any.
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+
+    /// Returns (and clears) the last iterator error, if any.
+    pub fn take_error(&mut self) -> Option<String> {
+        self.last_error.take()
     }
 
     /// Get current RID
@@ -51,10 +63,10 @@ impl IndexIterator {
     }
 
     /// Fetch next batch of results
-    fn fetch_next_batch(&mut self) -> bool {
+    fn fetch_next_batch(&mut self) -> Result<bool, String> {
         if self.exhausted {
             debug!("Iterator already exhausted");
-            return false;
+            return Ok(false);
         }
 
         debug!("Fetching next batch");
@@ -68,7 +80,7 @@ impl IndexIterator {
                 if self.last_key.is_some() {
                     debug!("Already completed full scan");
                     self.exhausted = true;
-                    return false;
+                    return Ok(false);
                 }
                 debug!("Starting fresh full scan");
                 tree_guard.scan_full()
@@ -77,17 +89,42 @@ impl IndexIterator {
             // Range scan case
             (Some(start), Some(end)) => {
                 let scan_start = if let Some(last_key) = &self.last_key {
-                    let key_attrs = tree_guard.get_metadata().get_key_attrs().clone();
                     let schema = start.get_schema();
                     let mut values = start.get_values();
 
-                    // Only modify the first key (the one we're iterating on)
-                    for &idx in &key_attrs {
-                        if idx == 0 {
-                            // Assuming we're always iterating on the first column
-                            values[idx] = last_key.clone();
-                        }
+                    // Continue from the last processed key.
+                    //
+                    // NOTE: The B+ tree currently only supports a single key column.
+                    // We still validate the attribute index against the tuple to avoid panics.
+                    let key_attrs = tree_guard.get_metadata().get_key_attrs();
+                    let key_attr = *key_attrs
+                        .first()
+                        .expect("B+ tree metadata must have at least one key attribute");
+
+                    if let Err(e) = start.keys_from_tuple_checked(&[key_attr]) {
+                        let msg = format!(
+                            "invalid start_key for index range scan: missing key_attr {} (tuple cols={}): {}",
+                            key_attr,
+                            start.get_column_count(),
+                            e
+                        );
+                        debug!("{msg}");
+                        self.exhausted = true;
+                        self.last_error = Some(msg.clone());
+                        return Err(msg);
                     }
+                    if key_attr >= values.len() {
+                        let msg = format!(
+                            "invalid start_key for index range scan: key_attr {} out of bounds (values len={})",
+                            key_attr,
+                            values.len()
+                        );
+                        debug!("{msg}");
+                        self.exhausted = true;
+                        self.last_error = Some(msg.clone());
+                        return Err(msg);
+                    }
+                    values[key_attr] = last_key.clone();
 
                     // Create a new tuple with the modified values
                     let new_start = Arc::new(Tuple::new(&values, &schema, RID::new(0, 0)));
@@ -101,8 +138,13 @@ impl IndexIterator {
                 tree_guard.scan_range(&scan_start, end, self.last_key.is_none())
             }
             _ => {
-                debug!("Invalid scan range configuration");
-                Ok(Vec::new())
+                let msg =
+                    "invalid scan range configuration: start_key/end_key must both be set or both be None"
+                        .to_string();
+                debug!("{msg}");
+                self.exhausted = true;
+                self.last_error = Some(msg.clone());
+                Err(msg)
             }
         };
 
@@ -111,7 +153,7 @@ impl IndexIterator {
                 if new_results.is_empty() {
                     debug!("No more results available");
                     self.exhausted = true;
-                    return false;
+                    return Ok(false);
                 }
 
                 // Update last_key for next batch
@@ -121,12 +163,13 @@ impl IndexIterator {
 
                 self.current_batch = new_results;
                 debug!("Fetched {} results", self.current_batch.len());
-                true
+                Ok(true)
             }
             Err(e) => {
                 debug!("Error fetching batch: {:?}", e);
                 self.exhausted = true;
-                false
+                self.last_error = Some(e.clone());
+                Err(e)
             }
         }
     }
@@ -136,24 +179,22 @@ impl IndexIterator {
         self.current_batch.clear();
         self.position = 0;
         self.exhausted = false;
+        self.last_error = None;
         self.fetch_next_batch();
     }
-}
 
-impl Iterator for IndexIterator {
-    type Item = RID;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    /// Fallible next() that surfaces iterator errors instead of silently ending the stream.
+    pub fn try_next(&mut self) -> Result<Option<RID>, String> {
         if self.is_end() {
             debug!("Iterator has reached the end");
-            return None;
+            return Ok(None);
         }
 
         // If we've exhausted current batch, try to fetch next batch
         if self.position >= self.current_batch.len() {
-            if !self.fetch_next_batch() {
+            if !self.fetch_next_batch()? {
                 debug!("No more batches available");
-                return None;
+                return Ok(None);
             }
             // Reset position for new batch
             self.position = 0;
@@ -164,10 +205,24 @@ impl Iterator for IndexIterator {
             let rid = self.current_batch[self.position].1;
             debug!("Returning RID {:?} at position {}", rid, self.position);
             self.position += 1;
-            Some(rid)
+            Ok(Some(rid))
         } else {
             debug!("No more items in current batch");
-            None
+            Ok(None)
+        }
+    }
+}
+
+impl Iterator for IndexIterator {
+    type Item = RID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.try_next() {
+            Ok(v) => v,
+            Err(e) => {
+                debug!("IndexIterator error, ending iteration: {}", e);
+                None
+            }
         }
     }
 }
@@ -191,22 +246,28 @@ impl DoubleEndedIterator for IndexIterator {
 impl IndexIterator {
     /// Skip to a specific key in the range
     pub fn seek(&mut self, seek_key: &Tuple) -> Option<RID> {
+        self.try_seek(seek_key).ok().flatten()
+    }
+
+    /// Fallible version of `seek` that returns errors instead of panicking.
+    pub fn try_seek(&mut self, seek_key: &Tuple) -> Result<Option<RID>, String> {
         // Reset iterator state
         self.current_batch.clear();
         self.position = 0;
         self.exhausted = false;
+        self.last_error = None;
 
         // Perform new scan from seek key in its own scope
         {
             let tree_guard = self.tree.read();
             if let Some(end) = &self.end_key {
-                self.current_batch
-                    .append(tree_guard.scan_range(seek_key, end, true).unwrap().as_mut());
+                let mut results = tree_guard.scan_range(seek_key, end, true)?;
+                self.current_batch.append(results.as_mut());
             }
         } // tree_guard is dropped here
 
         // Now we can safely call next()
-        self.next()
+        self.try_next()
     }
 
     /// Get an estimate of remaining items
