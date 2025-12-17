@@ -145,7 +145,7 @@ impl TableHeap {
         // Try to insert into the current page
         {
             let mut page = page_guard.write();
-            if page.has_space_for(tuple) {
+            if page.has_space_for(meta.as_ref(), tuple) {
                 return match page.insert_tuple(&meta, tuple) {
                     Some(rid) => {
                         page.set_dirty(true);
@@ -708,7 +708,7 @@ impl TableHeap {
         let mut new_page = new_page_guard.write();
 
         // First verify the page has space for the tuple
-        if !new_page.has_space_for(tuple) {
+        if !new_page.has_space_for(meta, tuple) {
             debug!(
                 "New page {} unexpectedly has no space for tuple",
                 new_page_id
@@ -780,7 +780,7 @@ impl TableHeap {
         let mut page = first_page_guard.write();
 
         // Verify the page has space for the tuple
-        if !page.has_space_for(tuple) {
+        if !page.has_space_for(meta.as_ref(), tuple) {
             return Err("First page has no space for tuple".to_string());
         }
 
@@ -848,7 +848,7 @@ impl TableHeap {
         // Try to insert into the current page
         {
             let mut page = page_guard.write();
-            if page.has_space_for(tuple) {
+            if page.has_space_for(meta.as_ref(), tuple) {
                 return if let Some(rid) = page.insert_tuple(&meta, tuple) {
                     page.set_dirty(true);
                     Ok(rid)
@@ -922,7 +922,7 @@ impl TableHeap {
             let mut page = page_guard.write();
 
             // Check if page has space
-            if page.has_space_for(&temp_tuple) {
+            if page.has_space_for(meta.as_ref(), &temp_tuple) {
                 // Get the next RID
                 let next_rid = page.get_next_rid();
 
@@ -1093,7 +1093,7 @@ impl TableHeap {
         let mut new_page = new_page_guard.write();
 
         // First verify the page has space for the tuple
-        if !new_page.has_space_for(&tuple) {
+        if !new_page.has_space_for(meta.as_ref(), &tuple) {
             debug!(
                 "New page {} unexpectedly has no space for tuple",
                 new_page_id
@@ -1211,7 +1211,7 @@ impl TupleStorage {
         let mut page = page_guard.write();
 
         // Try to insert into the current page
-        if page.has_space_for(&*tuple) {
+        if page.has_space_for(&*meta, &*tuple) {
             let rid = page
                 .insert_tuple(meta, tuple)
                 .ok_or("Failed to insert tuple into page")?;

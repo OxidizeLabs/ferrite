@@ -23,6 +23,9 @@ pub const DB_PAGE_SIZE: u64 = 4096; // size of a data page in bytes
 pub const BUFFER_POOL_SIZE: u64 = 8192; // 32MB buffer pool (8192 * 4KB pages)
 pub const LOG_BUFFER_SIZE: u64 = (BUFFER_POOL_SIZE + 1) * DB_PAGE_SIZE; // size of a log buffer in bytes
 pub const BUCKET_SIZE: u64 = 50; // size of extendable hash bucket
+/// Maximum serialized tuple body size we will accept (bytes).
+/// This should be comfortably below `DB_PAGE_SIZE` to leave room for metadata.
+pub const TUPLE_MAX_SERIALIZED_SIZE: usize = 3500;
 
 // PERFORMANCE OPTIMIZATION: Reduced LRU-K window for faster eviction decisions
 pub const LRUK_REPLACER_K: u64 = 2; // lookback window for lru-k replacer (reduced from 10)
