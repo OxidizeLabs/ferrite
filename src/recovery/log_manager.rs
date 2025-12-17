@@ -145,6 +145,8 @@ impl LogManager {
             for record in records {
                 disk_manager.write_log(&record).await?;
             }
+            // Ensure WAL durability before advertising persistence via `persistent_lsn`.
+            disk_manager.sync_log_direct().await?;
             Ok(())
         });
 
