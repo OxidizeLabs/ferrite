@@ -50,17 +50,19 @@ impl LogRecoveryManager {
     /// 1. Analysis phase
     /// 2. Redo phase
     /// 3. Undo phase
-    pub fn start_recovery(&self) -> Result<(), String> {
+    pub async fn start_recovery(&self) -> Result<(), String> {
         info!("Starting database recovery");
 
         // Phase 1: Analysis - determine active transactions at time of crash
-        let (mut txn_table, mut dirty_page_table, start_redo_lsn) = self.analyze_log()?;
+        let (mut txn_table, mut dirty_page_table, start_redo_lsn) =
+            self.analyze_log().await?;
 
         // Phase 2: Redo - reapply all updates (even from aborted transactions)
-        self.redo_log(&mut txn_table, &mut dirty_page_table, start_redo_lsn)?;
+        self.redo_log(&mut txn_table, &mut dirty_page_table, start_redo_lsn)
+            .await?;
 
         // Phase 3: Undo - rollback uncommitted transactions
-        self.undo_log(&txn_table)?;
+        self.undo_log(&txn_table).await?;
 
         // Update the log manager's persistent LSN
         let mut log_manager = self.log_manager.write();
@@ -78,7 +80,7 @@ impl LogRecoveryManager {
     /// - TxnTable: Active transactions at time of crash
     /// - DirtyPageTable: Dirty pages at time of crash
     /// - Lsn: The LSN to start redo from
-    fn analyze_log(&self) -> Result<(TxnTable, DirtyPageTable, Lsn), String> {
+    async fn analyze_log(&self) -> Result<(TxnTable, DirtyPageTable, Lsn), String> {
         info!("Starting analysis phase of recovery");
 
         let mut txn_table = TxnTable::new();
@@ -89,7 +91,7 @@ impl LogRecoveryManager {
         let mut log_iterator = LogIterator::new(self.disk_manager.clone());
 
         // Process each log record
-        while let Some(log_record) = log_iterator.next() {
+        while let Some(log_record) = log_iterator.next().await {
             let lsn = log_record.get_lsn();
             let txn_id = log_record.get_txn_id();
 
@@ -154,7 +156,7 @@ impl LogRecoveryManager {
     /// - `txn_table`: The transaction table from analysis phase
     /// - `dirty_page_table`: The dirty page table from analysis phase
     /// - `start_redo_lsn`: The LSN to start redo from
-    fn redo_log(
+    async fn redo_log(
         &self,
         _txn_table: &mut TxnTable,
         dirty_page_table: &mut DirtyPageTable,
@@ -169,7 +171,7 @@ impl LogRecoveryManager {
         let mut log_iterator = LogIterator::new(self.disk_manager.clone());
 
         // Process each log record
-        while let Some(log_record) = log_iterator.next() {
+        while let Some(log_record) = log_iterator.next().await {
             let lsn = log_record.get_lsn();
 
             // Skip records before start_redo_lsn
@@ -215,7 +217,7 @@ impl LogRecoveryManager {
     ///
     /// # Parameters
     /// - `txn_table`: The transaction table containing active transactions
-    fn undo_log(&self, txn_table: &TxnTable) -> Result<(), String> {
+    async fn undo_log(&self, txn_table: &TxnTable) -> Result<(), String> {
         info!("Starting undo phase of recovery");
 
         let active_txns = txn_table.get_active_txns();
@@ -235,7 +237,7 @@ impl LogRecoveryManager {
 
             // Build a map of LSN to offset in the log file
             // This requires a full scan of the log to build the LSN-to-offset mapping
-            let lsn_to_offset_map = self.build_lsn_offset_map()?;
+            let lsn_to_offset_map = self.build_lsn_offset_map().await?;
 
             // Continue until we reach the BEGIN record or INVALID_LSN
             while current_lsn != INVALID_LSN {
@@ -245,7 +247,7 @@ impl LogRecoveryManager {
                     let mut single_record_iterator =
                         LogIterator::with_offset(self.disk_manager.clone(), *offset);
 
-                    if let Some(log_record) = single_record_iterator.next() {
+                    if let Some(log_record) = single_record_iterator.next().await {
                         if log_record.get_txn_id() == txn_id {
                             match log_record.get_log_record_type() {
                                 LogRecordType::Begin => {
@@ -301,14 +303,14 @@ impl LogRecoveryManager {
     ///
     /// # Returns
     /// A HashMap mapping LSN to file offset
-    fn build_lsn_offset_map(&self) -> Result<HashMap<Lsn, u64>, String> {
+    async fn build_lsn_offset_map(&self) -> Result<HashMap<Lsn, u64>, String> {
         let mut map = HashMap::new();
         let mut log_iterator = LogIterator::new(self.disk_manager.clone());
 
         // Track the current offset
         let mut current_offset = 0;
 
-        while let Some(log_record) = log_iterator.next() {
+        while let Some(log_record) = log_iterator.next().await {
             let lsn = log_record.get_lsn();
 
             // Store the offset for this LSN
@@ -504,6 +506,7 @@ mod tests {
     struct TestContext {
         wal_manager: WALManager,
         recovery_manager: LogRecoveryManager,
+        log_manager: Arc<RwLock<LogManager>>,
         _temp_dir: TempDir,
     }
 
@@ -536,6 +539,9 @@ mod tests {
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
+            // Ensure durability waits in tests do not spin forever by keeping the flush
+            // thread running throughout each test context.
+            log_manager.write().run_flush_thread();
 
             let wal_manager = WALManager::new(log_manager.clone());
 
@@ -545,6 +551,7 @@ mod tests {
             Self {
                 wal_manager,
                 recovery_manager,
+                log_manager,
                 _temp_dir: temp_dir,
             }
         }
@@ -579,6 +586,13 @@ mod tests {
         }
     }
 
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            // Ensure the background flush thread is stopped between tests.
+            self.log_manager.write().shut_down();
+        }
+    }
+
     /// Tests for the analysis phase of log recovery
     mod analysis_tests {
         use super::*;
@@ -589,12 +603,12 @@ mod tests {
             let ctx = TestContext::new("analysis_empty_test").await;
 
             // Start recovery (which includes analysis)
-            let result = ctx.recovery_manager.start_recovery();
+            let result = ctx.recovery_manager.start_recovery().await;
             assert!(result.is_ok(), "Recovery should succeed on empty log");
 
             // Analyze the log directly to check results
             let (txn_table, dirty_page_table, _start_redo_lsn) =
-                ctx.recovery_manager.analyze_log().unwrap();
+                ctx.recovery_manager.analyze_log().await.unwrap();
 
             // Verify no active transactions found
             assert_eq!(
@@ -630,7 +644,7 @@ mod tests {
             ctx.simulate_crash();
 
             // Analysis should show no active transactions since it completed
-            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().await.unwrap();
             assert_eq!(
                 txn_table.get_active_txns().len(),
                 0,
@@ -664,7 +678,7 @@ mod tests {
             // sleep(Duration::from_millis(10));
 
             // Analysis should show one active transaction
-            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().await.unwrap();
             assert_eq!(
                 txn_table.get_active_txns().len(),
                 1,
@@ -689,7 +703,7 @@ mod tests {
             let ctx = TestContext::new("redo_empty_test").await;
 
             // Start recovery
-            let result = ctx.recovery_manager.start_recovery();
+            let result = ctx.recovery_manager.start_recovery().await;
             assert!(result.is_ok(), "Recovery should succeed on empty log");
         }
 
@@ -720,12 +734,12 @@ mod tests {
 
             // Now recover
             let (mut txn_table, mut dirty_page_table, start_redo_lsn) =
-                ctx.recovery_manager.analyze_log().unwrap();
+                ctx.recovery_manager.analyze_log().await.unwrap();
             let redo_result = ctx.recovery_manager.redo_log(
                 &mut txn_table,
                 &mut dirty_page_table,
                 start_redo_lsn,
-            );
+            ).await;
 
             assert!(redo_result.is_ok(), "Redo phase should succeed");
 
@@ -755,8 +769,8 @@ mod tests {
             ctx.simulate_crash();
 
             // Recovery and undo phase
-            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
-            let undo_result = ctx.recovery_manager.undo_log(&txn_table);
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().await.unwrap();
+            let undo_result = ctx.recovery_manager.undo_log(&txn_table).await;
 
             assert!(undo_result.is_ok(), "Undo phase should succeed");
             assert_eq!(
@@ -789,14 +803,14 @@ mod tests {
             ctx.simulate_crash();
 
             // Recovery and undo phase
-            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().unwrap();
+            let (txn_table, _, _) = ctx.recovery_manager.analyze_log().await.unwrap();
             assert_eq!(
                 txn_table.get_active_txns().len(),
                 1,
                 "Should have one active transaction"
             );
 
-            let undo_result = ctx.recovery_manager.undo_log(&txn_table);
+            let undo_result = ctx.recovery_manager.undo_log(&txn_table).await;
             assert!(undo_result.is_ok(), "Undo phase should succeed");
 
             // In a real test, we would validate the updates were properly rolled back
@@ -861,7 +875,7 @@ mod tests {
             ctx.simulate_crash();
 
             // Perform recovery
-            let recovery_result = ctx.recovery_manager.start_recovery();
+            let recovery_result = ctx.recovery_manager.start_recovery().await;
             assert!(
                 recovery_result.is_ok(),
                 "Complete recovery process should succeed"
@@ -907,7 +921,7 @@ mod tests {
             // Again, point it to the same files
 
             // This recovery should also succeed
-            let final_recovery_result = final_ctx.recovery_manager.start_recovery();
+            let final_recovery_result = final_ctx.recovery_manager.start_recovery().await;
             assert!(
                 final_recovery_result.is_ok(),
                 "Recovery after recovery crash should succeed"
