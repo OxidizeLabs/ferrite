@@ -1,4 +1,6 @@
-use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
+use crate::common::config::{
+    storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE,
+};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::Page;
@@ -10,22 +12,39 @@ use std::any::Any;
 use std::mem::size_of;
 
 /// Represents a table page using a slotted page format.
+/// Slotted pages store a forward-growing slot directory and backward-growing tuple bodies
+/// inside a fixed-size buffer, enabling compact packing and stable tuple offsets until
+/// a page rewrite/compaction occurs.
 ///
-/// # Slotted page format:
-///  -------------------------------------------------------------
-///  | HEADER | ... FREE SPACE ... | ... INSERTED TUPLES ... |
-///  -------------------------------------------------------------
+/// Layout (little-endian):
+/// - Byte 0: page type discriminator.
+/// - Header (28 bytes): page_id (8), next_page_id (8), prev_page_id (8),
+///   num_tuples (2), num_deleted_tuples (2).
+/// - Start magic (4 bytes): 0xDEADBEEF (big-endian) for basic corruption check.
+/// - Slot directory entries (one per tuple), packed front-to-back:
+///     [offset: u16][size: u16][TupleMeta (bincode-encoded, variable)]
+/// - End magic (4 bytes): 0xCAFEBABE (big-endian) immediately after the last
+///   encoded TupleMeta.
+/// - Tuple bodies: written from the end of the page backward; `offset` points
+///   into this region.
 ///
-///  Header format (size in bytes):
-///  -------------------------------------------------------------
-///  | NextPageId (4)| NumTuples(2) | NumDeletedTuples(2) |
-///  -------------------------------------------------------------
-///  -------------------------------------------------------------
-///  | Tuple_1 offset+size (4) | Tuple_2 offset+size (4) | ... |
-///  -------------------------------------------------------------
+/// Tuple body format: `[TupleMeta][Tuple data]` (bincode).
 ///
-/// Tuple format:
-/// | meta | data |
+/// Text diagram (low addresses at left, high at right):
+///
+///  ┌───────────────────────────────────────────────────────────┐
+///  │ PageType (1)                                              │
+///  │ Header (28)                                               │
+///  │ Start magic 0xDEADBEEF (4, big-endian)                    │
+///  │ Slot dir entry 0: offset(2) size(2) meta(var)             │
+///  │ Slot dir entry 1: offset(2) size(2) meta(var)             │
+///  │ ...                                                       │
+///  │ End magic 0xCAFEBABE (4, big-endian)                      │
+///  │                           ↑ grows forward as slots added  │
+///  │-----------------------------------------------------------│
+///  │                           ↓ grows backward as tuples added│
+///  │ Tuple bodies (offset points into this region)             │
+///  └───────────────────────────────────────────────────────────┘
 #[derive(Debug)]
 pub struct TablePage {
     data: Box<[u8; DB_PAGE_SIZE as usize]>,
@@ -173,7 +192,7 @@ impl TablePage {
     }
 
     /// Gets the next offset to insert a tuple.
-    pub fn get_next_tuple_offset(&self, tuple: &Tuple) -> Option<u16> {
+    pub fn get_next_tuple_offset(&self, meta: &TupleMeta, tuple: &Tuple) -> Option<u16> {
         // First check if the tuple is too large for any page
         if self.is_tuple_too_large(tuple) {
             debug!("Tuple is too large for any page, rejecting");
@@ -188,10 +207,10 @@ impl TablePage {
         let tuple_size = tuple_data.len() as u16;
 
         // Enforce a hard maximum size for any tuple
-        if tuple_size > 3500 {
+        if tuple_size as usize > TUPLE_MAX_SERIALIZED_SIZE {
             debug!(
-                "Tuple size {} exceeds maximum allowed size of 3500 bytes",
-                tuple_size
+                "Tuple size {} exceeds maximum allowed size of {} bytes",
+                tuple_size, TUPLE_MAX_SERIALIZED_SIZE
             );
             return None;
         }
@@ -203,13 +222,17 @@ impl TablePage {
         };
 
         let tuple_offset = slot_end_offset.saturating_sub(tuple_size);
-        let offset_size = self.get_header_size() + self.tuple_info_size() + 100; // Add safety buffer
 
-        // Ensure we have enough space for tuple data + metadata + safety margin
-        if tuple_offset < offset_size {
+        let metadata_footprint = match self.metadata_footprint_with_new(meta) {
+            Some(bytes) => bytes,
+            None => return None,
+        };
+
+        // Ensure we have enough space for tuple data + metadata region.
+        if tuple_offset < metadata_footprint as u16 {
             debug!(
                 "Not enough space in page: tuple_offset {} < offset_size {}",
-                tuple_offset, offset_size
+                tuple_offset, metadata_footprint
             );
             None
         } else {
@@ -277,7 +300,7 @@ impl TablePage {
                 .unwrap_or(DB_PAGE_SIZE as u16);
 
             let new_offset = min_offset.saturating_sub(new_size);
-            let header_and_tuple_info_size = self.get_header_size() + self.tuple_info_size();
+            let header_and_tuple_info_size = self.metadata_footprint_bytes() as u16;
 
             if new_offset < header_and_tuple_info_size {
                 return Err(PageError::TupleInvalid);
@@ -564,31 +587,19 @@ impl TablePage {
             offset += meta_bytes.len();
         }
 
-        // Write another magic number to mark the end of metadata (in big-endian format)
-        // Always use a fixed known offset of 41 for the end magic marker for deserialization consistency
-        // This is a hardcoded value based on the observed behavior in the logs
-        let fixed_offset = 41; // Using constant offset from logs
+        // Write an end-of-metadata marker immediately after the last encoded meta entry.
         let end_magic = 0xCAFEBABEu32.to_be_bytes();
-        debug!("Writing end magic number at fixed offset {}", fixed_offset);
-
-        if fixed_offset + 4 <= buffer.len() {
-            buffer[fixed_offset..fixed_offset + 4].copy_from_slice(&end_magic);
-            debug!("End magic written successfully at fixed offset");
+        debug!("Writing end magic number at calculated offset {}", offset);
+        if offset + 4 <= buffer.len() {
+            buffer[offset..offset + 4].copy_from_slice(&end_magic);
         } else {
-            debug!(
-                "ERROR: Not enough space for end magic marker at fixed offset {}",
-                fixed_offset
-            );
-            // This is a critical error - write the magic at the last possible position
+            // As a last resort, place it at the very end of the page to avoid panicking.
             let last_pos = buffer.len() - 4;
             buffer[last_pos..].copy_from_slice(&end_magic);
-            debug!("End magic written at backup position {}", last_pos);
-        }
-
-        // Also write at the current offset for backward compatibility
-        if offset + 4 <= buffer.len() && offset != fixed_offset {
-            debug!("Also writing end magic at calculated offset {}", offset);
-            buffer[offset..offset + 4].copy_from_slice(&end_magic);
+            debug!(
+                "Insufficient space at offset {}; end magic written at backup position {}",
+                offset, last_pos
+            );
         }
 
         // Copy tuple data
@@ -804,8 +815,38 @@ impl TablePage {
         ) as u16
     }
 
-    fn tuple_info_size(&self) -> u16 {
-        (self.header.num_tuples as usize * size_of::<(u16, u16, TupleMeta)>()) as u16
+    /// Returns the encoded size of all tuple-info entries (offset+size + encoded meta).
+    fn encoded_tuple_info_bytes(&self) -> usize {
+        self.tuple_info
+            .iter()
+            .map(|(_, _, meta)| {
+                // 2 bytes offset + 2 bytes size + encoded meta
+                4 + bincode::encode_to_vec(meta, storage_bincode_config())
+                    .expect("TupleMeta encoding should not fail")
+                    .len()
+            })
+            .sum()
+    }
+
+    fn metadata_footprint_bytes(&self) -> usize {
+        1 // page type byte
+            + TablePageHeader::size()
+            + 4 // start magic
+            + self.encoded_tuple_info_bytes()
+            + 4 // end magic
+    }
+
+    fn metadata_footprint_with_new(&self, meta: &TupleMeta) -> Option<usize> {
+        let meta_len = bincode::encode_to_vec(meta, storage_bincode_config()).ok()?.len();
+        Some(
+            1 // page type
+                + TablePageHeader::size()
+                + 4 // start magic
+                + self.encoded_tuple_info_bytes()
+                + 4 // offset+size for new tuple
+                + meta_len
+                + 4, // end magic
+        )
     }
 
     /// Gets the total size of all tuple data in the page
@@ -817,27 +858,23 @@ impl TablePage {
             .sum()
     }
 
-    /// Gets the amount of free space available in the page
+    /// Gets the amount of free space available in the page (approximate).
     pub fn get_free_space(&self) -> usize {
-        let header_size = TablePageHeader::size();
-        let tuple_info_size = self.tuple_info_size() as usize;
         let tuple_data_size = self.get_tuple_data_size();
-
-        DB_PAGE_SIZE as usize - header_size - tuple_info_size - tuple_data_size
+        let meta_bytes = self.metadata_footprint_bytes();
+        DB_PAGE_SIZE as usize
+            .saturating_sub(tuple_data_size)
+            .saturating_sub(meta_bytes)
     }
 
-    /// Checks if the page has enough space for a tuple
-    pub fn has_space_for(&self, tuple: &Tuple) -> bool {
+    /// Checks if the page has enough space for a tuple with the given metadata.
+    pub fn has_space_for(&self, meta: &TupleMeta, tuple: &Tuple) -> bool {
         // First check if tuple is too large for any page
         if self.is_tuple_too_large(tuple) {
             return false;
         }
 
-        // Then check if this specific page has enough space
-        let tuple_info_size = size_of::<(u16, u16, TupleMeta)>();
-        let tuple_size = tuple.get_length().unwrap_or(0); // Handle potential error
-        let total_required_space = tuple_size + tuple_info_size;
-        self.get_free_space() >= total_required_space
+        self.get_next_tuple_offset(meta, tuple).is_some()
     }
 
     /// Gets the ID of the previous page in the table.
@@ -853,20 +890,18 @@ impl TablePage {
             Err(_) => return true, // If we can't serialize it, consider it too large
         };
 
-        // Add space for tuple metadata in tuple_info
-        let tuple_info_entry_size = size_of::<(u16, u16, TupleMeta)>();
-        let total_size = serialized_size + tuple_info_entry_size;
-
-        // Reserve additional space for metadata structures to ensure we have room for end markers
-        let reserved_metadata_size = self.get_header_size() as usize + 100; // Header + safety buffer
-
-        // A tuple is too large if it's more than ~75% of the page size to leave room for overhead
-        let max_safe_tuple_size = (DB_PAGE_SIZE as usize * 3) / 4;
+        // Approximate metadata footprint if this tuple were added using a default meta.
+        // TupleMeta encoding is small; use a representative meta to reserve space.
+        let placeholder_meta = TupleMeta::new(0);
+        let meta_overhead = match self.metadata_footprint_with_new(&placeholder_meta) {
+            Some(bytes) => bytes,
+            None => return true,
+        };
 
         // Check both the absolute size and relative to page size
-        serialized_size > 3500 || // Ensure large tuples (>3500 bytes) are rejected
-        total_size > max_safe_tuple_size ||
-        total_size > (DB_PAGE_SIZE as usize - reserved_metadata_size)
+        serialized_size > TUPLE_MAX_SERIALIZED_SIZE // hard cap for tuple body
+            || serialized_size + meta_overhead > DB_PAGE_SIZE as usize
+            || serialized_size > (DB_PAGE_SIZE as usize * 3) / 4
     }
 
     /// Gets the next RID that would be assigned to a tuple inserted into this page
@@ -884,7 +919,7 @@ impl TablePage {
         );
 
         // Get the next available offset for the tuple
-        let tuple_offset = match self.get_next_tuple_offset(tuple) {
+        let tuple_offset = match self.get_next_tuple_offset(meta, tuple) {
             Some(offset) => {
                 debug!("Found available offset: {}", offset);
                 offset
@@ -978,7 +1013,7 @@ impl TablePage {
         );
 
         // Get the next available offset for the tuple
-        let tuple_offset = match self.get_next_tuple_offset(tuple) {
+        let tuple_offset = match self.get_next_tuple_offset(meta, tuple) {
             Some(offset) => {
                 debug!("Found available offset: {}", offset);
                 offset
@@ -1247,7 +1282,9 @@ mod unit_tests {
         let tuple = Tuple::new(&values, &schema, next_rid);
 
         // Now check that get_next_tuple_offset returns None
-        assert!(page.get_next_tuple_offset(&tuple).is_none());
+        assert!(page
+            .get_next_tuple_offset(&TupleMeta::new(123), &tuple)
+            .is_none());
     }
 
     #[test]
@@ -1446,6 +1483,51 @@ mod tuple_operation_tests {
     }
 
     #[test]
+    fn test_end_magic_written_after_meta_bytes() {
+        let mut page = TablePage::new(1);
+        let (meta, tuple) = create_test_tuple(1);
+
+        let rid = page.insert_tuple(&meta, &tuple).unwrap();
+        let serialized = page.serialize();
+
+        // Compute where the end magic should land based on the current layout:
+        // [PAGE_TYPE (1)] [header] [start magic (4)] [tuple offset+size (4)] [meta bytes] [end magic (4)]
+        let header_start = PAGE_TYPE_OFFSET + 1;
+        let header_size = TablePageHeader::size();
+        let meta_bytes = bincode::encode_to_vec(&meta, storage_bincode_config()).unwrap();
+
+        let meta_start = header_start + header_size + 4 + 4;
+        let expected_end_magic_offset = meta_start + meta_bytes.len();
+        let end_magic = 0xCAFEBABE_u32.to_be_bytes();
+
+        assert!(
+            expected_end_magic_offset + 4 <= serialized.len(),
+            "end magic offset {} out of bounds",
+            expected_end_magic_offset
+        );
+
+        // Meta bytes must be intact (not clobbered by the end marker).
+        assert_eq!(
+            &serialized[meta_start..meta_start + meta_bytes.len()],
+            meta_bytes.as_slice(),
+            "meta bytes were not preserved before end marker"
+        );
+
+        // End marker must appear immediately after the meta bytes.
+        assert_eq!(
+            &serialized[expected_end_magic_offset..expected_end_magic_offset + 4],
+            end_magic.as_slice(),
+            "end magic not written at expected offset"
+        );
+
+        // Deserialization should succeed and preserve the metadata.
+        let deserialized = TablePage::deserialize(&serialized).expect("deserialize failed");
+        let (deser_meta, _) = deserialized.get_tuple(&rid, false).expect("get_tuple failed");
+        assert_eq!(deser_meta.get_creator_txn_id(), meta.get_creator_txn_id());
+        assert_eq!(deser_meta.is_deleted(), meta.is_deleted());
+    }
+
+    #[test]
     fn test_tuple_in_place_update() {
         let mut page = TablePage::new(1);
         let (meta, tuple) = create_test_tuple(1);
@@ -1621,7 +1703,9 @@ mod capacity_tests {
         let tuple = Tuple::new(&values, &schema, next_rid);
 
         // Now check that get_next_tuple_offset returns None
-        assert!(page.get_next_tuple_offset(&tuple).is_none());
+        assert!(page
+            .get_next_tuple_offset(&TupleMeta::new(123), &tuple)
+            .is_none());
     }
 
     #[test]
@@ -1658,7 +1742,7 @@ mod capacity_tests {
     fn test_header_size_constraints() {
         let page = TablePage::new(1);
         assert!(page.get_header_size() < DB_PAGE_SIZE as u16);
-        assert_eq!(page.tuple_info_size(), 0);
+        assert_eq!(page.encoded_tuple_info_bytes(), 0);
     }
 }
 
