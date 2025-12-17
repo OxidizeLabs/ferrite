@@ -29,7 +29,7 @@ impl RID {
     ///
     /// # Format
     ///
-    /// This is a **legacy** 32/32 packing:
+    /// This uses 32/32 packing:
     /// - high 32 bits: `page_id` (truncated to 32-bit)
     /// - low  32 bits: `slot_num`
     ///
@@ -47,17 +47,16 @@ impl RID {
 
     /// Returns the 64-bit integer representation of the RID.
     ///
-    /// # Panics
+    /// # Format and overflow handling
     ///
-    /// Panics if `page_id` cannot fit into 32 bits (legacy 32/32 packing).
-    pub fn to_i64(&self) -> i64 {
-        assert!(
-            self.page_id <= u32::MAX as PageId,
-            "RID::to_i64 only supports 32-bit page_id packing; got page_id={}",
-            self.page_id
-        );
+    /// This uses 32/32 packing (high 32 bits: `page_id`, low 32 bits: `slot_num`).
+    /// If `page_id` does not fit in 32 bits, returns `None` instead of panicking.
+    pub fn to_i64(&self) -> Option<i64> {
+        if self.page_id > u32::MAX as PageId {
+            return None;
+        }
         let packed = ((self.page_id as u64) << 32) | (self.slot_num as u64);
-        packed as i64
+        Some(packed as i64)
     }
 
     /// Returns the page ID of the RID.
@@ -135,7 +134,13 @@ mod tests {
     #[test]
     fn test_to_i64() {
         let rid = RID::new(1, 2);
-        assert_eq!(rid.to_i64(), 0x0000000100000002);
+        assert_eq!(rid.to_i64(), Some(0x0000000100000002));
+    }
+
+    #[test]
+    fn test_to_i64_overflow_returns_none() {
+        let rid = RID::new((u32::MAX as PageId) + 1, 2);
+        assert!(rid.to_i64().is_none());
     }
 
     #[test]
