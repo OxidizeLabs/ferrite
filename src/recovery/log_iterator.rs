@@ -1,5 +1,7 @@
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::async_disk::AsyncDiskManager;
+use crate::storage::disk::direct_io::round_up_to_alignment;
+use crate::common::config::DB_PAGE_SIZE;
 use log::{debug, warn};
 use std::sync::Arc;
 use tokio::runtime::Handle;
@@ -60,7 +62,7 @@ impl LogIterator {
             return None;
         }
 
-        // Maximum number of attempts to find a valid record
+        // Maximum number of attempts to find a valid record (for corruption resync).
         let max_attempts = 100;
         let mut attempts = 0;
 
@@ -70,36 +72,102 @@ impl LogIterator {
 
             match tokio::task::block_in_place(|| {
                 self.runtime_handle
-                    .block_on(async move { disk_manager.read_log(offset).await })
+                    .block_on(async move { disk_manager.read_log_sized(offset, 4).await })
             }) {
-                Ok(bytes) => {
-                    // Deserialize bytes into LogRecord
-                    let record = match LogRecord::from_bytes(&bytes) {
+                Ok(header_bytes) => {
+                    if header_bytes.len() != 4 {
+                        warn!(
+                            "Short log header read at offset {}: {} bytes",
+                            self.current_offset,
+                            header_bytes.len()
+                        );
+                        self.reached_eof = true;
+                        return None;
+                    }
+
+                    let size_bytes: [u8; 4] = header_bytes.as_slice().try_into().unwrap();
+                    let record_size = i32::from_le_bytes(size_bytes);
+
+                    // Basic validation.
+                    if record_size <= 0 || record_size > 1_000_000 {
+                        warn!(
+                            "Invalid record size at offset {}: size={}, skipping",
+                            self.current_offset, record_size
+                        );
+
+                        // If direct I/O is enabled, reads/writes are alignment-sensitive and we
+                        // store records at alignment boundaries (with padding). Skip to the next
+                        // aligned boundary to resync quickly.
+                        if self.disk_manager.get_config().direct_io {
+                            self.current_offset += DB_PAGE_SIZE;
+                        } else {
+                            self.current_offset += 1;
+                        }
+
+                        attempts += 1;
+                        continue;
+                    }
+
+                    // Read the full record bytes (exact logical size).
+                    let record_bytes = match tokio::task::block_in_place(|| {
+                        let disk_manager = Arc::clone(&self.disk_manager);
+                        self.runtime_handle.block_on(async move {
+                            disk_manager.read_log_sized(offset, record_size as usize).await
+                        })
+                    }) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            warn!(
+                                "Failed to read full log record at offset {} (size={}): {}",
+                                self.current_offset, record_size, e
+                            );
+                            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                self.reached_eof = true;
+                                return None;
+                            }
+
+                            if self.disk_manager.get_config().direct_io {
+                                self.current_offset += DB_PAGE_SIZE;
+                            } else {
+                                self.current_offset += 1;
+                            }
+                            attempts += 1;
+                            continue;
+                        }
+                    };
+
+                    // Deserialize record bytes into LogRecord.
+                    let record = match LogRecord::from_bytes(&record_bytes) {
                         Ok(record) => record,
                         Err(e) => {
                             warn!(
                                 "Failed to deserialize log record at offset {}: {}",
                                 self.current_offset, e
                             );
-                            self.current_offset += 1;
+
+                            if self.disk_manager.get_config().direct_io {
+                                self.current_offset += DB_PAGE_SIZE;
+                            } else {
+                                self.current_offset += 1;
+                            }
                             attempts += 1;
                             continue;
                         }
                     };
 
                     // Additional validation for records to catch corrupted entries
-                    let record_size = record.get_size();
-                    if record_size <= 0
-                        || record_size > 1_000_000
-                        || record.get_log_record_type() == LogRecordType::Invalid
-                    {
+                    if record.get_log_record_type() == LogRecordType::Invalid {
                         warn!(
                             "Invalid record detected at offset {}: size={}, type={:?}, skipping",
                             self.current_offset,
                             record_size,
                             record.get_log_record_type()
                         );
-                        self.current_offset += 1;
+                        if self.disk_manager.get_config().direct_io {
+                            self.current_offset += DB_PAGE_SIZE;
+                        } else {
+                            self.current_offset += 1;
+                        }
                         attempts += 1;
                         continue;
                     }
@@ -113,15 +181,18 @@ impl LogIterator {
                     );
 
                     // Advance to next record
-                    self.current_offset += record_size as u64;
+                    if self.disk_manager.get_config().direct_io {
+                        let physical_advance = round_up_to_alignment(
+                            record_size as usize,
+                            DB_PAGE_SIZE as usize,
+                        ) as u64;
+                        self.current_offset += physical_advance;
+                    } else {
+                        self.current_offset += record_size as u64;
+                    }
                     return Some(record);
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to read log record at offset {}: {}",
-                        self.current_offset, e
-                    );
-
                     // Check if this is an EOF error
                     if e.kind() == std::io::ErrorKind::UnexpectedEof {
                         debug!("Reached EOF at offset {}", self.current_offset);
@@ -129,8 +200,17 @@ impl LogIterator {
                         return None;
                     }
 
-                    // Skip forward by 1 byte and try again
-                    self.current_offset += 1;
+                    warn!(
+                        "Failed to read log record at offset {}: {}",
+                        self.current_offset, e
+                    );
+
+                    // Resync on error.
+                    if self.disk_manager.get_config().direct_io {
+                        self.current_offset += DB_PAGE_SIZE;
+                    } else {
+                        self.current_offset += 1;
+                    }
                     attempts += 1;
                     continue;
                 }
