@@ -1,7 +1,7 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
-use crate::common::config::{INVALID_TXN_ID, PageId, Timestamp, TxnId};
+use crate::common::config::{INVALID_TS, INVALID_TXN_ID, PageId, Timestamp, TxnId};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{
@@ -339,7 +339,11 @@ impl TransactionManager {
 
                         // Create metadata for the restored tuple
                         let mut meta = TupleMeta::new(undo_link.prev_txn);
-                        meta.set_commit_timestamp(undo_log.ts);
+                        if undo_log.ts == INVALID_TS {
+                            meta.set_commit_timestamp_opt(None);
+                        } else {
+                            meta.set_commit_timestamp(undo_log.ts);
+                        }
                         meta.set_deleted(false); // Explicitly set to false for restored tuples
                         meta.set_undo_log_idx(undo_link.prev_log_idx)
                             .map_err(|e| format!("Invalid undo log index during restore: {}", e))
@@ -390,7 +394,11 @@ impl TransactionManager {
                         // Regular update rollback
                         // Restore the previous version
                         let mut meta = TupleMeta::new(undo_link.prev_txn);
-                        meta.set_commit_timestamp(undo_log.ts);
+                        if undo_log.ts == INVALID_TS {
+                            meta.set_commit_timestamp_opt(None);
+                        } else {
+                            meta.set_commit_timestamp(undo_log.ts);
+                        }
                         meta.set_deleted(undo_log.is_deleted);
                         meta.set_undo_log_idx(undo_link.prev_log_idx)
                             .map_err(|e| format!("Invalid undo log index during rollback: {}", e))
@@ -412,7 +420,7 @@ impl TransactionManager {
                     }
 
                     // Update the undo link to point to the previous version
-                    let prev_version_link = if undo_log.prev_version.prev_txn != 0 {
+                    let prev_version_link = if undo_log.prev_version.is_valid() {
                         Some(undo_log.prev_version.clone())
                     } else {
                         None
