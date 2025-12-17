@@ -119,7 +119,8 @@ impl Record {
     ///
     /// # Errors
     ///
-    /// Returns a `TupleError` if deserialization fails.
+    /// Returns a `TupleError` if deserialization fails or if the buffer
+    /// contains trailing bytes (must match the encoded length exactly).
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
         let (record, bytes_read): (Self, usize) =
             bincode::decode_from_slice(storage, storage_bincode_config())

@@ -306,12 +306,21 @@ impl Tuple {
     ///
     /// # Errors
     ///
-    /// Returns a `TupleError` if deserialization fails.
+    /// Returns a `TupleError` if deserialization fails or if the input slice
+    /// contains trailing bytes (the buffer must match the encoded length exactly).
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
         // RID will be `RID::default()`; caller must set it based on owning page/slot.
-        bincode::decode_from_slice(storage, storage_bincode_config())
-            .map_err(|e| TupleError::DeserializationError(e.to_string()))
-            .map(|(tuple, _)| tuple)
+        let (tuple, bytes_read) = bincode::decode_from_slice(storage, storage_bincode_config())
+            .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
+
+        if bytes_read != storage.len() {
+            return Err(TupleError::DeserializationError(format!(
+                "unexpected trailing bytes: consumed {bytes_read} of {}",
+                storage.len()
+            )));
+        }
+
+        Ok(tuple)
     }
 
     /// Returns the RID of the tuple.
@@ -611,6 +620,21 @@ mod tests {
         let mut deserialized = deserialized;
         deserialized.set_rid(tuple.get_rid());
         assert_eq!(deserialized.get_rid(), tuple.get_rid());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_tuple_deserialize_rejects_trailing_bytes() -> Result<(), TupleError> {
+        let (tuple, _schema) = create_sample_tuple();
+        let mut storage = vec![0u8; 1000];
+        let serialized_len = tuple.serialize_to(&mut storage)?;
+
+        let mut with_trailing = storage[..serialized_len].to_vec();
+        with_trailing.extend_from_slice(&[0u8, 1u8, 2u8]);
+
+        let err = Tuple::deserialize_from(&with_trailing).unwrap_err();
+        assert!(matches!(err, TupleError::DeserializationError(_)));
 
         Ok(())
     }
