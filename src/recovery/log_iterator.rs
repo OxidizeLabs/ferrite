@@ -1,6 +1,5 @@
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::async_disk::AsyncDiskManager;
-use crate::storage::disk::direct_io::round_up_to_alignment;
 use crate::common::config::DB_PAGE_SIZE;
 use log::{debug, warn};
 use std::sync::Arc;
@@ -14,6 +13,13 @@ pub struct LogIterator {
     reached_eof: bool,
     buffer_size: usize,
     runtime_handle: Handle,
+}
+
+#[inline]
+fn is_eof_error(e: &std::io::Error) -> bool {
+    // Some async/worker pipelines wrap I/O errors and lose the original `ErrorKind`.
+    // Treat any error message containing "eof" as end-of-file to avoid O(n) resync scanning.
+    e.kind() == std::io::ErrorKind::UnexpectedEof || e.to_string().to_lowercase().contains("eof")
 }
 
 impl LogIterator {
@@ -95,11 +101,14 @@ impl LogIterator {
                             self.current_offset, record_size
                         );
 
-                        // If direct I/O is enabled, reads/writes are alignment-sensitive and we
-                        // store records at alignment boundaries (with padding). Skip to the next
-                        // aligned boundary to resync quickly.
-                        if self.disk_manager.get_config().direct_io {
-                            self.current_offset += DB_PAGE_SIZE;
+                        // Resync strategy:
+                        // - WAL is OS-buffered and uses *logical* byte offsets (no required alignment).
+                        // - However, older/alternative WAL layouts may be padded with zero-filled
+                        //   DB-sized blocks. If we see an all-zero size header, treat it as padding
+                        //   and skip to the next DB_PAGE_SIZE boundary for faster recovery.
+                        if header_bytes.as_slice() == [0u8; 4] {
+                            let page = DB_PAGE_SIZE;
+                            self.current_offset = ((self.current_offset / page) + 1) * page;
                         } else {
                             self.current_offset += 1;
                         }
@@ -121,16 +130,12 @@ impl LogIterator {
                                 "Failed to read full log record at offset {} (size={}): {}",
                                 self.current_offset, record_size, e
                             );
-                            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                            if is_eof_error(&e) {
                                 self.reached_eof = true;
                                 return None;
                             }
 
-                            if self.disk_manager.get_config().direct_io {
-                                self.current_offset += DB_PAGE_SIZE;
-                            } else {
-                                self.current_offset += 1;
-                            }
+                            self.current_offset += 1;
                             attempts += 1;
                             continue;
                         }
@@ -145,11 +150,7 @@ impl LogIterator {
                                 self.current_offset, e
                             );
 
-                            if self.disk_manager.get_config().direct_io {
-                                self.current_offset += DB_PAGE_SIZE;
-                            } else {
-                                self.current_offset += 1;
-                            }
+                            self.current_offset += 1;
                             attempts += 1;
                             continue;
                         }
@@ -163,11 +164,7 @@ impl LogIterator {
                             record_size,
                             record.get_log_record_type()
                         );
-                        if self.disk_manager.get_config().direct_io {
-                            self.current_offset += DB_PAGE_SIZE;
-                        } else {
-                            self.current_offset += 1;
-                        }
+                        self.current_offset += 1;
                         attempts += 1;
                         continue;
                     }
@@ -181,20 +178,13 @@ impl LogIterator {
                     );
 
                     // Advance to next record
-                    if self.disk_manager.get_config().direct_io {
-                        let physical_advance = round_up_to_alignment(
-                            record_size as usize,
-                            DB_PAGE_SIZE as usize,
-                        ) as u64;
-                        self.current_offset += physical_advance;
-                    } else {
-                        self.current_offset += record_size as u64;
-                    }
+                    // WAL offsets are logical byte offsets.
+                    self.current_offset += record_size as u64;
                     return Some(record);
                 }
                 Err(e) => {
                     // Check if this is an EOF error
-                    if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                    if is_eof_error(&e) {
                         debug!("Reached EOF at offset {}", self.current_offset);
                         self.reached_eof = true;
                         return None;
@@ -206,11 +196,7 @@ impl LogIterator {
                     );
 
                     // Resync on error.
-                    if self.disk_manager.get_config().direct_io {
-                        self.current_offset += DB_PAGE_SIZE;
-                    } else {
-                        self.current_offset += 1;
-                    }
+                    self.current_offset += 1;
                     attempts += 1;
                     continue;
                 }
@@ -354,10 +340,6 @@ mod tests {
 
     fn record_logical_size_bytes(record: &LogRecord) -> u64 {
         record.to_bytes().unwrap().len() as u64
-    }
-
-    fn round_up_to_page(size: u64) -> u64 {
-        round_up_to_alignment(size as usize, DB_PAGE_SIZE as usize) as u64
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -516,44 +498,42 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn test_direct_io_offsets_are_page_aligned_and_iterator_advances_physically() {
+    async fn test_wal_offsets_are_logical_even_with_db_direct_io_enabled() {
         let config = DiskManagerConfig {
             direct_io: true,
             ..DiskManagerConfig::default()
         };
-        let ctx = TestContext::new_with_config("direct_io_offsets", config).await;
+        let ctx = TestContext::new_with_config("wal_offsets_logical", config).await;
         assert!(ctx.disk_manager.get_config().direct_io);
 
         let r1 = ctx.create_test_begin_record(1);
         let r2 = ctx.create_test_begin_record(2);
         let s1 = record_logical_size_bytes(&r1);
         let s2 = record_logical_size_bytes(&r2);
-        let p1 = round_up_to_page(s1);
-        let p2 = round_up_to_page(s2);
 
         let o1 = ctx.disk_manager.write_log(&r1).await.unwrap();
         let o2 = ctx.disk_manager.write_log(&r2).await.unwrap();
 
-        // Invariant: offsets reflect physical (aligned) layout.
+        // Invariant: WAL/log offsets reflect the logical (byte) layout.
         assert_eq!(o1, 0);
-        assert_eq!(o2, p1);
+        assert_eq!(o2, s1);
 
         let mut iter = LogIterator::new(ctx.disk_manager.clone());
         let a = iter.next().expect("expected first record");
         assert_eq!(a.get_txn_id(), 1);
-        assert_eq!(iter.get_offset(), p1);
+        assert_eq!(iter.get_offset(), s1);
 
         let b = iter.next().expect("expected second record");
         assert_eq!(b.get_txn_id(), 2);
-        assert_eq!(iter.get_offset(), p1 + p2);
+        assert_eq!(iter.get_offset(), s1 + s2);
 
         assert!(iter.next().is_none());
         assert!(iter.is_end());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn test_direct_io_resync_skips_corrupt_page_boundary() {
-        // Construct an on-disk layout that makes resync deterministic in direct I/O mode:
+    async fn test_resync_skips_zero_padded_page_boundary_layout() {
+        // Construct an on-disk layout that makes resync deterministic with a page-padded WAL:
         // - Page 0 begins with an invalid size header (all zeros => size=0)
         // - Page 1 begins with a valid record, padded to a full page
         let config = DiskManagerConfig {
@@ -601,7 +581,15 @@ mod tests {
         assert_eq!(rec.get_txn_id(), 7);
         assert_eq!(rec.get_log_record_type(), LogRecordType::Begin);
 
-        // Invariant: the iterator should have skipped page 0 and advanced one physical page.
+        // After reading the record, the iterator advances logically (by record size).
+        assert_eq!(
+            iter.get_offset(),
+            DB_PAGE_SIZE as u64 + record_bytes.len() as u64
+        );
+
+        // The next call should treat the zero-filled padding as padding and jump to the next page.
+        assert!(iter.next().is_none());
+        assert!(iter.is_end());
         assert_eq!(iter.get_offset(), DB_PAGE_SIZE as u64 * 2);
     }
 }
