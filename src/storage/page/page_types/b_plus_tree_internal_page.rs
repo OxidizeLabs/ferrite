@@ -395,10 +395,9 @@ impl<
 
     /// Get the minimum size (50% of the maximum size) of this page
     pub fn get_min_size(&self) -> usize {
-        // Keep internal nodes at least half full.
-        // Use ceil(max_size / 2) to match leaf min-size semantics and the
-        // usual B+ tree invariant for odd orders.
-        self.max_size.div_ceil(2)
+        // Internal node with N keys has N+1 children; min children is ceil((N+1)/2),
+        // so min keys is that minus 1 => floor(N/2).
+        self.max_size / 2
     }
 
     /// Serialize the internal page to bytes
