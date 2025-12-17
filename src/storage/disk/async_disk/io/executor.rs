@@ -97,28 +97,28 @@ impl IOOperationExecutor {
     pub async fn execute_operation(&self, operation: IOOperation) -> IoResult<Vec<u8>> {
         let completion_sender = operation.completion_sender;
 
-        let result = match operation.operation_type {
+        // IMPORTANT: Do not use `?` in these match arms.
+        // We must always send a completion result back through `completion_sender`,
+        // even when the operation fails, otherwise callers will see `RecvError`.
+        let result: IoResult<Vec<u8>> = match operation.operation_type {
             IOOperationType::ReadPage { page_id } => self.execute_read_page(page_id).await,
             IOOperationType::WritePage { page_id, data } => {
-                self.execute_write_page(page_id, &data).await?;
-                Ok(data) // Return the written data
+                self.execute_write_page(page_id, &data).await.map(|_| data)
             }
             IOOperationType::ReadLog { offset, size } => self.execute_read_log(offset, size).await,
             IOOperationType::WriteLog { data, offset } => {
-                self.execute_write_log(&data, offset).await?;
-                Ok(data) // Return the written data
+                self.execute_write_log(&data, offset).await.map(|_| data)
             }
             IOOperationType::AppendLog { data } => {
-                let offset = self.execute_append_log(&data).await?;
-                Ok(offset.to_le_bytes().to_vec()) // Return offset as bytes
+                self.execute_append_log(&data)
+                    .await
+                    .map(|offset| offset.to_le_bytes().to_vec())
             }
             IOOperationType::Sync => {
-                self.execute_sync().await?;
-                Ok(Vec::new()) // No data to return
+                self.execute_sync().await.map(|_| Vec::new())
             }
             IOOperationType::SyncLog => {
-                self.execute_sync_log().await?;
-                Ok(Vec::new()) // No data to return
+                self.execute_sync_log().await.map(|_| Vec::new())
             }
         };
 
@@ -177,22 +177,39 @@ impl IOOperationExecutor {
     ///
     /// # Arguments
     /// * `page_id` - The page identifier to write to
-    /// * `data` - The page data to write
+    /// * `data` - The page data to write (must be exactly DB_PAGE_SIZE bytes)
+    ///
+    /// # Errors
+    /// Returns an error if data length doesn't match DB_PAGE_SIZE
     async fn execute_write_page(&self, page_id: PageId, data: &[u8]) -> IoResult<()> {
+        // Validate page size to prevent partial writes
+        if data.len() != DB_PAGE_SIZE as usize {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Invalid page data size: expected {} bytes, got {} bytes",
+                    DB_PAGE_SIZE,
+                    data.len()
+                ),
+            ));
+        }
+
         let offset = page_id * DB_PAGE_SIZE;
 
         let mut file = self.db_file.lock().await;
 
-        // Debug: Check file size before write
-        let file_size_before = file.metadata().await?.len();
-        log::debug!(
-            "execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}, direct_io={}",
-            page_id,
-            offset,
-            data.len(),
-            file_size_before,
-            self.direct_io_config.enabled
-        );
+        // Debug logging with metadata (only pay syscall cost when debug is enabled)
+        if log::log_enabled!(log::Level::Debug) {
+            let file_size_before = file.metadata().await?.len();
+            log::debug!(
+                "execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}, direct_io={}",
+                page_id,
+                offset,
+                data.len(),
+                file_size_before,
+                self.direct_io_config.enabled
+            );
+        }
 
         file.seek(std::io::SeekFrom::Start(offset)).await?;
 
@@ -207,15 +224,18 @@ impl IOOperationExecutor {
             file.write_all(data).await?;
         }
 
-        file.flush().await?; // Ensure data is flushed to OS buffers
+        // Flush to OS page cache (does NOT guarantee persistence - use sync_all for durability)
+        file.flush().await?;
 
-        // Debug: Check file size after write and flush
-        let file_size_after = file.metadata().await?.len();
-        log::debug!(
-            "execute_write_page: COMPLETED page_id={}, file_size_after={}",
-            page_id,
-            file_size_after
-        );
+        // Debug logging with metadata (only pay syscall cost when debug is enabled)
+        if log::log_enabled!(log::Level::Debug) {
+            let file_size_after = file.metadata().await?.len();
+            log::debug!(
+                "execute_write_page: COMPLETED page_id={}, file_size_after={}",
+                page_id,
+                file_size_after
+            );
+        }
 
         Ok(())
     }
@@ -279,7 +299,8 @@ impl IOOperationExecutor {
             file.write_all(data).await?;
         }
 
-        file.flush().await?; // Ensure data is flushed to OS buffers
+        // Flush to OS page cache (does NOT guarantee persistence - use sync_all for durability)
+        file.flush().await?;
         Ok(())
     }
 
@@ -304,20 +325,23 @@ impl IOOperationExecutor {
             } else {
                 file.write_all(data).await?;
             }
-            file.flush().await?; // Ensure data is flushed to OS buffers
+            // Flush to OS page cache (does NOT guarantee persistence - use sync_all for durability)
+            file.flush().await?;
         }
 
         Ok(offset)
     }
 
-    /// Syncs the database file to ensure data persistence
+    /// Syncs the database file to ensure data persistence (fsync)
     async fn execute_sync(&self) -> IoResult<()> {
         log::debug!("execute_sync: Starting sync_all() for database file");
         let file = self.db_file.lock().await;
 
-        // Debug: Check file size before sync
-        let file_size = file.metadata().await?.len();
-        log::debug!("execute_sync: file_size_before_sync={}", file_size);
+        // Debug logging with metadata (only pay syscall cost when debug is enabled)
+        if log::log_enabled!(log::Level::Debug) {
+            let file_size = file.metadata().await?.len();
+            log::debug!("execute_sync: file_size_before_sync={}", file_size);
+        }
 
         let result = file.sync_all().await;
 
