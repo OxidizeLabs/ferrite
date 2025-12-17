@@ -862,7 +862,7 @@ impl TablePage {
     pub fn get_free_space(&self) -> usize {
         let tuple_data_size = self.get_tuple_data_size();
         let meta_bytes = self.metadata_footprint_bytes();
-        DB_PAGE_SIZE as usize
+        (DB_PAGE_SIZE as usize)
             .saturating_sub(tuple_data_size)
             .saturating_sub(meta_bytes)
     }
