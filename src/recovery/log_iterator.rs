@@ -3,7 +3,6 @@ use crate::storage::disk::async_disk::AsyncDiskManager;
 use crate::common::config::DB_PAGE_SIZE;
 use log::{debug, warn};
 use std::sync::Arc;
-use tokio::runtime::Handle;
 
 /// `LogIterator` provides a robust way to iterate through log records in a log file.
 /// It handles EOF detection, validation of records, and proper advancing through the file.
@@ -12,7 +11,6 @@ pub struct LogIterator {
     current_offset: u64,
     reached_eof: bool,
     buffer_size: usize,
-    runtime_handle: Handle,
 }
 
 #[inline]
@@ -36,7 +34,6 @@ impl LogIterator {
             current_offset: 0,
             reached_eof: false,
             buffer_size: 1024, // Default buffer size
-            runtime_handle: Handle::current(),
         }
     }
 
@@ -54,16 +51,15 @@ impl LogIterator {
             current_offset: start_offset,
             reached_eof: false,
             buffer_size: 1024,
-            runtime_handle: Handle::current(),
         }
     }
 
-    /// Gets the next log record.
+    /// Gets the next log record asynchronously.
     ///
     /// # Returns
     /// - `Some(LogRecord)` if a valid record was read.
     /// - `None` if EOF was reached or an error occurred.
-    pub fn next(&mut self) -> Option<LogRecord> {
+    pub async fn next(&mut self) -> Option<LogRecord> {
         if self.reached_eof {
             return None;
         }
@@ -73,13 +69,9 @@ impl LogIterator {
         let mut attempts = 0;
 
         while attempts < max_attempts {
-            let disk_manager = Arc::clone(&self.disk_manager);
             let offset = self.current_offset;
 
-            match tokio::task::block_in_place(|| {
-                self.runtime_handle
-                    .block_on(async move { disk_manager.read_log_sized(offset, 4).await })
-            }) {
+            match self.disk_manager.read_log_sized(offset, 4).await {
                 Ok(header_bytes) => {
                     if header_bytes.len() != 4 {
                         warn!(
@@ -118,12 +110,10 @@ impl LogIterator {
                     }
 
                     // Read the full record bytes (exact logical size).
-                    let record_bytes = match tokio::task::block_in_place(|| {
-                        let disk_manager = Arc::clone(&self.disk_manager);
-                        self.runtime_handle.block_on(async move {
-                            disk_manager.read_log_sized(offset, record_size as usize).await
-                        })
-                    }) {
+                    let record_bytes = match self
+                        .disk_manager
+                        .read_log_sized(offset, record_size as usize)
+                        .await {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             warn!(
@@ -256,9 +246,9 @@ impl LogIterator {
     ///
     /// # Returns
     /// A vector of log records.
-    pub fn collect(&mut self) -> Vec<LogRecord> {
+    pub async fn collect(&mut self) -> Vec<LogRecord> {
         let mut records = Vec::new();
-        while let Some(record) = self.next() {
+        while let Some(record) = self.next().await {
             records.push(record);
         }
         records
@@ -348,7 +338,7 @@ mod tests {
         let mut iter = LogIterator::new(ctx.disk_manager.clone());
 
         // Should return None for empty file
-        assert!(iter.next().is_none());
+        assert!(iter.next().await.is_none());
         assert!(iter.is_end());
     }
 
@@ -362,7 +352,7 @@ mod tests {
 
         // Create iterator and read the record
         let mut iter = LogIterator::new(ctx.disk_manager.clone());
-        let read_record = iter.next();
+        let read_record = iter.next().await;
 
         // Verify record was read correctly
         assert!(read_record.is_some());
@@ -371,7 +361,7 @@ mod tests {
         assert_eq!(read_record.get_log_record_type(), LogRecordType::Begin);
 
         // Should return None for second read
-        assert!(iter.next().is_none());
+        assert!(iter.next().await.is_none());
         assert!(iter.is_end());
     }
 
@@ -410,7 +400,7 @@ mod tests {
 
         for (i, txn_id) in expected_txns.iter().copied().enumerate() {
             assert_eq!(iter.get_offset(), current_expected_offset);
-            let rec = iter.next().expect("expected record");
+            let rec = iter.next().await.expect("expected record");
             assert_eq!(rec.get_txn_id(), txn_id);
             assert_eq!(rec.get_lsn(), txn_id as Lsn);
             assert_eq!(rec.get_prev_lsn(), INVALID_LSN);
@@ -420,23 +410,23 @@ mod tests {
             assert_eq!(iter.get_offset(), current_expected_offset);
         }
 
-        assert!(iter.next().is_none());
+        assert!(iter.next().await.is_none());
         assert!(iter.is_end());
 
         // `reset` should allow re-reading from the start.
         iter.reset();
         assert!(!iter.is_end());
         assert_eq!(iter.get_offset(), 0);
-        let first = iter.next().expect("expected first record after reset");
+        let first = iter.next().await.expect("expected first record after reset");
         assert_eq!(first.get_txn_id(), 1);
 
         // `set_offset` should also clear EOF state.
-        while iter.next().is_some() {}
+        while iter.next().await.is_some() {}
         assert!(iter.is_end());
         iter.set_offset(0);
         assert!(!iter.is_end());
         assert_eq!(iter.get_offset(), 0);
-        assert!(iter.next().is_some());
+        assert!(iter.next().await.is_some());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -461,13 +451,13 @@ mod tests {
 
         // Start from the 2nd record boundary.
         let mut iter = LogIterator::with_offset(ctx.disk_manager.clone(), o2);
-        let rec2 = iter.next().expect("expected second record");
+        let rec2 = iter.next().await.expect("expected second record");
         assert_eq!(rec2.get_txn_id(), 20);
         assert_eq!(iter.get_offset(), o2 + s2);
 
-        let rec3 = iter.next().expect("expected third record");
+        let rec3 = iter.next().await.expect("expected third record");
         assert_eq!(rec3.get_txn_id(), 30);
-        assert!(iter.next().is_none());
+        assert!(iter.next().await.is_none());
         assert!(iter.is_end());
     }
 
@@ -483,12 +473,14 @@ mod tests {
         let mut iter1 = LogIterator::new(ctx.disk_manager.clone());
         let mut iter2 = LogIterator::new(ctx.disk_manager.clone());
 
-        let manual: Vec<(TxnId, Lsn, LogRecordType)> = std::iter::from_fn(|| iter1.next())
+        let manual: Vec<(TxnId, Lsn, LogRecordType)> = iter1
+            .collect().await
+            .into_iter()
             .map(|r| (r.get_txn_id(), r.get_lsn(), r.get_log_record_type()))
             .collect();
 
         let collected: Vec<(TxnId, Lsn, LogRecordType)> = iter2
-            .collect()
+            .collect().await
             .into_iter()
             .map(|r| (r.get_txn_id(), r.get_lsn(), r.get_log_record_type()))
             .collect();
@@ -519,15 +511,15 @@ mod tests {
         assert_eq!(o2, s1);
 
         let mut iter = LogIterator::new(ctx.disk_manager.clone());
-        let a = iter.next().expect("expected first record");
+        let a = iter.next().await.expect("expected first record");
         assert_eq!(a.get_txn_id(), 1);
         assert_eq!(iter.get_offset(), s1);
 
-        let b = iter.next().expect("expected second record");
+        let b = iter.next().await.expect("expected second record");
         assert_eq!(b.get_txn_id(), 2);
         assert_eq!(iter.get_offset(), s1 + s2);
 
-        assert!(iter.next().is_none());
+        assert!(iter.next().await.is_none());
         assert!(iter.is_end());
     }
 
@@ -577,7 +569,7 @@ mod tests {
         let disk_manager = Arc::new(disk_manager);
 
         let mut iter = LogIterator::new(disk_manager);
-        let rec = iter.next().expect("expected iterator to resync to page 1");
+        let rec = iter.next().await.expect("expected iterator to resync to page 1");
         assert_eq!(rec.get_txn_id(), 7);
         assert_eq!(rec.get_log_record_type(), LogRecordType::Begin);
 
@@ -588,7 +580,7 @@ mod tests {
         );
 
         // The next call should treat the zero-filled padding as padding and jump to the next page.
-        assert!(iter.next().is_none());
+        assert!(iter.next().await.is_none());
         assert!(iter.is_end());
         assert_eq!(iter.get_offset(), DB_PAGE_SIZE as u64 * 2);
     }

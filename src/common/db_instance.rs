@@ -152,7 +152,7 @@ impl DBInstance {
             ));
 
             // Start recovery process
-            if let Err(e) = recovery_manager.start_recovery() {
+            if let Err(e) = recovery_manager.start_recovery().await {
                 error!("Failed to recover database: {}", e);
                 return Err(DBError::Recovery(format!("Recovery failed: {}", e)));
             }
