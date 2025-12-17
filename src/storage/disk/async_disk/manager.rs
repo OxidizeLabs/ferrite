@@ -71,8 +71,14 @@ impl AsyncDiskManager {
 
         // Create direct I/O configuration
         // Use DB_PAGE_SIZE for alignment to ensure optimal direct I/O performance
-        let direct_io_config = crate::storage::disk::direct_io::DirectIOConfig {
+        let db_direct_io_config = crate::storage::disk::direct_io::DirectIOConfig {
             enabled: config.direct_io,
+            alignment: DB_PAGE_SIZE as usize,
+        };
+        // WAL/log should remain OS-buffered: it is append-heavy and variable-length, and
+        // O_DIRECT/NO_BUFFERING-style constraints (alignment of offset/size/pointer) are a poor fit.
+        let log_direct_io_config = crate::storage::disk::direct_io::DirectIOConfig {
+            enabled: false,
             alignment: DB_PAGE_SIZE as usize,
         };
 
@@ -86,30 +92,31 @@ impl AsyncDiskManager {
             true,
             true,
             true,
-            &direct_io_config,
+            &db_direct_io_config,
         )?;
         let db_file = Arc::new(Mutex::new(File::from_std(db_file_std)));
 
         debug!(
-            "Opening log file with direct_io={}: {}",
-            config.direct_io, log_file_path
+            "Opening log file with OS-buffered I/O (direct_io=false): {}",
+            log_file_path
         );
         let log_file_std = crate::storage::disk::direct_io::open_direct_io(
             &log_file_path,
             true,
             true,
             true,
-            &direct_io_config,
+            &log_direct_io_config,
         )?;
         let log_file = Arc::new(Mutex::new(File::from_std(log_file_std)));
 
         // Create IO engine with direct I/O configuration
         debug!(
-            "Initializing AsyncIOEngine with direct_io={}, alignment={}",
-            direct_io_config.enabled, direct_io_config.alignment
+            "Initializing AsyncIOEngine with db_direct_io={}, db_alignment={}, wal_buffered=true",
+            db_direct_io_config.enabled,
+            db_direct_io_config.alignment
         );
         let mut io_engine_instance =
-            AsyncIOEngine::with_config(db_file.clone(), log_file.clone(), direct_io_config)?;
+            AsyncIOEngine::with_config(db_file.clone(), log_file.clone(), db_direct_io_config)?;
 
         // Start the IO engine with configured number of worker threads
         debug!(
@@ -758,6 +765,21 @@ impl AsyncDiskManager {
         debug!("Syncing all pending writes to disk");
         let io_engine = self.io_engine.read().await;
         io_engine.sync().await
+    }
+
+    /// Syncs the WAL/log file to ensure durability.
+    ///
+    /// This uses a "direct" execution path (bypassing the queue/worker pipeline) so the
+    /// recovery log flush thread can safely call it via `Handle::block_on` without risking
+    /// deadlock.
+    pub async fn sync_log_direct(&self) -> IoResult<()> {
+        // Honor the configured durability policy.
+        if matches!(self.config.fsync_policy, FsyncPolicy::Never) {
+            return Ok(());
+        }
+        debug!("Syncing WAL/log file (direct path) per fsync policy: {:?}", self.config.fsync_policy);
+        let io_engine = self.io_engine.read().await;
+        io_engine.sync_log_direct().await
     }
 
     /// Gets current metrics snapshot

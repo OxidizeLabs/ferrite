@@ -6,7 +6,7 @@
 use log::{debug, warn};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::fs::{File, OpenOptions};
-use std::io::{Result as IoResult, Write};
+use std::io::{Error as IoError, ErrorKind, Result as IoResult, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 
@@ -96,7 +96,43 @@ pub fn open_direct_io<P: AsRef<Path>>(
 
 /// Check if a buffer is properly aligned for direct I/O
 pub fn is_aligned(buffer: &[u8], alignment: usize) -> bool {
+    if alignment == 0 || buffer.is_empty() {
+        return true;
+    }
     (buffer.as_ptr() as usize).is_multiple_of(alignment)
+}
+
+#[inline]
+fn is_offset_aligned(offset: u64, alignment: usize) -> bool {
+    if alignment == 0 {
+        return true;
+    }
+    offset % (alignment as u64) == 0
+}
+
+#[inline]
+fn direct_io_requires_alignment(config: &DirectIOConfig) -> bool {
+    // Linux O_DIRECT and Windows FILE_FLAG_NO_BUFFERING have strict alignment requirements.
+    // macOS F_NOCACHE is "best-effort no-cache" and does not require aligned I/O.
+    config.enabled && cfg!(any(target_os = "linux", target_os = "windows"))
+}
+
+#[inline]
+fn invalid_input(msg: impl Into<String>) -> IoError {
+    IoError::new(ErrorKind::InvalidInput, msg.into())
+}
+
+#[inline]
+fn validate_alignment(alignment: usize) -> IoResult<()> {
+    if alignment == 0 {
+        return Err(invalid_input("direct I/O alignment must be non-zero"));
+    }
+    if !alignment.is_power_of_two() {
+        return Err(invalid_input(format!(
+            "direct I/O alignment must be a power of two, got {alignment}"
+        )));
+    }
+    Ok(())
 }
 
 /// An aligned buffer that maintains alignment throughout its lifetime.
@@ -110,6 +146,18 @@ pub struct AlignedBuffer {
 impl AlignedBuffer {
     /// Create a new aligned buffer with zeroed memory
     pub fn new(size: usize, alignment: usize) -> Self {
+        if size == 0 {
+            // Avoid relying on allocator behavior for zero-sized allocations.
+            // For size=0, a dangling aligned pointer is valid to form slices of length 0.
+            let layout = Layout::from_size_align(0, alignment)
+                .expect("Invalid layout for aligned buffer");
+            return Self {
+                ptr: std::ptr::NonNull::<u8>::dangling().as_ptr(),
+                size,
+                layout,
+            };
+        }
+
         let layout = Layout::from_size_align(size, alignment)
             .expect("Invalid layout for aligned buffer");
 
@@ -168,8 +216,10 @@ impl DerefMut for AlignedBuffer {
 
 impl Drop for AlignedBuffer {
     fn drop(&mut self) {
-        unsafe {
-            dealloc(self.ptr, self.layout);
+        if self.size != 0 {
+            unsafe {
+                dealloc(self.ptr, self.layout);
+            }
         }
     }
 }
@@ -204,7 +254,13 @@ pub fn round_up_to_alignment(size: usize, alignment: usize) -> usize {
     if alignment == 0 {
         return size;
     }
-    (size + alignment - 1) & !(alignment - 1)
+    // Works for any non-zero alignment (not just power-of-two).
+    // Panics on overflow because it indicates a programming error.
+    let add = alignment - 1;
+    let adjusted = size
+        .checked_add(add)
+        .expect("round_up_to_alignment overflow");
+    (adjusted / alignment) * alignment
 }
 
 /// Check if a size is aligned to the given alignment
@@ -216,20 +272,92 @@ pub fn is_size_aligned(size: usize, alignment: usize) -> bool {
     size.is_multiple_of(alignment)
 }
 
-/// Create an aligned buffer for direct I/O operations
-/// Returns a Vec<u8> for API compatibility - uses AlignedBuffer internally
-/// and copies to Vec (which may lose alignment).
-pub fn create_aligned_buffer(size: usize, alignment: usize) -> Vec<u8> {
-    let aligned = AlignedBuffer::new(size, alignment);
-    // For API compatibility, we return a Vec
-    // The caller should use AlignedBuffer directly for guaranteed alignment
-    aligned.to_vec()
-}
-
 /// Create an aligned buffer that maintains alignment (preferred for direct I/O)
-pub fn create_aligned_buffer_raw(size: usize, alignment: usize) -> AlignedBuffer {
+pub fn create_aligned_buffer(size: usize, alignment: usize) -> AlignedBuffer {
     AlignedBuffer::new(size, alignment)
 }
+
+// --- Platform-specific helper functions ---
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn read_exact_at(file: &mut File, offset: u64, buf: &mut [u8]) -> IoResult<()> {
+    use std::os::unix::fs::FileExt;
+    let mut done = 0usize;
+    while done < buf.len() {
+        let n = file.read_at(&mut buf[done..], offset + done as u64)?;
+        if n == 0 {
+            return Err(IoError::new(ErrorKind::UnexpectedEof, "unexpected EOF"));
+        }
+        done += n;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn read_exact_at(file: &mut File, offset: u64, buf: &mut [u8]) -> IoResult<()> {
+    use std::os::windows::fs::FileExt;
+    let mut done = 0usize;
+    while done < buf.len() {
+        let n = file.seek_read(&mut buf[done..], offset + done as u64)?;
+        if n == 0 {
+            return Err(IoError::new(ErrorKind::UnexpectedEof, "unexpected EOF"));
+        }
+        done += n;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn read_exact_at(file: &mut File, offset: u64, buf: &mut [u8]) -> IoResult<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(offset))?;
+    file.read_exact(buf)?;
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn write_all_at(file: &mut File, offset: u64, buf: &[u8]) -> IoResult<()> {
+    use std::os::unix::fs::FileExt;
+    let mut done = 0usize;
+    while done < buf.len() {
+        let n = file.write_at(&buf[done..], offset + done as u64)?;
+        if n == 0 {
+            return Err(IoError::new(
+                ErrorKind::WriteZero,
+                "failed to write whole buffer",
+            ));
+        }
+        done += n;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn write_all_at(file: &mut File, offset: u64, buf: &[u8]) -> IoResult<()> {
+    use std::os::windows::fs::FileExt;
+    let mut done = 0usize;
+    while done < buf.len() {
+        let n = file.seek_write(&buf[done..], offset + done as u64)?;
+        if n == 0 {
+            return Err(IoError::new(
+                ErrorKind::WriteZero,
+                "failed to write whole buffer",
+            ));
+        }
+        done += n;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn write_all_at(file: &mut File, offset: u64, buf: &[u8]) -> IoResult<()> {
+    use std::io::{Seek, SeekFrom, Write};
+    file.seek(SeekFrom::Start(offset))?;
+    file.write_all(buf)?;
+    Ok(())
+}
+
+// --- End helper functions ---
 
 /// Perform a direct I/O read operation with proper alignment
 pub fn read_aligned(
@@ -237,29 +365,83 @@ pub fn read_aligned(
     offset: u64,
     size: usize,
     config: &DirectIOConfig,
-) -> IoResult<Vec<u8>> {
-    use std::io::{Read, Seek, SeekFrom};
+) -> IoResult<AlignedBuffer> {
+    if size == 0 {
+        return Ok(AlignedBuffer::new(0, config.alignment.max(1)));
+    }
 
-    file.seek(SeekFrom::Start(offset))?;
-
-    // For direct I/O, we need to read in aligned chunks
-    if config.enabled && size % config.alignment != 0 {
-        warn!(
-            "Direct I/O read size {} is not aligned to {}, this may cause issues",
-            size, config.alignment
-        );
+    if direct_io_requires_alignment(config) {
+        validate_alignment(config.alignment)?;
+        if !is_offset_aligned(offset, config.alignment) {
+            return Err(invalid_input(format!(
+                "direct I/O read offset {offset} is not aligned to {}",
+                config.alignment
+            )));
+        }
     }
 
     if config.enabled {
-        // Use properly aligned buffer for direct I/O
-        let mut buffer = create_aligned_buffer_raw(size, config.alignment);
-        file.read_exact(&mut *buffer)?;
-        Ok(buffer.to_vec())
+        // For Linux/Windows direct I/O, the kernel often requires I/O sizes to be aligned.
+        let io_size = if direct_io_requires_alignment(config) {
+            round_up_to_alignment(size, config.alignment)
+        } else {
+            size
+        };
+
+        let mut buffer = create_aligned_buffer(io_size, config.alignment.max(1));
+        read_exact_at(file, offset, buffer.as_mut_slice())?;
+        
+        // Note: The buffer might be larger than requested 'size'. 
+        // The caller is responsible for slicing only what they need.
+        Ok(buffer)
     } else {
-        let mut buffer = vec![0u8; size];
-        file.read_exact(&mut buffer)?;
+        let mut buffer = create_aligned_buffer(size, config.alignment.max(1));
+        read_exact_at(file, offset, buffer.as_mut_slice())?;
         Ok(buffer)
     }
+}
+
+/// Perform a direct I/O read operation into a user-provided buffer
+pub fn read_aligned_into(
+    file: &mut File,
+    offset: u64,
+    buf: &mut [u8],
+    config: &DirectIOConfig,
+) -> IoResult<()> {
+    if buf.is_empty() {
+        return Ok(());
+    }
+
+    if direct_io_requires_alignment(config) {
+        validate_alignment(config.alignment)?;
+        
+        let offset_aligned = is_offset_aligned(offset, config.alignment);
+        let ptr_aligned = is_aligned(buf, config.alignment);
+        let size_aligned = is_size_aligned(buf.len(), config.alignment);
+
+        if !offset_aligned {
+            return Err(invalid_input(format!(
+                "direct I/O read offset {offset} is not aligned to {}",
+                config.alignment
+            )));
+        }
+
+        // If strict alignment is required and the user buffer doesn't satisfy it,
+        // we must use a bounce buffer.
+        if !ptr_aligned || !size_aligned {
+            let aligned_size = round_up_to_alignment(buf.len(), config.alignment);
+            let mut bounce_buffer = create_aligned_buffer(aligned_size, config.alignment);
+            
+            read_exact_at(file, offset, bounce_buffer.as_mut_slice())?;
+            
+            // Copy relevant part to user buffer
+            buf.copy_from_slice(&bounce_buffer[..buf.len()]);
+            return Ok(());
+        }
+    }
+
+    // Direct path (aligned or buffered I/O)
+    read_exact_at(file, offset, buf)
 }
 
 /// Perform a direct I/O write operation with proper alignment
@@ -269,28 +451,43 @@ pub fn write_aligned(
     data: &[u8],
     config: &DirectIOConfig,
 ) -> IoResult<()> {
-    use std::io::{Seek, SeekFrom, Write};
+    if data.is_empty() {
+        return Ok(());
+    }
 
-    file.seek(SeekFrom::Start(offset))?;
+    if direct_io_requires_alignment(config) {
+        validate_alignment(config.alignment)?;
 
-    if config.enabled {
-        // Check alignment requirements
-        if !is_aligned(data, config.alignment) {
-            warn!("Data buffer is not aligned for direct I/O, performance may be degraded");
+        if !is_offset_aligned(offset, config.alignment) {
+            return Err(invalid_input(format!(
+                "direct I/O write offset {offset} is not aligned to {}",
+                config.alignment
+            )));
         }
 
-        if data.len() % config.alignment != 0 {
-            warn!(
-                "Write size {} is not aligned to {}, this may cause issues with direct I/O",
+        // IMPORTANT: padding a write changes file contents beyond `data.len()`.
+        // So we enforce size alignment rather than silently padding.
+        if !is_size_aligned(data.len(), config.alignment) {
+            return Err(invalid_input(format!(
+                "direct I/O write size {} is not aligned to {}",
                 data.len(),
                 config.alignment
-            );
+            )));
         }
     }
 
-    file.write_all(data)?;
-
-    Ok(())
+    if config.enabled && direct_io_requires_alignment(config) && !is_aligned(data, config.alignment)
+    {
+        // Fix pointer alignment by copying into an aligned buffer (same size).
+        let mut aligned = create_aligned_buffer(data.len(), config.alignment);
+        aligned.as_mut_slice().copy_from_slice(data);
+        write_all_at(file, offset, aligned.as_slice())
+    } else {
+        if config.enabled && !direct_io_requires_alignment(config) && !is_aligned(data, config.alignment) {
+            warn!("Data buffer is not aligned; this is fine on this platform but may reduce performance");
+        }
+        write_all_at(file, offset, data)
+    }
 }
 
 /// Force synchronization to disk based on policy
@@ -299,7 +496,9 @@ pub fn sync_file(file: &mut File, force_sync: bool) -> IoResult<()> {
         debug!("Performing fsync to ensure data durability");
         file.sync_all()?;
     } else {
-        debug!("Performing flush to OS buffers");
+        // For std::fs::File, flush() does not imply durability. Keep this as a best-effort
+        // "flush user-space buffers" operation and make the log message explicit.
+        debug!("Flushing user-space buffers (no durability guarantee)");
         file.flush()?;
     }
     Ok(())
@@ -313,7 +512,7 @@ mod tests {
     #[test]
     fn test_aligned_buffer_creation() {
         // Use AlignedBuffer directly for guaranteed alignment
-        let buffer = create_aligned_buffer_raw(4096, 512);
+        let buffer = create_aligned_buffer(4096, 512);
         assert_eq!(buffer.len(), 4096);
         assert!(is_aligned(&buffer, 512));
     }
@@ -362,6 +561,23 @@ mod tests {
         assert!(!is_size_aligned(1, 512));
         assert!(!is_size_aligned(513, 512));
         assert!(is_size_aligned(4096, 4096));
+    }
+
+    #[test]
+    fn test_round_up_to_alignment_non_power_of_two() {
+        // round_up_to_alignment is intentionally general, even though DirectIO alignments
+        // are expected to be powers of two.
+        assert_eq!(round_up_to_alignment(0, 6), 0);
+        assert_eq!(round_up_to_alignment(1, 6), 6);
+        assert_eq!(round_up_to_alignment(6, 6), 6);
+        assert_eq!(round_up_to_alignment(7, 6), 12);
+    }
+
+    #[test]
+    fn test_validate_alignment_rejects_invalid() {
+        assert!(validate_alignment(0).is_err());
+        assert!(validate_alignment(3).is_err());
+        assert!(validate_alignment(512).is_ok());
     }
 
     #[test]

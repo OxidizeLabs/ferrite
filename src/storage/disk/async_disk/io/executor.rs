@@ -32,8 +32,11 @@ pub struct IOOperationExecutor {
     /// Log file handle for log operations
     log_file: Arc<Mutex<File>>,
 
-    /// Direct I/O configuration
-    direct_io_config: DirectIOConfig,
+    /// Direct I/O configuration for the DB file only.
+    ///
+    /// WAL/log operations are intentionally OS-buffered: WAL is variable-length and append-heavy,
+    /// and O_DIRECT/NO_BUFFERING alignment requirements are a poor fit.
+    db_direct_io_config: DirectIOConfig,
 }
 
 impl IOOperationExecutor {
@@ -46,7 +49,7 @@ impl IOOperationExecutor {
         Self {
             db_file,
             log_file,
-            direct_io_config: DirectIOConfig::default(),
+            db_direct_io_config: DirectIOConfig::default(),
         }
     }
 
@@ -59,28 +62,28 @@ impl IOOperationExecutor {
     pub fn with_config(
         db_file: Arc<Mutex<File>>,
         log_file: Arc<Mutex<File>>,
-        direct_io_config: DirectIOConfig,
+        db_direct_io_config: DirectIOConfig,
     ) -> Self {
         log::debug!(
-            "Creating IOOperationExecutor with direct_io={}, alignment={}",
-            direct_io_config.enabled,
-            direct_io_config.alignment
+            "Creating IOOperationExecutor with db_direct_io={}, db_alignment={}, wal_buffered=true",
+            db_direct_io_config.enabled,
+            db_direct_io_config.alignment
         );
         Self {
             db_file,
             log_file,
-            direct_io_config,
+            db_direct_io_config,
         }
     }
 
     /// Returns whether direct I/O is enabled
     pub fn is_direct_io_enabled(&self) -> bool {
-        self.direct_io_config.enabled
+        self.db_direct_io_config.enabled
     }
 
     /// Returns the alignment requirement for direct I/O
     pub fn alignment(&self) -> usize {
-        self.direct_io_config.alignment
+        self.db_direct_io_config.alignment
     }
 
     /// Executes an I/O operation type and returns the resulting bytes.
@@ -132,9 +135,9 @@ impl IOOperationExecutor {
         let mut file = self.db_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
 
-        if self.direct_io_config.enabled {
+        if self.db_direct_io_config.enabled {
             // Use aligned buffer for direct I/O
-            let mut aligned_buf = AlignedBuffer::new(size, self.direct_io_config.alignment);
+            let mut aligned_buf = AlignedBuffer::new(size, self.db_direct_io_config.alignment);
             file.read_exact(aligned_buf.as_mut_slice()).await?;
             Ok(aligned_buf.to_vec())
         } else {
@@ -177,22 +180,25 @@ impl IOOperationExecutor {
         if log::log_enabled!(log::Level::Debug) {
             let file_size_before = file.metadata().await?.len();
             log::debug!(
-                "execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}, direct_io={}",
+                "execute_write_page: page_id={}, offset={}, data_len={}, file_size_before={}, db_direct_io={}",
                 page_id,
                 offset,
                 data.len(),
                 file_size_before,
-                self.direct_io_config.enabled
+                self.db_direct_io_config.enabled
             );
         }
 
         file.seek(std::io::SeekFrom::Start(offset)).await?;
 
-        if self.direct_io_config.enabled {
+        if self.db_direct_io_config.enabled {
             // Use aligned buffer for direct I/O
             // DB_PAGE_SIZE (4096) is already aligned, but we ensure the buffer is aligned
-            let aligned_buf =
-                AlignedBuffer::from_slice_with_size(data, DB_PAGE_SIZE as usize, self.direct_io_config.alignment);
+            let aligned_buf = AlignedBuffer::from_slice_with_size(
+                data,
+                DB_PAGE_SIZE as usize,
+                self.db_direct_io_config.alignment,
+            );
             file.write_all(aligned_buf.as_slice()).await?;
         } else {
             // Use standard write for buffered I/O
@@ -235,20 +241,10 @@ impl IOOperationExecutor {
         let mut file = self.log_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
 
-        if self.direct_io_config.enabled {
-            // For direct I/O, we need to read aligned amounts
-            // but return only the requested size
-            let alignment = self.direct_io_config.alignment;
-            let aligned_size = crate::storage::disk::direct_io::round_up_to_alignment(size, alignment);
-            let mut aligned_buf = AlignedBuffer::new(aligned_size, alignment);
-            file.read_exact(aligned_buf.as_mut_slice()).await?;
-            // Return only the requested size
-            Ok(aligned_buf.as_slice()[..size].to_vec())
-        } else {
-            let mut buffer = vec![0u8; size];
-            file.read_exact(&mut buffer).await?;
-            Ok(buffer)
-        }
+        // WAL/log is OS-buffered: read exactly the requested number of bytes.
+        let mut buffer = vec![0u8; size];
+        file.read_exact(&mut buffer).await?;
+        Ok(buffer)
     }
 
     /// Writes data to the log file at a specific offset
@@ -266,15 +262,9 @@ impl IOOperationExecutor {
         let mut file = self.log_file.lock().await;
         file.seek(std::io::SeekFrom::Start(offset)).await?;
 
-        if self.direct_io_config.enabled {
-            // Use aligned buffer for direct I/O
-            let aligned_buf = AlignedBuffer::from_slice(data, self.direct_io_config.alignment);
-            file.write_all(aligned_buf.as_slice()).await?;
-        } else {
-            file.write_all(data).await?;
-        }
+        file.write_all(data).await?;
 
-        // Flush to OS page cache (does NOT guarantee persistence - use sync_all for durability)
+        // Flush to OS page cache (does NOT guarantee persistence - use sync_data/sync_all for durability)
         file.flush().await?;
         Ok(())
     }
@@ -293,14 +283,8 @@ impl IOOperationExecutor {
         let offset = file.seek(std::io::SeekFrom::End(0)).await?;
 
         if !data.is_empty() {
-            if self.direct_io_config.enabled {
-                // Use aligned buffer for direct I/O
-                let aligned_buf = AlignedBuffer::from_slice(data, self.direct_io_config.alignment);
-                file.write_all(aligned_buf.as_slice()).await?;
-            } else {
-                file.write_all(data).await?;
-            }
-            // Flush to OS page cache (does NOT guarantee persistence - use sync_all for durability)
+            file.write_all(data).await?;
+            // Flush to OS page cache (does NOT guarantee persistence - use sync_data/sync_all for durability)
             file.flush().await?;
         }
 
@@ -327,7 +311,8 @@ impl IOOperationExecutor {
     /// Syncs the log file to ensure data persistence
     async fn execute_sync_log(&self) -> IoResult<()> {
         let file = self.log_file.lock().await;
-        file.sync_all().await
+        // Prefer fdatasync-style durability for WAL (data + required metadata like file length).
+        file.sync_data().await
     }
 
     /// Gets the current size of the database file in bytes
