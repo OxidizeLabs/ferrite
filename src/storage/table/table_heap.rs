@@ -911,8 +911,16 @@ impl TableHeap {
 
         let _write_guard = self.latch.write();
 
-        // Get the last page
+        // If no pages exist yet, create the first page and insert.
         let last_page_id = *self.last_page_id.read();
+        if last_page_id == INVALID_PAGE_ID {
+            return self.create_first_page_and_insert(&meta, &Tuple::new(
+                &expanded_values,
+                schema,
+                RID::default(),
+            ));
+        }
+
         let page_guard = self.get_page(last_page_id)?;
 
         // Create a temporary tuple to check size (with dummy RID)
