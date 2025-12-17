@@ -11,47 +11,91 @@ pub struct RID {
 }
 
 impl RID {
+    /// Fixed-width on-disk/in-page encoding length (little-endian):
+    /// `[page_id: u64][slot_num: u32]`.
+    pub const ENCODED_LEN: usize = 8 + 4;
+
     /// Creates a new RID with the given page ID and slot number.
     ///
     /// # Arguments
     ///
     /// * `page_id` - The page identifier.
     /// * `slot_num` - The slot number within the page.
-    pub fn new(page_id: PageId, slot_num: u32) -> Self {
+    pub const fn new(page_id: PageId, slot_num: u32) -> Self {
         Self { page_id, slot_num }
     }
 
     /// Creates an RID from a 64-bit integer representation.
     ///
+    /// # Format
+    ///
+    /// This is a **legacy** 32/32 packing:
+    /// - high 32 bits: `page_id` (truncated to 32-bit)
+    /// - low  32 bits: `slot_num`
+    ///
+    /// Prefer using `try_deserialize`/`to_bytes_le` for a lossless encoding.
+    ///
     /// # Arguments
     ///
     /// * `rid` - The 64-bit integer representation of the RID.
     pub fn from_i64(rid: i64) -> Self {
-        Self {
-            page_id: (rid >> 32) as PageId,
-            slot_num: rid as u32,
-        }
+        let bits = rid as u64;
+        let page_id_u32 = (bits >> 32) as u32;
+        let slot_num = bits as u32;
+        Self::new(page_id_u32 as PageId, slot_num)
     }
 
     /// Returns the 64-bit integer representation of the RID.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `page_id` cannot fit into 32 bits (legacy 32/32 packing).
     pub fn to_i64(&self) -> i64 {
-        ((self.page_id as i64) << 32) | self.slot_num as i64
+        assert!(
+            self.page_id <= u32::MAX as PageId,
+            "RID::to_i64 only supports 32-bit page_id packing; got page_id={}",
+            self.page_id
+        );
+        let packed = ((self.page_id as u64) << 32) | (self.slot_num as u64);
+        packed as i64
     }
 
     /// Returns the page ID of the RID.
-    pub fn get_page_id(&self) -> PageId {
+    pub const fn get_page_id(&self) -> PageId {
         self.page_id
     }
 
     /// Returns the slot number of the RID.
-    pub fn get_slot_num(&self) -> u32 {
+    pub const fn get_slot_num(&self) -> u32 {
         self.slot_num
     }
 
+    /// Serialize the RID as a fixed-width, little-endian byte array:
+    /// `[page_id: u64][slot_num: u32]`.
+    pub fn to_bytes_le(&self) -> [u8; Self::ENCODED_LEN] {
+        let mut out = [0u8; Self::ENCODED_LEN];
+        out[..8].copy_from_slice(&self.page_id.to_le_bytes());
+        out[8..12].copy_from_slice(&self.slot_num.to_le_bytes());
+        out
+    }
+
+    /// Try to deserialize a RID from `[page_id: u64][slot_num: u32]` (little-endian).
+    pub fn try_deserialize(data: &[u8]) -> Option<Self> {
+        if data.len() < Self::ENCODED_LEN {
+            return None;
+        }
+        let page_id = PageId::from_le_bytes(data[..8].try_into().ok()?);
+        let slot_num = u32::from_le_bytes(data[8..12].try_into().ok()?);
+        Some(Self::new(page_id, slot_num))
+    }
+
+    /// Deserialize a RID from `[page_id: u64][slot_num: u32]` (little-endian).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data` is shorter than `RID::ENCODED_LEN`.
     pub fn deserialize(data: &[u8]) -> Self {
-        let page_id = u32::from_le_bytes(data[..4].try_into().unwrap());
-        let slot_num = u32::from_le_bytes(data[4..8].try_into().unwrap());
-        RID::new(page_id as PageId, slot_num)
+        Self::try_deserialize(data).expect("RID::deserialize: buffer too small")
     }
 }
 
@@ -92,6 +136,15 @@ mod tests {
     fn test_to_i64() {
         let rid = RID::new(1, 2);
         assert_eq!(rid.to_i64(), 0x0000000100000002);
+    }
+
+    #[test]
+    fn test_serialize_deserialize_le() {
+        let rid = RID::new(0x1122_3344_5566_7788, 0x99AA_BBCC);
+        let bytes = rid.to_bytes_le();
+        assert_eq!(bytes.len(), RID::ENCODED_LEN);
+        let decoded = RID::deserialize(&bytes);
+        assert_eq!(decoded, rid);
     }
 
     #[test]
