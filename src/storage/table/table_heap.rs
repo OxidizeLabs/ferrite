@@ -780,7 +780,7 @@ impl TableHeap {
         let mut page = first_page_guard.write();
 
         // Verify the page has space for the tuple
-        if !page.has_space_for(meta.as_ref(), tuple) {
+        if !page.has_space_for(meta, tuple) {
             return Err("First page has no space for tuple".to_string());
         }
 
@@ -1101,7 +1101,7 @@ impl TableHeap {
         let mut new_page = new_page_guard.write();
 
         // First verify the page has space for the tuple
-        if !new_page.has_space_for(meta.as_ref(), &tuple) {
+        if !new_page.has_space_for(meta, &tuple) {
             debug!(
                 "New page {} unexpectedly has no space for tuple",
                 new_page_id
