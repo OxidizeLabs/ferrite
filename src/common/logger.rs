@@ -5,7 +5,8 @@ use std::sync::Once;
 static INIT: Once = Once::new();
 
 pub fn initialize_logger() {
-    INIT.call_once(|| {
+    // Use call_once_force to recover if an earlier initialization attempt panicked.
+    INIT.call_once_force(|_| {
         let mut builder = Builder::new();
 
         builder
@@ -17,8 +18,10 @@ pub fn initialize_logger() {
             .filter_module("tkdb::recovery", LevelFilter::Info)
             .filter_module("rustyline", LevelFilter::Info)
             .format_timestamp_millis()
-            .parse_default_env()
-            .init();
+            .parse_default_env();
+
+        // Avoid panicking if the logger was already initialized elsewhere.
+        let _ = builder.try_init();
     });
 }
 

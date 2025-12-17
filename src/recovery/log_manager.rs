@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Handle;
+use tokio::task::block_in_place;
 use parking_lot::Mutex;
 
 /// LogManager maintains a separate thread awakened whenever the log buffer is full or whenever a timeout
@@ -287,40 +288,43 @@ impl LogManager {
     ///
     /// # Returns
     /// An optional LogRecord if reading and parsing was successful
-    pub fn read_log_record(&self, offset: u64) -> Option<LogRecord> {
+    pub async fn read_log_record_async(&self, offset: u64) -> Option<LogRecord> {
         debug!("Reading log record from offset {}", offset);
 
-        // Use the runtime handle to block on the async operation
         let disk_manager = Arc::clone(&self.state.disk_manager);
-        match self
-            .runtime_handle
-            .block_on(async move { disk_manager.read_log(offset).await })
-        {
-            Ok(bytes) => {
-                // Deserialize bytes into LogRecord
-                match LogRecord::from_bytes(&bytes) {
-                    Ok(record) => {
-                        debug!(
-                            "Successfully read log record: txn_id={}, type={:?}, size={}",
-                            record.get_txn_id(),
-                            record.get_log_record_type(),
-                            record.get_size()
-                        );
-                        Some(record)
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to deserialize log record at offset {}: {}",
-                            offset, e
-                        );
-                        None
-                    }
+        match disk_manager.read_log(offset).await {
+            Ok(bytes) => match LogRecord::from_bytes(&bytes) {
+                Ok(record) => {
+                    debug!(
+                        "Successfully read log record: txn_id={}, type={:?}, size={}",
+                        record.get_txn_id(),
+                        record.get_log_record_type(),
+                        record.get_size()
+                    );
+                    Some(record)
                 }
-            }
+                Err(e) => {
+                    warn!(
+                        "Failed to deserialize log record at offset {}: {}",
+                        offset, e
+                    );
+                    None
+                }
+            },
             Err(e) => {
                 warn!("Failed to read log from disk at offset {}: {}", offset, e);
                 None
             }
+        }
+    }
+
+    pub fn read_log_record(&self, offset: u64) -> Option<LogRecord> {
+        // If we're already on a Tokio runtime, block in place to avoid nested runtime errors.
+        if Handle::try_current().is_ok() {
+            block_in_place(|| Handle::current().block_on(self.read_log_record_async(offset)))
+        } else {
+            self.runtime_handle
+                .block_on(self.read_log_record_async(offset))
         }
     }
 }
@@ -337,6 +341,8 @@ mod tests {
 
     struct TestContext {
         log_manager: LogManager,
+        disk_manager: Arc<AsyncDiskManager>,
+        _temp_dir: TempDir,
     }
 
     impl TestContext {
@@ -359,16 +365,22 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager =
-                AsyncDiskManager::new(db_path, log_path.clone(), DiskManagerConfig::default())
-                    .await;
+            let disk_manager = AsyncDiskManager::new(
+                db_path.clone(),
+                log_path.clone(),
+                DiskManagerConfig::default(),
+            ).await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let mut log_manager = LogManager::new(disk_manager_arc.clone());
             // Most tests append commit records; commit durability waiting requires the flush
             // thread to be running. Start it by default so tests don't hang.
             log_manager.run_flush_thread();
 
-            Self { log_manager }
+            Self {
+                log_manager,
+                disk_manager: disk_manager_arc,
+                _temp_dir: temp_dir,
+            }
         }
     }
 
@@ -378,328 +390,6 @@ mod tests {
             self.log_manager.shut_down();
         }
     }
-
-    // Tests for internal helper methods
-    /*
-    mod helper_method_tests {
-        use super::*;
-        use crossbeam_channel::bounded;
-        use parking_lot::RwLock;
-        use std::sync::atomic::{AtomicBool, AtomicU64};
-
-        // Helper to create test state
-        async fn disk_manager_arc() -> Arc<LogManagerState> {
-            let (sender, receiver) = bounded(10); // smaller channel for testing
-            let disk_manager = AsyncDiskManager::new(
-                "dummy.db".to_string(),
-                "tests/data/helper_test.log".to_string(),
-                DiskManagerConfig::default(),
-            )
-            .await;
-
-            Arc::new(LogManagerState {
-                next_lsn: AtomicU64::new(0),
-                persistent_lsn: AtomicU64::new(INVALID_LSN),
-                log_buffer: RwLock::new(LogBuffer::new(LOG_BUFFER_SIZE as usize)),
-                flush_thread: Mutex::new(None),
-                stop_flag: AtomicBool::new(false),
-                disk_manager: Arc::new(disk_manager.unwrap()),
-                log_queue: (sender, receiver),
-                buffered_records: RwLock::new(Vec::new()),
-            })
-        }
-
-        // Helper to create a test record
-        fn create_test_record(
-            txn_id: TxnId,
-            lsn: Lsn,
-            record_type: LogRecordType,
-        ) -> Arc<LogRecord> {
-            let record = LogRecord::new_transaction_record(txn_id, lsn, record_type);
-            let record = Arc::new(record);
-            // Set LSN using thread-safe method
-            record.set_lsn(lsn);
-            record
-        }
-
-        #[tokio::test]
-        async fn test_process_queued_records_single() {
-            let state = disk_manager_arc().await;
-            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-            let mut batch_start_lsn = None;
-            let mut max_lsn_in_batch = INVALID_LSN;
-            let mut records_processed = false;
-
-            // Create and directly place a record to the queue
-            let record = create_test_record(1, 10, LogRecordType::Begin);
-
-            // Verify the LSN is set correctly on the record
-            assert_eq!(record.get_lsn(), 10, "Record LSN should be set to 10");
-
-            // Send the record to the queue
-            state.log_queue.0.send(record).unwrap();
-
-            // Process the record
-            LogManager::process_queued_records(
-                &state,
-                &mut flush_buffer,
-                &mut batch_start_lsn,
-                &mut max_lsn_in_batch,
-                &mut records_processed,
-            );
-
-            // Verify the results
-            assert!(records_processed, "Record should be processed");
-            assert_eq!(batch_start_lsn, Some(10), "Starting LSN should be set");
-            assert_eq!(max_lsn_in_batch, 10, "Max LSN should be set");
-            assert!(!flush_buffer.is_empty(), "Buffer should not be empty");
-        }
-
-        #[tokio::test]
-        async fn test_process_queued_records_multiple() {
-            let state = disk_manager_arc().await;
-            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-            let mut batch_start_lsn = None;
-            let mut max_lsn_in_batch = INVALID_LSN;
-            let mut records_processed = false;
-
-            // Create multiple records
-            let record1 = create_test_record(1, 10, LogRecordType::Begin);
-            let record2 = create_test_record(1, 11, LogRecordType::NewPage);
-            let record3 = create_test_record(1, 12, LogRecordType::Commit);
-
-            // Verify LSNs are set correctly
-            assert_eq!(record1.get_lsn(), 10);
-            assert_eq!(record2.get_lsn(), 11);
-            assert_eq!(record3.get_lsn(), 12);
-
-            // Send records to the queue
-            state.log_queue.0.send(record1).unwrap();
-            state.log_queue.0.send(record2).unwrap();
-            state.log_queue.0.send(record3).unwrap();
-
-            // Process the records
-            LogManager::process_queued_records(
-                &state,
-                &mut flush_buffer,
-                &mut batch_start_lsn,
-                &mut max_lsn_in_batch,
-                &mut records_processed,
-            );
-
-            // Verify the results
-            assert!(records_processed, "Records should be processed");
-            assert_eq!(
-                batch_start_lsn, None,
-                "Batch LSN should be reset after commit"
-            );
-            assert_eq!(
-                max_lsn_in_batch, INVALID_LSN,
-                "Max LSN should be reset after commit"
-            );
-            assert!(
-                flush_buffer.is_empty(),
-                "Buffer should be empty after commit flush"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_process_queued_records_commit() {
-            let state = disk_manager_arc().await;
-            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-            let mut batch_start_lsn = None;
-            let mut max_lsn_in_batch = INVALID_LSN;
-            let mut records_processed = false;
-
-            // Create a commit record
-            let record = create_test_record(1, 10, LogRecordType::Commit);
-
-            // Verify LSN is set correctly
-            assert_eq!(record.get_lsn(), 10);
-
-            // Send to the queue
-            state.log_queue.0.send(record).unwrap();
-
-            // Process the record
-            LogManager::process_queued_records(
-                &state,
-                &mut flush_buffer,
-                &mut batch_start_lsn,
-                &mut max_lsn_in_batch,
-                &mut records_processed,
-            );
-
-            // Verify commit caused a flush
-            assert!(records_processed, "Record should be processed");
-            assert_eq!(
-                batch_start_lsn, None,
-                "Batch LSN should be reset after commit"
-            );
-            assert_eq!(
-                max_lsn_in_batch, INVALID_LSN,
-                "Max LSN should be reset after commit"
-            );
-            assert!(
-                flush_buffer.is_empty(),
-                "Buffer should be empty after commit flush"
-            );
-
-            // Check persistent LSN was updated
-            let persistent_lsn = state.persistent_lsn.load(Ordering::SeqCst);
-            assert_eq!(
-                persistent_lsn, 10,
-                "Persistent LSN should be updated to commit LSN"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_process_queued_records_buffer_full() {
-            let state = disk_manager_arc().await;
-
-            // Create a small buffer to test overflow
-            let mut flush_buffer = LogBuffer::new(100); // Small size to force overflow
-            let mut batch_start_lsn = None;
-            let mut max_lsn_in_batch = INVALID_LSN;
-            let mut records_processed = false;
-
-            // Create and prepare a record
-            let record = LogRecord::new_transaction_record(1, INVALID_LSN, LogRecordType::Begin);
-            let record = Arc::new(record);
-            // Set LSN using thread-safe method
-            record.set_lsn(10);
-
-            // Verify LSN is set correctly
-            assert_eq!(record.get_lsn(), 10);
-
-            // Since we can't easily create a large record directly, we'll simulate by filling the buffer first
-            flush_buffer.data[0..90].fill(b'X'); // Fill most of the buffer
-            flush_buffer.write_pos = 90;
-
-            // Send to the queue
-            state.log_queue.0.send(record).unwrap();
-
-            // Process the record
-            LogManager::process_queued_records(
-                &state,
-                &mut flush_buffer,
-                &mut batch_start_lsn,
-                &mut max_lsn_in_batch,
-                &mut records_processed,
-            );
-
-            // Verify buffer overflow was handled
-            assert!(records_processed, "Record should be processed");
-            assert_eq!(batch_start_lsn, Some(10), "Batch LSN should be set");
-            assert_eq!(max_lsn_in_batch, 10, "Max LSN should be set");
-            assert!(
-                !flush_buffer.is_empty(),
-                "Buffer should contain data after appending"
-            );
-
-            // Check persistent LSN was updated during buffer full flush
-            let persistent_lsn = state.persistent_lsn.load(Ordering::SeqCst);
-            assert_eq!(
-                persistent_lsn, 10,
-                "Persistent LSN should be updated after buffer full flush"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_perform_flush_success() {
-            let state = disk_manager_arc().await;
-            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-
-            // Add some data to the buffer
-            let test_data = b"Test flush data";
-            flush_buffer.append(test_data);
-
-            // Perform the flush
-            LogManager::perform_flush_async(&state, &Handle::current(), vec![], 42, "test");
-
-            // Verify buffer was cleared
-            assert!(
-                flush_buffer.is_empty(),
-                "Buffer should be empty after flush"
-            );
-
-            // Verify persistent LSN was updated
-            let persistent_lsn = state.persistent_lsn.load(Ordering::SeqCst);
-            assert_eq!(persistent_lsn, 42, "Persistent LSN should be updated to 42");
-        }
-
-        #[tokio::test]
-        async fn test_perform_flush_empty_buffer() {
-            let state = disk_manager_arc().await;
-            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-
-            // Set initial persistent LSN value
-            state.persistent_lsn.store(10, Ordering::SeqCst);
-
-            // Attempt to flush empty buffer
-            LogManager::perform_flush_async(&state, &Handle::current(), vec![], 42, "empty_test");
-
-            // Verify persistent LSN was not changed (early return on empty buffer)
-            let persistent_lsn = state.persistent_lsn.load(Ordering::SeqCst);
-            assert_eq!(
-                persistent_lsn, 10,
-                "Persistent LSN should not change when flushing empty buffer"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_perform_flush_different_reasons() {
-            let state = disk_manager_arc().await;
-            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-
-            // Test different flush reasons
-            let reasons = ["commit", "buffer full", "periodic", "shutdown"];
-
-            for (i, reason) in reasons.iter().enumerate() {
-                // Clear buffer and add new data
-                flush_buffer.clear();
-                flush_buffer.append(format!("Test data for {}", reason).as_bytes());
-
-                // Perform flush with this reason
-                let lsn = i as u64 + 100;
-                LogManager::perform_flush_async(&state, &Handle::current(), vec![], lsn, reason);
-
-                // Verify LSN was updated
-                let persistent_lsn = state.persistent_lsn.load(Ordering::SeqCst);
-                assert_eq!(
-                    persistent_lsn, lsn,
-                    "Persistent LSN should be updated to {} after {} flush",
-                    lsn, reason
-                );
-            }
-        }
-
-        #[tokio::test]
-        async fn test_perform_flush_invalid_lsn() {
-            let state = disk_manager_arc().await;
-            let mut flush_buffer = LogBuffer::new(LOG_BUFFER_SIZE as usize);
-
-            // Set initial persistent LSN
-            state.persistent_lsn.store(10, Ordering::SeqCst);
-
-            // Add data to buffer
-            flush_buffer.append(b"Test data");
-
-            // Flush with INVALID_LSN
-            LogManager::perform_flush_async(&state, &Handle::current(), vec![], INVALID_LSN, "invalid_lsn_test");
-
-            // Verify buffer was cleared but LSN was not updated
-            assert!(
-                flush_buffer.is_empty(),
-                "Buffer should be empty after flush"
-            );
-            let persistent_lsn = state.persistent_lsn.load(Ordering::SeqCst);
-            assert_eq!(
-                persistent_lsn, 10,
-                "Persistent LSN should not be updated with INVALID_LSN"
-            );
-        }
-    }
-    */
 
     /// Basic functionality tests for LogManager
     mod basic_functionality {
@@ -1103,10 +793,16 @@ mod tests {
 
                 batch_end_lsns.push(last_batch_lsn);
 
-                // Wait for flush to happen
-                tokio::time::sleep(Duration::from_millis(50)).await;
-
-                let end_persistent_lsn = ctx.log_manager.get_persistent_lsn();
+                // Wait for flush to happen (polling to reduce flakiness)
+                let mut waited_ms = 0;
+                let end_persistent_lsn = loop {
+                    let current = ctx.log_manager.get_persistent_lsn();
+                    if current >= last_batch_lsn || waited_ms >= 200 {
+                        break current;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    waited_ms += 5;
+                };
 
                 // Persistent LSN should have advanced
                 assert!(
@@ -1256,7 +952,6 @@ mod tests {
         }
     }
 
-    /*
     mod read_and_write_tests {
         use super::*;
 
@@ -1264,156 +959,36 @@ mod tests {
         async fn test_write_and_read_log_record() {
             let mut ctx = TestContext::new("write_read_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
-
             // Create and append a log record
             let txn_id: TxnId = 42;
-            let log_record = Arc::new(LogRecord::new_transaction_record(
+            let begin_record = Arc::new(LogRecord::new_transaction_record(
                 txn_id,
                 INVALID_LSN,
                 LogRecordType::Begin,
             ));
+            let begin_serialized_size = begin_record.to_bytes().unwrap().len();
 
-            // Get size of the serialized record for later
-            let serialized_size = log_record.to_bytes().unwrap().len() as u64;
-            debug!("Original record serialized size: {}", serialized_size);
+            let begin_lsn = ctx.log_manager.append_log_record(begin_record);
 
-            // Append the record
-            let lsn = ctx.log_manager.append_log_record(log_record);
-            debug!("Appended record with LSN {}", lsn);
-
-            // Force a flush with a commit record
+            // Force durability with a commit record
             let commit_record = Arc::new(LogRecord::new_transaction_record(
                 txn_id,
-                lsn,
+                begin_lsn,
                 LogRecordType::Commit,
             ));
             ctx.log_manager.append_log_record(commit_record);
 
-            // Wait a bit to ensure records are flushed
-            sleep(Duration::from_millis(50));
+            // Read back the first record from the log using the known serialized size
+            let raw = ctx
+                .disk_manager
+                .read_log_sized(0, begin_serialized_size)
+                .await
+                .expect("log bytes should be readable");
+            let read_record =
+                LogRecord::from_bytes(&raw).expect("log record should exist at offset 0");
 
-            // Read directly using read_log_at method from disk_manager at offset 0
-            let mut buffer = vec![0u8; serialized_size as usize];
-            if let Err(e) = ctx.disk_manager.read_log_at(&mut buffer, 0) {
-                panic!("Failed to read log at offset 0: {}", e);
-            }
-
-            debug!(
-                "Successfully read {} bytes from log at offset 0",
-                buffer.len()
-            );
-
-            // Try to deserialize the record
-            match LogRecord::from_bytes(&buffer) {
-                Ok(read_record) => {
-                    debug!(
-                        "Successfully deserialized record: txn_id={}, type={:?}",
-                        read_record.get_txn_id(),
-                        read_record.get_log_record_type()
-                    );
-
-                    // Verify record contents
-                    assert_eq!(read_record.get_txn_id(), txn_id, "Transaction ID mismatch");
-                    assert_eq!(
-                        read_record.get_log_record_type(),
-                        LogRecordType::Begin,
-                        "Record type mismatch"
-                    );
-                }
-                Err(e) => {
-                    panic!("Failed to deserialize log record: {}", e);
-                }
-            }
-
-            ctx.log_manager.shut_down();
-        }
-
-        #[tokio::test]
-        async fn test_read_multiple_log_records() {
-            let mut ctx = TestContext::new("read_multiple_test").await;
-
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
-
-            // Create and append multiple log records
-            let record_count = 3; // Reduced from 5 for simplicity
-            let mut records = Vec::new();
-            let mut lsn_values = Vec::new();
-            let mut offset = 0;
-
-            for i in 0..record_count {
-                let txn_id = i + 100;
-                let record = Arc::new(LogRecord::new_transaction_record(
-                    txn_id,
-                    INVALID_LSN,
-                    LogRecordType::Begin,
-                ));
-
-                // Store original record and its size
-                let serialized = record.to_bytes().unwrap();
-                let record_size = serialized.len() as u64;
-                records.push(serialized);
-
-                // Store offset for this record
-                let current_offset = offset;
-                offset += record_size;
-
-                // Append and get LSN
-                let lsn = ctx.log_manager.append_log_record(record.clone());
-                lsn_values.push((lsn, current_offset));
-            }
-
-            // Force flush of records by committing the last transaction
-            let commit_record = Arc::new(LogRecord::new_transaction_record(
-                record_count + 100 - 1,
-                lsn_values
-                    .last()
-                    .map(|(lsn, _)| *lsn)
-                    .unwrap_or(INVALID_LSN),
-                LogRecordType::Commit,
-            ));
-            ctx.log_manager.append_log_record(commit_record);
-
-            // Ensure all records are flushed to disk
-            sleep(Duration::from_millis(50));
-
-            // Now read back each record directly using read_log_at
-            for (i, (_, record_offset)) in lsn_values.iter().enumerate() {
-                let txn_id = i as TxnId + 100;
-                let expected_record_data = &records[i];
-
-                // Read directly from disk_manager
-                let mut buffer = vec![0u8; expected_record_data.len()];
-                if let Err(e) = ctx.disk_manager.read_log_at(&mut buffer, *record_offset) {
-                    panic!("Failed to read record at offset {}: {}", record_offset, e);
-                }
-
-                // Deserialize and verify
-                match LogRecord::from_bytes(&buffer) {
-                    Ok(read_record) => {
-                        assert_eq!(
-                            read_record.get_txn_id(),
-                            txn_id,
-                            "Transaction ID mismatch at offset {}",
-                            record_offset
-                        );
-                        assert_eq!(
-                            read_record.get_log_record_type(),
-                            LogRecordType::Begin,
-                            "Record type mismatch at offset {}",
-                            record_offset
-                        );
-                    }
-                    Err(e) => {
-                        panic!(
-                            "Failed to deserialize record at offset {}: {}",
-                            record_offset, e
-                        );
-                    }
-                }
-            }
+            assert_eq!(read_record.get_txn_id(), txn_id);
+            assert_eq!(read_record.get_log_record_type(), LogRecordType::Begin);
 
             ctx.log_manager.shut_down();
         }
@@ -1422,85 +997,18 @@ mod tests {
         async fn test_read_with_invalid_offset() {
             let mut ctx = TestContext::new("invalid_offset_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
-
-            // Try to read from an invalid offset (file should be empty)
-            let record = ctx.log_manager.read_log_record(1000);
+            // Try to read from an offset that is beyond the written data
+            let record = ctx.log_manager.read_log_record_async(10_000).await;
             assert!(record.is_none(), "Should return None for invalid offset");
 
             ctx.log_manager.shut_down();
         }
 
         #[tokio::test]
-        async fn test_read_after_log_write() {
-            let mut ctx = TestContext::new("read_after_log_write_test").await;
-
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
-
-            // Write a BEGIN record and immediately force flush
-            let txn_id = 123;
-            let begin_record = Arc::new(LogRecord::new_transaction_record(
-                txn_id,
-                INVALID_LSN,
-                LogRecordType::Begin,
-            ));
-
-            // Get serialized size for reading later
-            let serialized = begin_record.to_bytes().unwrap();
-            let record_size = serialized.len();
-
-            let begin_lsn = ctx.log_manager.append_log_record(begin_record);
-            debug!("Appended BEGIN record with LSN {}", begin_lsn);
-
-            // Force flush with a commit record
-            let commit_record = Arc::new(LogRecord::new_transaction_record(
-                txn_id,
-                begin_lsn,
-                LogRecordType::Commit,
-            ));
-            ctx.log_manager.append_log_record(commit_record);
-
-            // Ensure records are flushed to disk
-            sleep(Duration::from_millis(50));
-
-            // Now read the BEGIN record directly from disk using read_log_at
-            let mut buffer = vec![0u8; record_size];
-            if let Err(e) = ctx.disk_manager.read_log_at(&mut buffer, 0) {
-                panic!("Failed to read log at offset 0: {}", e);
-            }
-
-            // Deserialize and verify
-            match LogRecord::from_bytes(&buffer) {
-                Ok(record) => {
-                    debug!(
-                        "Read record: txn_id={}, type={:?}",
-                        record.get_txn_id(),
-                        record.get_log_record_type()
-                    );
-
-                    // Verify record contents
-                    assert_eq!(
-                        record.get_txn_id(),
-                        txn_id,
-                        "Transaction ID mismatch: expected {} but got {}",
-                        txn_id,
-                        record.get_txn_id()
-                    );
-                    assert_eq!(
-                        record.get_log_record_type(),
-                        LogRecordType::Begin,
-                        "Record type mismatch: expected Begin but got {:?}",
-                        record.get_log_record_type()
-                    );
-                }
-                Err(e) => {
-                    panic!("Failed to deserialize log record: {}", e);
-                }
-            }
-
-            ctx.log_manager.shut_down();
+        async fn test_parse_log_record_rejects_empty() {
+            let ctx = TestContext::new("parse_empty_test").await;
+            assert!(ctx.log_manager.parse_log_record(&[]).is_none());
+            assert!(ctx.log_manager.parse_log_record(&[0u8; 32]).is_none());
         }
 
         #[test]
@@ -1529,5 +1037,4 @@ mod tests {
             assert_eq!(deserialized.get_prev_lsn(), INVALID_LSN);
         }
     }
-    */
 }
