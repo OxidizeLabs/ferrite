@@ -336,6 +336,7 @@ impl Drop for IOWorkerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::config::DB_PAGE_SIZE;
     use crate::storage::disk::async_disk::io::operations::{IOOperationType, priorities};
     use std::sync::Arc;
     use tokio::fs::File;
@@ -680,7 +681,7 @@ mod tests {
         // Enqueue many operations quickly to test queue handling
         let mut receivers = Vec::new();
         for i in 0..50 {
-            let test_data = vec![i as u8; 1024]; // Smaller data to process faster
+            let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
             let (_op_id, receiver) = queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
@@ -729,7 +730,7 @@ mod tests {
 
         // Low priority operations
         for i in 0..3 {
-            let test_data = vec![i as u8; 1024];
+            let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
             let (_op_id, receiver) = queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
@@ -744,7 +745,7 @@ mod tests {
 
         // High priority operations
         for i in 10..13 {
-            let test_data = vec![i as u8; 1024];
+            let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
             let (_op_id, receiver) = queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
@@ -791,7 +792,7 @@ mod tests {
         assert!(worker_manager.has_active_workers());
 
         // Add a single operation to verify workers are still responsive
-        let test_data = vec![42u8; 1024];
+        let test_data = vec![42u8; DB_PAGE_SIZE as usize];
         let (_op_id, receiver) = queue_manager
             .enqueue_operation(
                 IOOperationType::WritePage {
@@ -897,7 +898,7 @@ mod tests {
 
         // Write operations
         for i in 0..3 {
-            let test_data = vec![i as u8; 1024];
+            let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
             let (_op_id, receiver) = queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
@@ -979,7 +980,7 @@ mod tests {
         assert_eq!(worker_manager.worker_count(), 3);
 
         // Verify workers are functional
-        let test_data = vec![42u8; 1024];
+        let test_data = vec![42u8; DB_PAGE_SIZE as usize];
         let (_op_id, receiver) = queue_manager
             .enqueue_operation(
                 IOOperationType::WritePage {
@@ -1021,7 +1022,7 @@ mod tests {
         // Enqueue successful operations
         let mut receivers = Vec::new();
         for i in 0..5 {
-            let test_data = vec![i as u8; 1024];
+            let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
             let (_op_id, receiver) = queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
@@ -1085,7 +1086,7 @@ mod tests {
         // Enqueue more operations than semaphore permits
         let mut receivers = Vec::new();
         for i in 0..10 {
-            let test_data = vec![i as u8; 1024];
+            let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
             let (_op_id, receiver) = queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
@@ -1197,20 +1198,37 @@ mod tests {
             Arc::clone(&completion_tracker),
         );
 
-        // Test with large data
+        // Test with large data via log operations (log ops support variable sizes)
         let large_data = vec![0xFFu8; 64 * 1024]; // 64KB
         let (_op_id, receiver) = queue_manager
             .enqueue_operation(
-                IOOperationType::WritePage {
-                    page_id: 0,
+                IOOperationType::AppendLog {
                     data: large_data.clone(),
                 },
-                priorities::PAGE_WRITE,
+                priorities::LOG_APPEND,
             )
             .await;
 
-        let result = receiver.await.unwrap().unwrap();
-        assert_eq!(result, large_data);
+        let offset_bytes = receiver.await.unwrap().unwrap();
+        let offset: u64 = u64::from_le_bytes(
+            offset_bytes
+                .as_slice()
+                .try_into()
+                .expect("AppendLog must return 8-byte offset"),
+        );
+
+        let (_op_id, receiver) = queue_manager
+            .enqueue_operation(
+                IOOperationType::ReadLog {
+                    offset,
+                    size: large_data.len(),
+                },
+                priorities::LOG_READ,
+            )
+            .await;
+
+        let read_back = receiver.await.unwrap().unwrap();
+        assert_eq!(read_back, large_data);
 
         // Verify metrics recorded the large data size
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
