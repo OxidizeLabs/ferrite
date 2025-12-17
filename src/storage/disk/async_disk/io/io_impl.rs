@@ -46,19 +46,19 @@ impl AsyncIOEngine {
         Self::with_config(db_file, log_file, DirectIOConfig::default())
     }
 
-    /// Creates a new async I/O engine with direct I/O configuration
+    /// Creates a new async I/O engine with direct I/O configuration for the DB file.
     ///
     /// # Arguments
     /// * `db_file` - Shared database file handle (should be opened with direct I/O flags)
-    /// * `log_file` - Shared log file handle (should be opened with direct I/O flags)
-    /// * `direct_io_config` - Configuration for direct I/O operations
+    /// * `log_file` - Shared WAL/log file handle (should be opened without direct I/O flags)
+    /// * `direct_io_config` - Configuration for DB direct I/O operations
     pub fn with_config(
         db_file: Arc<Mutex<File>>,
         log_file: Arc<Mutex<File>>,
         direct_io_config: DirectIOConfig,
     ) -> IoResult<Self> {
         log::debug!(
-            "Creating AsyncIOEngine with direct_io={}, alignment={}",
+            "Creating AsyncIOEngine with db_direct_io={}, db_alignment={}, wal_buffered=true",
             direct_io_config.enabled,
             direct_io_config.alignment
         );
@@ -238,6 +238,18 @@ impl AsyncIOEngine {
         }
         let offset_bytes: [u8; 8] = bytes[0..8].try_into().expect("slice length checked");
         Ok(u64::from_le_bytes(offset_bytes))
+    }
+
+    /// Syncs the WAL/log file by executing directly on the caller task.
+    ///
+    /// This bypasses the queue/worker pipeline for the same reason as `append_log_direct`:
+    /// callers that use `Handle::block_on` from a non-runtime thread (e.g. the WAL flush thread)
+    /// must not depend on the async I/O workers to make progress.
+    pub async fn sync_log_direct(&self) -> IoResult<()> {
+        self.executor
+            .execute_operation_type(IOOperationType::SyncLog)
+            .await
+            .map(|_| ())
     }
 
     /// Appends log with specified priority
