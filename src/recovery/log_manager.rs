@@ -3,13 +3,14 @@ use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::AsyncDiskManager;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use log::{debug, error, trace, warn};
+use std::io;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Handle;
+use parking_lot::Mutex;
 
 /// LogManager maintains a separate thread awakened whenever the log buffer is full or whenever a timeout
 /// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
@@ -57,51 +58,46 @@ impl LogManager {
         let state = Arc::clone(&self.state);
         let runtime_handle = self.runtime_handle.clone();
 
-        let thread = thread::spawn(move || {
-            let mut last_flush_time = std::time::Instant::now();
+        let thread_handle = thread::spawn(move || {
             let flush_interval = Duration::from_millis(10);
 
             while !state.stop_flag.load(Ordering::SeqCst) {
-                let mut records_processed = false;
+                // Block until at least one record arrives, or timeout to allow periodic flush.
+                let first = match state.log_queue.1.recv_timeout(flush_interval) {
+                    Ok(record) => Some(record),
+                    Err(_) => None,
+                };
+
                 let mut records_to_flush = Vec::new();
                 let mut max_lsn_in_batch: Lsn = INVALID_LSN;
 
-                // Process queued log records
-                while let Ok(record) = state.log_queue.1.try_recv() {
-                    records_processed = true;
+                if let Some(record) = first {
                     let record_lsn = record.get_lsn();
+                    max_lsn_in_batch = record_lsn;
+                    records_to_flush.push(record);
 
-                    // Track highest LSN in this batch
-                    if max_lsn_in_batch == INVALID_LSN || record_lsn > max_lsn_in_batch {
-                        max_lsn_in_batch = record_lsn;
-                    }
-
-                    records_to_flush.push(record.clone());
-
-                    // Check if record is a commit - force flush if it is
-                    if record.is_commit() {
-                        break;
+                    // Drain any additional queued records.
+                    while let Ok(record) = state.log_queue.1.try_recv() {
+                        let record_lsn = record.get_lsn();
+                        if max_lsn_in_batch == INVALID_LSN || record_lsn > max_lsn_in_batch {
+                            max_lsn_in_batch = record_lsn;
+                        }
+                        let is_commit = record.is_commit();
+                        records_to_flush.push(record);
+                        if is_commit {
+                            break;
+                        }
                     }
                 }
 
-                // Handle periodic flush if needed
-                let now = std::time::Instant::now();
-                if !records_to_flush.is_empty()
-                    && (now.duration_since(last_flush_time) >= flush_interval
-                        || records_to_flush.iter().any(|r| r.is_commit()))
-                {
-                    Self::perform_flush_async(
+                if !records_to_flush.is_empty() {
+                    Self::perform_flush_blocking(
                         &state,
                         &runtime_handle,
                         records_to_flush,
                         max_lsn_in_batch,
                         "periodic",
                     );
-                    last_flush_time = now;
-                }
-
-                if !records_processed {
-                    thread::sleep(Duration::from_millis(5));
                 }
             }
 
@@ -116,7 +112,7 @@ impl LogManager {
                     .map(|r| r.get_lsn())
                     .max()
                     .unwrap_or(INVALID_LSN);
-                Self::perform_flush_async(
+                Self::perform_flush_blocking(
                     &state,
                     &runtime_handle,
                     final_records,
@@ -125,11 +121,13 @@ impl LogManager {
                 );
             }
         });
-        std::mem::drop(thread);
+
+        // Store the join handle so shutdown can join it.
+        *self.state.flush_thread.lock() = Some(thread_handle);
     }
 
     /// Perform a flush of the records to disk and update the persistent LSN
-    fn perform_flush_async(
+    fn perform_flush_blocking(
         state: &Arc<LogManagerState>,
         runtime_handle: &Handle,
         records: Vec<Arc<LogRecord>>,
@@ -140,45 +138,42 @@ impl LogManager {
             return;
         }
 
-        let state_clone = Arc::clone(state);
         let disk_manager = Arc::clone(&state.disk_manager);
-        let flush_reason = flush_reason.to_string();
 
-        // Use spawn_blocking to run the async operation in the background thread
-        let handle = runtime_handle.spawn(async move {
-            // Write each record to disk
+        // Synchronously (from the flush thread) write records in-order to preserve WAL ordering.
+        let flush_res: Result<(), io::Error> = runtime_handle.block_on(async move {
             for record in records {
-                if let Err(e) = disk_manager.write_log(&record).await {
-                    error!(
-                        "Failed to write log record to disk during {} flush: {}",
-                        flush_reason, e
+                disk_manager.write_log(&record).await?;
+            }
+            Ok(())
+        });
+
+        match flush_res {
+            Ok(()) => {
+                if max_lsn != INVALID_LSN {
+                    state.persistent_lsn.store(max_lsn, Ordering::SeqCst);
+                    debug!(
+                        "{} flush completed, persistent LSN updated to {}",
+                        flush_reason, max_lsn
                     );
-                    return;
                 }
             }
-
-            // Update persistent LSN
-            if max_lsn != INVALID_LSN {
-                state_clone.persistent_lsn.store(max_lsn, Ordering::SeqCst);
-                debug!(
-                    "{} flush completed, persistent LSN updated to {}",
-                    flush_reason, max_lsn
+            Err(e) => {
+                error!(
+                    "Failed to write log record(s) to disk during {} flush: {}",
+                    flush_reason, e
                 );
+                // Fail closed: stop the flush thread to avoid giving a false durability signal.
+                // Callers waiting on commit will notice stop_flag and stop waiting.
+                state.stop_flag.store(true, Ordering::SeqCst);
             }
-        });
-        std::mem::drop(handle);
+        }
     }
 
     pub fn shut_down(&mut self) {
         self.state.stop_flag.store(true, Ordering::SeqCst);
 
-        // Handle mutex poisoning gracefully
-        let thread_handle = if let Ok(mut guard) = self.state.flush_thread.lock() {
-            guard.take()
-        } else {
-            error!("Failed to acquire flush thread mutex during shutdown - it may be poisoned");
-            None
-        };
+        let thread_handle = self.state.flush_thread.lock().take();
 
         // Join the thread if we got a valid handle
         if let Some(handle) = thread_handle {
@@ -214,8 +209,19 @@ impl LogManager {
             // Wait for confirmation that it has been flushed
             trace!("Waiting for commit record with LSN {} to be flushed", lsn);
 
-            // Wait for buffer to be flushed (observe persistent_lsn ≥ lsn)
-            while self.state.persistent_lsn.load(Ordering::SeqCst) < lsn {
+            // Wait for buffer to be flushed (observe persistent_lsn ≥ lsn).
+            // persistent_lsn is initialized to INVALID_LSN, which must be treated as "nothing flushed yet".
+            while {
+                let persisted = self.state.persistent_lsn.load(Ordering::SeqCst);
+                persisted == INVALID_LSN || persisted < lsn
+            } {
+                if self.state.stop_flag.load(Ordering::SeqCst) {
+                    error!(
+                        "Log flush thread stopped while waiting for commit LSN {} to persist",
+                        lsn
+                    );
+                    break;
+                }
                 thread::sleep(Duration::from_millis(1));
             }
 
@@ -355,9 +361,19 @@ mod tests {
                 AsyncDiskManager::new(db_path, log_path.clone(), DiskManagerConfig::default())
                     .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
-            let log_manager = LogManager::new(disk_manager_arc.clone());
+            let mut log_manager = LogManager::new(disk_manager_arc.clone());
+            // Most tests append commit records; commit durability waiting requires the flush
+            // thread to be running. Start it by default so tests don't hang.
+            log_manager.run_flush_thread();
 
             Self { log_manager }
+        }
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            // Ensure we don't leak a background flush thread across tests.
+            self.log_manager.shut_down();
         }
     }
 
