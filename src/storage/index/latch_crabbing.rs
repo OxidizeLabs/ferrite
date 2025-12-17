@@ -32,6 +32,7 @@ use crate::storage::page::page_types::{
     b_plus_tree_internal_page::BPlusTreeInternalPage,
     b_plus_tree_leaf_page::BPlusTreeLeafPage,
 };
+use crate::storage::index::btree_observability;
 use crate::storage::index::types::{KeyComparator, KeyType};
 use log::trace;
 use parking_lot::lock_api::ArcRwLockWriteGuard;
@@ -39,6 +40,9 @@ use parking_lot::{RawRwLock, RwLock};
 use std::fmt::{Debug, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
+use std::thread;
 
 /// Type alias for the Arc-owned write guard.
 /// This is returned by `RwLock::write_arc()` when using the `arc_lock` feature.
@@ -97,6 +101,8 @@ where
     write_guard: ArcRwLockWriteGuard<RawRwLock, BPlusTreeInternalPage<K, C>>,
     /// The page ID (cached for quick access without dereferencing)
     page_id: PageId,
+    /// When the write lock was successfully acquired (for hold-time metrics)
+    acquired_at: Instant,
 }
 
 impl<K, C> HeldWriteLock<K, C>
@@ -116,13 +122,61 @@ where
         let page_id = page_guard.get_page_id();
         // Clone the Arc so the write guard owns it independently
         let arc = Arc::clone(page_guard.get_page());
-        // Acquire the write lock using write_arc() which returns an ArcRwLockWriteGuard
-        // that owns the Arc and holds the write lock
-        let write_guard = RwLock::write_arc(&arc);
+        // Acquire the write lock with observability:
+        // - periodically warn if we wait "too long" (potential deadlock/hang)
+        // - optionally time out in tests to avoid infinite hangs
+        let cfg = btree_observability::config();
+        let start = Instant::now();
+        let mut last_warn = start;
+        let mut warned = false;
+        let mut backoff = cfg.poll_interval;
+
+        let write_guard = loop {
+            if let Some(g) = RwLock::try_write_arc(&arc) {
+                break g;
+            }
+
+            let waited = start.elapsed();
+
+            if waited >= cfg.warn_after && last_warn.elapsed() >= cfg.warn_every {
+                warned = true;
+                last_warn = Instant::now();
+                btree_observability::warn_slow_lock(
+                    "internal",
+                    "write",
+                    page_id,
+                    waited,
+                    "HeldWriteLock::new",
+                    &[],
+                    0,
+                );
+            }
+
+            if let Some(timeout) = cfg.timeout_after
+                && waited >= timeout
+            {
+                btree_observability::record_internal_write_wait(waited, warned, true);
+                panic!(
+                    "B+tree internal write lock timed out (page_id={}, waited_ms={})",
+                    page_id,
+                    waited.as_millis()
+                );
+            }
+
+            // Backoff to reduce CPU burn during contention/deadlock scenarios.
+            thread::sleep(backoff);
+            // Cap backoff to keep logs responsive.
+            backoff = std::cmp::min(backoff * 2, Duration::from_millis(250));
+        };
+
+        let waited = start.elapsed();
+        btree_observability::record_internal_write_wait(waited, warned, false);
+        let acquired_at = Instant::now();
         Self {
             _page_guard: page_guard,
             write_guard,
             page_id,
+            acquired_at,
         }
     }
 
@@ -133,10 +187,12 @@ where
         let page_id = page_guard.get_page_id();
         let arc = Arc::clone(page_guard.get_page());
         let write_guard = RwLock::try_write_arc(&arc)?;
+        let acquired_at = Instant::now();
         Some(Self {
             _page_guard: page_guard,
             write_guard,
             page_id,
+            acquired_at,
         })
     }
 
@@ -191,6 +247,7 @@ where
             "Releasing held write lock on internal page {}",
             self.page_id
         );
+        btree_observability::record_internal_write_hold(self.acquired_at.elapsed());
         // The ArcRwLockWriteGuard automatically releases the lock when dropped.
         // Then _page_guard drops, unpinning the page in the buffer pool.
     }
