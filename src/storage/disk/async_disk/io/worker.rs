@@ -7,6 +7,7 @@ use super::executor::IOOperationExecutor;
 use super::operations::IOOperation;
 use super::queue::IOQueueManager;
 use crate::storage::disk::async_disk::io::completion::CompletionTracker;
+use crate::storage::disk::async_disk::io::operation_status::OperationResult;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Semaphore;
@@ -98,6 +99,15 @@ impl IOWorkerManager {
         log::info!("Started {} I/O worker threads", num_workers);
     }
 
+    /// Signals all workers to begin shutdown without waiting for them.
+    ///
+    /// This is useful when callers only have `&self` access (e.g. initiating shutdown
+    /// from a different component) and will later call `shutdown()` to await completion.
+    pub fn signal_shutdown(&self) {
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+        self.shutdown_signal.notify_waiters();
+    }
+
     /// Main worker loop that continuously processes operations
     ///
     /// Each worker runs this loop independently, checking for:
@@ -179,6 +189,17 @@ impl IOWorkerManager {
         completion_tracker: &CompletionTracker,
         concurrency_limiter: &Semaphore,
     ) {
+        let op_id = operation.id;
+
+        // If the operation has already been cancelled/timed out, skip executing the I/O.
+        if !completion_tracker.is_operation_pending(op_id).await {
+            log::trace!(
+                "Skipping execution for operation {} (no longer pending)",
+                op_id
+            );
+            return;
+        }
+
         // Acquire semaphore permit to limit concurrent I/O operations
         // This provides backpressure and prevents overwhelming the disk subsystem
         let _permit = match concurrency_limiter.acquire().await {
@@ -191,42 +212,38 @@ impl IOWorkerManager {
             }
         };
 
-        let op_id = operation.id;
-        let start_time = std::time::Instant::now();
+        // Execute the operation and complete it via the tracker.
+        let result = executor
+            .execute_operation_type(operation.operation_type)
+            .await;
 
-        // Record that we started processing this operation
-        completion_tracker.metrics().record_operation_start();
-
-        // Execute the operation - this consumes the operation including its completion_sender
-        let result = executor.execute_operation(operation).await;
-
-        let duration = start_time.elapsed();
-
-        // Record completion metrics based on the result
-        match &result {
+        match result {
             Ok(data) => {
-                // Record successful completion
-                let data_size = data.len() as u64;
-                completion_tracker
-                    .metrics()
-                    .record_operation_complete(duration, data_size, true)
-                    .await;
-                log::trace!(
-                    "Operation {} completed successfully in {:?}",
-                    op_id,
-                    duration
-                );
+                if let Err(e) = completion_tracker
+                    .complete_operation_with_result(op_id, OperationResult::Success(data))
+                    .await
+                {
+                    log::debug!(
+                        "Operation {} completed but could not be recorded (likely cancelled): {}",
+                        op_id,
+                        e
+                    );
+                }
             }
-            Err(e) => {
-                // Record failure
-                completion_tracker.metrics().record_operation_failed();
-                log::warn!("Operation {} failed after {:?}: {}", op_id, duration, e);
+            Err(err) => {
+                let msg = format!("{:?}: {}", err.kind(), err);
+                if let Err(e) = completion_tracker
+                    .complete_operation_with_result(op_id, OperationResult::Error(msg))
+                    .await
+                {
+                    log::debug!(
+                        "Operation {} failed but could not be recorded (likely cancelled): {}",
+                        op_id,
+                        e
+                    );
+                }
             }
         }
-
-        // Note: The executor.execute_operation() method handles sending the result
-        // back to the caller via the completion_sender, so we don't need to do it here.
-        // The operation is fully consumed by the executor.
     }
 
     /// Signals all workers to shutdown gracefully
@@ -477,19 +494,24 @@ mod tests {
 
         // Enqueue an operation
         let test_data = vec![42u8; 4096];
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::WritePage {
                     page_id: 0,
                     data: test_data.clone(),
                 },
                 priorities::PAGE_WRITE,
+                op_id,
             )
             .await;
 
         // Wait for operation to complete
-        let result = receiver.await.unwrap().unwrap();
-        assert_eq!(result, test_data);
+        let result = receiver.await.unwrap();
+        match result {
+            OperationResult::Success(bytes) => assert_eq!(bytes, test_data),
+            OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+        }
 
         // Verify operation was processed by checking metrics
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -523,13 +545,15 @@ mod tests {
         let mut receivers = Vec::new();
         for i in 0..5 {
             let test_data = vec![i as u8; 4096];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -537,7 +561,11 @@ mod tests {
 
         // Wait for all operations to complete
         for receiver in receivers {
-            let _result = receiver.await.unwrap().unwrap();
+            let result = receiver.await.unwrap();
+            match result {
+                OperationResult::Success(_) => {}
+                OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+            }
         }
 
         // Verify all operations were processed
@@ -591,17 +619,19 @@ mod tests {
         );
 
         // Try to read from a very large page that doesn't exist (would cause EOF error)
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::ReadPage { page_id: 1000 }, // Page that doesn't exist in our small test file
                 priorities::PAGE_READ,
+                op_id,
             )
             .await;
 
         // Wait for operation to complete
         let result = receiver.await.unwrap();
         assert!(
-            result.is_err(),
+            matches!(result, OperationResult::Error(_)),
             "Reading from non-existent page should fail"
         );
 
@@ -638,13 +668,15 @@ mod tests {
         let mut receivers = Vec::new();
         for i in 0..3 {
             let test_data = vec![i as u8; 4096];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -652,7 +684,11 @@ mod tests {
 
         // Operations should still complete despite concurrency limiting
         for receiver in receivers {
-            let _result = receiver.await.unwrap().unwrap();
+            let result = receiver.await.unwrap();
+            match result {
+                OperationResult::Success(_) => {}
+                OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+            }
         }
 
         worker_manager.shutdown().await;
@@ -682,13 +718,15 @@ mod tests {
         let mut receivers = Vec::new();
         for i in 0..50 {
             let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -696,7 +734,11 @@ mod tests {
 
         // All operations should eventually complete
         for receiver in receivers {
-            let _result = receiver.await.unwrap().unwrap();
+            let result = receiver.await.unwrap();
+            match result {
+                OperationResult::Success(_) => {}
+                OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+            }
         }
 
         // Verify all operations were processed
@@ -731,13 +773,15 @@ mod tests {
         // Low priority operations
         for i in 0..3 {
             let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE, // Normal priority
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -746,13 +790,15 @@ mod tests {
         // High priority operations
         for i in 10..13 {
             let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::LOG_WRITE, // Higher priority
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -760,7 +806,11 @@ mod tests {
 
         // All operations should complete regardless of priority
         for receiver in receivers {
-            let _result = receiver.await.unwrap().unwrap();
+            let result = receiver.await.unwrap();
+            match result {
+                OperationResult::Success(_) => {}
+                OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+            }
         }
 
         worker_manager.shutdown().await;
@@ -793,18 +843,23 @@ mod tests {
 
         // Add a single operation to verify workers are still responsive
         let test_data = vec![42u8; DB_PAGE_SIZE as usize];
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::WritePage {
                     page_id: 0,
                     data: test_data.clone(),
                 },
                 priorities::PAGE_WRITE,
+                op_id,
             )
             .await;
 
-        let result = receiver.await.unwrap().unwrap();
-        assert_eq!(result, test_data);
+        let result = receiver.await.unwrap();
+        match result {
+            OperationResult::Success(bytes) => assert_eq!(bytes, test_data),
+            OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+        }
 
         worker_manager.shutdown().await;
         cleanup_test_files(&db_path, &log_path).await;
@@ -831,13 +886,15 @@ mod tests {
         let mut receivers = Vec::new();
         for i in 0..5 {
             let test_data = vec![i as u8; 4096];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -855,10 +912,10 @@ mod tests {
                 // Use timeout to avoid hanging indefinitely
                 match tokio::time::timeout(tokio::time::Duration::from_millis(500), receiver).await
                 {
-                    Ok(Ok(Ok(_))) => completed_count += 1,
-                    Ok(Ok(Err(_))) => (), // Operation failed, which is acceptable during shutdown
-                    Ok(Err(_)) => (), // Receiver was dropped, which is acceptable during shutdown
-                    Err(_) => (),     // Timeout - operation didn't complete in time due to shutdown
+                    Ok(Ok(OperationResult::Success(_))) => completed_count += 1,
+                    Ok(Ok(OperationResult::Error(_))) => (), // acceptable during shutdown
+                    Ok(Err(_)) => (),                        // receiver dropped
+                    Err(_) => (), // Timeout - operation didn't complete in time due to shutdown
                 }
             }
             completed_count
@@ -899,13 +956,15 @@ mod tests {
         // Write operations
         for i in 0..3 {
             let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -913,10 +972,12 @@ mod tests {
 
         // Read operations
         for i in 0..3 {
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::ReadPage { page_id: i },
                     priorities::PAGE_READ,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -924,10 +985,12 @@ mod tests {
 
         // Log operations
         let log_data = b"test log entry".to_vec();
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::AppendLog { data: log_data },
                 priorities::LOG_WRITE,
+                op_id,
             )
             .await;
         receivers.push(receiver);
@@ -981,18 +1044,23 @@ mod tests {
 
         // Verify workers are functional
         let test_data = vec![42u8; DB_PAGE_SIZE as usize];
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::WritePage {
                     page_id: 0,
                     data: test_data.clone(),
                 },
                 priorities::PAGE_WRITE,
+                op_id,
             )
             .await;
 
-        let result = receiver.await.unwrap().unwrap();
-        assert_eq!(result, test_data);
+        let result = receiver.await.unwrap();
+        match result {
+            OperationResult::Success(bytes) => assert_eq!(bytes, test_data),
+            OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+        }
 
         worker_manager.shutdown().await;
         cleanup_test_files(&db_path, &log_path).await;
@@ -1023,13 +1091,15 @@ mod tests {
         let mut receivers = Vec::new();
         for i in 0..5 {
             let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -1037,19 +1107,25 @@ mod tests {
 
         // Wait for all operations to complete
         for receiver in receivers {
-            let _result = receiver.await.unwrap().unwrap();
+            let result = receiver.await.unwrap();
+            match result {
+                OperationResult::Success(_) => {}
+                OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+            }
         }
 
         // Enqueue an operation that should fail
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::ReadPage { page_id: 1000 }, // Non-existent page
                 priorities::PAGE_READ,
+                op_id,
             )
             .await;
 
         let result = receiver.await.unwrap();
-        assert!(result.is_err());
+        assert!(matches!(result, OperationResult::Error(_)));
 
         // Wait for metrics to update
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -1087,13 +1163,15 @@ mod tests {
         let mut receivers = Vec::new();
         for i in 0..10 {
             let test_data = vec![i as u8; DB_PAGE_SIZE as usize];
-            let (_op_id, receiver) = queue_manager
+            let (op_id, receiver) = completion_tracker.start_operation(None).await;
+            queue_manager
                 .enqueue_operation(
                     IOOperationType::WritePage {
                         page_id: i,
                         data: test_data,
                     },
                     priorities::PAGE_WRITE,
+                    op_id,
                 )
                 .await;
             receivers.push(receiver);
@@ -1101,7 +1179,11 @@ mod tests {
 
         // All operations should eventually complete despite semaphore limiting
         for receiver in receivers {
-            let _result = receiver.await.unwrap().unwrap();
+            let result = receiver.await.unwrap();
+            match result {
+                OperationResult::Success(_) => {}
+                OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+            }
         }
 
         // Verify all operations were processed
@@ -1200,16 +1282,22 @@ mod tests {
 
         // Test with large data via log operations (log ops support variable sizes)
         let large_data = vec![0xFFu8; 64 * 1024]; // 64KB
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::AppendLog {
                     data: large_data.clone(),
                 },
                 priorities::LOG_APPEND,
+                op_id,
             )
             .await;
 
-        let offset_bytes = receiver.await.unwrap().unwrap();
+        let offset_bytes = receiver.await.unwrap();
+        let offset_bytes = match offset_bytes {
+            OperationResult::Success(bytes) => bytes,
+            OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+        };
         let offset: u64 = u64::from_le_bytes(
             offset_bytes
                 .as_slice()
@@ -1217,17 +1305,23 @@ mod tests {
                 .expect("AppendLog must return 8-byte offset"),
         );
 
-        let (_op_id, receiver) = queue_manager
+        let (op_id, receiver) = completion_tracker.start_operation(None).await;
+        queue_manager
             .enqueue_operation(
                 IOOperationType::ReadLog {
                     offset,
                     size: large_data.len(),
                 },
                 priorities::LOG_READ,
+                op_id,
             )
             .await;
 
-        let read_back = receiver.await.unwrap().unwrap();
+        let read_back = receiver.await.unwrap();
+        let read_back = match read_back {
+            OperationResult::Success(bytes) => bytes,
+            OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
+        };
         assert_eq!(read_back, large_data);
 
         // Verify metrics recorded the large data size

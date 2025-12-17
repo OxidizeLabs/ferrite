@@ -4,7 +4,7 @@
 // including file operations for both database and log files.
 // Supports direct I/O with properly aligned buffers for optimal performance.
 
-use super::operations::{IOOperation, IOOperationType};
+use super::operations::IOOperationType;
 use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::storage::disk::direct_io::{AlignedBuffer, DirectIOConfig};
 use std::io::Result as IoResult;
@@ -83,61 +83,36 @@ impl IOOperationExecutor {
         self.direct_io_config.alignment
     }
 
-    /// Executes a single I/O operation
+    /// Executes an I/O operation type and returns the resulting bytes.
     ///
-    /// This is the main entry point for operation execution. It matches
-    /// on the operation type and delegates to the appropriate method.
-    /// The result is sent through the completion_sender and also returned.
-    ///
-    /// # Arguments
-    /// * `operation` - The I/O operation to execute
-    ///
-    /// # Returns
-    /// The result data as a vector of bytes, or an I/O error
-    pub async fn execute_operation(&self, operation: IOOperation) -> IoResult<Vec<u8>> {
-        let completion_sender = operation.completion_sender;
-
-        // IMPORTANT: Do not use `?` in these match arms.
-        // We must always send a completion result back through `completion_sender`,
-        // even when the operation fails, otherwise callers will see `RecvError`.
-        let result: IoResult<Vec<u8>> = match operation.operation_type {
+    /// This is the main entry point used by the worker pipeline. Completion /
+    /// cancellation is handled by higher-level components (e.g. `CompletionTracker`),
+    /// not by this executor.
+    pub async fn execute_operation_type(&self, operation_type: IOOperationType) -> IoResult<Vec<u8>> {
+        match operation_type {
             IOOperationType::ReadPage { page_id } => self.execute_read_page(page_id).await,
             IOOperationType::WritePage { page_id, data } => {
-                self.execute_write_page(page_id, &data).await.map(|_| data)
+                self.execute_write_page(page_id, &data).await?;
+                Ok(data)
             }
             IOOperationType::ReadLog { offset, size } => self.execute_read_log(offset, size).await,
             IOOperationType::WriteLog { data, offset } => {
-                self.execute_write_log(&data, offset).await.map(|_| data)
+                self.execute_write_log(&data, offset).await?;
+                Ok(data)
             }
-            IOOperationType::AppendLog { data } => {
-                self.execute_append_log(&data)
-                    .await
-                    .map(|offset| offset.to_le_bytes().to_vec())
-            }
+            IOOperationType::AppendLog { data } => self
+                .execute_append_log(&data)
+                .await
+                .map(|offset| offset.to_le_bytes().to_vec()),
             IOOperationType::Sync => {
-                self.execute_sync().await.map(|_| Vec::new())
+                self.execute_sync().await?;
+                Ok(Vec::new())
             }
             IOOperationType::SyncLog => {
-                self.execute_sync_log().await.map(|_| Vec::new())
-            }
-        };
-
-        // Send result through completion channel, handling the Result properly
-        match &result {
-            Ok(data) => {
-                // Send a copy of the successful data
-                let _ = completion_sender.send(Ok(data.clone()));
-            }
-            Err(err) => {
-                // Create a new error with the same details since Error doesn't implement Clone
-                let error_msg = err.to_string();
-                let error_kind = err.kind();
-                let new_error = std::io::Error::new(error_kind, error_msg);
-                let _ = completion_sender.send(Err(new_error));
+                self.execute_sync_log().await?;
+                Ok(Vec::new())
             }
         }
-
-        result
     }
 
     /// Reads a page from the database file
@@ -376,10 +351,8 @@ impl IOOperationExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
-    use tokio::sync::oneshot;
 
     async fn create_test_executor() -> (IOOperationExecutor, String, String) {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -548,174 +521,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_operation_execution() {
+    async fn test_operation_type_execution_write_and_read() {
         let (executor, db_path, log_path) = create_test_executor().await;
 
-        // Create a test operation
-        let (sender, _receiver) = oneshot::channel();
-        let operation = IOOperation {
-            priority: 5,
-            id: 1,
-            operation_type: IOOperationType::WritePage {
-                page_id: 0,
-                data: vec![123u8; 4096],
-            },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-
-        // Execute the operation
-        let result = executor.execute_operation(operation).await.unwrap();
-        assert_eq!(result, vec![123u8; 4096]);
-
-        // Verify the write actually happened
-        let read_data = executor.execute_read_page(0).await.unwrap();
-        assert_eq!(read_data, vec![123u8; 4096]);
-
-        // Cleanup
-        let _ = std::fs::remove_file(db_path);
-        let _ = std::fs::remove_file(log_path);
-    }
-
-    #[tokio::test]
-    async fn test_all_operation_types() {
-        let (executor, db_path, log_path) = create_test_executor().await;
-
-        // Test ReadPage operation
-        let (sender, receiver) = oneshot::channel();
-        let read_op = IOOperation {
-            priority: 1,
-            id: 1,
-            operation_type: IOOperationType::ReadPage { page_id: 0 },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-        let result = executor.execute_operation(read_op).await.unwrap();
-        assert_eq!(result.len(), 4096);
-        let _ = receiver.await;
-
-        // Test WritePage operation
-        let test_data = vec![42u8; 4096];
-        let (sender, receiver) = oneshot::channel();
-        let write_op = IOOperation {
-            priority: 2,
-            id: 2,
-            operation_type: IOOperationType::WritePage {
+        let test_data = vec![123u8; 4096];
+        let write_result = executor
+            .execute_operation_type(IOOperationType::WritePage {
                 page_id: 0,
                 data: test_data.clone(),
-            },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-        let result = executor.execute_operation(write_op).await.unwrap();
-        assert_eq!(result, test_data);
-        let _ = receiver.await;
+            })
+            .await
+            .unwrap();
+        assert_eq!(write_result, test_data);
 
-        // Test ReadLog operation
-        let (sender, receiver) = oneshot::channel();
-        let read_log_op = IOOperation {
-            priority: 3,
-            id: 3,
-            operation_type: IOOperationType::ReadLog {
-                offset: 0,
-                size: 11,
-            },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-        let result = executor.execute_operation(read_log_op).await.unwrap();
-        assert_eq!(result, b"initial log");
-        let _ = receiver.await;
-
-        // Test WriteLog operation
-        let log_data = b"new log data";
-        let (sender, receiver) = oneshot::channel();
-        let write_log_op = IOOperation {
-            priority: 4,
-            id: 4,
-            operation_type: IOOperationType::WriteLog {
-                data: log_data.to_vec(),
-                offset: 0,
-            },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-        let result = executor.execute_operation(write_log_op).await.unwrap();
-        assert_eq!(result, log_data);
-        let _ = receiver.await;
-
-        // Test AppendLog operation
-        let append_data = b"appended data";
-        let (sender, receiver) = oneshot::channel();
-        let append_log_op = IOOperation {
-            priority: 5,
-            id: 5,
-            operation_type: IOOperationType::AppendLog {
-                data: append_data.to_vec(),
-            },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-        let result = executor.execute_operation(append_log_op).await.unwrap();
-        assert_eq!(result.len(), 8); // offset as bytes
-        let _ = receiver.await;
-
-        // Test Sync operation
-        let (sender, receiver) = oneshot::channel();
-        let sync_op = IOOperation {
-            priority: 6,
-            id: 6,
-            operation_type: IOOperationType::Sync,
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-        let result = executor.execute_operation(sync_op).await.unwrap();
-        assert!(result.is_empty());
-        let _ = receiver.await;
-
-        // Test SyncLog operation
-        let (sender, receiver) = oneshot::channel();
-        let sync_log_op = IOOperation {
-            priority: 7,
-            id: 7,
-            operation_type: IOOperationType::SyncLog,
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-        let result = executor.execute_operation(sync_log_op).await.unwrap();
-        assert!(result.is_empty());
-        let _ = receiver.await;
-
-        // Cleanup
-        let _ = std::fs::remove_file(db_path);
-        let _ = std::fs::remove_file(log_path);
-    }
-
-    #[tokio::test]
-    async fn test_completion_channel_success() {
-        let (executor, db_path, log_path) = create_test_executor().await;
-
-        let (sender, receiver) = oneshot::channel();
-        let test_data = vec![55u8; 4096];
-        let operation = IOOperation {
-            priority: 1,
-            id: 1,
-            operation_type: IOOperationType::WritePage {
-                page_id: 0,
-                data: test_data.clone(),
-            },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-
-        // Execute operation
-        let direct_result = executor.execute_operation(operation).await.unwrap();
-
-        // Check completion channel
-        let channel_result = receiver.await.unwrap().unwrap();
-
-        assert_eq!(direct_result, test_data);
-        assert_eq!(channel_result, test_data);
+        let read_result = executor
+            .execute_operation_type(IOOperationType::ReadPage { page_id: 0 })
+            .await
+            .unwrap();
+        assert_eq!(read_result, test_data);
 
         // Cleanup
         let _ = std::fs::remove_file(db_path);

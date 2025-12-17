@@ -4,9 +4,7 @@
 // including operation types, operation metadata, and priority handling.
 
 use crate::common::config::PageId;
-use std::io::Result as IoResult;
 use std::time::Instant;
-use tokio::sync::oneshot;
 
 /// Types of I/O operations supported by the async I/O engine
 #[derive(Debug, Clone)]
@@ -33,11 +31,11 @@ pub enum IOOperationType {
     SyncLog,
 }
 
-/// I/O operation with priority and completion signaling
+/// I/O operation with priority and tracking metadata
 ///
 /// This structure represents a single I/O operation that will be processed
 /// by the worker threads. It includes priority information for queue ordering
-/// and a completion channel to signal when the operation is done.
+/// and metadata for tracking and observability.
 #[derive(Debug)]
 pub struct IOOperation {
     /// Priority level (higher number = higher priority)
@@ -48,9 +46,6 @@ pub struct IOOperation {
 
     /// The specific type of I/O operation to perform
     pub operation_type: IOOperationType,
-
-    /// Channel for sending the operation result back to the caller
-    pub completion_sender: oneshot::Sender<IoResult<Vec<u8>>>,
 
     /// Timestamp when the operation was submitted
     pub submitted_at: Instant,

@@ -13,11 +13,11 @@ use tokio::sync::Mutex;
 
 use super::executor::IOOperationExecutor;
 // Import our modular components
-use super::operations::{IOOperation, IOOperationType, priorities};
+use super::operation_status::OperationResult;
+use super::operations::{IOOperationType, priorities};
 use super::queue::IOQueueManager;
 use super::worker::IOWorkerManager;
 use tokio::sync::oneshot;
-use std::time::Instant;
 
 // All the modular components are now in separate files
 
@@ -98,9 +98,7 @@ impl AsyncIOEngine {
     /// Signals the I/O engine to begin shutdown (without requiring mutable access)
     /// This triggers the shutdown signals that workers are listening for
     pub fn signal_shutdown(&self) {
-        // We can't directly access the shutdown mechanisms from the worker_manager
-        // because it's not wrapped in Arc, but we can at least clear operations
-        // The workers will exit when the manager is dropped anyway
+        self.worker_manager.signal_shutdown();
     }
 
     /// Stops the I/O engine and all worker threads
@@ -121,16 +119,10 @@ impl AsyncIOEngine {
         priority: u8,
     ) -> IoResult<Vec<u8>> {
         let (_op_id, receiver) = self
-            .queue_manager
-            .enqueue_operation(IOOperationType::ReadPage { page_id }, priority)
+            .enqueue_tracked_operation(IOOperationType::ReadPage { page_id }, priority)
             .await;
 
-        match receiver.await {
-            Ok(result) => result,
-            Err(_) => Err(std::io::Error::other(
-                "Operation was cancelled or failed to complete",
-            )),
-        }
+        Self::await_operation(receiver).await
     }
 
     /// Writes a page to the database file (now uses queue)
@@ -147,8 +139,7 @@ impl AsyncIOEngine {
         priority: u8,
     ) -> IoResult<()> {
         let (_op_id, receiver) = self
-            .queue_manager
-            .enqueue_operation(
+            .enqueue_tracked_operation(
                 IOOperationType::WritePage {
                     page_id,
                     data: data.to_vec(),
@@ -157,12 +148,7 @@ impl AsyncIOEngine {
             )
             .await;
 
-        match receiver.await {
-            Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::other(
-                "Operation was cancelled or failed to complete",
-            )),
-        }
+        Self::await_operation(receiver).await.map(|_| ())
     }
 
     /// Syncs the database file to disk (now uses queue)
@@ -173,16 +159,10 @@ impl AsyncIOEngine {
     /// Syncs with specified priority
     pub async fn sync_with_priority(&self, priority: u8) -> IoResult<()> {
         let (_op_id, receiver) = self
-            .queue_manager
-            .enqueue_operation(IOOperationType::Sync, priority)
+            .enqueue_tracked_operation(IOOperationType::Sync, priority)
             .await;
 
-        match receiver.await {
-            Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::other(
-                "Operation was cancelled or failed to complete",
-            )),
-        }
+        Self::await_operation(receiver).await.map(|_| ())
     }
 
     /// Reads data from the log file at the specified offset (now uses queue)
@@ -199,16 +179,10 @@ impl AsyncIOEngine {
         priority: u8,
     ) -> IoResult<Vec<u8>> {
         let (_op_id, receiver) = self
-            .queue_manager
-            .enqueue_operation(IOOperationType::ReadLog { offset, size }, priority)
+            .enqueue_tracked_operation(IOOperationType::ReadLog { offset, size }, priority)
             .await;
 
-        match receiver.await {
-            Ok(result) => result,
-            Err(_) => Err(std::io::Error::other(
-                "Operation was cancelled or failed to complete",
-            )),
-        }
+        Self::await_operation(receiver).await
     }
 
     /// Writes data to the log file at the specified offset (now uses queue)
@@ -225,8 +199,7 @@ impl AsyncIOEngine {
         priority: u8,
     ) -> IoResult<()> {
         let (_op_id, receiver) = self
-            .queue_manager
-            .enqueue_operation(
+            .enqueue_tracked_operation(
                 IOOperationType::WriteLog {
                     data: data.to_vec(),
                     offset,
@@ -235,12 +208,7 @@ impl AsyncIOEngine {
             )
             .await;
 
-        match receiver.await {
-            Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::other(
-                "Operation was cancelled or failed to complete",
-            )),
-        }
+        Self::await_operation(receiver).await.map(|_| ())
     }
 
     /// Appends data to the log file and returns the offset where it was written (now uses queue)
@@ -256,18 +224,12 @@ impl AsyncIOEngine {
     /// `Handle::block_on` and would otherwise risk deadlocking if the runtime has limited
     /// worker threads.
     pub async fn append_log_direct(&self, data: &[u8]) -> IoResult<u64> {
-        let (sender, _receiver) = oneshot::channel();
-        let op = IOOperation {
-            priority: priorities::LOG_APPEND,
-            id: 0,
-            operation_type: IOOperationType::AppendLog {
+        let bytes = self
+            .executor
+            .execute_operation_type(IOOperationType::AppendLog {
                 data: data.to_vec(),
-            },
-            completion_sender: sender,
-            submitted_at: Instant::now(),
-        };
-
-        let bytes = self.executor.execute_operation(op).await?;
+            })
+            .await?;
         if bytes.len() < 8 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -281,8 +243,7 @@ impl AsyncIOEngine {
     /// Appends log with specified priority
     pub async fn append_log_with_priority(&self, data: &[u8], priority: u8) -> IoResult<u64> {
         let (_op_id, receiver) = self
-            .queue_manager
-            .enqueue_operation(
+            .enqueue_tracked_operation(
                 IOOperationType::AppendLog {
                     data: data.to_vec(),
                 },
@@ -290,21 +251,15 @@ impl AsyncIOEngine {
             )
             .await;
 
-        match receiver.await {
-            Ok(result) => result.and_then(|bytes| {
-                if bytes.len() >= 8 {
-                    let offset_bytes: [u8; 8] = bytes[0..8].try_into().unwrap();
-                    Ok(u64::from_le_bytes(offset_bytes))
-                } else {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Invalid offset data returned from append operation",
-                    ))
-                }
-            }),
-            Err(_) => Err(std::io::Error::other(
-                "Operation was cancelled or failed to complete",
-            )),
+        let bytes = Self::await_operation(receiver).await?;
+        if bytes.len() >= 8 {
+            let offset_bytes: [u8; 8] = bytes[0..8].try_into().unwrap();
+            Ok(u64::from_le_bytes(offset_bytes))
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid offset data returned from append operation",
+            ))
         }
     }
 
@@ -316,16 +271,10 @@ impl AsyncIOEngine {
     /// Syncs log with specified priority
     pub async fn sync_log_with_priority(&self, priority: u8) -> IoResult<()> {
         let (_op_id, receiver) = self
-            .queue_manager
-            .enqueue_operation(IOOperationType::SyncLog, priority)
+            .enqueue_tracked_operation(IOOperationType::SyncLog, priority)
             .await;
 
-        match receiver.await {
-            Ok(result) => result.map(|_| ()),
-            Err(_) => Err(std::io::Error::other(
-                "Operation was cancelled or failed to complete",
-            )),
-        }
+        Self::await_operation(receiver).await.map(|_| ())
     }
 
     /// Gets the current size of the database file in bytes
@@ -342,7 +291,19 @@ impl AsyncIOEngine {
 
     /// Clears all pending operations from the queue
     pub async fn clear_queue(&self) -> usize {
-        self.queue_manager.clear_queue().await
+        let drained = self.queue_manager.drain_queue().await;
+        let mut cancelled = 0usize;
+        for op in drained {
+            if self
+                .completion_tracker
+                .cancel_operation(op.id, "Cleared from queue".to_string())
+                .await
+                .is_ok()
+            {
+                cancelled += 1;
+            }
+        }
+        cancelled
     }
 
     // Completion tracker access methods
@@ -369,9 +330,26 @@ impl AsyncIOEngine {
 
     /// Cancels all pending operations
     pub async fn cancel_all_pending_operations(&self, reason: &str) -> usize {
-        self.completion_tracker
-            .cancel_all_pending(reason.to_string())
-            .await
+        // First drain the queue so we don't waste I/O on work that hasn't started yet.
+        let drained = self.queue_manager.drain_queue().await;
+        let mut cancelled = 0usize;
+        for op in drained {
+            if self
+                .completion_tracker
+                .cancel_operation(op.id, reason.to_string())
+                .await
+                .is_ok()
+            {
+                cancelled += 1;
+            }
+        }
+
+        // Then cancel any remaining pending operations (including in-flight ones).
+        cancelled
+            + self
+                .completion_tracker
+                .cancel_all_pending(reason.to_string())
+                .await
     }
 
     /// Checks for and handles timed out operations
@@ -410,6 +388,28 @@ impl AsyncIOEngine {
         );
         println!("Success rate: {:.2}%", metrics.success_rate());
         println!("===============================");
+    }
+
+    async fn enqueue_tracked_operation(
+        &self,
+        operation_type: IOOperationType,
+        priority: u8,
+    ) -> (u64, oneshot::Receiver<OperationResult>) {
+        let (op_id, receiver) = self.completion_tracker.start_operation(None).await;
+        self.queue_manager
+            .enqueue_operation(operation_type, priority, op_id)
+            .await;
+        (op_id, receiver)
+    }
+
+    async fn await_operation(receiver: oneshot::Receiver<OperationResult>) -> IoResult<Vec<u8>> {
+        match receiver.await {
+            Ok(OperationResult::Success(bytes)) => Ok(bytes),
+            Ok(OperationResult::Error(msg)) => Err(std::io::Error::other(msg)),
+            Err(_) => Err(std::io::Error::other(
+                "Operation was cancelled or failed to complete",
+            )),
+        }
     }
 }
 
@@ -500,12 +500,23 @@ mod tests {
     #[tokio::test]
     async fn test_async_io_engine_with_completion_tracking() {
         // Create temporary files for testing
-        let db_path = "/tmp/test_db.dat";
-        let log_path = "/tmp/test_log.dat";
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let db_path = format!(
+            "/tmp/test_db_{}_{}.dat",
+            std::process::id(),
+            unique_id
+        );
+        let log_path = format!(
+            "/tmp/test_log_{}_{}.dat",
+            std::process::id(),
+            unique_id
+        );
 
         // Create test files
-        let mut db_file = File::create(db_path).await.unwrap();
-        let mut log_file = File::create(log_path).await.unwrap();
+        let mut db_file = File::create(&db_path).await.unwrap();
+        let mut log_file = File::create(&log_path).await.unwrap();
 
         // Write some initial data to ensure the files exist
         db_file.write_all(&vec![0u8; 4096]).await.unwrap();
@@ -519,7 +530,7 @@ mod tests {
             File::options()
                 .read(true)
                 .write(true)
-                .open(db_path)
+                .open(&db_path)
                 .await
                 .unwrap(),
         ));
@@ -527,7 +538,7 @@ mod tests {
             File::options()
                 .read(true)
                 .write(true)
-                .open(log_path)
+                .open(&log_path)
                 .await
                 .unwrap(),
         ));
@@ -596,24 +607,26 @@ mod tests {
         let queue_manager = IOQueueManager::new();
 
         // Test enqueuing operations with different priorities
-        let (_id1, _receiver1) = queue_manager
-            .enqueue_operation(IOOperationType::ReadPage { page_id: 1 }, 5)
+        queue_manager
+            .enqueue_operation(IOOperationType::ReadPage { page_id: 1 }, 5, 1)
             .await;
 
-        let (_id2, _receiver2) = queue_manager
+        queue_manager
             .enqueue_operation(
                 IOOperationType::WritePage {
                     page_id: 2,
                     data: vec![1u8; 4096],
                 },
                 10, // Higher priority
+                2,
             )
             .await;
 
-        let (_id3, _receiver3) = queue_manager
+        queue_manager
             .enqueue_operation(
                 IOOperationType::ReadPage { page_id: 3 },
                 3, // Lower priority
+                3,
             )
             .await;
 
