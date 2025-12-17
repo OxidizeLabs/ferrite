@@ -241,6 +241,12 @@ impl CompletionTracker {
         operations.get(&op_id).map(|status| status.is_completed())
     }
 
+    /// Returns true if the operation exists and is still pending.
+    pub async fn is_operation_pending(&self, op_id: OperationId) -> bool {
+        let operations = self.operations.read().await;
+        matches!(operations.get(&op_id), Some(OperationStatus::Pending { .. }))
+    }
+
     /// Waits for an operation to complete with a timeout
     pub async fn wait_for_operation(
         &self,
