@@ -95,7 +95,13 @@ impl<P: Page + 'static> PageGuard<P> {
         self.page_id
     }
 
-    pub(crate) fn get_page(&self) -> &Arc<RwLock<P>> {
+    /// Exposes the underlying page Arc.
+    ///
+    /// This is primarily intended for advanced locking/observability use cases
+    /// (e.g., latch-crabbing tests) where the raw lock needs to be probed.
+    /// Normal callers should prefer `read()` / `write()` to interact with page
+    /// data to ensure pin/unpin semantics remain intact.
+    pub fn get_page(&self) -> &Arc<RwLock<P>> {
         &self.page
     }
 }
@@ -183,7 +189,11 @@ impl PageGuard<dyn PageTrait> {
         self.page_id
     }
 
-    pub(crate) fn get_page(&self) -> &Arc<RwLock<dyn PageTrait>> {
+    /// Exposes the underlying page Arc for untyped pages.
+    ///
+    /// Intended for advanced locking/observability use cases. Prefer the
+    /// typed `read()`/`write()` accessors in most code paths.
+    pub fn get_page(&self) -> &Arc<RwLock<dyn PageTrait>> {
         &self.page
     }
 }

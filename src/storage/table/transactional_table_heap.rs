@@ -1,6 +1,6 @@
 use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
-use crate::common::config::{INVALID_PAGE_ID, INVALID_TS, INVALID_TXN_ID, TableOidT};
+use crate::common::config::{INVALID_PAGE_ID, INVALID_TS, TableOidT};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
 use crate::concurrency::transaction::UndoLog;
