@@ -286,18 +286,30 @@ mod tests {
     use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
     use crate::storage::disk::async_disk::DiskManagerConfig;
-    use std::fs;
-    use std::path::Path;
     use std::sync::Arc;
     use tempfile::TempDir;
 
     struct TestContext {
+        _temp_dir: TempDir,
         log_path: String,
         disk_manager: Arc<AsyncDiskManager>,
     }
 
     impl TestContext {
         pub async fn new(name: &str) -> Self {
+            // Default to buffered I/O for deterministic small-record tests.
+            // (Direct I/O forces page-sized reads/writes and changes physical offsets.)
+            Self::new_with_config(
+                name,
+                DiskManagerConfig {
+                    direct_io: false,
+                    ..DiskManagerConfig::default()
+                },
+            )
+            .await
+        }
+
+        pub async fn new_with_config(name: &str, config: DiskManagerConfig) -> Self {
             initialize_logger();
 
             // Create temporary directory
@@ -317,19 +329,13 @@ mod tests {
 
             // Create disk components
             let disk_manager =
-                AsyncDiskManager::new(db_path, log_path.clone(), DiskManagerConfig::default())
-                    .await;
+                AsyncDiskManager::new(db_path, log_path.clone(), config).await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
 
             Self {
+                _temp_dir: temp_dir,
                 log_path,
                 disk_manager: disk_manager_arc,
-            }
-        }
-
-        fn cleanup(&self) {
-            if Path::new(&self.log_path).exists() {
-                fs::remove_file(&self.log_path).unwrap();
             }
         }
 
@@ -346,10 +352,12 @@ mod tests {
         }
     }
 
-    impl Drop for TestContext {
-        fn drop(&mut self) {
-            self.cleanup();
-        }
+    fn record_logical_size_bytes(record: &LogRecord) -> u64 {
+        record.to_bytes().unwrap().len() as u64
+    }
+
+    fn round_up_to_page(size: u64) -> u64 {
+        round_up_to_alignment(size as usize, DB_PAGE_SIZE as usize) as u64
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -383,5 +391,217 @@ mod tests {
         // Should return None for second read
         assert!(iter.next().is_none());
         assert!(iter.is_end());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_multiple_records_preserve_order_and_offsets_buffered_io() {
+        let ctx = TestContext::new("multiple_records_buffered").await;
+
+        // Write a few BEGIN records.
+        let mut expected_sizes = Vec::new();
+        let mut expected_txns = Vec::new();
+        let mut expected_offsets = Vec::new();
+
+        for txn_id in 1..=5 {
+            let record = ctx.create_test_begin_record(txn_id);
+            let size = record_logical_size_bytes(&record);
+            expected_sizes.push(size);
+            expected_txns.push(txn_id);
+
+            // When direct I/O is disabled, `write_log` should append without padding.
+            let offset = ctx.disk_manager.write_log(&record).await.unwrap();
+            expected_offsets.push(offset);
+        }
+
+        // Invariant: contiguous layout with no padding when direct I/O is off.
+        assert!(!ctx.disk_manager.get_config().direct_io);
+        assert_eq!(expected_offsets[0], 0);
+        let mut running = 0u64;
+        for i in 0..expected_sizes.len() {
+            assert_eq!(expected_offsets[i], running);
+            running += expected_sizes[i];
+        }
+
+        // Read back and verify ordering + offset advancement invariants.
+        let mut iter = LogIterator::new(ctx.disk_manager.clone());
+        let mut current_expected_offset = 0u64;
+
+        for (i, txn_id) in expected_txns.iter().copied().enumerate() {
+            assert_eq!(iter.get_offset(), current_expected_offset);
+            let rec = iter.next().expect("expected record");
+            assert_eq!(rec.get_txn_id(), txn_id);
+            assert_eq!(rec.get_lsn(), txn_id as Lsn);
+            assert_eq!(rec.get_prev_lsn(), INVALID_LSN);
+            assert_eq!(rec.get_log_record_type(), LogRecordType::Begin);
+
+            current_expected_offset += expected_sizes[i];
+            assert_eq!(iter.get_offset(), current_expected_offset);
+        }
+
+        assert!(iter.next().is_none());
+        assert!(iter.is_end());
+
+        // `reset` should allow re-reading from the start.
+        iter.reset();
+        assert!(!iter.is_end());
+        assert_eq!(iter.get_offset(), 0);
+        let first = iter.next().expect("expected first record after reset");
+        assert_eq!(first.get_txn_id(), 1);
+
+        // `set_offset` should also clear EOF state.
+        while iter.next().is_some() {}
+        assert!(iter.is_end());
+        iter.set_offset(0);
+        assert!(!iter.is_end());
+        assert_eq!(iter.get_offset(), 0);
+        assert!(iter.next().is_some());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_with_offset_reads_from_record_boundary() {
+        let ctx = TestContext::new("with_offset_boundary").await;
+
+        let r1 = ctx.create_test_begin_record(10);
+        let r2 = ctx.create_test_begin_record(20);
+        let r3 = ctx.create_test_begin_record(30);
+
+        let s1 = record_logical_size_bytes(&r1);
+        let s2 = record_logical_size_bytes(&r2);
+        let _s3 = record_logical_size_bytes(&r3);
+
+        let o1 = ctx.disk_manager.write_log(&r1).await.unwrap();
+        let o2 = ctx.disk_manager.write_log(&r2).await.unwrap();
+        let o3 = ctx.disk_manager.write_log(&r3).await.unwrap();
+
+        assert_eq!(o1, 0);
+        assert_eq!(o2, s1);
+        assert_eq!(o3, s1 + s2);
+
+        // Start from the 2nd record boundary.
+        let mut iter = LogIterator::with_offset(ctx.disk_manager.clone(), o2);
+        let rec2 = iter.next().expect("expected second record");
+        assert_eq!(rec2.get_txn_id(), 20);
+        assert_eq!(iter.get_offset(), o2 + s2);
+
+        let rec3 = iter.next().expect("expected third record");
+        assert_eq!(rec3.get_txn_id(), 30);
+        assert!(iter.next().is_none());
+        assert!(iter.is_end());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_collect_matches_manual_iteration() {
+        let ctx = TestContext::new("collect_matches_manual").await;
+
+        for txn_id in 1..=4 {
+            let record = ctx.create_test_begin_record(txn_id);
+            ctx.write_record(&record).await;
+        }
+
+        let mut iter1 = LogIterator::new(ctx.disk_manager.clone());
+        let mut iter2 = LogIterator::new(ctx.disk_manager.clone());
+
+        let manual: Vec<(TxnId, Lsn, LogRecordType)> = std::iter::from_fn(|| iter1.next())
+            .map(|r| (r.get_txn_id(), r.get_lsn(), r.get_log_record_type()))
+            .collect();
+
+        let collected: Vec<(TxnId, Lsn, LogRecordType)> = iter2
+            .collect()
+            .into_iter()
+            .map(|r| (r.get_txn_id(), r.get_lsn(), r.get_log_record_type()))
+            .collect();
+
+        assert_eq!(manual, collected);
+        assert_eq!(manual.len(), 4);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_direct_io_offsets_are_page_aligned_and_iterator_advances_physically() {
+        let config = DiskManagerConfig {
+            direct_io: true,
+            ..DiskManagerConfig::default()
+        };
+        let ctx = TestContext::new_with_config("direct_io_offsets", config).await;
+        assert!(ctx.disk_manager.get_config().direct_io);
+
+        let r1 = ctx.create_test_begin_record(1);
+        let r2 = ctx.create_test_begin_record(2);
+        let s1 = record_logical_size_bytes(&r1);
+        let s2 = record_logical_size_bytes(&r2);
+        let p1 = round_up_to_page(s1);
+        let p2 = round_up_to_page(s2);
+
+        let o1 = ctx.disk_manager.write_log(&r1).await.unwrap();
+        let o2 = ctx.disk_manager.write_log(&r2).await.unwrap();
+
+        // Invariant: offsets reflect physical (aligned) layout.
+        assert_eq!(o1, 0);
+        assert_eq!(o2, p1);
+
+        let mut iter = LogIterator::new(ctx.disk_manager.clone());
+        let a = iter.next().expect("expected first record");
+        assert_eq!(a.get_txn_id(), 1);
+        assert_eq!(iter.get_offset(), p1);
+
+        let b = iter.next().expect("expected second record");
+        assert_eq!(b.get_txn_id(), 2);
+        assert_eq!(iter.get_offset(), p1 + p2);
+
+        assert!(iter.next().is_none());
+        assert!(iter.is_end());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_direct_io_resync_skips_corrupt_page_boundary() {
+        // Construct an on-disk layout that makes resync deterministic in direct I/O mode:
+        // - Page 0 begins with an invalid size header (all zeros => size=0)
+        // - Page 1 begins with a valid record, padded to a full page
+        let config = DiskManagerConfig {
+            direct_io: true,
+            ..DiskManagerConfig::default()
+        };
+
+        // Create tempdir + file paths first so we can pre-populate the log file bytes
+        initialize_logger();
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir
+            .path()
+            .join("direct_io_resync.db")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join("direct_io_resync.log")
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let record = {
+            let mut r = LogRecord::new_transaction_record(7, INVALID_LSN, LogRecordType::Begin);
+            r.set_lsn(7);
+            r
+        };
+        let record_bytes = record.to_bytes().unwrap();
+        let mut page1 = vec![0u8; DB_PAGE_SIZE as usize];
+        page1[..record_bytes.len()].copy_from_slice(&record_bytes);
+
+        let mut file_bytes = vec![0u8; DB_PAGE_SIZE as usize];
+        file_bytes.extend_from_slice(&page1);
+
+        std::fs::write(&log_path, file_bytes).unwrap();
+
+        // Now open the disk manager in direct I/O mode over that pre-populated file.
+        let disk_manager =
+            AsyncDiskManager::new(db_path, log_path.clone(), config).await.unwrap();
+        let disk_manager = Arc::new(disk_manager);
+
+        let mut iter = LogIterator::new(disk_manager);
+        let rec = iter.next().expect("expected iterator to resync to page 1");
+        assert_eq!(rec.get_txn_id(), 7);
+        assert_eq!(rec.get_log_record_type(), LogRecordType::Begin);
+
+        // Invariant: the iterator should have skipped page 0 and advanced one physical page.
+        assert_eq!(iter.get_offset(), DB_PAGE_SIZE as u64 * 2);
     }
 }
