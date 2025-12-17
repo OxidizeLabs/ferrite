@@ -1,7 +1,6 @@
 use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
-use crate::common::config::{INVALID_PAGE_ID, INVALID_TXN_ID};
-use crate::common::config::TableOidT;
+use crate::common::config::{INVALID_PAGE_ID, INVALID_TS, INVALID_TXN_ID, TableOidT};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
 use crate::concurrency::transaction::UndoLog;
@@ -559,7 +558,9 @@ impl TransactionalTableHeap {
                         Ok((meta, tuple))
                     }
                 } else {
-                    Err("Tuple not visible".to_string())
+                    // Head version is uncommitted by another transaction; walk the chain
+                    // to find the latest committed version that is visible.
+                    self.get_visible_version(rid, txn, txn_manager, meta, tuple)
                 }
             }
             _ => self.get_visible_version(rid, txn, txn_manager, meta, tuple),
@@ -592,10 +593,11 @@ impl TransactionalTableHeap {
 
         // Create undo log with link to current version
         let txn_manager = txn_ctx.get_transaction_manager();
+        let current_commit_ts = current_meta.get_commit_timestamp();
         log::debug!(
-            "Creating undo log for update. Current version: creator_txn={}, commit_ts={}",
+            "Creating undo log for update. Current version: creator_txn={}, commit_ts={:?}",
             current_meta.get_creator_txn_id(),
-            current_meta.get_commit_timestamp().expect("Commit timestamp is required")
+            current_commit_ts
         );
 
         let prev_version = match current_meta
@@ -617,7 +619,7 @@ impl TransactionalTableHeap {
             is_deleted: false,
             modified_fields: vec![true; tuple.get_column_count()],
             tuple: current_tuple,
-            ts: current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
+            ts: current_commit_ts.unwrap_or(INVALID_TS),
             prev_version,
             original_rid: Some(rid),
         };
@@ -654,10 +656,10 @@ impl TransactionalTableHeap {
             .map_err(|e| format!("Invalid undo log index: {}", e))?;
 
         log::debug!(
-            "Created new meta: creator={}, idx={:?}, commit_ts={}",
+            "Created new meta: creator={}, idx={:?}, commit_ts={:?}",
             new_meta.get_creator_txn_id(),
             new_meta.get_undo_log_idx_raw_opt(),
-            new_meta.get_commit_timestamp().expect("Commit timestamp is required")
+            new_meta.get_commit_timestamp()
         );
 
         // Perform update
@@ -741,7 +743,11 @@ impl TransactionalTableHeap {
 
             // Create metadata for previous version using the undo log's prev_version
             let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
-            prev_meta.set_commit_timestamp(undo_log.ts);
+            if undo_log.ts == INVALID_TS {
+                prev_meta.set_commit_timestamp_opt(None);
+            } else {
+                prev_meta.set_commit_timestamp(undo_log.ts);
+            }
             prev_meta.set_deleted(undo_log.is_deleted);
             if undo_log.prev_version.is_valid() {
                 prev_meta
@@ -752,11 +758,11 @@ impl TransactionalTableHeap {
             }
 
             log::debug!(
-                "Created previous version metadata: creator_txn={}, commit_ts={}, deleted={}, undo_idx={:?}",
+                "Created previous version metadata: creator_txn={}, commit_ts={:?}, deleted={}, undo_idx={:?}",
                 prev_meta.get_creator_txn_id(),
-                prev_meta.get_commit_timestamp().expect("Commit timestamp is required"),
+                prev_meta.get_commit_timestamp(),
                 prev_meta.is_deleted(),
-            prev_meta.get_undo_log_idx_raw_opt()
+                prev_meta.get_undo_log_idx_raw_opt()
             );
 
             // Update current version
@@ -837,10 +843,11 @@ impl TransactionalTableHeap {
 
         // Create undo log with a link to the current version
         let txn_manager = txn_ctx.get_transaction_manager();
+        let current_commit_ts = current_meta.get_commit_timestamp();
         log::debug!(
-            "Creating undo log for delete. Current version: creator_txn={}, commit_ts={}",
+            "Creating undo log for delete. Current version: creator_txn={}, commit_ts={:?}",
             current_meta.get_creator_txn_id(),
-            current_meta.get_commit_timestamp().expect("Commit timestamp is required")
+            current_commit_ts
         );
 
         let prev_version = match current_meta
@@ -862,7 +869,7 @@ impl TransactionalTableHeap {
             false, // Not deleted in the previous version
             vec![true; current_tuple.get_column_count()],
             current_tuple.clone(),
-            current_meta.get_commit_timestamp().expect("Commit timestamp is required"),
+            current_commit_ts.unwrap_or(INVALID_TS),
             prev_version,
             rid,
         );
@@ -888,10 +895,10 @@ impl TransactionalTableHeap {
             .map_err(|e| format!("Invalid undo log index: {}", e))?;
 
         log::debug!(
-            "Created new meta: creator={}, idx={:?}, commit_ts={}, deleted=true",
+            "Created new meta: creator={}, idx={:?}, commit_ts={:?}, deleted=true",
             new_meta.get_creator_txn_id(),
             new_meta.get_undo_log_idx_raw_opt(),
-            new_meta.get_commit_timestamp().expect("Commit timestamp is required")
+            new_meta.get_commit_timestamp()
         );
 
         // Update the tuple with deleted metadata
