@@ -13,9 +13,11 @@ use tokio::sync::Mutex;
 
 use super::executor::IOOperationExecutor;
 // Import our modular components
-use super::operations::{IOOperationType, priorities};
+use super::operations::{IOOperation, IOOperationType, priorities};
 use super::queue::IOQueueManager;
 use super::worker::IOWorkerManager;
+use tokio::sync::oneshot;
+use std::time::Instant;
 
 // All the modular components are now in separate files
 
@@ -245,6 +247,35 @@ impl AsyncIOEngine {
     pub async fn append_log(&self, data: &[u8]) -> IoResult<u64> {
         self.append_log_with_priority(data, priorities::LOG_APPEND)
             .await
+    }
+
+    /// Appends data to the log file by executing directly on the caller task.
+    ///
+    /// This bypasses the queue/worker pipeline. It's useful for components (like the
+    /// recovery `LogManager` flush thread) that may call into async I/O via
+    /// `Handle::block_on` and would otherwise risk deadlocking if the runtime has limited
+    /// worker threads.
+    pub async fn append_log_direct(&self, data: &[u8]) -> IoResult<u64> {
+        let (sender, _receiver) = oneshot::channel();
+        let op = IOOperation {
+            priority: priorities::LOG_APPEND,
+            id: 0,
+            operation_type: IOOperationType::AppendLog {
+                data: data.to_vec(),
+            },
+            completion_sender: sender,
+            submitted_at: Instant::now(),
+        };
+
+        let bytes = self.executor.execute_operation(op).await?;
+        if bytes.len() < 8 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid offset data returned from append operation",
+            ));
+        }
+        let offset_bytes: [u8; 8] = bytes[0..8].try_into().expect("slice length checked");
+        Ok(u64::from_le_bytes(offset_bytes))
     }
 
     /// Appends log with specified priority

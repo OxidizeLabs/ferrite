@@ -1116,7 +1116,7 @@ impl AsyncDiskManager {
         // Note: when direct I/O is enabled, the I/O layer may pad the write to alignment.
         // Readers should use the record's own `size` (logical) and advance offsets with
         // the same alignment policy.
-        let offset = self.io_engine.read().await.append_log(&bytes).await?;
+        let offset = self.io_engine.read().await.append_log_direct(&bytes).await?;
         Ok(offset)
     }
 
