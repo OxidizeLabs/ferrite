@@ -312,6 +312,20 @@ impl AsyncDiskManager {
         Ok(data)
     }
 
+    #[inline]
+    fn validate_page_data_len(len: usize) -> IoResult<()> {
+        if len != DB_PAGE_SIZE as usize {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Invalid page data size: expected {} bytes, got {} bytes",
+                    DB_PAGE_SIZE, len
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     /// Writes a page to the write buffer and eventually to disk
     pub async fn write_page(&self, page_id: PageId, data: Vec<u8>) -> IoResult<()> {
         self.write_page_with_priority(page_id, data, IOPriority::Normal)
@@ -325,6 +339,7 @@ impl AsyncDiskManager {
         data: Vec<u8>,
         priority: IOPriority,
     ) -> IoResult<()> {
+        Self::validate_page_data_len(data.len())?;
         trace!(
             "Writing page: {} (size: {} bytes) with priority: {:?}",
             page_id,
@@ -639,6 +654,7 @@ impl AsyncDiskManager {
         for chunk in pages.chunks(batch_size) {
             // Buffer all writes in this chunk
             for (page_id, data) in chunk {
+                Self::validate_page_data_len(data.len())?;
                 trace!("Buffering page {} in batch write", page_id);
                 let flushed_pages = self
                     .write_manager
@@ -1207,6 +1223,17 @@ mod tests {
     };
     use tempfile::TempDir;
 
+    fn page_with_prefix(prefix: &[u8]) -> Vec<u8> {
+        let mut page = vec![0u8; DB_PAGE_SIZE as usize];
+        let n = std::cmp::min(prefix.len(), page.len());
+        page[..n].copy_from_slice(&prefix[..n]);
+        page
+    }
+
+    fn page_filled(byte: u8) -> Vec<u8> {
+        vec![byte; DB_PAGE_SIZE as usize]
+    }
+
     /// Helper function to create a test AsyncDiskManager with temporary files
     async fn create_test_manager() -> (AsyncDiskManager, TempDir) {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory");
@@ -1269,7 +1296,7 @@ mod tests {
         let (mut manager, _temp_dir) = create_test_manager().await;
 
         let page_id = 1;
-        let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let test_data = page_with_prefix(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Write a page
         manager
@@ -1300,7 +1327,7 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager().await;
 
         let page_id = 1;
-        let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let test_data = page_with_prefix(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Write with high priority
         manager
@@ -1326,11 +1353,11 @@ mod tests {
 
         let page_ids = [1, 2, 3, 4, 5];
         let test_data = [
-            vec![1, 2, 3, 4],
-            vec![5, 6, 7, 8],
-            vec![9, 10, 11, 12],
-            vec![13, 14, 15, 16],
-            vec![17, 18, 19, 20],
+            page_with_prefix(&[1, 2, 3, 4]),
+            page_with_prefix(&[5, 6, 7, 8]),
+            page_with_prefix(&[9, 10, 11, 12]),
+            page_with_prefix(&[13, 14, 15, 16]),
+            page_with_prefix(&[17, 18, 19, 20]),
         ];
 
         // Prepare batch write data
@@ -1360,7 +1387,7 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager().await;
 
         let page_id = 1;
-        let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let test_data = page_with_prefix(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Write a page
         manager
@@ -1436,7 +1463,11 @@ mod tests {
         let (mut manager, _temp_dir) = create_test_manager().await;
 
         let page_ids = [1, 2, 3];
-        let test_data = [vec![1, 2, 3, 4], vec![5, 6, 7, 8], vec![9, 10, 11, 12]];
+        let test_data = vec![
+            page_with_prefix(&[1, 2, 3, 4]),
+            page_with_prefix(&[5, 6, 7, 8]),
+            page_with_prefix(&[9, 10, 11, 12]),
+        ];
 
         // Write multiple pages
         for (page_id, data) in page_ids.iter().zip(test_data.iter()) {
@@ -1477,7 +1508,7 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager().await;
 
         let page_id = 1;
-        let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let test_data = page_with_prefix(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Write a page
         manager
@@ -1513,7 +1544,7 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager().await;
 
         let page_id = 1;
-        let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let test_data = page_with_prefix(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Perform some operations
         manager
@@ -1590,7 +1621,7 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager_with_config(config_sync_on_flush).await;
 
         let page_id = 1;
-        let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let test_data = page_with_prefix(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Write and flush
         manager
@@ -1660,7 +1691,7 @@ mod tests {
 
         let (manager_disabled, _temp_dir2) = create_test_manager_with_config(config_disabled).await;
 
-        let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let test_data = page_with_prefix(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Both should work with same functionality
         manager_enabled
@@ -1733,7 +1764,7 @@ mod tests {
         for i in 1..=10 {
             let manager_clone = Arc::clone(&manager);
             let handle = tokio::spawn(async move {
-                let data = vec![i as u8; 8];
+                let data = page_filled(i as u8);
                 manager_clone.write_page(i, data).await
             });
             handles.push(handle);
@@ -1759,7 +1790,7 @@ mod tests {
         for (i, handle) in handles.into_iter().enumerate() {
             let page_id = (i + 1) as PageId;
             let read_data = handle.await.unwrap().expect("Failed to read page");
-            let expected_data = vec![page_id as u8; 8];
+            let expected_data = page_filled(page_id as u8);
             assert_eq!(read_data, expected_data);
         }
     }
@@ -1776,7 +1807,7 @@ mod tests {
 
         // Perform some operations
         manager
-            .write_page(1, vec![1, 2, 3, 4])
+            .write_page(1, page_with_prefix(&[1, 2, 3, 4]))
             .await
             .expect("Failed to write page");
         manager.flush().await.expect("Failed to flush");
@@ -1801,7 +1832,7 @@ mod tests {
 
         // Write some data
         manager
-            .write_page(1, vec![1, 2, 3, 4])
+            .write_page(1, page_with_prefix(&[1, 2, 3, 4]))
             .await
             .expect("Failed to write page");
 
@@ -1816,23 +1847,23 @@ mod tests {
     async fn test_large_data_handling() {
         let (mut manager, _temp_dir) = create_test_manager().await;
 
-        // Test with large data (1MB)
+        // Large data belongs in the log, not a single fixed-size page.
         let large_data = vec![42u8; 1024 * 1024];
-        let page_id = 1;
 
-        manager
-            .write_page(page_id, large_data.clone())
+        let offset = manager
+            .io_engine
+            .read()
             .await
-            .expect("Failed to write large page");
-
-        manager.flush().await.expect("Failed to flush");
-
-        let read_data = manager
-            .read_page(page_id)
+            .append_log(&large_data)
             .await
-            .expect("Failed to read large page");
+            .expect("Failed to append large log data");
 
-        assert_eq!(read_data, large_data);
+        let read_back = manager
+            .read_log_sized(offset, large_data.len())
+            .await
+            .expect("Failed to read back large log data");
+
+        assert_eq!(read_back, large_data);
 
         // Properly shutdown the manager to avoid hanging
         manager
@@ -1882,7 +1913,7 @@ mod tests {
         assert!(manager.config.compression_algorithm == CompressionAlgorithm::LZ4);
 
         // Test write with compression
-        let test_data = vec![0x42; 1024]; // Compressible data
+        let test_data = vec![0x42; DB_PAGE_SIZE as usize]; // Compressible data
         let result = manager.write_page(100, test_data.clone()).await;
         assert!(result.is_ok(), "Write with compression should succeed");
 
@@ -1901,7 +1932,7 @@ mod tests {
         let (manager, _temp_dir) = create_test_manager().await;
 
         // Perform read operation
-        let test_data = vec![0x42; 1024];
+        let test_data = vec![0x42; DB_PAGE_SIZE as usize];
         let write_result = manager.write_page(200, test_data.clone()).await;
         assert!(write_result.is_ok(), "Write should succeed");
 
@@ -1926,9 +1957,9 @@ mod tests {
 
         // Test batch operations metrics
         let pages = vec![
-            (300, vec![0x01; 1024]),
-            (301, vec![0x02; 1024]),
-            (302, vec![0x03; 1024]),
+            (300, vec![0x01; DB_PAGE_SIZE as usize]),
+            (301, vec![0x02; DB_PAGE_SIZE as usize]),
+            (302, vec![0x03; DB_PAGE_SIZE as usize]),
         ];
 
         let batch_write_result = manager.write_pages_batch(pages).await;
@@ -1963,7 +1994,7 @@ mod tests {
 
         let (manager, _temp_dir) = create_test_manager_with_config(config).await;
 
-        let test_data = vec![0x55; 1024];
+        let test_data = vec![0x55; DB_PAGE_SIZE as usize];
 
         // First write and read (should be cache miss)
         let write_result = manager.write_page(400, test_data.clone()).await;
@@ -1999,7 +2030,7 @@ mod tests {
 
         // Perform several operations over time
         for i in 0..5 {
-            let data = vec![i as u8; 1024];
+            let data = vec![i as u8; DB_PAGE_SIZE as usize];
             let write_result = manager.write_page(500 + i, data).await;
             assert!(write_result.is_ok(), "Write {} should succeed", i);
         }
@@ -2039,7 +2070,7 @@ mod tests {
 
         // Perform normal operations (should maintain good health)
         for i in 0..3 {
-            let data = vec![i as u8; 1024];
+            let data = vec![i as u8; DB_PAGE_SIZE as usize];
             let write_result = manager.write_page(600 + i, data).await;
             assert!(write_result.is_ok(), "Write should succeed");
         }
