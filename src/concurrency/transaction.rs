@@ -111,7 +111,7 @@ impl UndoLink {
 
     /// Checks if the undo link points to something.
     pub fn is_valid(&self) -> bool {
-        self.prev_txn != INVALID_TXN_ID
+        self.prev_txn != INVALID_TXN_ID && self.prev_log_idx != usize::MAX
     }
 }
 
@@ -398,11 +398,12 @@ impl Transaction {
                 visible
             }
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
-                let visible = meta.is_committed()
-                    && meta
-                        .get_commit_timestamp()
-                        .is_some_and(|ts| ts <= *self.read_ts.read())
-                    && !meta.is_deleted();
+                let visible = !meta.is_deleted()
+                    && (meta.get_creator_txn_id() == self.txn_id
+                        || (meta.is_committed()
+                            && meta
+                                .get_commit_timestamp()
+                                .is_some_and(|ts| ts <= *self.read_ts.read())));
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
             }

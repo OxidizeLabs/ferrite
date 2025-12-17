@@ -609,8 +609,9 @@ impl TransactionalTableHeap {
                 prev_log_idx: idx,
             },
             None => UndoLink {
-                prev_txn: INVALID_TXN_ID,
-                prev_log_idx: 0,
+                // No previous undo log; preserve creator_txn_id but mark chain end with usize::MAX
+                prev_txn: current_meta.get_creator_txn_id(),
+                prev_log_idx: usize::MAX,
             },
         };
 
@@ -859,8 +860,9 @@ impl TransactionalTableHeap {
                 prev_log_idx: idx,
             },
             None => UndoLink {
-                prev_txn: INVALID_TXN_ID,
-                prev_log_idx: 0,
+                // No previous undo log; preserve creator_txn_id but mark chain end with usize::MAX
+                prev_txn: current_meta.get_creator_txn_id(),
+                prev_log_idx: usize::MAX,
             },
         };
 
