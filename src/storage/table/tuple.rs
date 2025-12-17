@@ -216,8 +216,8 @@ impl bincode::Encode for Tuple {
         &self,
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
-        self.values.encode(encoder)?;
-        self.rid.encode(encoder)
+        // Persist only the tuple values; RID is supplied by the caller's context (page+slot).
+        self.values.encode(encoder)
     }
 }
 
@@ -227,10 +227,10 @@ impl<C> bincode::Decode<C> for Tuple {
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         let values: Vec<Value> = bincode::Decode::decode(decoder)?;
-        let rid: RID = bincode::Decode::decode(decoder)?;
         Ok(Self {
             values,
-            rid,
+            // RID is intentionally not encoded; caller must set it after loading.
+            rid: RID::default(),
         })
     }
 }
@@ -242,10 +242,9 @@ impl<'de, C> bincode::BorrowDecode<'de, C> for Tuple {
         D: bincode::de::BorrowDecoder<'de, Context = C>,
     {
         let values: Vec<Value> = bincode::BorrowDecode::borrow_decode(decoder)?;
-        let rid: RID = bincode::BorrowDecode::borrow_decode(decoder)?;
         Ok(Self {
             values,
-            rid,
+            rid: RID::default(),
         })
     }
 }
@@ -295,6 +294,7 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
+        // RID is not serialized; callers should supply/set it from page+slot context.
         bincode::encode_into_slice(self, storage, storage_bincode_config()).map_err(|e| match e {
             // bincode 2.x uses this variant when the destination slice is too small.
             bincode::error::EncodeError::UnexpectedEnd => TupleError::BufferTooSmall,
@@ -308,6 +308,7 @@ impl Tuple {
     ///
     /// Returns a `TupleError` if deserialization fails.
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
+        // RID will be `RID::default()`; caller must set it based on owning page/slot.
         bincode::decode_from_slice(storage, storage_bincode_config())
             .map_err(|e| TupleError::DeserializationError(e.to_string()))
             .map(|(tuple, _)| tuple)
@@ -598,11 +599,18 @@ mod tests {
         let serialized_len = tuple.serialize_to(&mut storage)?;
 
         let deserialized = Tuple::deserialize_from(&storage[..serialized_len])?;
-        assert_eq!(deserialized.get_rid(), tuple.get_rid());
+        // RID is not persisted; it should default until caller sets it.
+        assert_eq!(deserialized.get_rid(), RID::default());
+        // Values round-trip.
         assert_eq!(deserialized.get_value(0), tuple.get_value(0));
         assert_eq!(deserialized.get_value(1), tuple.get_value(1));
         assert_eq!(deserialized.get_value(2), tuple.get_value(2));
         assert_eq!(deserialized.get_value(3), tuple.get_value(3));
+
+        // Caller can reattach the RID from context.
+        let mut deserialized = deserialized;
+        deserialized.set_rid(tuple.get_rid());
+        assert_eq!(deserialized.get_rid(), tuple.get_rid());
 
         Ok(())
     }
@@ -676,7 +684,7 @@ mod tests {
         let (deserialized, _): (Tuple, usize) = bincode::decode_from_slice(&serialized, config)?;
 
         // Verify the deserialized tuple matches the original
-        assert_eq!(deserialized.get_rid(), tuple.get_rid());
+        assert_eq!(deserialized.get_rid(), RID::default());
         assert_eq!(deserialized.get_value(0), tuple.get_value(0));
         assert_eq!(deserialized.get_value(1), tuple.get_value(1));
         assert_eq!(deserialized.get_value(2), tuple.get_value(2));

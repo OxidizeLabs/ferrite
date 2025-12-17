@@ -27,9 +27,8 @@ impl bincode::Encode for Record {
         &self,
         encoder: &mut E,
     ) -> Result<(), bincode::error::EncodeError> {
-        // Encode in the same format as `Tuple` (values then RID).
-        // This avoids cloning `Vec<Value>` (unlike `Tuple::get_values()`).
-        // Schema metadata is intentionally not serialized.
+        // Encode in the same format as `Tuple` (values only).
+        // RID is provided by page/slot context; schema metadata is intentionally not serialized.
         self.tuple.encode(encoder)
     }
 }
@@ -40,10 +39,10 @@ impl<C> bincode::Decode<C> for Record {
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         let tuple: Tuple = bincode::Decode::decode(decoder)?;
-        let rid = tuple.get_rid();
         Ok(Self {
             tuple,
-            rid,
+            // RID is not encoded; caller must set it after load.
+            rid: RID::default(),
             schema: None,
         })
     }
@@ -56,10 +55,9 @@ impl<'de, C> bincode::BorrowDecode<'de, C> for Record {
         D: bincode::de::BorrowDecoder<'de, Context = C>,
     {
         let tuple: Tuple = bincode::BorrowDecode::borrow_decode(decoder)?;
-        let rid = tuple.get_rid();
         Ok(Self {
             tuple,
-            rid,
+            rid: RID::default(),
             schema: None,
         })
     }
@@ -109,6 +107,7 @@ impl Record {
     ///
     /// Returns a `TupleError` if serialization fails or if the buffer is too small.
     pub fn serialize_to(&self, storage: &mut [u8]) -> Result<usize, TupleError> {
+        // RID is not serialized; caller should set it from the surrounding page/slot.
         bincode::encode_into_slice(self, storage, storage_bincode_config()).map_err(|e| match e {
             // bincode 2.x uses this variant when the destination slice is too small.
             bincode::error::EncodeError::UnexpectedEnd => TupleError::BufferTooSmall,
@@ -310,11 +309,17 @@ mod tests {
         let serialized_len = record.serialize_to(&mut storage)?;
 
         let deserialized = Record::deserialize_from(&storage[..serialized_len])?;
-        assert_eq!(deserialized.get_rid(), record.get_rid());
+        // RID is not persisted; it defaults until caller sets it.
+        assert_eq!(deserialized.get_rid(), RID::default());
         assert_eq!(deserialized.get_value(0), record.get_value(0));
         assert_eq!(deserialized.get_value(1), record.get_value(1));
         assert_eq!(deserialized.get_value(2), record.get_value(2));
         assert_eq!(deserialized.get_value(3), record.get_value(3));
+
+        // Caller can reattach the RID from context.
+        let mut deserialized = deserialized;
+        deserialized.set_rid(record.get_rid());
+        assert_eq!(deserialized.get_rid(), record.get_rid());
 
         Ok(())
     }
@@ -363,7 +368,7 @@ mod tests {
             bincode::decode_from_slice(&serialized, storage_bincode_config())?;
 
         // Verify the deserialized record matches the original
-        assert_eq!(deserialized.get_rid(), record.get_rid());
+        assert_eq!(deserialized.get_rid(), RID::default());
         assert_eq!(deserialized.get_value(0), record.get_value(0));
         assert_eq!(deserialized.get_value(1), record.get_value(1));
         assert_eq!(deserialized.get_value(2), record.get_value(2));
