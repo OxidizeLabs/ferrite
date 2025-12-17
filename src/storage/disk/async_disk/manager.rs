@@ -19,6 +19,7 @@ use crate::storage::disk::async_disk::metrics::prediction::TrendData;
 use crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot;
 use crate::storage::disk::async_disk::scheduler::{IOTask, IOTaskType, WorkStealingScheduler};
 use log::{debug, error, info, trace, warn};
+use std::io;
 use std::io::Result as IoResult;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1074,15 +1075,33 @@ impl AsyncDiskManager {
         result
     }
 
+    /// Reads an exact number of bytes from the log file at the specified offset.
+    ///
+    /// This is the primitive that higher-level WAL utilities (like `LogIterator`) should use.
+    /// Note: the underlying I/O layer uses `read_exact`, so this will return `UnexpectedEof`
+    /// if the requested range extends past the end of the file.
+    pub async fn read_log_sized(&self, offset: u64, size: usize) -> IoResult<Vec<u8>> {
+        debug!("Reading log data at offset: {} (size={})", offset, size);
+        self.io_engine.read().await.read_log(offset, size).await
+    }
+
     /// Writes a log record to the log file
     pub async fn write_log(&self, log_record: &LogRecord) -> IoResult<u64> {
         debug!("Writing log record: {:?}", log_record);
-        // Implementation would use WAL if enabled in config
-        if self.config.wal_enabled {
-            debug!("WAL is enabled, writing to WAL");
-            // Implementation simplified
-        }
-        Ok(0)
+        // Serialize using the storage bincode config (LogRecord::to_bytes)
+        let bytes = log_record.to_bytes().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to serialize log record: {e}"),
+            )
+        })?;
+
+        // Append to the log file and return the offset.
+        // Note: when direct I/O is enabled, the I/O layer may pad the write to alignment.
+        // Readers should use the record's own `size` (logical) and advance offsets with
+        // the same alignment policy.
+        let offset = self.io_engine.read().await.append_log(&bytes).await?;
+        Ok(offset)
     }
 
     /// Gets configuration information
