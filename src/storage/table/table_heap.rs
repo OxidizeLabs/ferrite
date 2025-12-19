@@ -364,7 +364,10 @@ impl TableHeap {
                     let mut current_link = txn_manager.get_undo_link(rid);
 
                     while let Some(ref undo_link) = current_link {
-                        let undo_log = txn_manager.get_undo_log(undo_link.clone());
+                        let undo_log = match txn_manager.get_undo_log(undo_link.clone()) {
+                            Ok(log) => log,
+                            Err(e) => return Err(format!("Undo log missing: {}", e)),
+                        };
 
                         let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
                         prev_meta.set_commit_timestamp(undo_log.ts);
@@ -401,7 +404,10 @@ impl TableHeap {
                 let mut current_link = txn_manager.get_undo_link(rid);
 
                 while let Some(ref undo_link) = current_link {
-                    let undo_log = txn_manager.get_undo_log(undo_link.clone());
+                    let undo_log = match txn_manager.get_undo_log(undo_link.clone()) {
+                        Ok(log) => log,
+                        Err(e) => return Err(format!("Undo log missing: {}", e)),
+                    };
 
                     let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
                     prev_meta.set_commit_timestamp(undo_log.ts);

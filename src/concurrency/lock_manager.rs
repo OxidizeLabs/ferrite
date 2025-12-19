@@ -644,6 +644,53 @@ impl LockStateManager {
         Err(LockError::NoLockHeld)
     }
 
+    /// Force releases all locks held by the given transaction without mutating the transaction state.
+    pub fn force_release_txn(&self, txn_id: TxnId) -> Result<(), LockError> {
+        // Snapshot locks held by the transaction.
+        let (table_locks, row_locks_for_txn) = {
+            let txn_locks = self.txn_lock_sets.lock();
+            if let Some(state) = txn_locks.get(&txn_id) {
+                (state.table_locks.clone(), state.row_locks.clone())
+            } else {
+                return Ok(()); // Nothing to release
+            }
+        };
+
+        // Release row locks first to avoid table-lock ordering issues.
+        {
+            let mut row_locks = self.row_locks.lock();
+            for (_, rid) in row_locks_for_txn.iter() {
+                if let Some(queue) = row_locks.get(rid) {
+                    let mut queue_guard = queue.lock();
+                    queue_guard
+                        .request_queue
+                        .retain(|req| req.lock().get_txn_id() != txn_id);
+                    self.grant_waiting_locks(&mut queue_guard);
+                }
+            }
+        }
+
+        // Release table locks.
+        {
+            let mut table_locks_map = self.table_lock_map.lock();
+            for oid in table_locks.iter() {
+                if let Some(queue) = table_locks_map.get(oid) {
+                    let mut queue_guard = queue.lock();
+                    queue_guard
+                        .request_queue
+                        .retain(|req| req.lock().get_txn_id() != txn_id);
+                    self.grant_waiting_locks(&mut queue_guard);
+                }
+            }
+        }
+
+        // Remove transaction lock state entry.
+        let mut txn_locks = self.txn_lock_sets.lock();
+        txn_locks.remove(&txn_id);
+
+        Ok(())
+    }
+
     /// Attempts to grant locks to waiting transactions
     fn grant_waiting_locks(&self, queue: &mut MutexGuard<RawMutex, LockRequestQueue>) {
         let mut i = 0;
@@ -1117,6 +1164,13 @@ impl LockManager {
         }
 
         Ok(true)
+    }
+
+    /// Force releases all locks held by the provided transaction ID without altering its state.
+    pub fn force_release_txn(&self, txn_id: TxnId) -> Result<(), LockError> {
+        // Remove waits-for edges for this transaction as it no longer blocks others.
+        self.deadlock_detector.remove_edge(txn_id);
+        self.lock_state_manager.force_release_txn(txn_id)
     }
 
     pub fn check_deadlock(&self, txn: Arc<Transaction>) -> Result<bool, LockError> {
