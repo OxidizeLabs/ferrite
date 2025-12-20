@@ -1,8 +1,12 @@
 use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
+use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::async_disk::AsyncDiskManager;
+use crate::storage::page::page_types::table_page::TablePage;
+use crate::storage::table::tuple::TupleMeta;
+use crate::storage::page::page_impl::PageTrait;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -16,6 +20,7 @@ use std::sync::Arc;
 pub struct LogRecoveryManager {
     disk_manager: Arc<AsyncDiskManager>,
     log_manager: Arc<RwLock<LogManager>>,
+    bpm: Arc<BufferPoolManager>,
 }
 
 /// Keeps track of active transactions during recovery
@@ -38,10 +43,15 @@ impl LogRecoveryManager {
     ///
     /// # Returns
     /// A new `LogRecoveryManager` instance.
-    pub fn new(disk_manager: Arc<AsyncDiskManager>, log_manager: Arc<RwLock<LogManager>>) -> Self {
+    pub fn new(
+        disk_manager: Arc<AsyncDiskManager>,
+        log_manager: Arc<RwLock<LogManager>>,
+        bpm: Arc<BufferPoolManager>,
+    ) -> Self {
         Self {
             disk_manager,
             log_manager,
+            bpm,
         }
     }
 
@@ -361,7 +371,16 @@ impl LogRecoveryManager {
                     (record.get_insert_rid(), record.get_insert_tuple())
                 {
                     debug!("Redoing INSERT for RID {:?}", rid);
-                    // In a real implementation, we would insert the tuple into the table
+                    if let Some(page_guard) =
+                        self.bpm.fetch_page::<TablePage>(rid.get_page_id())
+                    {
+                        let mut page = page_guard.write();
+                        let meta = TupleMeta::new(record.get_txn_id());
+                        if let Some(tuple) = record.get_insert_tuple() {
+                            let _ = page.insert_tuple_with_rid(&meta, tuple, *rid);
+                            page.set_dirty(true);
+                        }
+                    }
                 }
             }
             LogRecordType::Update => {
@@ -369,25 +388,55 @@ impl LogRecoveryManager {
                     (record.get_update_rid(), record.get_update_tuple())
                 {
                     debug!("Redoing UPDATE for RID {:?}", rid);
-                    // In a real implementation, we would update the tuple in the table
+                    if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
+                        let mut page = page_guard.write();
+                        if let (Some(tuple), Some(_old)) = (
+                            record.get_update_tuple(),
+                            record.get_original_tuple(),
+                        ) {
+                            let meta = TupleMeta::new(record.get_txn_id());
+                            let _ = page.update_tuple(meta, tuple, *rid);
+                            page.set_dirty(true);
+                        }
+                    }
                 }
             }
             LogRecordType::MarkDelete => {
                 if let Some(rid) = record.get_delete_rid() {
                     debug!("Redoing MARK_DELETE for RID {:?}", rid);
-                    // In a real implementation, we would mark the tuple as deleted
+                    if let Some(page_guard) =
+                        self.bpm.fetch_page::<TablePage>(rid.get_page_id())
+                    {
+                        let mut page = page_guard.write();
+                        if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
+                            meta.set_deleted(true);
+                            let _ = page.update_tuple(meta, &tuple, *rid);
+                            page.set_dirty(true);
+                        }
+                    }
                 }
             }
             LogRecordType::ApplyDelete => {
                 if let Some(rid) = record.get_delete_rid() {
                     debug!("Redoing APPLY_DELETE for RID {:?}", rid);
-                    // In a real implementation, we would delete the tuple
+                    if let Some(page_guard) =
+                        self.bpm.fetch_page::<TablePage>(rid.get_page_id())
+                    {
+                        let mut page = page_guard.write();
+                        if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
+                            meta.set_deleted(true);
+                            let _ = page.update_tuple(meta, &tuple, *rid);
+                            page.set_dirty(true);
+                        }
+                    }
                 }
             }
             LogRecordType::NewPage => {
                 if let Some(page_id) = record.get_page_id() {
                     debug!("Redoing NEW_PAGE for page {}", page_id);
-                    // In a real implementation, we would create a new page
+                    if self.bpm.fetch_page::<TablePage>(*page_id).is_none() {
+                        let _ = self.bpm.new_page::<TablePage>();
+                    }
                 }
             }
             _ => {} // Ignore other record types for redo
@@ -402,7 +451,14 @@ impl LogRecoveryManager {
     fn undo_insert(&self, record: &LogRecord) -> Result<(), String> {
         if let Some(rid) = record.get_insert_rid() {
             debug!("Undoing INSERT for RID {:?}", rid);
-            // In a real implementation, we would delete the inserted tuple
+            if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
+                let mut page = page_guard.write();
+                if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
+                    meta.set_deleted(true);
+                    let _ = page.update_tuple(meta, &tuple, *rid);
+                    page.set_dirty(true);
+                }
+            }
         }
         Ok(())
     }
@@ -416,7 +472,14 @@ impl LogRecoveryManager {
             (record.get_update_rid(), record.get_original_tuple())
         {
             debug!("Undoing UPDATE for RID {:?}", rid);
-            // In a real implementation, we would restore the original tuple
+            if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
+                let mut page = page_guard.write();
+                if let Some(original) = record.get_original_tuple() {
+                    let meta = TupleMeta::new(record.get_txn_id());
+                    let _ = page.update_tuple(meta, original, *rid);
+                    page.set_dirty(true);
+                }
+            }
         }
         Ok(())
     }
@@ -428,7 +491,15 @@ impl LogRecoveryManager {
     fn undo_delete(&self, record: &LogRecord) -> Result<(), String> {
         if let (Some(rid), Some(_tuple)) = (record.get_delete_rid(), record.get_delete_tuple()) {
             debug!("Undoing DELETE for RID {:?}", rid);
-            // In a real implementation, we would restore the deleted tuple
+            if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
+                let mut page = page_guard.write();
+                if let Some(tuple) = record.get_delete_tuple() {
+                    let mut meta = TupleMeta::new(record.get_txn_id());
+                    meta.set_deleted(false);
+                    let _ = page.update_tuple(meta, tuple, *rid);
+                    page.set_dirty(true);
+                }
+            }
         }
         Ok(())
     }
@@ -496,6 +567,8 @@ mod tests {
     use crate::common::rid::RID;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction::Transaction;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::recovery::wal_manager::WALManager;
     use crate::storage::disk::async_disk::DiskManagerConfig;
     use crate::storage::table::tuple::Tuple;
@@ -507,6 +580,7 @@ mod tests {
         wal_manager: WALManager,
         recovery_manager: LogRecoveryManager,
         log_manager: Arc<RwLock<LogManager>>,
+        _bpm: Arc<BufferPoolManager>,
         _temp_dir: TempDir,
     }
 
@@ -545,13 +619,21 @@ mod tests {
 
             let wal_manager = WALManager::new(log_manager.clone());
 
+            // Minimal buffer pool for recovery operations
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(16, 2)));
+            let bpm = Arc::new(
+                BufferPoolManager::new(16, disk_manager_arc.clone(), replacer)
+                    .expect("buffer pool should initialize"),
+            );
+
             let recovery_manager =
-                LogRecoveryManager::new(disk_manager_arc.clone(), log_manager.clone());
+                LogRecoveryManager::new(disk_manager_arc.clone(), log_manager.clone(), bpm.clone());
 
             Self {
                 wal_manager,
                 recovery_manager,
                 log_manager,
+                _bpm: bpm,
                 _temp_dir: temp_dir,
             }
         }

@@ -1,6 +1,7 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
+use crate::catalog::system_catalog::SYS_COLUMNS_OID;
 use crate::common::config::{DataBaseOid, IndexOidT, TableOidT};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::storage::index::b_plus_tree::BPlusTree;
@@ -54,7 +55,7 @@ impl Database {
             bpm,
             tables: HashMap::new(),
             table_names: HashMap::new(),
-            next_table_oid: 0,
+            next_table_oid: SYS_COLUMNS_OID + 1,
             indexes: HashMap::new(),
             index_names: HashMap::new(),
             next_index_oid: 0,
@@ -87,7 +88,7 @@ impl Database {
             bpm,
             tables: HashMap::new(),
             table_names: HashMap::new(),
-            next_table_oid: 0,
+            next_table_oid: SYS_COLUMNS_OID + 1,
             indexes: HashMap::new(),
             index_names: HashMap::new(),
             next_index_oid: 0,
@@ -131,7 +132,7 @@ impl Database {
             bpm,
             tables,
             table_names,
-            next_table_oid,
+            next_table_oid: next_table_oid.max(SYS_COLUMNS_OID + 1),
             indexes,
             index_names,
             next_index_oid,
@@ -356,6 +357,22 @@ impl Database {
     /// A vector of table names.
     pub fn get_table_names(&self) -> Vec<String> {
         self.table_names.keys().cloned().collect()
+    }
+
+    /// Returns all table metadata objects.
+    pub fn get_all_table_info(&self) -> Vec<&TableInfo> {
+        self.tables.values().collect()
+    }
+
+    /// Loads table metadata from catalog rows, updating name maps and OID counters.
+    pub fn load_tables_from_catalog(&mut self, tables: Vec<TableInfo>) {
+        for table in tables {
+            let oid = table.get_table_oidt();
+            self.next_table_oid = self.next_table_oid.max(oid + 1);
+            self.table_names
+                .insert(table.get_table_name().to_string(), oid);
+            self.tables.insert(oid, table);
+        }
     }
 
     pub fn get_table_schema(&self, table_name: &str) -> Option<Schema> {

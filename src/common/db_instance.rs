@@ -151,6 +151,7 @@ impl DBInstance {
             let recovery_manager = Arc::new(LogRecoveryManager::new(
                 disk_manager_arc.clone(),
                 log_manager.clone(),
+                buffer_pool_manager.clone(),
             ));
 
             // Start recovery process
@@ -165,6 +166,12 @@ impl DBInstance {
             info!("No existing database files or logging disabled, skipping recovery");
             None
         };
+
+        // Rebuild in-memory catalog caches from persisted system catalog tables
+        {
+            let mut catalog_guard = catalog.write();
+            catalog_guard.rebuild_from_system_catalog();
+        }
 
         Ok(Self {
             buffer_pool_manager,

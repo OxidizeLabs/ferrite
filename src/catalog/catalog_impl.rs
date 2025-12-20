@@ -1,17 +1,26 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::database::Database;
+use crate::catalog::system_catalog::{
+    SystemCatalogSchemas, SystemCatalogTables, TableCatalogRow, SYS_TABLES_OID,
+};
 use crate::catalog::schema::Schema;
-use crate::common::config::{IndexOidT, TableOidT};
+use crate::common::config::{storage_bincode_config, IndexOidT, TableOidT};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::{IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
+use crate::storage::table::table_iterator::TableScanIterator;
+use crate::storage::table::tuple::TupleMeta;
+use crate::types_db::value::Value;
+use bincode::{decode_from_slice, encode_to_vec};
 use core::fmt;
 use log::{info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Parameters for creating a catalog with existing data
@@ -46,6 +55,8 @@ pub struct Catalog {
     bpm: Arc<BufferPoolManager>,
     databases: HashMap<String, Database>,
     current_database: Option<String>,
+    system: SystemCatalogTables,
+    system_schemas: SystemCatalogSchemas,
     txn_manager: Arc<TransactionManager>,
 }
 
@@ -80,6 +91,9 @@ impl Catalog {
         index_names: HashMap<String, IndexOidT>,
         txn_manager: Arc<TransactionManager>,
     ) -> Self {
+        let system_schemas = SystemCatalogSchemas::new();
+        let system = SystemCatalogTables::bootstrap(bpm.clone());
+
         // Create a default database with the existing data
         let mut databases = HashMap::new();
         let default_db = Database::with_existing_data(
@@ -96,12 +110,23 @@ impl Catalog {
         );
         databases.insert("default".to_string(), default_db);
 
-        Catalog {
+        let mut catalog = Catalog {
             bpm,
             databases,
             current_database: Some("default".to_string()),
+            system,
+            system_schemas,
             txn_manager,
+        };
+
+        // Seed system catalog with any provided tables
+        if let Some(default_db_ref) = catalog.databases.get("default") {
+            for table_info in default_db_ref.get_all_table_info() {
+                catalog.record_system_table(table_info, &table_info.get_table_schema());
+            }
         }
+
+        catalog
     }
 
     /// Creates a new database.
@@ -210,7 +235,11 @@ impl Catalog {
     /// # Returns
     /// Some(TableInfo) if table creation succeeds, None if current database is not set or table with same name already exists
     pub fn create_table(&mut self, name: String, schema: Schema) -> Option<TableInfo> {
-        self.get_current_database_mut()?.create_table(name, schema)
+        let table_info = self.get_current_database_mut()?.create_table(name.clone(), schema.clone())?;
+
+        // Record metadata in system catalog (__tables)
+        self.record_system_table(&table_info, &schema);
+        Some(table_info)
     }
 
     /// Queries table metadata by name in the current database.
@@ -247,9 +276,24 @@ impl Catalog {
         unique: bool,
         index_type: IndexType,
     ) -> Option<(Arc<IndexInfo>, Arc<RwLock<BPlusTree>>)> {
-        self.get_current_database_mut()?.create_index(
-            index_name, table_name, key_schema, key_attrs, key_size, unique, index_type,
-        )
+        let result = self.get_current_database_mut()?.create_index(
+            index_name, table_name, key_schema.clone(), key_attrs.clone(), key_size, unique, index_type.clone(),
+        );
+
+        if let Some((index_info, btree)) = &result {
+            self.record_system_index(
+                index_info.get_index_oid(),
+                index_info,
+                &key_schema,
+                &key_attrs,
+                unique,
+                index_type,
+            );
+            // Ensure index metadata is tracked for lookups
+            self.add_index(index_info.get_index_oid(), index_info.clone(), btree.clone());
+        }
+
+        result
     }
 
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&Arc<IndexInfo>> {
@@ -308,6 +352,151 @@ impl Catalog {
         self.get_current_database()
             .map(|db| db.get_all_tables())
             .unwrap_or_default()
+    }
+
+    /// Rebuilds in-memory catalog maps by scanning the persisted system catalog tables.
+    pub fn rebuild_from_system_catalog(&mut self) {
+        let snapshot_path = Path::new("catalog.snapshot");
+        let mut scan = TableScanIterator::new(self.system.tables.clone());
+        let mut rebuilt: Vec<TableInfo> = Vec::new();
+        let mut rows: Vec<TableCatalogRow> = Vec::new();
+
+        // Load snapshot first if available to seed faster rebuild
+        if snapshot_path.exists() {
+            if let Ok(bytes) = fs::read(snapshot_path) {
+                if let Ok((snapshot_rows, _)) = decode_from_slice::<Vec<TableCatalogRow>, _>(
+                    &bytes,
+                    storage_bincode_config(),
+                )
+                {
+                    for row in snapshot_rows {
+                        if row.table_oid <= SYS_TABLES_OID {
+                            continue;
+                        }
+                        if let Some(info) = self.row_to_table_info(&row) {
+                            rebuilt.push(info);
+                        }
+                    }
+                }
+            }
+        }
+
+        while let Some((_meta, tuple)) = scan.next() {
+            if let Some(row) = TableCatalogRow::from_tuple(&tuple) {
+                // Skip system tables themselves
+                if row.table_oid <= SYS_TABLES_OID {
+                    continue;
+                }
+
+                if let Some(info) = self.row_to_table_info(&row) {
+                    rebuilt.push(info);
+                    rows.push(row);
+                }
+            }
+        }
+
+        if let Some(db) = self.get_current_database_mut() {
+            db.load_tables_from_catalog(rebuilt);
+        }
+
+        if !rows.is_empty() {
+            if let Ok(bytes) = encode_to_vec(&rows, storage_bincode_config()) {
+                let _ = fs::write(snapshot_path, bytes);
+            }
+        }
+    }
+
+    fn row_to_table_info(&self, row: &TableCatalogRow) -> Option<TableInfo> {
+        let (schema, _): (Schema, usize) =
+            match decode_from_slice::<Schema, _>(&row.schema_bin, storage_bincode_config()) {
+                Ok(res) => res,
+                Err(err) => {
+                    warn!("Failed to decode schema for table {}: {}", row.table_oid, err);
+                    return None;
+                }
+            };
+
+        let heap = Arc::new(TableHeap::reopen(
+            self.bpm.clone(),
+            row.table_oid,
+            row.first_page_id,
+            row.last_page_id,
+        ));
+
+        Some(TableInfo::new(
+            schema.clone(),
+            row.table_name.clone(),
+            heap,
+            row.table_oid,
+        ))
+    }
+}
+
+impl Catalog {
+    fn record_system_table(&self, table_info: &TableInfo, schema: &Schema) {
+        let encoded_schema =
+            bincode::encode_to_vec(schema, crate::common::config::storage_bincode_config())
+                .unwrap_or_default();
+
+        let row = TableCatalogRow {
+            table_oid: table_info.get_table_oidt(),
+            table_name: table_info.get_table_name().to_string(),
+            first_page_id: table_info.get_table_heap().get_first_page_id_raw(),
+            last_page_id: table_info.get_table_heap().get_last_page_id_raw(),
+            schema_bin: encoded_schema,
+        };
+
+        let values: Vec<Value> = row.to_values();
+        let sys_table = self.system.tables.get_table_heap();
+        let meta = Arc::new(TupleMeta::new(0));
+
+        let _ = sys_table.insert_tuple_from_values(
+            values,
+            &self.system_schemas.tables,
+            meta,
+        );
+
+        info!(
+            "Recorded table '{}' (oid {}) in system catalog",
+            table_info.get_table_name(),
+            table_info.get_table_oidt()
+        );
+    }
+
+    fn record_system_index(
+        &self,
+        index_oid: IndexOidT,
+        index_info: &Arc<IndexInfo>,
+        key_schema: &Schema,
+        key_attrs: &[usize],
+        unique: bool,
+        index_type: IndexType,
+    ) {
+        let encoded_schema =
+            bincode::encode_to_vec(key_schema, crate::common::config::storage_bincode_config())
+                .unwrap_or_default();
+        let row = crate::catalog::system_catalog::IndexCatalogRow {
+            index_oid,
+            index_name: index_info.get_index_name().clone(),
+            table_oid: self
+                .get_table(index_info.get_table_name())
+                .map(|t| t.get_table_oidt())
+                .unwrap_or_default(),
+            unique,
+            index_type: index_type as i32,
+            key_attrs: key_attrs.to_vec(),
+            key_schema_bin: encoded_schema,
+        };
+
+        let values: Vec<Value> = row.to_values();
+        let sys_table = self.system.indexes.get_table_heap();
+        let meta = Arc::new(TupleMeta::new(0));
+        let _ = sys_table.insert_tuple_from_values(values, &self.system_schemas.indexes, meta);
+        info!(
+            "Recorded index '{}' (oid {}) in system catalog",
+            index_info.get_index_name(),
+            index_oid
+        );
     }
 }
 

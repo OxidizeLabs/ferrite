@@ -116,6 +116,34 @@ impl TableHeap {
         heap
     }
 
+    /// Reopens a table heap from existing page ids without allocating a fresh page.
+    ///
+    /// # Parameters
+    /// - `bpm`: Buffer pool manager.
+    /// - `table_oid`: Table OID.
+    /// - `first_page_id`: First page for the table (or INVALID_PAGE_ID for empty).
+    /// - `last_page_id`: Last page id (falls back to `first_page_id` if invalid).
+    pub fn reopen(
+        bpm: Arc<BufferPoolManager>,
+        table_oid: TableOidT,
+        first_page_id: PageId,
+        last_page_id: PageId,
+    ) -> Self {
+        let resolved_last = if last_page_id == INVALID_PAGE_ID {
+            first_page_id
+        } else {
+            last_page_id
+        };
+
+        Self {
+            bpm,
+            first_page_id: RwLock::new(first_page_id),
+            last_page_id: RwLock::new(resolved_last),
+            table_oid,
+            latch: RwLock::new(()),
+        }
+    }
+
     /// Inserts a tuple into the table. If the tuple is too large (>= page_size), returns `None`.
     ///
     /// # Parameters
@@ -517,7 +545,7 @@ impl TableHeap {
     }
 
     /// Gets the first page ID (raw version without checking for tuples)
-    fn get_first_page_id_raw(&self) -> PageId {
+    pub fn get_first_page_id_raw(&self) -> PageId {
         *self.first_page_id.read()
     }
 
@@ -548,7 +576,7 @@ impl TableHeap {
     }
 
     /// Gets the last page ID (raw version without checking for tuples)
-    fn get_last_page_id_raw(&self) -> PageId {
+    pub fn get_last_page_id_raw(&self) -> PageId {
         *self.last_page_id.read()
     }
 
