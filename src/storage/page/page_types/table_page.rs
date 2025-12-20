@@ -904,7 +904,6 @@ impl TablePage {
         // Check both the absolute size and relative to page size
         serialized_size > TUPLE_MAX_SERIALIZED_SIZE // hard cap for tuple body
             || serialized_size + meta_overhead > DB_PAGE_SIZE as usize
-            || serialized_size > (DB_PAGE_SIZE as usize * 3) / 4
     }
 
     /// Gets the next RID that would be assigned to a tuple inserted into this page

@@ -493,20 +493,21 @@ impl BufferPoolManager {
     pub async fn flush_page_async(&self, page_id: PageId) -> Result<(), String> {
         trace!("Flushing page {} to disk", page_id);
 
-        let page_table = self.page_table.read();
-        let frame_id = page_table
-            .get(&page_id)
-            .ok_or_else(|| format!("Page {} not found in page table", page_id))?;
-        let frame_id = *frame_id;
-        drop(page_table);
+        let frame_id = {
+            let page_table = self.page_table.read();
+            *page_table
+                .get(&page_id)
+                .ok_or_else(|| format!("Page {} not found in page table", page_id))?
+        };
 
-        let pages = self.pages.read();
-        let page = pages
-            .get(frame_id as usize)
-            .and_then(|p| p.as_ref())
-            .ok_or_else(|| format!("Page {} not found in pages array", page_id))?
-            .clone();
-        drop(pages);
+        let page = {
+            let pages = self.pages.read();
+            pages
+                .get(frame_id as usize)
+                .and_then(|p| p.as_ref())
+                .ok_or_else(|| format!("Page {} not found in pages array", page_id))?
+                .clone()
+        };
 
         self.write_page_to_disk_async(page_id, &page).await
     }
