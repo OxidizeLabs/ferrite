@@ -63,6 +63,37 @@ pub struct UndoLog {
 }
 
 impl UndoLog {
+    /// Validates core invariants for undo logs:
+    /// - `modified_fields` length must match the tuple column count.
+    /// - Deleted logs must carry the original RID so rollbacks can restore rows.
+    fn validate_invariants(
+        is_deleted: bool,
+        modified_fields: &[bool],
+        tuple: &Tuple,
+        original_rid: Option<RID>,
+    ) {
+        let column_count = tuple.get_column_count();
+        debug_assert_eq!(
+            modified_fields.len(),
+            column_count,
+            "UndoLog modified_fields length {} must match tuple column count {}",
+            modified_fields.len(),
+            column_count
+        );
+
+        if is_deleted {
+            debug_assert!(
+                original_rid.is_some(),
+                "Deleted undo logs must include original_rid for rollback"
+            );
+        } else {
+            debug_assert!(
+                original_rid.is_none(),
+                "Non-delete undo logs must not set original_rid"
+            );
+        }
+    }
+
     /// Creates a new UndoLog entry
     pub fn new(
         is_deleted: bool,
@@ -71,6 +102,7 @@ impl UndoLog {
         ts: TimeStampOidT,
         prev_version: UndoLink,
     ) -> Self {
+        Self::validate_invariants(is_deleted, &modified_fields, tuple.as_ref(), None);
         Self {
             is_deleted,
             modified_fields,
@@ -90,6 +122,16 @@ impl UndoLog {
         prev_version: UndoLink,
         rid: RID,
     ) -> Self {
+        debug_assert!(
+            is_deleted,
+            "UndoLog::new_for_delete must be called with is_deleted=true"
+        );
+        Self::validate_invariants(
+            is_deleted,
+            &modified_fields,
+            tuple.as_ref(),
+            Some(rid),
+        );
         Self {
             is_deleted,
             modified_fields,
@@ -122,6 +164,7 @@ impl IsolationLevel {
             "read committed" => Some(IsolationLevel::ReadCommitted),
             "repeatable read" => Some(IsolationLevel::RepeatableRead),
             "serializable" => Some(IsolationLevel::Serializable),
+            "snapshot" | "snapshot isolation" => Some(IsolationLevel::Snapshot),
             _ => None,
         }
     }
@@ -342,6 +385,24 @@ impl Transaction {
 
     /// Commits the transaction and updates watermark
     pub fn commit(&self, watermark: &mut Watermark) -> Timestamp {
+        match self.get_state() {
+            TransactionState::Committed => {
+                log::warn!(
+                    "commit() called on already committed txn {}",
+                    self.txn_id_human_readable()
+                );
+                return self.commit_ts();
+            }
+            TransactionState::Aborted => {
+                log::warn!(
+                    "commit() called on aborted txn {}",
+                    self.txn_id_human_readable()
+                );
+                return self.commit_ts();
+            }
+            _ => {}
+        }
+
         let commit_ts = watermark.get_next_ts();
         self.set_commit_ts(commit_ts);
 
@@ -365,6 +426,24 @@ impl Transaction {
 
     /// Aborts the transaction and updates watermark
     pub fn abort(&self, watermark: &mut Watermark) {
+        match self.get_state() {
+            TransactionState::Aborted => {
+                log::warn!(
+                    "abort() called on already aborted txn {}",
+                    self.txn_id_human_readable()
+                );
+                return;
+            }
+            TransactionState::Committed => {
+                log::warn!(
+                    "abort() called after commit on txn {}",
+                    self.txn_id_human_readable()
+                );
+                return;
+            }
+            _ => {}
+        }
+
         // Remove this transaction from active transactions
         watermark.remove_txn(self.read_ts());
         self.set_state(TransactionState::Aborted);
@@ -373,11 +452,12 @@ impl Transaction {
     /// Enhanced tuple visibility check that considers watermark
     pub fn is_tuple_visible(&self, meta: &TupleMeta) -> bool {
         let commit_ts_dbg = meta.get_commit_timestamp();
+        let read_ts = *self.read_ts.read();
         debug!(
             "Transaction.is_tuple_visible(): txn_id={}, isolation={:?}, read_ts={}, meta={{creator={}, commit_ts={}, deleted={}}}",
             self.txn_id,
             self.isolation_level,
-            *self.read_ts.read(),
+            read_ts,
             meta.get_creator_txn_id(),
             commit_ts_dbg
                 .map(|ts| ts.to_string())
@@ -403,11 +483,15 @@ impl Transaction {
                         || (meta.is_committed()
                             && meta
                                 .get_commit_timestamp()
-                                .is_some_and(|ts| ts <= *self.read_ts.read())));
+                                .is_some_and(|ts| ts <= read_ts)));
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
             }
-            IsolationLevel::Snapshot => todo!(),
+            IsolationLevel::Snapshot => {
+                let visible = meta.is_visible_to(self.txn_id, read_ts);
+                debug!("SNAPSHOT visibility: {}", visible);
+                visible
+            }
         }
     }
 }
@@ -554,12 +638,14 @@ mod tests {
 
             // Modify an existing log
             let tuple3 = create_test_tuple();
-            let modified_log1 = UndoLog::new(
-                true, // changed to true (deleted)
+            let rid = tuple3.get_rid();
+            let modified_log1 = UndoLog::new_for_delete(
+                true, // deleted version
                 vec![true, false],
                 Arc::new(tuple3),
                 150, // changed timestamp
                 UndoLink::new(INVALID_TXN_ID, 0),
+                rid,
             );
 
             txn.modify_undo_log(link1.prev_log_idx, Arc::new(modified_log1));
@@ -839,6 +925,14 @@ mod tests {
                 IsolationLevel::from_str("SERIALIZABLE"),
                 Some(IsolationLevel::Serializable)
             );
+            assert_eq!(
+                IsolationLevel::from_str("snapshot"),
+                Some(IsolationLevel::Snapshot)
+            );
+            assert_eq!(
+                IsolationLevel::from_str("SNAPSHOT ISOLATION"),
+                Some(IsolationLevel::Snapshot)
+            );
         }
 
         #[test]
@@ -871,6 +965,7 @@ mod tests {
                 "REPEATABLE_READ"
             );
             assert_eq!(IsolationLevel::Serializable.to_string(), "SERIALIZABLE");
+            assert_eq!(IsolationLevel::Snapshot.to_string(), "SNAPSHOT");
         }
     }
 
@@ -984,6 +1079,34 @@ mod tests {
 
             let meta4 = create_tuple_meta(2, 200, false, true);
             assert!(!txn.is_tuple_visible(&meta4));
+        }
+
+        #[test]
+        fn test_snapshot_visibility() {
+            // Snapshot isolation should respect the reader's snapshot timestamp and hide tombstones
+            let txn_id = 1;
+            let txn = Transaction::new(txn_id, IsolationLevel::Snapshot);
+            txn.set_read_ts(150);
+
+            // Own uncommitted version is visible
+            let own_uncommitted = create_tuple_meta(txn_id, 0, false, false);
+            assert!(txn.is_tuple_visible(&own_uncommitted));
+
+            // Other's uncommitted version is invisible
+            let other_uncommitted = create_tuple_meta(2, 0, false, false);
+            assert!(!txn.is_tuple_visible(&other_uncommitted));
+
+            // Committed version with commit_ts <= snapshot is visible
+            let committed_visible = create_tuple_meta(2, 100, false, true);
+            assert!(txn.is_tuple_visible(&committed_visible));
+
+            // Committed version after snapshot is invisible
+            let committed_future = create_tuple_meta(2, 200, false, true);
+            assert!(!txn.is_tuple_visible(&committed_future));
+
+            // Deleted committed version should not be returned
+            let committed_deleted = create_tuple_meta(2, 100, true, true);
+            assert!(!txn.is_tuple_visible(&committed_deleted));
         }
     }
 
@@ -1139,23 +1262,17 @@ mod tests {
         }
 
         #[test]
+        #[should_panic(expected = "modified_fields length")]
         fn test_undo_log_empty_fields() {
-            // Test undo log with empty modified fields
-            let txn = Transaction::new(1, IsolationLevel::ReadCommitted);
+            // Invalid: modified_fields must match tuple column count
             let tuple = create_test_tuple();
-
-            let undo_log = UndoLog::new(
+            let _ = UndoLog::new(
                 false,
                 vec![], // Empty modified fields
                 Arc::new(tuple),
                 100,
                 UndoLink::new(INVALID_TXN_ID, 0),
             );
-
-            let link = txn.append_undo_log(Arc::new(undo_log));
-            let retrieved_log = txn.get_undo_log(link.prev_log_idx);
-
-            assert_eq!(retrieved_log.modified_fields.len(), 0);
         }
     }
 

@@ -2659,8 +2659,15 @@ mod tests {
                 return;
             }
 
-            // At this point, there should be multiple versions in the undo log chain
-            // The most recent one should be visible to new transactions
+            // Commit the third transaction so the latest version is visible to new readers
+            assert!(
+                ctx.txn_manager()
+                    .commit(txn3.clone(), ctx.buffer_pool_manager())
+                    .await
+            );
+
+            // At this point, there should be multiple versions in the undo log chain.
+            // The most recent committed one should be visible to new transactions.
 
             let txn4 = ctx
                 .begin_transaction(IsolationLevel::ReadCommitted)
@@ -2687,10 +2694,6 @@ mod tests {
             }
 
             // Cleanup
-            let _ = ctx
-                .txn_manager()
-                .commit(txn3, ctx.buffer_pool_manager())
-                .await;
             let _ = ctx
                 .txn_manager()
                 .commit(txn4, ctx.buffer_pool_manager())
