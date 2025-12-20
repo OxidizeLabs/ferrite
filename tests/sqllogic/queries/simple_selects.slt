@@ -3,8 +3,8 @@
 # Setup test table and data
 statement ok
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
+    id INTEGER,
+    name TEXT,
     age INTEGER,
     city TEXT
 );
