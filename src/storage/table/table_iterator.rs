@@ -17,6 +17,8 @@ pub struct TableIterator {
     table_heap: Arc<TransactionalTableHeap>,
     /// Current position in the table
     current_rid: RID,
+    /// RID of the last tuple that was returned
+    last_returned_rid: Option<RID>,
     /// Stop position (if any)
     stop_at_rid: RID,
     /// Optional transaction context for visibility checks
@@ -33,6 +35,8 @@ pub struct TableScanIterator {
     table_info: Arc<TableInfo>,
     /// Track if we've reached the end
     is_end: bool,
+    /// RID of the most recently returned tuple (stable for callers)
+    last_rid: Option<RID>,
 }
 
 impl TableIterator {
@@ -45,6 +49,7 @@ impl TableIterator {
         let mut iterator = Self {
             table_heap,
             current_rid: start_rid,
+            last_returned_rid: None,
             stop_at_rid: stop_rid,
             txn_ctx,
         };
@@ -52,9 +57,14 @@ impl TableIterator {
         iterator
     }
 
-    /// Get current RID
+    /// Get the RID the iterator is currently positioned at (i.e., the next tuple).
     pub fn get_rid(&self) -> RID {
         self.current_rid
+    }
+
+    /// Get the RID of the last tuple that was returned by `next()`, if any.
+    pub fn get_last_rid(&self) -> Option<RID> {
+        self.last_returned_rid
     }
 
     /// Check if iterator has reached the end
@@ -108,6 +118,7 @@ impl TableIterator {
         {
             debug!("Starting from first page");
             self.current_rid = RID::new(first_page_id, 0);
+            self.last_returned_rid = None;
             return;
         }
 
@@ -117,6 +128,7 @@ impl TableIterator {
             if self.current_rid.get_slot_num() >= page.get_num_tuples() as u32 {
                 debug!("Invalid slot number, resetting to 0");
                 self.current_rid = RID::new(self.current_rid.get_page_id(), 0);
+                self.last_returned_rid = None;
             }
         }
     }
@@ -183,6 +195,7 @@ impl TableScanIterator {
             inner,
             table_info,
             is_end: false,
+            last_rid: None,
         }
     }
 
@@ -193,7 +206,9 @@ impl TableScanIterator {
 
     /// Get current RID
     pub fn get_rid(&self) -> RID {
-        self.inner.get_rid()
+        self.last_rid
+            .or_else(|| self.inner.get_last_rid())
+            .unwrap_or_else(|| self.inner.get_rid())
     }
 
     /// Reset the iterator to start of table
@@ -214,6 +229,7 @@ impl TableScanIterator {
             None,
         );
         self.is_end = false;
+        self.last_rid = None;
     }
 
     /// Get reference to the table info
@@ -230,11 +246,15 @@ impl Iterator for TableScanIterator {
             return None;
         }
 
+        let current_rid = self.inner.get_rid();
         let result = self.inner.next();
 
         // Update end status
         if result.is_none() {
             self.is_end = true;
+            self.last_rid = None;
+        } else {
+            self.last_rid = Some(current_rid);
         }
 
         result
@@ -245,6 +265,9 @@ impl Iterator for TableIterator {
     type Item = (Arc<TupleMeta>, Arc<Tuple>);
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Capture the RID we are about to return; `advance` will move to the next slot.
+        let current_rid = self.current_rid;
+
         while !self.is_end() {
             debug!("Attempting to get tuple with RID: {:?}", self.current_rid);
 
@@ -264,6 +287,7 @@ impl Iterator for TableIterator {
             self.advance();
 
             if let Some(tuple) = result {
+                self.last_returned_rid = Some(current_rid);
                 return Some(tuple);
             }
         }

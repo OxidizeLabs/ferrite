@@ -232,3 +232,107 @@ async fn select_distinct_rows() {
         "DISTINCT across multiple columns should preserve unique combinations"
     );
 }
+
+#[tokio::test]
+async fn select_order_by_full_dataset() {
+    init_test_logger();
+    let db = new_temp_db().await.unwrap();
+    let mut writer = TestResultWriter::new();
+
+    db.execute_sql(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER, city TEXT);",
+        IsolationLevel::ReadCommitted,
+        &mut writer,
+    )
+    .await
+    .unwrap();
+
+    db.execute_sql(
+        "INSERT INTO users (id, name, age, city) VALUES
+            (1, 'Alice', 30, 'Seattle'),
+            (2, 'Bob', 25, 'Portland'),
+            (3, 'Carol', 35, 'Seattle'),
+            (4, 'Dave', 40, 'San Francisco'),
+            (5, 'Eve', 28, 'Portland');",
+        IsolationLevel::ReadCommitted,
+        &mut writer,
+    )
+    .await
+    .unwrap();
+
+    let mut result_writer = TestResultWriter::new();
+    db.execute_sql(
+        "SELECT name FROM users ORDER BY name;",
+        IsolationLevel::ReadCommitted,
+        &mut result_writer,
+    )
+    .await
+    .unwrap();
+
+    let names: Vec<String> = result_writer
+        .get_rows()
+        .iter()
+        .map(|row| row[0].to_string())
+        .collect();
+
+    assert_eq!(
+        names,
+        vec![
+            "Alice".to_string(),
+            "Bob".to_string(),
+            "Carol".to_string(),
+            "Dave".to_string(),
+            "Eve".to_string(),
+        ],
+        "SELECT with ORDER BY should return all inserted rows in alphabetical order"
+    );
+}
+
+#[tokio::test]
+async fn select_order_by_age_desc_limit() {
+    init_test_logger();
+    let db = new_temp_db().await.unwrap();
+    let mut writer = TestResultWriter::new();
+
+    db.execute_sql(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER, city TEXT);",
+        IsolationLevel::ReadCommitted,
+        &mut writer,
+    )
+    .await
+    .unwrap();
+
+    db.execute_sql(
+        "INSERT INTO users (id, name, age, city) VALUES
+            (1, 'Alice', 30, 'Seattle'),
+            (2, 'Bob', 25, 'Portland'),
+            (3, 'Carol', 35, 'Seattle'),
+            (4, 'Dave', 40, 'San Francisco'),
+            (5, 'Eve', 28, 'Portland');",
+        IsolationLevel::ReadCommitted,
+        &mut writer,
+    )
+    .await
+    .unwrap();
+
+    let mut result_writer = TestResultWriter::new();
+    db.execute_sql(
+        "SELECT name FROM users ORDER BY age DESC, name LIMIT 2;",
+        IsolationLevel::ReadCommitted,
+        &mut result_writer,
+    )
+    .await
+    .unwrap();
+
+    let names: Vec<String> = result_writer
+        .get_rows()
+        .iter()
+        .map(|row| row[0].to_string())
+        .collect();
+
+    assert_eq!(
+        names,
+        vec!["Dave".to_string(), "Carol".to_string()],
+        "ORDER BY with LIMIT should respect ordering on multiple columns"
+    );
+}

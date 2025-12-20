@@ -187,19 +187,17 @@ impl LogicalPlanBuilder {
         select: &Select,
         order_by: Option<&OrderBy>,
     ) -> Result<Box<LogicalPlan>, String> {
-        let mut current_plan = {
-            if select.from.is_empty() {
-                return Err("FROM clause is required".to_string());
-            }
-
-            // Check if we have a join (multiple tables in FROM clause)
-            if select.from.len() > 1 || !select.from[0].joins.is_empty() {
-                // Use the expression parser's prepare_join_scan method to handle joins
-                self.prepare_join_scan(select)?
-            } else {
-                // Single table query
-                self.build_table_scan(&select.from[0])?
-            }
+        let mut current_plan = if select.from.is_empty() {
+            // Support SELECT without FROM by using a single-row VALUES source
+            // with an empty schema. Projection expressions (constants) will be
+            // evaluated on top of this dummy row.
+            LogicalPlan::values(vec![Vec::new()], Schema::new(vec![]))
+        } else if select.from.len() > 1 || !select.from[0].joins.is_empty() {
+            // Use the expression parser's prepare_join_scan method to handle joins
+            self.prepare_join_scan(select)?
+        } else {
+            // Single table query
+            self.build_table_scan(&select.from[0])?
         };
 
         // Process WHERE clause if it exists
@@ -262,6 +260,10 @@ impl LogicalPlanBuilder {
                 }
             }
         }
+
+        // Capture the plan before applying the SELECT projection so ORDER BY can
+        // fall back to it if it references columns not present in the projection.
+        let plan_before_projection = current_plan.clone();
 
         if has_group_by || has_aggregates {
             // Check for wildcards now that we know we have aggregates
@@ -382,6 +384,12 @@ impl LogicalPlanBuilder {
                 return Err("Internal error: missing schema while applying ORDER BY".to_string());
             };
 
+            // Default to sorting the projected plan. If ORDER BY references columns
+            // that aren't present in the projection, fall back to sorting the
+            // pre-projection plan and then re-apply the projection.
+            let mut sort_child = current_plan.clone();
+            let mut needs_reprojection = false;
+
             // Build sort specifications with ASC/DESC support using fallback parsing
             let sort_specifications = match &order_by.kind {
                 OrderByKind::Expressions(order_by_exprs) => {
@@ -393,11 +401,14 @@ impl LogicalPlanBuilder {
                         Ok(specs) => specs,
                         Err(_) => {
                             // Fallback: manually parse with fallback logic for each expression
+                            needs_reprojection = true;
+                            sort_child = plan_before_projection.clone();
+
                             let mut specs = Vec::new();
                             for order_item in order_by_exprs {
                                 let expr = self.expression_parser.parse_expression_with_fallback(
                                     &order_item.expr,
-                                    &projection_schema,
+                                    sort_child.get_schema().as_ref().unwrap(),
                                     &original_schema,
                                 )?;
 
@@ -424,8 +435,36 @@ impl LogicalPlanBuilder {
                 }
             };
 
-            current_plan =
-                LogicalPlan::sort(sort_specifications, projection_schema.clone(), current_plan);
+            current_plan = LogicalPlan::sort(
+                sort_specifications,
+                sort_child.get_schema().clone().unwrap(),
+                sort_child,
+            );
+
+            // If we had to sort using the wider schema, re-apply the SELECT projection
+            // so the output matches what callers expect.
+            if needs_reprojection {
+                current_plan = if has_group_by || has_aggregates {
+                    self.build_projection_plan_with_schema(
+                        &select.projection,
+                        current_plan,
+                        &original_schema,
+                    )?
+                } else {
+                    self.build_projection_plan(&select.projection, current_plan)?
+                };
+
+                // DISTINCT was applied before ORDER BY; ensure it still holds after
+                // re-projecting from the wider schema.
+                if select.distinct.is_some() {
+                    let Some(projection_schema) = current_plan.get_schema() else {
+                        return Err(
+                            "Internal error: missing schema while re-applying DISTINCT".to_string()
+                        );
+                    };
+                    current_plan = LogicalPlan::distinct(projection_schema, current_plan);
+                }
+            }
         }
 
         // Apply SORT BY if it exists (Hive-specific)
