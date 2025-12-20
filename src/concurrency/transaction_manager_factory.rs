@@ -37,7 +37,21 @@ impl TransactionManagerFactory {
         buffer_pool_manager: Arc<BufferPoolManager>,
         wal_manager: Arc<WALManager>,
     ) -> Self {
-        let transaction_manager = Arc::new(TransactionManager::new());
+        // Preserve existing behavior by allocating a fresh transaction manager.
+        Self::with_wal_manager_and_txn(
+            buffer_pool_manager,
+            wal_manager,
+            Arc::new(TransactionManager::new()),
+        )
+    }
+
+    /// Build a factory using an externally supplied TransactionManager so catalog
+    /// registration and transaction lifecycle share the same instance.
+    pub fn with_wal_manager_and_txn(
+        buffer_pool_manager: Arc<BufferPoolManager>,
+        wal_manager: Arc<WALManager>,
+        transaction_manager: Arc<TransactionManager>,
+    ) -> Self {
         let lock_manager = Arc::new(LockManager::new());
 
         wal_manager.force_run_flush_thread();

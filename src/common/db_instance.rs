@@ -118,21 +118,23 @@ impl DBInstance {
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
         log_manager.write().run_flush_thread();
 
+        // Single shared transaction manager for catalog + factory
         let transaction_manager = Arc::new(TransactionManager::new());
 
         // Initialize catalog with default values
         let catalog = Arc::new(RwLock::new(Catalog::new(
             buffer_pool_manager.clone(),
-            transaction_manager,
+            transaction_manager.clone(),
         )));
 
         // Initialize WAL manager
         let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
 
-        // Initialize transaction components
-        let transaction_factory = Arc::new(TransactionManagerFactory::with_wal_manager(
+        // Initialize transaction components reusing the same transaction manager
+        let transaction_factory = Arc::new(TransactionManagerFactory::with_wal_manager_and_txn(
             buffer_pool_manager.clone(),
             wal_manager.clone(),
+            transaction_manager.clone(),
         ));
 
         // Initialize execution engine
