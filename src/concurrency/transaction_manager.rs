@@ -280,9 +280,27 @@ impl TransactionManager {
             txn.get_transaction_id()
         );
         let current_state = txn.get_state();
-        if current_state != TransactionState::Running && current_state != TransactionState::Tainted
-        {
-            panic!("txn not in running / tainted state");
+        match current_state {
+            TransactionState::Running
+            | TransactionState::Tainted
+            | TransactionState::Shrinking
+            | TransactionState::Growing => {
+                // Proceed with abort
+            }
+            TransactionState::Committed => {
+                log::warn!(
+                    "ABORT: txn {} already committed, nothing to do",
+                    txn.txn_id_human_readable()
+                );
+                return;
+            }
+            TransactionState::Aborted => {
+                log::warn!(
+                    "ABORT: txn {} already aborted, skipping second abort",
+                    txn.txn_id_human_readable()
+                );
+                return;
+            }
         }
 
         // Get all modified tuples from write set
