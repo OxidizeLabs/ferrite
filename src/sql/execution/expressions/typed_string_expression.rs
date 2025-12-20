@@ -35,6 +35,15 @@ impl TypedStringExpression {
         }
     }
 
+    /// Returns the normalized data type keyword (e.g., "TIMESTAMP" from "TIMESTAMP '...'" or "timestamp").
+    fn normalized_type(&self) -> String {
+        self.data_type
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_uppercase()
+    }
+
     // Parse a date string in the format YYYY-MM-DD
     fn parse_date(&self, date_str: &str) -> Result<Value, ExpressionError> {
         match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
@@ -145,7 +154,8 @@ impl TypedStringExpression {
 impl ExpressionOps for TypedStringExpression {
     fn evaluate(&self, _tuple: &Tuple, _schema: &Schema) -> Result<Value, ExpressionError> {
         // Parse string according to data type
-        match self.data_type.to_uppercase().as_str() {
+        let dtype = self.normalized_type();
+        match dtype.as_str() {
             "DATE" => self.parse_date(&self.value),
             "TIME" => self.parse_time(&self.value),
             "TIMESTAMP" => {
@@ -230,7 +240,8 @@ impl ExpressionOps for TypedStringExpression {
 
     fn validate(&self, _schema: &Schema) -> Result<(), ExpressionError> {
         // Validate that the data type and value format are compatible
-        match self.data_type.to_uppercase().as_str() {
+        let dtype = self.normalized_type();
+        match dtype.as_str() {
             "DATE" => {
                 if NaiveDate::parse_from_str(&self.value, "%Y-%m-%d").is_err() {
                     return Err(ExpressionError::InvalidOperation(format!(
