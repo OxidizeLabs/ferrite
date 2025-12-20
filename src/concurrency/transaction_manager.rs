@@ -3040,8 +3040,8 @@ mod tests {
                     .await
             );
 
-            // Create a barrier to synchronize thread start
-            let barrier = Arc::new(std::sync::Barrier::new(NUM_TUPLES));
+            // Create a barrier to synchronize task start (async-friendly barrier)
+            let barrier = Arc::new(tokio::sync::Barrier::new(NUM_TUPLES));
             let rids_arc = Arc::new(rids);
 
             // Create worker threads that will update different tuples concurrently
@@ -3059,7 +3059,7 @@ mod tests {
 
                 let handle = tokio::spawn(async move {
                     // Wait for all threads to be ready
-                    worker_barrier.wait();
+                    worker_barrier.wait().await;
 
                     // Begin transaction
                     let txn = match worker_txn_manager.begin(IsolationLevel::ReadCommitted) {
