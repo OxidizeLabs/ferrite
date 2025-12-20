@@ -1790,7 +1790,8 @@ mod mixed_type_operations {
         let result = mixed_expr3.evaluate(&tuple, &schema).unwrap();
         // Note: Due to floating-point precision, we need to check the approximate value
         if let Val::Decimal(val) = result.get_val() {
-            assert!((val - 5.85).abs() < 0.001); // Check within tolerance
+            let expected = (std::f32::consts::PI as f64) + 2.71f64;
+            assert!((val - expected).abs() < 1e-6); // Check within tolerance of computed sum
         } else {
             panic!("Expected Decimal result");
         }
