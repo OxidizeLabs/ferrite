@@ -749,7 +749,13 @@ impl TransactionalTableHeap {
             } else {
                 prev_meta.set_commit_timestamp(undo_log.ts);
             }
-            prev_meta.set_deleted(undo_log.is_deleted);
+            let prev_deleted = if undo_log.original_rid.is_some() {
+                // Delete undo logs store the pre-delete version; treat it as live.
+                false
+            } else {
+                undo_log.is_deleted
+            };
+            prev_meta.set_deleted(prev_deleted);
             if undo_log.prev_version.is_valid() {
                 prev_meta
                     .set_undo_log_idx(undo_log.prev_version.prev_log_idx)
@@ -868,7 +874,7 @@ impl TransactionalTableHeap {
 
         // Create undo log that points to the original version, now with RID for proper restoration
         let undo_log = UndoLog::new_for_delete(
-            false, // Not deleted in the previous version
+            true, // Deletion marker
             vec![true; current_tuple.get_column_count()],
             current_tuple.clone(),
             current_commit_ts.unwrap_or(INVALID_TS),

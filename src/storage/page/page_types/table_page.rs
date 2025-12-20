@@ -438,8 +438,11 @@ impl TablePage {
         let end = start + *size as usize;
 
         // Deserialize tuple data
-        match bincode::decode_from_slice(&self.data[start..end], storage_bincode_config()) {
-            Ok((tuple, _)) => {
+        match bincode::decode_from_slice::<Tuple, _>(&self.data[start..end], storage_bincode_config()) {
+            Ok((mut tuple, _)) => {
+                // Tuple RID is not persisted; set it from the caller-provided RID.
+                tuple.set_rid(*rid);
+
                 // Create owned TupleMeta by copying fields instead of cloning
                 let mut owned_meta =
                     TupleMeta::new_with_delete(meta.get_creator_txn_id(), meta.is_deleted());

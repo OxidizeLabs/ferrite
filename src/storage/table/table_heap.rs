@@ -371,7 +371,13 @@ impl TableHeap {
 
                         let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
                         prev_meta.set_commit_timestamp(undo_log.ts);
-                        prev_meta.set_deleted(undo_log.is_deleted);
+                        let prev_deleted = if undo_log.original_rid.is_some() {
+                            // Delete undo logs store the pre-delete version; treat it as live.
+                            false
+                        } else {
+                            undo_log.is_deleted
+                        };
+                        prev_meta.set_deleted(prev_deleted);
                         if undo_log.prev_version.is_valid() {
                             prev_meta
                                 .set_undo_log_idx(undo_log.prev_version.prev_log_idx)
@@ -411,7 +417,13 @@ impl TableHeap {
 
                     let mut prev_meta = TupleMeta::new(undo_log.prev_version.prev_txn);
                     prev_meta.set_commit_timestamp(undo_log.ts);
-                    prev_meta.set_deleted(undo_log.is_deleted);
+                    let prev_deleted = if undo_log.original_rid.is_some() {
+                        // Delete undo logs store the pre-delete version; treat it as live.
+                        false
+                    } else {
+                        undo_log.is_deleted
+                    };
+                    prev_meta.set_deleted(prev_deleted);
                     if undo_log.prev_version.is_valid() {
                         prev_meta
                             .set_undo_log_idx(undo_log.prev_version.prev_log_idx)
