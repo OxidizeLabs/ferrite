@@ -33,6 +33,23 @@ where
     }
 }
 
+// SAFETY: Node only moves across threads while protected by the outer RwLock
+// inside ConcurrentLRUCache. The contained key/value types must themselves
+// be Send + Sync to avoid interior unsafety.
+unsafe impl<K, V> Send for Node<K, V>
+where
+    K: Copy + Send + Sync,
+    V: Send + Sync,
+{
+}
+
+unsafe impl<K, V> Sync for Node<K, V>
+where
+    K: Copy + Send + Sync,
+    V: Send + Sync,
+{
+}
+
 /// High-performance LRU Cache Core using HashMap + Doubly-Linked List
 ///
 /// # Zero-Copy Design Philosophy
@@ -65,6 +82,23 @@ where
     head: Option<NonNull<Node<K, V>>>, // Most recently used
     tail: Option<NonNull<Node<K, V>>>, // Least recently used
     _phantom: PhantomData<(K, V)>,
+}
+
+// SAFETY: LRUCore is only shared across threads behind an RwLock in
+// ConcurrentLRUCache. Raw pointer fields are only mutated while the lock
+// is held, so requiring K/V to be Send + Sync preserves thread safety.
+unsafe impl<K, V> Send for LRUCore<K, V>
+where
+    K: Copy + Eq + Hash + Send + Sync,
+    V: Send + Sync,
+{
+}
+
+unsafe impl<K, V> Sync for LRUCore<K, V>
+where
+    K: Copy + Eq + Hash + Send + Sync,
+    V: Send + Sync,
+{
 }
 
 impl<K, V> LRUCore<K, V>
