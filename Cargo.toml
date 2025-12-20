@@ -46,7 +46,7 @@ crossbeam-channel = "0.5"
 futures = "0.3"
 
 # SQL parsing and processing
-sqlparser = "0.59"
+sqlparser = "0.60"
 regex = "1.12"
 hex = "0.4"
 
@@ -75,11 +75,10 @@ tokio = { version = "1.48", features = ["full", "test-util"] }
 # Testing framework dependencies
 mockall = "0.14"
 tempfile = "3.23"
-sqllogictest = "0.28"
-test-tag = "0.1"
+sqllogictest = "0.29"
 
 # Benchmarking
-criterion = { version = "0.7", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 # Benchmark targets
 [[bench]]

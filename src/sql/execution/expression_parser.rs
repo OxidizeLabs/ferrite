@@ -1575,7 +1575,7 @@ impl ExpressionParser {
                             DataType::Date32 => TypeId::Timestamp,
                             DataType::Datetime(_) => TypeId::Timestamp,
                             DataType::Datetime64(_, _) => TypeId::Timestamp,
-                            DataType::TimestampNtz => TypeId::Timestamp,
+                            DataType::TimestampNtz(_) => TypeId::Timestamp,
                             DataType::Interval { fields: _, precision: _ } => TypeId::Interval,
                             DataType::JSON => TypeId::JSON,
                             DataType::JSONB => TypeId::JSON,

@@ -39,22 +39,14 @@ impl QueryPlanner {
             Statement::Insert(stmt) => self.plan_builder.build_insert_plan(stmt),
             Statement::CreateTable(stmt) => self.plan_builder.build_create_table_plan(stmt),
             Statement::CreateIndex(stmt) => self.plan_builder.build_create_index_plan(stmt),
-            Statement::Update {
-                table,
-                assignments,
-                from,
-                selection,
-                returning,
-                or,
-                limit
-            } => self.plan_builder.build_update_plan(
-                table,
-                assignments,
-                from,
-                selection,
-                returning,
-                or,
-                limit
+            Statement::Update(update) => self.plan_builder.build_update_plan(
+                &update.table,
+                &update.assignments,
+                &update.from,
+                &update.selection,
+                &update.returning,
+                &update.or,
+                &update.limit,
             ),
             Statement::Delete(_) => self.plan_builder.build_delete_plan(stmt),
             Statement::Explain { .. } => self.plan_builder.build_explain_plan(stmt),
@@ -121,48 +113,34 @@ impl QueryPlanner {
                 location,
                 managed_location,
             ),
-            Statement::AlterTable {
-                name,
-                if_exists,
-                only,
-                operations,
-                location,
-                on_cluster,
-                iceberg: false,
-                end_token: _end_token,
-            } => self
-                .plan_builder
-                .build_alter_table_plan(name, if_exists, only, operations, location, on_cluster),
-            Statement::CreateView {
-                or_alter,
-                or_replace,
-                materialized,
-                secure: _secure, name,
-                name_before_not_exists: _name_before_not_exists, columns,
-                query,
-                options,
-                cluster_by,
-                comment,
-                with_no_schema_binding,
-                if_not_exists,
-                temporary,
-                to,
-                params,
-            } => self.plan_builder.build_create_view_plan(
-                or_alter,
-                or_replace,
-                materialized,
-                name,
-                columns,
-                query,
-                options,
-                cluster_by,
-                comment,
-                with_no_schema_binding,
-                if_not_exists,
-                temporary,
-                to,
-                params,
+            Statement::AlterTable(alter) => {
+                if alter.table_type.is_some() {
+                    return Err("ALTER TABLE is only supported for regular tables".to_string());
+                }
+                self.plan_builder.build_alter_table_plan(
+                    &alter.name,
+                    &alter.if_exists,
+                    &alter.only,
+                    &alter.operations,
+                    &alter.location,
+                    &alter.on_cluster,
+                )
+            }
+            Statement::CreateView(view) => self.plan_builder.build_create_view_plan(
+                &view.or_alter,
+                &view.or_replace,
+                &view.materialized,
+                &view.name,
+                &view.columns,
+                &view.query,
+                &view.options,
+                &view.cluster_by,
+                &view.comment,
+                &view.with_no_schema_binding,
+                &view.if_not_exists,
+                &view.temporary,
+                &view.to,
+                &view.params,
             ),
             Statement::AlterView {
                 name,

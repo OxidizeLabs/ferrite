@@ -42,15 +42,15 @@ impl LogicalPlanBuilder {
                 self.build_values_plan(&values.rows, &schema)?
             }
             SetExpr::Update(update_stmt) => match update_stmt {
-                Statement::Update {
-                    table,
-                    assignments,
-                    from,
-                    selection,
-                    returning,
-                    or,
-                    limit,
-                } => self.build_update_plan(table, assignments, from, selection, returning, or, limit)?,
+                Statement::Update(update) => self.build_update_plan(
+                    &update.table,
+                    &update.assignments,
+                    &update.from,
+                    &update.selection,
+                    &update.returning,
+                    &update.or,
+                    &update.limit,
+                )?,
                 _ => return Err("Expected Update statement".to_string()),
             },
             SetExpr::Delete(_) => return Err("DELETE is not supported in this context".to_string()),
@@ -871,15 +871,26 @@ impl LogicalPlanBuilder {
         constraints: &[TableConstraint],
         columns: &mut [Column],
     ) -> Result<(), String> {
+        fn index_column_name(index_col: &IndexColumn) -> Result<String, String> {
+            match &index_col.column.expr {
+                Expr::Identifier(ident) => Ok(ident.value.clone()),
+                Expr::CompoundIdentifier(parts) if !parts.is_empty() => {
+                    // Be permissive and accept the last identifier segment (e.g. schema.table.col)
+                    Ok(parts.last().unwrap().value.clone())
+                }
+                other => Err(format!(
+                    "Unsupported column reference in constraint: {:?}",
+                    other
+                )),
+            }
+        }
+
         for constraint in constraints {
             match constraint {
-                TableConstraint::PrimaryKey {
-                    columns: pk_columns,
-                    ..
-                } => {
+                TableConstraint::PrimaryKey(pk) => {
                     // Set primary key flag on the specified columns
-                    for pk_col_ident in pk_columns {
-                        let pk_col_name = pk_col_ident.to_string();
+                    for pk_index_col in &pk.columns {
+                        let pk_col_name = index_column_name(pk_index_col)?;
                         let column_found =
                             columns.iter_mut().find(|col| col.get_name() == pk_col_name);
                         match column_found {
@@ -896,13 +907,10 @@ impl LogicalPlanBuilder {
                         }
                     }
                 }
-                TableConstraint::Unique {
-                    columns: unique_columns,
-                    ..
-                } => {
+                TableConstraint::Unique(unique) => {
                     // Set unique flag on the specified columns
-                    for unique_col_ident in unique_columns {
-                        let unique_col_name = unique_col_ident.to_string();
+                    for unique_index_col in &unique.columns {
+                        let unique_col_name = index_column_name(unique_index_col)?;
                         let column_found = columns
                             .iter_mut()
                             .find(|col| col.get_name() == unique_col_name);
@@ -919,27 +927,22 @@ impl LogicalPlanBuilder {
                         }
                     }
                 }
-                TableConstraint::ForeignKey {
-                    columns: fk_columns,
-                    foreign_table,
-                    referred_columns,
-                    ..
-                } => {
+                TableConstraint::ForeignKey(fk) => {
                     // Process FOREIGN KEY constraint
-                    if fk_columns.len() != 1 {
+                    if fk.columns.len() != 1 {
                         log::warn!("Multi-column FOREIGN KEY constraints are not yet supported");
                         continue;
                     }
-                    if referred_columns.len() != 1 {
+                    if fk.referred_columns.len() != 1 {
                         log::warn!(
                             "FOREIGN KEY constraints with multiple referred columns are not yet supported"
                         );
                         continue;
                     }
 
-                    let fk_col_name = fk_columns[0].to_string();
-                    let referred_table = foreign_table.to_string();
-                    let referred_col_name = referred_columns[0].to_string();
+                    let fk_col_name = fk.columns[0].value.clone();
+                    let referred_table = fk.foreign_table.to_string();
+                    let referred_col_name = fk.referred_columns[0].value.clone();
 
                     let column_found = columns.iter_mut().find(|col| col.get_name() == fk_col_name);
                     match column_found {
