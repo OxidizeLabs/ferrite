@@ -172,9 +172,31 @@ impl TransactionManager {
         );
 
         let current_state = txn.get_state();
-        if current_state != TransactionState::Running && current_state != TransactionState::Tainted
-        {
-            panic!("txn not in running / tainted state");
+        match current_state {
+            TransactionState::Aborted => {
+                log::warn!(
+                    "COMMIT: txn {} already aborted, returning false",
+                    txn.txn_id_human_readable()
+                );
+                return false;
+            }
+            TransactionState::Committed => {
+                log::warn!(
+                    "COMMIT: txn {} already committed, treating as success",
+                    txn.txn_id_human_readable()
+                );
+                return true;
+            }
+            TransactionState::Running
+            | TransactionState::Tainted
+            | TransactionState::Shrinking
+            | TransactionState::Growing => {
+                log::trace!(
+                    "COMMIT: txn {} proceeding from state {:?}",
+                    txn.txn_id_human_readable(),
+                    current_state
+                );
+            }
         }
 
         // Use logical watermark-based commit to set commit_ts and update running set
