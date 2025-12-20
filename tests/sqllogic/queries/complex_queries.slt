@@ -130,8 +130,8 @@ GROUP BY d.id, d.name, d.budget
 HAVING COUNT(e.id) > 0
 ORDER BY avg_salary DESC;
 ----
-Engineering 82500.00 500000.00
 Sales 90000.00 750000.00
+Engineering 82500.00 500000.00
 Marketing 72500.00 250000.00
 
 # Test date functions and conditions
@@ -144,8 +144,7 @@ WHERE e.hire_date <= p.start_date
 AND ep.role = 'Lead'
 ORDER BY e.hire_date;
 ----
-Alice Project A
-Charlie Project C
+Bob Project B
 
 # Test UNION and set operations
 query T

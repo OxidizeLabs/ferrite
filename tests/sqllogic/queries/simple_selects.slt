@@ -1,0 +1,66 @@
+# Simple Select Query Tests
+
+# Setup test table and data
+statement ok
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    age INTEGER,
+    city TEXT
+);
+
+statement ok
+INSERT INTO users (id, name, age, city) VALUES
+    (1, 'Alice', 30, 'Seattle'),
+    (2, 'Bob', 25, 'Portland'),
+    (3, 'Carol', 35, 'Seattle'),
+    (4, 'Dave', 40, 'San Francisco'),
+    (5, 'Eve', 28, 'Portland');
+
+# Alphabetical ordering
+query T
+SELECT name FROM users ORDER BY name;
+----
+Alice
+Bob
+Carol
+Dave
+Eve
+
+# Filter with multiple columns
+query TI
+SELECT name, age
+FROM users
+WHERE age >= 30
+ORDER BY age, name;
+----
+Alice 30
+Carol 35
+Dave 40
+
+# Simple WHERE equality
+query T
+SELECT name
+FROM users
+WHERE city = 'Seattle'
+ORDER BY id;
+----
+Alice
+Carol
+
+# Ordering with LIMIT
+query T
+SELECT name
+FROM users
+ORDER BY age DESC, name
+LIMIT 2;
+----
+Dave
+Carol
+
+# Constant expression
+query I
+SELECT 1 + 2;
+----
+3
+

@@ -3,7 +3,7 @@
 use sqllogictest::{DB, DBOutput, DefaultColumnType};
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -333,8 +333,9 @@ fn setup_test_logging() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqllogictest::Runner;
+    use sqllogictest::{MakeConnection, Runner};
     use std::fs;
+    use std::path::Path;
 
     struct TestSuiteStats {
         name: String,
@@ -358,6 +359,27 @@ mod tests {
         }
     }
 
+    fn build_runner(
+        shared_stats: Arc<Mutex<TestStats>>,
+        config: DBConfig,
+    ) -> Runner<TKDBTest, impl MakeConnection<Conn = TKDBTest>> {
+        Runner::new(move || {
+            let shared_stats_clone = shared_stats.clone();
+            let config = config.clone();
+            async move {
+                let instance = DBInstance::new(config.clone()).await?;
+
+                let db = TKDBTest {
+                    instance,
+                    config,
+                    stats: shared_stats_clone,
+                };
+
+                Ok(db)
+            }
+        })
+    }
+
     async fn run_test_file(path: &Path) -> Result<TestStats, Box<dyn Error>> {
         let start_time = Instant::now();
 
@@ -370,21 +392,7 @@ mod tests {
         // Create shared stats that will be used by all DB instances
         let shared_stats = Arc::new(Mutex::new(TestStats::new()));
 
-        let mut runner = Runner::new(|| {
-            let shared_stats_clone = shared_stats.clone();
-            async move {
-                let config = generate_temp_db_config(); // Generate fresh config for each connection
-                let instance = DBInstance::new(config.clone()).await?;
-
-                let db = TKDBTest {
-                    instance,
-                    config,
-                    stats: shared_stats_clone,
-                };
-
-                Ok(db)
-            }
-        });
+        let mut runner = build_runner(shared_stats.clone(), config.clone());
 
         let result = runner.run_file(path);
 
@@ -479,82 +487,80 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn run_ddl_tests() -> Result<(), Box<dyn Error>> {
-        setup_test_logging();
-        let mut stats = TestSuiteStats::new("DDL Tests");
-        let result = run_test_directory(Path::new("tests/sqllogic/ddl"), &mut stats).await;
-        stats.finish();
-        cleanup_temp_directory();
-        result
+    fn write_temp_slt(name: &str, content: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("{}_{}.slt", name, nanos));
+        fs::write(&path, content).expect("failed to write temp slt");
+        path
     }
 
-    #[tokio::test]
-    async fn run_dml_tests() -> Result<(), Box<dyn Error>> {
-        setup_test_logging();
-        let mut stats = TestSuiteStats::new("DML Tests");
-        let result = run_test_directory(Path::new("tests/sqllogic/dml"), &mut stats).await;
-        stats.finish();
-        cleanup_temp_directory();
-        result
+    /// Run a single .slt file as its own async test.
+    async fn run_single_slt_file(path: &Path) -> Result<(), Box<dyn Error>> {
+        run_test_file(path).await.map(|_| ())
     }
 
-    #[tokio::test]
-    async fn run_query_tests() -> Result<(), Box<dyn Error>> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_test_file_succeeds_for_valid_slt() -> Result<(), Box<dyn Error>> {
         setup_test_logging();
-        let mut stats = TestSuiteStats::new("Query Tests");
-        let result = run_test_directory(Path::new("tests/sqllogic/queries"), &mut stats).await;
-        stats.finish();
-        cleanup_temp_directory();
-        result
-    }
+        let slt = r#"
+# Minimal SLT success
+statement ok
+CREATE TABLE t(x INT);
 
-    #[tokio::test]
-    async fn run_all_tests() -> Result<(), Box<dyn Error>> {
-        setup_test_logging();
-        let test_categories = [
-            "ddl",
-            "dml",
-            "queries",
-            "transactions",
-            "indexes",
-            "constraints",
-            "functions",
-        ];
+statement ok
+INSERT INTO t VALUES (1);
 
-        let mut total_stats = TestStats::new();
-        let start_time = Instant::now();
+statement ok
+INSERT INTO t VALUES (2);
 
-        for category in test_categories.iter() {
-            let dir = PathBuf::from("tests/sqllogic").join(category);
-            if dir.exists() {
-                let mut suite_stats = TestSuiteStats::new(&format!("{} Tests", category));
-                println!("\n{}Running {} tests...{}", BLUE, category, RESET);
-                run_test_directory(&dir, &mut suite_stats).await?;
+query I
+SELECT COUNT(*) FROM t;
+----
+2
+"#;
+        let slt_path = write_temp_slt("slt_valid_runner", slt);
 
-                total_stats.files_run += suite_stats.stats.files_run;
-                total_stats.statements_run += suite_stats.stats.statements_run;
-                total_stats.queries_run += suite_stats.stats.queries_run;
-                total_stats.errors_caught += suite_stats.stats.errors_caught;
-                total_stats.successful_statements += suite_stats.stats.successful_statements;
-                total_stats.successful_queries += suite_stats.stats.successful_queries;
-                total_stats.failed_statements += suite_stats.stats.failed_statements;
-                total_stats.failed_queries += suite_stats.stats.failed_queries;
+        let stats = run_test_file(&slt_path).await?;
+        assert_eq!(stats.files_run, 1);
+        assert_eq!(stats.statements_run, 3);
+        assert_eq!(stats.queries_run, 1);
+        assert_eq!(stats.failed_statements, 0);
+        assert_eq!(stats.failed_queries, 0);
 
-                suite_stats.finish();
-            }
-        }
-
-        total_stats.duration = start_time.elapsed();
-        println!("\n{}Overall Test Results:{}", BLUE, RESET);
-        println!("====================");
-        total_stats.print_summary();
-
-        // Clean up all temporary files
-        cleanup_temp_directory();
-
+        let _ = fs::remove_file(&slt_path);
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_test_file_propagates_query_mismatch() {
+        setup_test_logging();
+        let slt = r#"
+# Minimal SLT expected to fail
+statement ok
+CREATE TABLE t(x INT);
+
+statement ok
+INSERT INTO t VALUES (1);
+
+query I
+SELECT COUNT(*) FROM t;
+----
+2
+"#;
+        let slt_path = write_temp_slt("slt_fail_runner", slt);
+
+        let result = run_test_file(&slt_path).await;
+        let _ = fs::remove_file(&slt_path);
+
+        assert!(result.is_err());
+    }
+
+    // Auto-generated per-file sqllogic tests live in OUT_DIR/sqllogic_tests.rs
+    include!(concat!(env!("OUT_DIR"), "/sqllogic_tests.rs"));
 
     async fn run_test_suite(suite_name: &str) -> Result<TestStats, Box<dyn Error>> {
         let dir = PathBuf::from("tests/sqllogic").join(suite_name);
@@ -566,76 +572,5 @@ mod tests {
         run_test_directory(&dir, &mut suite_stats).await?;
         suite_stats.finish();
         Ok(suite_stats.stats)
-    }
-
-    #[tokio::test]
-    async fn run_data_modification_suite() -> Result<(), Box<dyn Error>> {
-        setup_test_logging();
-        let start_time = Instant::now();
-        let mut total_stats = TestStats::new();
-
-        println!("\n{}Running Data Modification Test Suite{}", BLUE, RESET);
-        println!("===================================");
-
-        // Run both DDL and DML tests together
-        let ddl_stats = run_test_suite("ddl").await?;
-        let dml_stats = run_test_suite("dml").await?;
-
-        total_stats.files_run = ddl_stats.files_run + dml_stats.files_run;
-        total_stats.statements_run = ddl_stats.statements_run + dml_stats.statements_run;
-        total_stats.queries_run = ddl_stats.queries_run + dml_stats.queries_run;
-        total_stats.errors_caught = ddl_stats.errors_caught + dml_stats.errors_caught;
-        total_stats.successful_statements =
-            ddl_stats.successful_statements + dml_stats.successful_statements;
-        total_stats.successful_queries =
-            ddl_stats.successful_queries + dml_stats.successful_queries;
-        total_stats.failed_statements = ddl_stats.failed_statements + dml_stats.failed_statements;
-        total_stats.failed_queries = ddl_stats.failed_queries + dml_stats.failed_queries;
-        total_stats.duration = start_time.elapsed();
-
-        println!("\n{}Combined Data Modification Results:{}", BLUE, RESET);
-        println!("=================================");
-        total_stats.print_summary();
-
-        // Clean up all temporary files
-        cleanup_temp_directory();
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn run_query_optimization_suite() -> Result<(), Box<dyn Error>> {
-        setup_test_logging();
-        let start_time = Instant::now();
-        let mut total_stats = TestStats::new();
-
-        println!("\n{}Running Query Optimization Test Suite{}", BLUE, RESET);
-        println!("===================================");
-
-        // Run queries and indexes tests together
-        let query_stats = run_test_suite("queries").await?;
-        let index_stats = run_test_suite("indexes").await?;
-
-        total_stats.files_run = query_stats.files_run + index_stats.files_run;
-        total_stats.statements_run = query_stats.statements_run + index_stats.statements_run;
-        total_stats.queries_run = query_stats.queries_run + index_stats.queries_run;
-        total_stats.errors_caught = query_stats.errors_caught + index_stats.errors_caught;
-        total_stats.successful_statements =
-            query_stats.successful_statements + index_stats.successful_statements;
-        total_stats.successful_queries =
-            query_stats.successful_queries + index_stats.successful_queries;
-        total_stats.failed_statements =
-            query_stats.failed_statements + index_stats.failed_statements;
-        total_stats.failed_queries = query_stats.failed_queries + index_stats.failed_queries;
-        total_stats.duration = start_time.elapsed();
-
-        println!("\n{}Combined Query Optimization Results:{}", BLUE, RESET);
-        println!("==================================");
-        total_stats.print_summary();
-
-        // Clean up all temporary files
-        cleanup_temp_directory();
-
-        Ok(())
     }
 }
