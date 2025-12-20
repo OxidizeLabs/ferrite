@@ -176,13 +176,12 @@ impl SchemaManager {
 
         for option_def in options {
             match &option_def.option {
-                ColumnOption::Unique { is_primary, .. } => {
-                    if *is_primary {
-                        is_primary_key = true;
-                        is_not_null = true; // PRIMARY KEY implies NOT NULL
-                    } else {
-                        is_unique = true;
-                    }
+                ColumnOption::PrimaryKey(_) => {
+                    is_primary_key = true;
+                    is_not_null = true; // PRIMARY KEY implies NOT NULL
+                }
+                ColumnOption::Unique(_) => {
+                    is_unique = true;
                 }
                 ColumnOption::NotNull => {
                     is_not_null = true;
@@ -190,30 +189,26 @@ impl SchemaManager {
                 ColumnOption::Null => {
                     is_not_null = false;
                 }
-                ColumnOption::ForeignKey {
-                    foreign_table,
-                    referred_columns,
-                    on_delete,
-                    on_update,
-                    ..
-                } => {
+                ColumnOption::ForeignKey(fk) => {
                     // Convert ObjectName to table name string
-                    let table_name = self.object_name_to_string(foreign_table);
+                    let table_name = self.object_name_to_string(&fk.foreign_table);
 
                     // For now, we only support single-column foreign keys
-                    if referred_columns.len() != 1 {
+                    if fk.referred_columns.len() != 1 {
                         return Err(
                             "Multi-column foreign keys are not currently supported".to_string()
                         );
                     }
 
-                    let column_name = referred_columns[0].value.clone();
+                    let column_name = fk.referred_columns[0].value.clone();
 
                     // Convert sqlparser ReferentialAction to our ReferentialAction
-                    let on_delete_action = on_delete
+                    let on_delete_action = fk
+                        .on_delete
                         .as_ref()
                         .map(|action| self.convert_referential_action(action));
-                    let on_update_action = on_update
+                    let on_update_action = fk
+                        .on_update
                         .as_ref()
                         .map(|action| self.convert_referential_action(action));
 
@@ -564,7 +559,7 @@ impl SchemaManager {
             DataType::Time(_, _) => Ok(TypeId::Time),
             DataType::Datetime(_) => Ok(TypeId::Timestamp),
             DataType::Datetime64(_, _) => Ok(TypeId::Timestamp),
-            DataType::TimestampNtz => Ok(TypeId::Timestamp),
+            DataType::TimestampNtz(_) => Ok(TypeId::Timestamp),
             DataType::Interval { fields: _, precision: _ } => Ok(TypeId::Interval),
             // Special types
             DataType::JSON => Ok(TypeId::JSON),
