@@ -102,7 +102,15 @@ async fn test_held_write_lock_actually_holds_lock() {
     let internal_arc = Arc::clone(internal_page.get_page());
 
     // Create a HeldWriteLock - this should acquire and hold the write lock
-    let held_lock = HeldWriteLock::new(internal_page);
+    //
+    // IMPORTANT: This is an integration test, so `tkdb` is compiled without `cfg(test)`.
+    // That means any "test-only" lock-acquisition timeout defaults inside the library
+    // do NOT apply here. Using `HeldWriteLock::new()` (which can wait indefinitely)
+    // can therefore hang this test if the lock can't be acquired.
+    //
+    // Use `try_new()` so the test is fail-fast and never blocks unboundedly.
+    let held_lock = HeldWriteLock::try_new(internal_page)
+        .expect("Failed to acquire internal-page write lock (try_new returned None)");
 
     // Verify we can read from the held lock
     let _size = held_lock.get_size();

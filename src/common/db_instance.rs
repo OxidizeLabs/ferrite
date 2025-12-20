@@ -209,6 +209,7 @@ impl DBInstance {
             "Executing SQL with isolation level {:?}: {}",
             isolation_level, sql
         );
+        let normalized_sql = sql.trim().to_lowercase();
 
         // Begin transaction through factory
         let txn_ctx = self.transaction_factory.begin_transaction(isolation_level);
@@ -229,6 +230,13 @@ impl DBInstance {
         // Handle transaction completion
         match result {
             Ok(success) => {
+                // Transaction control statements like ROLLBACK are already handled inside the
+                // execution engine and should not be auto-committed/aborted here to avoid
+                // double-finalizing the transaction.
+                if normalized_sql.starts_with("rollback") {
+                    return Ok(success);
+                }
+
                 if success {
                     if self
                         .transaction_factory
