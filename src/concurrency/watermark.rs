@@ -1245,28 +1245,31 @@ mod concurrency_tests {
         );
     }
 
-    #[test]
-    fn test_concurrent_producer_consumer() {
+    #[tokio::test]
+    async fn test_concurrent_producer_consumer() {
         // Test producer-consumer pattern with watermark
         let watermark = Arc::new(Mutex::new(Watermark::new()));
         let channel_capacity = 100;
 
         // Create a multi-producer, multi-consumer channel
-        let (sender, receiver) = bounded(channel_capacity);
+        // Using tokio mpsc protected by Mutex for multiple consumers
+        let (sender, receiver) = mpsc::channel(channel_capacity);
+        let receiver = Arc::new(tokio::sync::Mutex::new(receiver));
 
         // Producer: generates timestamps and registers them
         let producer_watermark = Arc::clone(&watermark);
-        let producer = thread::spawn(move || {
+        let producer = tokio::spawn(async move {
             for _ in 0..500 {
-                let mut w = producer_watermark.lock();
-                let ts = w.get_next_ts_and_register();
+                let ts = {
+                    let mut w = producer_watermark.lock();
+                    w.get_next_ts_and_register()
+                };
 
                 // Send timestamp to consumers
-                sender.send(ts).unwrap();
+                sender.send(ts).await.unwrap();
 
                 // Small sleep to simulate work
-                drop(w); // Release lock before sleeping
-                thread::sleep(std::time::Duration::from_micros(50));
+                tokio::time::sleep(std::time::Duration::from_micros(50)).await;
             }
             // Sender is dropped at end of function, closing the channel
         });
@@ -1276,29 +1279,36 @@ mod concurrency_tests {
         let consumers: Vec<_> = (0..num_consumers)
             .map(|_| {
                 let consumer_watermark = Arc::clone(&watermark);
-                let consumer_receiver = receiver.clone(); // Crossbeam channels can be cloned
+                let consumer_receiver = Arc::clone(&receiver);
 
-                thread::spawn(move || {
-                    while let Ok(ts) = consumer_receiver.recv() {
-                        // Process timestamp
-                        thread::sleep(std::time::Duration::from_micros(200));
+                tokio::spawn(async move {
+                    loop {
+                        let ts = {
+                            let mut rx = consumer_receiver.lock().await;
+                            rx.recv().await
+                        };
 
-                        // Mark as processed by unregistering
-                        consumer_watermark.lock().remove_txn(ts);
+                        match ts {
+                            Some(ts) => {
+                                // Process timestamp
+                                tokio::time::sleep(std::time::Duration::from_micros(200)).await;
+
+                                // Mark as processed by unregistering
+                                consumer_watermark.lock().remove_txn(ts);
+                            }
+                            None => break,
+                        }
                     }
                 })
             })
             .collect();
 
         // Wait for producer to finish
-        producer.join().unwrap();
-
-        // Original receiver is dropped when the crossbeam channel is closed
-        // No need to explicitly drop it
+        producer.await.unwrap();
 
         // Wait for consumers to finish processing remaining items
         for consumer in consumers {
-            consumer.join().unwrap();
+            consumer.await.unwrap();
         }
 
         // Verify final state
@@ -1502,8 +1512,8 @@ mod concurrency_tests {
         );
     }
 
-    #[test]
-    fn test_recovery_from_interruption() {
+    #[tokio::test]
+    async fn test_recovery_from_interruption() {
         // Test that watermark can recover correctly after thread interruption
         let watermark = Arc::new(Mutex::new(Watermark::new()));
 
@@ -1525,15 +1535,15 @@ mod concurrency_tests {
 
         // Create a thread that will be forcefully interrupted
         let watermark_clone = Arc::clone(&watermark);
-        let (sender, receiver) = bounded::<()>(1);
+        let (sender, mut receiver) = mpsc::channel::<()>(1);
 
-        let handle = thread::spawn(move || {
+        let handle = tokio::spawn(async move {
             // Remove transactions 2 and 4
             watermark_clone.lock().remove_txn(2);
             watermark_clone.lock().remove_txn(4);
 
             // Wait to be interrupted (this simulates a long operation)
-            let _ = receiver.recv();
+            let _ = receiver.recv().await;
 
             // These operations might not complete due to interruption
             watermark_clone.lock().remove_txn(1);
@@ -1542,13 +1552,13 @@ mod concurrency_tests {
         });
 
         // Sleep briefly to let the thread start working
-        thread::sleep(std::time::Duration::from_millis(50));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Forcefully drop the channel to interrupt the thread
         drop(sender);
 
         // Wait a bit for potential thread completion
-        let _ = handle.join(); // Might error if thread panicked, that's ok
+        let _ = handle.await; // Might error if thread panicked, that's ok
 
         // At this point, we might have an inconsistent state
         // Let's verify we can still work with the watermark
