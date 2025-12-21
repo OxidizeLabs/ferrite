@@ -1,49 +1,11 @@
-use std::collections::{HashMap, VecDeque};
+//! # Prediction & Trends
+//!
+//! Structures for storing historical trend data and predictive analysis results.
+//!
+//! This module supports features that look at metrics over time to identify trends
+//! (e.g., "Latency is increasing over the last hour") or store forecast data.
+
 use std::time::{Duration, Instant};
-
-/// Trend analysis for predictive monitoring
-#[derive(Debug)]
-pub struct TrendAnalyzer {
-    pub trend_data: HashMap<String, VecDeque<(Instant, f64)>>,
-    pub trend_window: Duration,
-    pub prediction_horizon: Duration,
-}
-
-/// Predictive performance engine
-#[derive(Debug)]
-pub struct PredictionEngine {
-    pub models: HashMap<String, PredictionModel>,
-    pub forecast_horizon: Duration,
-    pub confidence_threshold: f64,
-}
-
-/// Prediction model for performance forecasting
-#[derive(Debug)]
-pub struct PredictionModel {
-    pub metric_name: String,
-    pub model_type: ModelType,
-    pub accuracy: f64,
-    pub last_trained: Instant,
-    pub predictions: VecDeque<Prediction>,
-}
-
-/// Types of prediction models
-#[derive(Debug)]
-pub enum ModelType {
-    LinearRegression,
-    MovingAverage,
-    ExponentialSmoothing,
-    Seasonal,
-}
-
-/// Performance prediction
-#[derive(Debug, Clone)]
-pub struct Prediction {
-    pub timestamp: Instant,
-    pub predicted_value: f64,
-    pub confidence_interval: (f64, f64),
-    pub confidence_score: f64,
-}
 
 /// Trend prediction data point
 #[derive(Debug, Clone)]
