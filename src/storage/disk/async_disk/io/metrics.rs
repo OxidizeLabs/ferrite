@@ -1,3 +1,22 @@
+//! # I/O Metrics Collection
+//!
+//! The `IOMetrics` struct provides a comprehensive observability layer for the I/O subsystem.
+//! It tracks performance counters, throughput, and latency statistics in real-time.
+//!
+//! ## Key Features
+//!
+//! - **Atomic Counters**: Lock-free tracking of total, completed, failed, and cancelled operations.
+//! - **Throughput Tracking**: Monitors bytes read/written to calculate I/O bandwidth usage.
+//! - **Latency Analysis**:
+//!     - Tracks total, minimum, and maximum operation durations.
+//!     - Maintains a rolling window of recent durations to calculate short-term averages.
+//! - **State Monitoring**: Tracks current pending operations to detect backpressure or stalls.
+//!
+//! ## Usage
+//!
+//! Metrics are collected automatically by the `CompletionTracker` and can be queried by monitoring
+//! systems or the dashboard to visualize database health.
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};

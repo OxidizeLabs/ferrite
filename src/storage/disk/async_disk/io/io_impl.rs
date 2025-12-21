@@ -1,6 +1,29 @@
-// Async I/O Engine implementation
-// Refactored into separate modules for better organization
-// Supports direct I/O with aligned buffers for optimal performance
+//! # Async I/O Engine
+//!
+//! The `AsyncIOEngine` is the central coordinator for the asynchronous I/O subsystem. It ties together
+//! all modular components (Queue, Workers, Executor, Completion Tracking) to provide a high-performance,
+//! non-blocking I/O interface for the database.
+//!
+//! ## Architecture
+//!
+//! The engine implements a producer-consumer architecture:
+//! - **Producers**: Database components call methods like `read_page` or `write_page`, which enqueue
+//!   operations into a priority queue.
+//! - **Consumers**: A pool of background worker threads (managed by `IOWorkerManager`) dequeue
+//!   operations and execute them using the `IOOperationExecutor`.
+//!
+//! ## Key Features
+//!
+//! - **Priority Scheduling**: Operations are processed based on importance (e.g., WAL writes > Page writes > Prefetch reads).
+//! - **Concurrency Control**: Limits the number of in-flight I/O requests to prevent system overload.
+//! - **Direct I/O Support**: Configurable support for O_DIRECT to bypass OS page cache.
+//! - **Completion Tracking**: Callers receive `oneshot` channels to await results asynchronously.
+//! - **Graceful Shutdown**: Coordination for safe termination of worker threads and flushing of queues.
+//!
+//! ## Usage
+//!
+//! This struct is the main entry point for I/O in the `AsyncDiskManager`. It should be instantiated once
+//! and shared across the application.
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::io::completion::CompletionTracker;

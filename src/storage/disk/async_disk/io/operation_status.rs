@@ -1,3 +1,23 @@
+//! # I/O Operation Status
+//!
+//! This module defines the state machine and result types for tracking individual I/O operations.
+//! It allows callers to query the state of an asynchronous request or await its result.
+//!
+//! ## Key Types
+//!
+//! - **`OperationStatus`**: An enum representing the lifecycle state of an operation:
+//!     - `Pending`: In queue or currently executing. Contains the `oneshot` sender for notification.
+//!     - `Completed`: Successfully finished or failed. Contains timing info and the result.
+//!     - `Cancelled`: Aborted before completion.
+//! - **`OperationResult`**: The outcome of an operation (`Success(Vec<u8>)` or `Error(String)`).
+//! - **`OperationId`**: Unique identifier alias (`u64`).
+//!
+//! ## Features
+//!
+//! - **Timeout Detection**: Helper methods to check if a pending operation has exceeded its TTL.
+//! - **In-Place Updates**: State transitions (e.g., Pending -> Completed) handle the logic of
+//!   notifying waiters via channels.
+
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 

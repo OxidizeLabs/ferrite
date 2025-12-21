@@ -1,3 +1,35 @@
+//! # I/O Completion Tracking
+//!
+//! The `CompletionTracker` provides a robust mechanism for tracking the lifecycle and status of
+//! asynchronous I/O operations in the Async Disk Manager. It bridges the gap between low-level
+//! asynchronous I/O execution and high-level request management.
+//!
+//! ## Architecture
+//!
+//! The tracker maintains a registry of active and recently completed operations, allowing callers to:
+//! - Start new tracked operations and receive a unique `OperationId`.
+//! - Await completion via direct channels (`oneshot`) or broadcast events.
+//! - Query the status of ongoing or completed operations.
+//!
+//! ## Key Features
+//!
+//! - **Lifecycle Management**: Tracks operations through `Pending`, `Completed`, and `Cancelled` states.
+//! - **Notification System**:
+//!     - **Direct**: Uses `oneshot` channels for efficient, single-consumer notification.
+//!     - **Broadcast**: Uses `broadcast` channels to notify multiple listeners (e.g., monitoring tools).
+//! - **Timeout Handling**: Automatically detects and fails operations that exceed their configured duration.
+//! - **Automatic Cleanup**: A background task periodically purges old operation records to prevent memory leaks.
+//! - **Metrics Integration**: Automatically records operation duration, data size, and success/failure rates.
+//! - **Batch Waiting**: Supports efficiently waiting for multiple operations to complete simultaneously.
+//!
+//! ## Usage
+//!
+//! The `CompletionTracker` is typically used by the `AsyncDiskManager` to coordinate I/O requests.
+//! Callers start an operation, getting an ID and receiver, and then use the tracker to signal completion
+//! or failure from the I/O backend.
+//!
+//! This module contains the `CompletionTracker`, `OperationStatus`, `OperationResult`, and configuration structures.
+
 use super::metrics::IOMetrics;
 use super::operation_status::{OperationId, OperationResult, OperationStatus};
 use std::collections::HashMap;

@@ -1,7 +1,26 @@
-// I/O Worker Management Module
-//
-// This module handles the worker thread lifecycle and operation processing,
-// including worker spawning, shutdown, and operation execution coordination.
+//! # I/O Worker Management
+//!
+//! The `IOWorkerManager` handles the lifecycle of background worker threads that process I/O operations.
+//! It acts as the bridge between the priority queue and the execution logic.
+//!
+//! ## Architecture
+//!
+//! This manager spawns and supervises a pool of dedicated Tokio tasks ("workers"). Each worker runs a
+//! continuous loop that:
+//! 1. Dequeues the highest-priority operation from the `IOQueueManager`.
+//! 2. Acquires a permit from a concurrency semaphore (backpressure).
+//! 3. Executes the operation via the `IOOperationExecutor`.
+//! 4. Reports completion or failure to the `CompletionTracker`.
+//!
+//! ## Key Features
+//!
+//! - **Dynamic Scaling**: Supports starting a configurable number of worker threads.
+//! - **Concurrency Limiting**: Uses a `Semaphore` to globally limit the number of simultaneous disk I/O
+//!   operations, independent of the number of worker threads.
+//! - **Graceful Shutdown**: Implements a robust shutdown protocol using signals and atomic flags to
+//!   ensure workers complete in-flight requests before terminating.
+//! - **Fault Isolation**: Each worker runs independently; a panic in one (though unlikely) does not
+//!   crash the entire system (in a robust implementation, this would also include restart logic).
 
 use super::executor::IOOperationExecutor;
 use super::operations::IOOperation;

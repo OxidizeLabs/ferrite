@@ -1,8 +1,39 @@
-// I/O Operation Executor Module
-//
-// This module handles the actual execution of I/O operations,
-// including file operations for both database and log files.
-// Supports direct I/O with properly aligned buffers for optimal performance.
+//! # I/O Operation Executor
+//!
+//! The `IOOperationExecutor` is responsible for the low-level execution of asynchronous I/O operations
+//! against the database and log files. It serves as the "worker" component in the I/O pipeline,
+//! translating high-level operation types into concrete `tokio::fs` calls.
+//!
+//! ## Architecture
+//!
+//! The executor manages access to shared file handles (`Arc<Mutex<File>>`) for the database file
+//! (fixed-size pages) and the Write-Ahead Log (WAL, variable-length records). It supports both
+//! buffered I/O and Direct I/O (O_DIRECT) modes.
+//!
+//! ## Key Features
+//!
+//! - **Direct I/O Support**: When enabled, uses `AlignedBuffer` to ensure memory alignment requirements
+//!   are met for `O_DIRECT` operations (critical for bypassing OS page cache).
+//! - **Operation Dispatch**: Centralized `execute_operation_type` method dispatching specific logic for:
+//!     - `ReadPage` / `WritePage`: Fixed-size random access to database pages.
+//!     - `AppendLog` / `ReadLog`: Sequential access for WAL records.
+//!     - `Sync` / `SyncLog`: Durability primitives (fsync/fdatasync).
+//! - **Thread Safety**: Safely shares file handles across concurrent async tasks using Tokio mutexes.
+//! - **Metadata Logging**: Optional debug logging tracking file sizes and operation offsets for debugging.
+//!
+//! ## Usage
+//!
+//! This component is typically wrapped by the `AsyncDiskManager` or a worker pool. It is stateless
+//! regarding the *content* of the I/O but stateful regarding the *configuration* (e.g., Direct I/O settings).
+//!
+//! ## Performance Considerations
+//!
+//! - **Direct I/O**: For the database file, Direct I/O avoids double-buffering in the OS page cache
+//!   but requires strictly aligned memory buffers.
+//! - **Buffered WAL**: The WAL always uses buffered I/O because its write patterns (small, variable appends)
+//!   are poorly suited for the block-aligned restrictions of Direct I/O.
+//!
+//! This module contains the `IOOperationExecutor` struct.
 
 use super::operations::IOOperationType;
 use crate::common::config::{DB_PAGE_SIZE, PageId};
