@@ -5605,41 +5605,125 @@ mod tests {
     // MEMORY SAFETY TESTS MODULE
     // ==============================================
     mod memory_safety {
+        use super::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        // Helper to track object lifecycle
+        struct LifeCycleTracker {
+            _id: usize,
+            counter: Arc<AtomicUsize>,
+        }
+
+        impl LifeCycleTracker {
+            fn new(id: usize, counter: Arc<AtomicUsize>) -> Self {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Self { _id: id, counter }
+            }
+        }
+
+        impl Drop for LifeCycleTracker {
+            fn drop(&mut self) {
+                self.counter.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
 
         #[test]
         fn test_no_memory_leaks_on_eviction() {
-            // This test relies on tools like valgrind or miri to detect leaks
-            todo!()
+            let counter = Arc::new(AtomicUsize::new(0));
+            let mut cache = LRUCore::new(2);
+
+            // Insert 2 items
+            cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
+            cache.insert(2, Arc::new(LifeCycleTracker::new(2, counter.clone())));
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+
+            // Insert 3rd item - should evict 1
+            cache.insert(3, Arc::new(LifeCycleTracker::new(3, counter.clone())));
+            
+            // Should have 2 items in cache (2 and 3), 1 evicted and dropped
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+            assert!(!cache.contains(&1));
+            assert!(cache.contains(&2));
+            assert!(cache.contains(&3));
         }
 
         #[test]
         fn test_no_memory_leaks_on_remove() {
-            // Test that removing items doesn't leak memory
-            todo!()
+            let counter = Arc::new(AtomicUsize::new(0));
+            let mut cache = LRUCore::new(5);
+
+            cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+            // Remove item
+            {
+                let _item = cache.remove(&1);
+                // Still alive because we hold the Arc
+                assert_eq!(counter.load(Ordering::SeqCst), 1);
+            }
+            // Now dropped
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
         }
 
         #[test]
         fn test_no_memory_leaks_on_pop_lru() {
-            // Test that popping LRU items doesn't leak memory
-            todo!()
+            let counter = Arc::new(AtomicUsize::new(0));
+            let mut cache = LRUCore::new(5);
+
+            cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+            {
+                let popped = cache.pop_lru();
+                assert!(popped.is_some());
+                assert_eq!(counter.load(Ordering::SeqCst), 1);
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
         }
 
         #[test]
         fn test_no_memory_leaks_on_clear() {
-            // Test that clearing cache doesn't leak memory
-            todo!()
+            let counter = Arc::new(AtomicUsize::new(0));
+            let mut cache = LRUCore::new(5);
+
+            for i in 0..5 {
+                cache.insert(i, Arc::new(LifeCycleTracker::new(i, counter.clone())));
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 5);
+
+            cache.clear();
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
+            assert_eq!(cache.len(), 0);
         }
 
         #[test]
         fn test_no_memory_leaks_on_drop() {
-            // Test that dropping cache properly cleans up all memory
-            todo!()
+            let counter = Arc::new(AtomicUsize::new(0));
+            {
+                let mut cache = LRUCore::new(5);
+                for i in 0..5 {
+                    cache.insert(i, Arc::new(LifeCycleTracker::new(i, counter.clone())));
+                }
+                assert_eq!(counter.load(Ordering::SeqCst), 5);
+            } // cache drops here
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
         }
 
         #[test]
         fn test_no_double_free_on_eviction() {
-            // Test prevention of double-free during eviction
-            todo!()
+            // Implicitly tested by AtomicUsize wrapping if double free occurred
+            // but we can be explicit
+            let counter = Arc::new(AtomicUsize::new(100)); // Start at 100 to avoid wrapping on first decrement if bug
+            let mut cache = LRUCore::new(1);
+            
+            cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
+            assert_eq!(counter.load(Ordering::SeqCst), 101);
+            
+            // Evict
+            cache.insert(2, Arc::new(LifeCycleTracker::new(2, counter.clone())));
+            assert_eq!(counter.load(Ordering::SeqCst), 101); // 1 evicted (-1), 2 added (+1)
         }
 
         #[test]
@@ -5692,8 +5776,23 @@ mod tests {
 
         #[test]
         fn test_arc_reference_counting_safety() {
-            // Test that Arc reference counting prevents premature deallocation
-            todo!()
+            let counter = Arc::new(AtomicUsize::new(0));
+            let mut cache = LRUCore::new(5);
+
+            let tracker = Arc::new(LifeCycleTracker::new(1, counter.clone()));
+            cache.insert(1, tracker.clone());
+
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+            
+            // Remove from cache
+            cache.remove(&1);
+            
+            // Still alive because we hold a reference
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+            
+            drop(tracker);
+            // Now dead
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
         }
 
         #[test]
@@ -5746,8 +5845,33 @@ mod tests {
 
         #[test]
         fn test_safe_concurrent_access() {
-            // Test memory safety in concurrent access scenarios
-            todo!()
+             // Verify memory safety under concurrent load
+             let counter = Arc::new(AtomicUsize::new(0));
+             let cache = Arc::new(ConcurrentLRUCache::new(10));
+             
+             let mut handles = vec![];
+             
+             for i in 0..10 {
+                 let cache = cache.clone();
+                 let counter = counter.clone();
+                 handles.push(thread::spawn(move || {
+                     for j in 0..100 {
+                         // Use a larger key space to force evictions
+                         let key = i * 1000 + j;
+                         let val = Arc::new(LifeCycleTracker::new(key as usize, counter.clone()));
+                         cache.insert(key, val);
+                     }
+                 }));
+             }
+             
+             for h in handles {
+                 h.join().unwrap();
+             }
+             
+             // At end, we should have at most 10 items in cache (capacity 10)
+             let count = counter.load(Ordering::SeqCst);
+             assert!(count <= 10, "Memory leak detected: {} items alive (capacity 10)", count);
+             assert_eq!(cache.len(), count);
         }
 
         #[test]
