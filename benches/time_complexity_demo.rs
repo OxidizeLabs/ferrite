@@ -2,6 +2,7 @@
 #![allow(unused_parens)]
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::BatchSize;
 use std::collections::HashMap;
 use std::hint::black_box;
 // =================================================================================
@@ -79,17 +80,17 @@ fn benchmark_constant_time(c: &mut Criterion) {
         for i in 0..size {
             map.insert(i, i);
         }
+        let index = size / 2; // Access middle element
+        let key = size / 2;
 
         group.bench_with_input(BenchmarkId::new("array_access", size), &size, |b, _| {
             b.iter(|| {
-                let index = size / 2; // Access middle element
                 black_box(constant_time_access(&data, index as usize))
             })
         });
 
         group.bench_with_input(BenchmarkId::new("hash_lookup", size), &size, |b, _| {
             b.iter(|| {
-                let key = (size / 2);
                 black_box(hash_lookup(&map, key))
             })
         });
@@ -104,11 +105,11 @@ fn benchmark_linear_time(c: &mut Criterion) {
     // Test different data sizes - should show linear growth
     for size in [100, 500, 1_000, 5_000, 10_000] {
         let data: Vec<i32> = (0..size).map(|i| i).collect();
+        // Search for element that doesn't exist (worst case)
+        let target = size + 1;
 
         group.bench_with_input(BenchmarkId::new("linear_search", size), &size, |b, _| {
             b.iter(|| {
-                // Search for element that doesn't exist (worst case)
-                let target = size + 1;
                 black_box(linear_search(&data, target))
             })
         });
@@ -127,14 +128,18 @@ fn benchmark_quadratic_time(c: &mut Criterion) {
     // Use smaller sizes for quadratic algorithms
     for size in [50, 100, 200, 400, 800] {
         let data: Vec<i32> = (0..size).map(|i| i).rev().collect(); // Worst case for bubble sort
+        let target = data[0] + data[1]; // Sum that exists
 
         group.bench_with_input(BenchmarkId::new("bubble_sort", size), &size, |b, _| {
-            b.iter(|| black_box(bubble_sort(data.clone())))
+            b.iter_batched(
+                || data.clone(),
+                |input| black_box(bubble_sort(black_box(input))),
+                BatchSize::SmallInput,
+            )
         });
 
         group.bench_with_input(BenchmarkId::new("find_pairs", size), &size, |b, _| {
             b.iter(|| {
-                let target = data[0] + data[1]; // Sum that exists
                 black_box(find_pairs_naive(&data, target))
             })
         });
@@ -151,7 +156,11 @@ fn benchmark_linearithmic_time(c: &mut Criterion) {
         let data: Vec<i32> = (0..size).map(|i| (size - i)).collect(); // Reverse sorted (challenging)
 
         group.bench_with_input(BenchmarkId::new("efficient_sort", size), &size, |b, _| {
-            b.iter(|| black_box(efficient_sort(data.clone())))
+            b.iter_batched(
+                || data.clone(),
+                |input| black_box(efficient_sort(black_box(input))),
+                BatchSize::SmallInput,
+            )
         });
     }
 
