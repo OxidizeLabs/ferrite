@@ -1,3 +1,81 @@
+//! Least Recently Used (LRU) Cache Implementation.
+//!
+//! This module provides a high-performance, concurrent LRU cache implementation used primarily
+//! for the disk buffer pool and other caching needs in TKDB.
+//!
+//! # Architecture
+//!
+//! The implementation consists of two main components:
+//!
+//! 1. [`LRUCore`]: The foundational single-threaded implementation that maintains:
+//!    - A `HashMap` for O(1) key lookup.
+//!    - A doubly-linked list for O(1) updates to the eviction order.
+//!    - Internal usage of `unsafe` pointers (`NonNull`) for optimized list manipulation avoiding
+//!      Rust's ownership checks for the intrusive-like list structure.
+//!
+//! 2. [`ConcurrentLRUCache`]: A thread-safe wrapper around `LRUCore` protected by an `RwLock`.
+//!    This is the primary public interface used by the system.
+//!
+//! # Key Features
+//!
+//! - **O(1) Operations**: All core operations (get, put, remove) are constant time.
+//! - **Zero-Copy**: Values are stored as `Arc<V>`, allowing efficient sharing without cloning.
+//! - **Concurrency**: Thread-safe access suitable for highly concurrent database workloads.
+//! - **Type Safety**: Generic implementation supporting any `Copy + Hash + Eq` key type.
+//!
+//! # Design Rationale
+//!
+//! This custom implementation was chosen over standard crates (like `lru` or `cached`) to support specific
+//! database requirements:
+//! - **Arc-based Value Storage**: Database pages are heavy objects. Storing them as `Arc<V>` allows
+//!   consumers to hold references to pages even after they are evicted from the cache (e.g., during a writeback),
+//!   preventing use-after-free issues without requiring cloning.
+//! - **Internal Visibility**: Database buffer managers often need precise control over the eviction
+//!   policy (e.g., pinning pages, touching pages without retrieving).
+//! - **Pointer Stability**: Using `NonNull` nodes ensures that memory locations of nodes remain stable,
+//!   which is critical for the `unsafe` linked list manipulations.
+//!
+//! # Performance Characteristics
+//!
+//! - **Time Complexity**:
+//!   - `get`, `put`, `remove`, `peek`: **O(1)** average case (amortized by HashMap).
+//!   - `pop_lru`: **O(1)** (direct tail pointer access).
+//! - **Space Overhead**:
+//!   - Per entry: 2 pointers (`prev`, `next`) + 1 `Arc` overhead + HashMap entry overhead.
+//!   - This is relatively compact compared to `RefCell`/`Rc` based approaches.
+//! - **Concurrency**:
+//!   - Uses a coarse-grained `RwLock`.
+//!   - **Reads (`get`, `peek`)**: concurrent (acquire read lock).
+//!   - **Writes (`insert`, `remove`)**: exclusive (acquire write lock).
+//!   - **Updates (`touch` on `get`)**: requires write lock to update LRU order.
+//!
+//! # Trade-offs
+//!
+//! - **Pros**:
+//!   - Predictable O(1) performance.
+//!   - Safe sharing of heavy values via `Arc`.
+//!   - No `Clone` requirement for values.
+//! - **Cons**:
+//!   - Global lock contention: In extremely high-throughput multi-threaded scenarios, the single `RwLock`
+//!     can become a bottleneck.
+//!   - Unsafe code complexity: Manual memory management requires rigorous testing.
+//!
+//! # When to Use
+//!
+//! - **Use when**:
+//!   - You need a general-purpose page cache or object cache.
+//!   - Read operations significantly outnumber write/eviction operations.
+//!   - The values are expensive to clone (use `Arc`).
+//! - **Avoid when**:
+//!   - You require strictly lock-free concurrency (consider a sharded map or clock sweep algorithm).
+//!   - You need complex eviction policies beyond simple LRU (e.g., LFU, LRU-K - see `lru_k.rs`).
+//!
+//! # Safety
+//!
+//! This module uses `unsafe` code to manage the doubly-linked list manually. Extensive
+//! testing (correctness, edge cases, memory safety) is included to verify the soundness
+//! of the pointer manipulations.
+
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LRUCacheTrait, MutableCache,
 };
