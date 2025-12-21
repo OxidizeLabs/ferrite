@@ -60,7 +60,7 @@ impl BufferManager {
     pub fn buffer_write(&mut self, page_id: PageId, data: Vec<u8>) -> IoResult<bool> {
         // Apply compression if enabled
         let final_data = if self.buffer.compression_enabled {
-            self.compress_data(&data, CompressionAlgorithm::Custom, 6)
+            self.compress_data(&data, CompressionAlgorithm::LZ4, 6)
         } else {
             data
         };
@@ -163,7 +163,6 @@ impl BufferManager {
             CompressionAlgorithm::None => data.to_vec(),
             CompressionAlgorithm::LZ4 => self.compress_lz4(data),
             CompressionAlgorithm::Zstd => self.compress_zstd(data, level),
-            CompressionAlgorithm::Custom => self.compress_custom_simd(data),
         }
     }
 

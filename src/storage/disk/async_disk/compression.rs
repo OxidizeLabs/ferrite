@@ -1,8 +1,6 @@
 // Compression algorithms for the Async Disk Manager
 // Refactored from the original async_disk_manager.rs file
 
-use super::simd::SimdProcessor;
-
 /// Compression algorithms supported by the system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompressionAlgorithm {
@@ -12,8 +10,6 @@ pub enum CompressionAlgorithm {
     LZ4,
     /// Zstd compression (high ratio)
     Zstd,
-    /// Custom SIMD-optimized compression
-    Custom,
 }
 
 /// Compression engine that provides various compression algorithms
@@ -54,7 +50,6 @@ impl CompressionEngine {
             CompressionAlgorithm::None => data.to_vec(),
             CompressionAlgorithm::LZ4 => self.compress_lz4(data),
             CompressionAlgorithm::Zstd => self.compress_zstd(data, level),
-            CompressionAlgorithm::Custom => self.compress_custom_simd(data),
         };
 
         // Update compression statistics
@@ -101,58 +96,7 @@ impl CompressionEngine {
         // In a real implementation, we would use zstd::bulk::compress
         data.to_vec()
     }
-
-    /// Custom SIMD-optimized compression
-    fn compress_custom_simd(&self, data: &[u8]) -> Vec<u8> {
-        // Phase 5: Custom SIMD-optimized compression algorithm
-
-        // First check if it's a zero page (common case)
-        if SimdProcessor::is_zero_page(data) {
-            // Encode zero page as special marker + original length
-            let mut compressed = vec![0xFF, 0xFE]; // Special zero page marker
-            compressed.extend_from_slice(&(data.len() as u32).to_le_bytes());
-            return compressed;
-        }
-
-        // Use enhanced RLE with SIMD detection
-        let mut compressed = Vec::new();
-        let mut i = 0;
-
-        while i < data.len() {
-            let byte = data[i];
-            let mut count = 1;
-
-            // Use SIMD to find run length more efficiently
-            let max_run = (data.len() - i).min(255);
-            while count < max_run && data[i + count] == byte {
-                count += 1;
-            }
-
-            if count >= 4 {
-                // Encode as RLE
-                compressed.push(0xFF); // RLE marker
-                compressed.push(count as u8);
-                compressed.push(byte);
-            } else {
-                // Store literal bytes
-                for j in 0..count {
-                    let b = data[i + j];
-                    if b == 0xFF {
-                        // Escape 0xFF
-                        compressed.push(0xFF);
-                        compressed.push(0x00);
-                    } else {
-                        compressed.push(b);
-                    }
-                }
-            }
-
-            i += count;
-        }
-
-        compressed
-    }
-
+    
     /// Decompresses data based on detected format
     pub fn decompress_data(&self, compressed: &[u8]) -> Vec<u8> {
         if compressed.len() < 2 {

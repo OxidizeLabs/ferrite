@@ -9,8 +9,6 @@ pub mod manager;
 pub mod compression;
 pub mod prefetching;
 pub mod scheduler;
-pub mod simd;
-
 // Cache implementations
 pub mod cache;
 pub mod memory;
