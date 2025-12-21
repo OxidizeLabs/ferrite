@@ -761,4 +761,4 @@ async fn test_select_very_long_query() {
 }
 
 #[tokio::test]
-async fn test_select_with_nested_expressions() {}
+async fn test_select_with_nested_expressions() { todo!() }
