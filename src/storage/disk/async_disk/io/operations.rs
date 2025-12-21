@@ -1,7 +1,18 @@
-// I/O Operations Module
-//
-// This module defines the types and structures for I/O operations,
-// including operation types, operation metadata, and priority handling.
+//! # I/O Operations Definitions
+//!
+//! This module defines the core data structures that represent I/O requests within the system.
+//! It decouples the *intent* of an operation from its *execution*.
+//!
+//! ## Key Types
+//!
+//! - **`IOOperationType`**: An enum representing the specific action (ReadPage, WritePage, Sync, etc.)
+//!   and its associated data (PageId, buffer contents).
+//! - **`IOOperation`**: A wrapper struct that adds metadata for scheduling and tracking, including:
+//!     - `priority`: Scheduling urgency.
+//!     - `id`: Unique tracking identifier.
+//!     - `submitted_at`: Timestamp for latency tracking and FIFO tie-breaking.
+//! - **`priorities`**: Constants defining standard priority levels for different database activities
+//!   (e.g., `SYNC` is highest, `BACKGROUND` is lowest).
 
 use crate::common::config::PageId;
 use std::time::Instant;

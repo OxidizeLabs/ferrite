@@ -1,7 +1,21 @@
-// I/O Queue Management Module
-//
-// This module handles the priority queue for I/O operations,
-// including enqueueing, dequeuing, and queue management operations.
+//! # I/O Operation Queue
+//!
+//! The `IOQueueManager` implements a thread-safe, priority-based scheduling queue for pending I/O operations.
+//! It ensures that critical database operations (like WAL writes) are processed before background tasks
+//! (like prefetching).
+//!
+//! ## Architecture
+//!
+//! The queue is backed by a `BinaryHeap` wrapped in a `Mutex`, allowing concurrent access from multiple
+//! producers (callers) and consumers (workers). Operations are ordered by their `priority` field.
+//!
+//! ## Key Features
+//!
+//! - **Priority-Based Ordering**: Operations with higher priority values are dequeued first.
+//! - **FIFO Tie-Breaking**: Operations with equal priority are ordered by submission time to prevent starvation.
+//! - **Thread Safety**: Safe for concurrent enqueue/dequeue operations.
+//! - **Observability**: Provides methods to inspect queue size and peek at high-priority items.
+//! - **Drain Capability**: Supports bulk removal of operations, useful for cancellation or shutdown sequences.
 
 use super::operations::{IOOperation, IOOperationType};
 use std::collections::BinaryHeap;
