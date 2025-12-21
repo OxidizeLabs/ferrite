@@ -1,7 +1,21 @@
-//! Write buffer management with compression support
+//! # Write Buffer Manager
 //!
-//! This module handles the core write buffering functionality including
-//! compression, size tracking, and buffer capacity management.
+//! The `BufferManager` handles the in-memory storage of dirty pages waiting to be flushed to disk.
+//! It optimizes memory usage through compression and provides precise tracking of buffer occupancy.
+//!
+//! ## Features
+//!
+//! - **Compressed Buffering**: Supports storing pages in compressed formats (LZ4, Zstd) to maximize
+//!   the effective capacity of the write buffer.
+//! - **Capacity Management**: Enforces strict memory limits, rejecting writes when the buffer is full
+//!   to trigger backpressure/flushing.
+//! - **Change Tracking**: Tracks "dirty" pages and calculating the memory delta for every operation.
+//! - **Statistics**: Provides real-time metrics on buffer utilization, compression ratios, and dirty page counts.
+//!
+//! ## Usage
+//!
+//! This component is primarily used by the `WriteManager` to temporarily hold data. It does not decide
+//! *when* to flush, only *what* to store and *how* to store it.
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
