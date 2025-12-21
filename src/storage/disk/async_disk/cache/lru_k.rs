@@ -678,7 +678,12 @@ mod tests {
         #[test]
         fn test_large_cache_operations() {
             let mut cache = LRUKCache::new(100);
-            for i in 0..100 {
+            
+            // Insert 0 first and wait to ensure it has the distinctly oldest timestamp
+            cache.insert(0, 0);
+            thread::sleep(Duration::from_millis(1));
+
+            for i in 1..100 {
                 cache.insert(i, i);
             }
             assert_eq!(cache.len(), 100);
