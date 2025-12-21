@@ -1,7 +1,42 @@
-//! Advanced multi-level cache management system for the Async Disk Manager
+//! # Advanced Cache Manager
 //!
-//! This module contains the CacheManager and related components for efficient page caching,
-//! prefetching, and data temperature management.
+//! The `CacheManager` implements a sophisticated multi-level caching system designed to optimize
+//! disk I/O performance for the Async Disk Manager. It employs a tiered architecture to
+//! handle different data access patterns efficiently, distinguishing between hot, warm, and cold data.
+//!
+//! ## Architecture
+//!
+//! The cache is organized into three distinct levels (L1, L2, L3), each utilizing a specialized
+//! eviction policy tailored to specific data temperatures:
+//!
+//! - **L1 Hot Cache (LRU-K)**: Stores frequently accessed "hot" pages. Uses the LRU-K (K=2) algorithm
+//!   to robustly identify popular pages and resist scan-pollution.
+//! - **L2 Warm Cache (LFU)**: Stores "warm" pages with moderate access frequency. Uses a Least
+//!   Frequently Used (LFU) policy to retain pages with a proven history of utility.
+//! - **L3 Cold Cache (FIFO)**: The default entry point for new pages. Uses First-In-First-Out (FIFO)
+//!   for low-overhead management of "cold" or newly read data, protecting higher tiers from one-time scans.
+//!
+//! ## Key Features
+//!
+//! - **Adaptive Tiered Caching**: Pages are promoted or demoted between cache levels based on their
+//!   access frequency and recency (Temperature Classification).
+//! - **Smart Admission Control**: Regulates entry into the cache based on current memory pressure and
+//!   predicted reuse probability to prevent cache thrashing under load.
+//! - **Intelligent Prefetching**:
+//!     - **Sequential**: Automatically detects sequential scans and prefetches upcoming pages.
+//!     - **ML-Based**: Learns and predicts complex, non-sequential access patterns.
+//! - **Deduplication**: Identifies and merges duplicate page content to maximize effective cache capacity.
+//! - **Comprehensive Metrics**: Tracks hit ratios per tier, promotion/demotion events, and prefetch accuracy
+//!   to support fine-grained performance monitoring and tuning.
+//!
+//! ## Usage
+//!
+//! The `CacheManager` is initialized with a `DiskManagerConfig` and serves as the central caching
+//! component. It handles `get_page` requests by checking tiers in order (Hot -> Warm -> Cold) and
+//! manages the lifecycle of cached pages including eviction and write-back coordination.
+//!
+//! This module contains the `CacheManager` struct and related components like `AdmissionController`,
+//! `PrefetchEngine`, and statistical structures.
 
 use super::fifo::FIFOCache;
 use super::lfu::LFUCache;
