@@ -5,9 +5,20 @@
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
-use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+use std::future::Future;
+use std::io::{Result as IoResult};
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// Interface for performing durability operations
+pub trait DurabilityProvider {
+    /// Syncs data pages to disk
+    fn sync_data(&self) -> impl Future<Output = IoResult<()>> + Send;
+    
+    /// Syncs the WAL/log file to disk
+    fn sync_log(&self) -> impl Future<Output = IoResult<()>> + Send;
+}
 
 /// Manages durability guarantees and sync policies
 #[derive(Debug)]
@@ -16,6 +27,7 @@ pub struct DurabilityManager {
     durability_level: DurabilityLevel,
     wal_enabled: bool,
     pending_syncs: AtomicUsize,
+    last_sync_time: Mutex<Instant>,
 }
 
 /// Result of applying durability guarantees
@@ -43,11 +55,19 @@ impl DurabilityManager {
             durability_level,
             wal_enabled,
             pending_syncs: AtomicUsize::new(0),
+            last_sync_time: Mutex::new(Instant::now()),
         }
     }
 
     /// Applies durability guarantees to flushed pages
-    pub fn apply_durability(&self, pages: &[(PageId, Vec<u8>)]) -> IoResult<DurabilityResult> {
+    pub async fn apply_durability<P>(
+        &self,
+        pages: &[(PageId, Vec<u8>)],
+        provider: &P,
+    ) -> IoResult<DurabilityResult>
+    where
+        P: DurabilityProvider,
+    {
         if pages.is_empty() {
             return Ok(DurabilityResult {
                 sync_performed: false,
@@ -71,6 +91,7 @@ impl DurabilityManager {
             }
             DurabilityLevel::Buffer => {
                 // Buffer durability - data is in OS buffers but not necessarily on disk
+                // We assume writing to WAL (OS buffer) is sufficient for this level if enabled
                 result.wal_written = self.wal_enabled;
                 Ok(result)
             }
@@ -80,7 +101,10 @@ impl DurabilityManager {
                 result.wal_written = self.wal_enabled;
 
                 if result.sync_performed {
+                    // Sync data
+                    provider.sync_data().await?;
                     self.pending_syncs.fetch_add(pages.len(), Ordering::Relaxed);
+                    *self.last_sync_time.lock() = Instant::now();
                 }
 
                 Ok(result)
@@ -90,60 +114,32 @@ impl DurabilityManager {
                 result.sync_performed = true;
                 result.wal_written = self.wal_enabled;
 
-                // In a real implementation, this would perform actual fsync
-                self.perform_sync(pages)?;
-
+                // Ensure WAL is synced first (Write-Ahead Logging protocol)
                 if self.wal_enabled {
-                    self.write_wal_entries(pages)?;
+                    provider.sync_log().await?;
                 }
 
+                // Then sync data
+                provider.sync_data().await?;
+
                 self.pending_syncs.fetch_add(pages.len(), Ordering::Relaxed);
+                *self.last_sync_time.lock() = Instant::now();
                 Ok(result)
             }
         }
     }
 
     /// Checks if pages should be synced based on fsync policy
-    fn should_sync_pages(&self, pages: &[(PageId, Vec<u8>)]) -> IoResult<bool> {
+    fn should_sync_pages(&self, _pages: &[(PageId, Vec<u8>)]) -> IoResult<bool> {
         match self.fsync_policy {
             FsyncPolicy::Never => Ok(false),
             FsyncPolicy::OnFlush => Ok(true),
             FsyncPolicy::PerWrite => Ok(true),
-            FsyncPolicy::Periodic(_duration) => {
-                // In a real implementation, this would check timing against the duration
-                Ok(pages.len() > 10) // Simple heuristic for example
+            FsyncPolicy::Periodic(duration) => {
+                let last_sync = *self.last_sync_time.lock();
+                Ok(last_sync.elapsed() >= duration)
             }
         }
-    }
-
-    /// Performs actual sync operation
-    fn perform_sync(&self, pages: &[(PageId, Vec<u8>)]) -> IoResult<()> {
-        // In a real implementation, this would:
-        // 1. Group pages by file
-        // 2. Call fsync() on each file descriptor
-        // 3. Handle any sync errors appropriately
-
-        // For this example, we'll just simulate the operation
-        if pages.is_empty() {
-            return Err(IoError::new(ErrorKind::InvalidInput, "No pages to sync"));
-        }
-
-        Ok(())
-    }
-
-    /// Writes WAL entries for the pages
-    fn write_wal_entries(&self, _pages: &[(PageId, Vec<u8>)]) -> IoResult<()> {
-        if !self.wal_enabled {
-            return Ok(());
-        }
-
-        // In a real implementation, this would:
-        // 1. Create WAL entries for each page
-        // 2. Write them to the WAL file
-        // 3. Ensure WAL is synced before data pages
-
-        // For this example, we'll just simulate
-        Ok(())
     }
 
     /// Gets the current fsync policy
@@ -223,6 +219,12 @@ mod tests {
     use super::*;
     use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
 
+    struct MockDurabilityProvider;
+    impl DurabilityProvider for MockDurabilityProvider {
+        async fn sync_data(&self) -> IoResult<()> { Ok(()) }
+        async fn sync_log(&self) -> IoResult<()> { Ok(()) }
+    }
+
     #[test]
     fn test_durability_manager_creation() {
         let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Sync, true);
@@ -233,12 +235,13 @@ mod tests {
         assert_eq!(manager.pending_syncs(), 0);
     }
 
-    #[test]
-    fn test_apply_durability_none() {
+    #[tokio::test]
+    async fn test_apply_durability_none() {
         let manager = DurabilityManager::new(FsyncPolicy::Never, DurabilityLevel::None, false);
+        let provider = MockDurabilityProvider;
 
         let pages = vec![(1, vec![1, 2, 3, 4])];
-        let result = manager.apply_durability(&pages).unwrap();
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
 
         assert!(!result.sync_performed);
         assert!(!result.wal_written);
@@ -246,12 +249,13 @@ mod tests {
         assert_eq!(result.durability_level, DurabilityLevel::None);
     }
 
-    #[test]
-    fn test_apply_durability_buffer() {
+    #[tokio::test]
+    async fn test_apply_durability_buffer() {
         let manager = DurabilityManager::new(FsyncPolicy::Never, DurabilityLevel::Buffer, true);
+        let provider = MockDurabilityProvider;
 
         let pages = vec![(1, vec![1, 2, 3, 4]), (2, vec![5, 6, 7, 8])];
-        let result = manager.apply_durability(&pages).unwrap();
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
 
         assert!(!result.sync_performed);
         assert!(result.wal_written);
@@ -259,12 +263,13 @@ mod tests {
         assert_eq!(result.durability_level, DurabilityLevel::Buffer);
     }
 
-    #[test]
-    fn test_apply_durability_sync() {
+    #[tokio::test]
+    async fn test_apply_durability_sync() {
         let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Sync, true);
+        let provider = MockDurabilityProvider;
 
         let pages = vec![(1, vec![1, 2, 3, 4])];
-        let result = manager.apply_durability(&pages).unwrap();
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
 
         assert!(result.sync_performed);
         assert!(result.wal_written);
@@ -273,12 +278,13 @@ mod tests {
         assert!(manager.pending_syncs() > 0);
     }
 
-    #[test]
-    fn test_apply_durability_durable() {
+    #[tokio::test]
+    async fn test_apply_durability_durable() {
         let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Durable, true);
+        let provider = MockDurabilityProvider;
 
         let pages = vec![(1, vec![1, 2, 3, 4])];
-        let result = manager.apply_durability(&pages).unwrap();
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
 
         assert!(result.sync_performed);
         assert!(result.wal_written);
@@ -286,16 +292,43 @@ mod tests {
         assert_eq!(result.durability_level, DurabilityLevel::Durable);
     }
 
-    #[test]
-    fn test_apply_durability_empty_pages() {
+    #[tokio::test]
+    async fn test_apply_durability_empty_pages() {
         let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Durable, true);
+        let provider = MockDurabilityProvider;
 
         let pages = vec![];
-        let result = manager.apply_durability(&pages).unwrap();
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
 
         assert!(!result.sync_performed);
         assert!(!result.wal_written);
         assert_eq!(result.pages_synced, 0);
+    }
+
+    #[tokio::test]
+    async fn test_apply_durability_periodic() {
+        let manager = DurabilityManager::new(
+            FsyncPolicy::Periodic(Duration::from_millis(50)),
+            DurabilityLevel::Sync,
+            false,
+        );
+        let provider = MockDurabilityProvider;
+        let pages = vec![(1, vec![1, 2, 3])];
+
+        // First call should not sync (initialized with now)
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
+        assert!(!result.sync_performed);
+
+        // Sleep to exceed duration
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        // Second call should sync
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
+        assert!(result.sync_performed);
+
+        // Immediate subsequent call should not sync
+        let result = manager.apply_durability(&pages, &provider).await.unwrap();
+        assert!(!result.sync_performed);
     }
 
     #[test]
@@ -312,15 +345,16 @@ mod tests {
         assert!(manager.is_wal_enabled());
     }
 
-    #[test]
-    fn test_pending_syncs_tracking() {
+    #[tokio::test]
+    async fn test_pending_syncs_tracking() {
         let manager = DurabilityManager::new(FsyncPolicy::OnFlush, DurabilityLevel::Sync, false);
+        let provider = MockDurabilityProvider;
 
         assert_eq!(manager.pending_syncs(), 0);
 
         // Apply durability to some pages
         let pages = vec![(1, vec![1, 2, 3, 4]), (2, vec![5, 6, 7, 8])];
-        manager.apply_durability(&pages).unwrap();
+        manager.apply_durability(&pages, &provider).await.unwrap();
 
         assert!(manager.pending_syncs() > 0);
 
