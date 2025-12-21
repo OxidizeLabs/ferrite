@@ -206,17 +206,26 @@ impl WriteManager {
         log::debug!("WriteManager::force_flush called");
 
         // Step 1: Force start flush coordination
-        if !self.flush_coordinator.try_start_flush() {
-            log::debug!("WriteManager::force_flush waiting for flush lock");
-            // Wait briefly and try again for force flush
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            if !self.flush_coordinator.try_start_flush() {
-                log::error!("WriteManager::force_flush could not acquire flush lock");
+        // Retry logic to handle concurrent flush attempts
+        let mut retry_count = 0;
+        const MAX_RETRIES: u32 = 100; // 100 * 10ms = 1s timeout
+        
+        loop {
+            if self.flush_coordinator.try_start_flush() {
+                break;
+            }
+            
+            if retry_count >= MAX_RETRIES {
+                log::error!("WriteManager::force_flush could not acquire flush lock after {} retries", MAX_RETRIES);
                 return Err(IoError::new(
                     ErrorKind::WouldBlock,
                     "Could not acquire flush lock for force flush",
                 ));
             }
+            
+            log::debug!("WriteManager::force_flush waiting for flush lock (retry {})", retry_count + 1);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            retry_count += 1;
         }
 
         log::debug!("WriteManager::force_flush acquired flush lock");
