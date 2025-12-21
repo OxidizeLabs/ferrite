@@ -1,5 +1,23 @@
-// Compression algorithms for the Async Disk Manager
-// Refactored from the original async_disk_manager.rs file
+//! Compression module for the Async Disk Manager.
+//!
+//! This module provides the `CompressionEngine` which handles data compression and decompression
+//! using various algorithms (LZ4, Zstd) or a custom RLE format. It abstracts the complexity
+//! of different compression libraries and provides a unified interface for the disk manager
+//! to optimize storage space and I/O performance.
+//!
+//! # Supported Algorithms
+//!
+//! - **LZ4**: Fast compression/decompression, suitable for high-throughput scenarios.
+//! - **Zstd**: High compression ratio, suitable for archival or storage optimization.
+//! - **None**: No compression.
+//!
+//! The module also handles magic bytes detection to automatically determine the compression
+//! format during decompression.
+
+use std::io::Cursor;
+
+const MAGIC_LZ4: u8 = 0xF0;
+const MAGIC_ZSTD: u8 = 0xF1;
 
 /// Compression algorithms supported by the system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,38 +85,56 @@ impl CompressionEngine {
 
     /// LZ4 compression for high-speed compression
     fn compress_lz4(&self, data: &[u8]) -> Vec<u8> {
-        // Phase 5: Use LZ4 for fast compression
-        // Note: In a real implementation, we would use the lz4 crate
-        // For this refactoring, we'll use a simplified placeholder
-
-        // Simplified placeholder implementation
         if data.is_empty() {
             return Vec::new();
         }
 
-        // Just return the original data for now
-        // In a real implementation, we would use lz4::block::compress
-        data.to_vec()
+        // Use lz4_flex for compression (prepend size for easier decompression)
+        let compressed = lz4_flex::compress_prepend_size(data);
+        
+        // Add magic header
+        let mut result = Vec::with_capacity(1 + compressed.len());
+        result.push(MAGIC_LZ4);
+        result.extend_from_slice(&compressed);
+        
+        result
     }
 
     /// Zstd compression for high compression ratios
-    fn compress_zstd(&self, data: &[u8], _level: u32) -> Vec<u8> {
-        // Phase 5: Use Zstd for high compression ratios
-        // Note: In a real implementation, we would use the zstd crate
-        // For this refactoring, we'll use a simplified placeholder
-
-        // Simplified placeholder implementation
+    fn compress_zstd(&self, data: &[u8], level: u32) -> Vec<u8> {
         if data.is_empty() {
             return Vec::new();
         }
 
-        // Just return the original data for now
-        // In a real implementation, we would use zstd::bulk::compress
-        data.to_vec()
+        // Use zstd for compression
+        let compressed = zstd::stream::encode_all(Cursor::new(data), level as i32)
+            .expect("Zstd compression failed");
+
+        let mut result = Vec::with_capacity(1 + compressed.len());
+        result.push(MAGIC_ZSTD);
+        result.extend_from_slice(&compressed);
+        
+        result
     }
     
     /// Decompresses data based on detected format
     pub fn decompress_data(&self, compressed: &[u8]) -> Vec<u8> {
+        if compressed.is_empty() {
+            return Vec::new();
+        }
+
+        // Check for LZ4 magic header
+        if compressed[0] == MAGIC_LZ4 {
+            return lz4_flex::decompress_size_prepended(&compressed[1..])
+                .expect("LZ4 decompression failed");
+        }
+
+        // Check for Zstd magic header
+        if compressed[0] == MAGIC_ZSTD {
+            return zstd::stream::decode_all(Cursor::new(&compressed[1..]))
+                .expect("Zstd decompression failed");
+        }
+
         if compressed.len() < 2 {
             return compressed.to_vec();
         }
@@ -183,4 +219,85 @@ pub struct CompressionResult {
     pub algorithm: CompressionAlgorithm,
     /// Whether compression was effective
     pub effective: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lz4_compression_roundtrip() {
+        let mut engine = CompressionEngine::new();
+        let data = b"Hello, LZ4 compression! This is a test string that should be compressed.";
+        
+        let compressed = engine.compress_data(data, CompressionAlgorithm::LZ4, 0);
+        assert!(!compressed.is_empty());
+        assert_eq!(compressed[0], MAGIC_LZ4);
+        
+        let decompressed = engine.decompress_data(&compressed);
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_zstd_compression_roundtrip() {
+        let mut engine = CompressionEngine::new();
+        let data = b"Hello, Zstd compression! This is a test string that should be compressed with high ratio.";
+        
+        let compressed = engine.compress_data(data, CompressionAlgorithm::Zstd, 3);
+        assert!(!compressed.is_empty());
+        assert_eq!(compressed[0], MAGIC_ZSTD);
+        
+        let decompressed = engine.decompress_data(&compressed);
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_no_compression_roundtrip() {
+        let mut engine = CompressionEngine::new();
+        let data = b"Hello, No compression!";
+        
+        let compressed = engine.compress_data(data, CompressionAlgorithm::None, 0);
+        assert_eq!(compressed, data);
+        
+        let decompressed = engine.decompress_data(&compressed);
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_empty_data() {
+        let mut engine = CompressionEngine::new();
+        let data = b"";
+        
+        let compressed_lz4 = engine.compress_data(data, CompressionAlgorithm::LZ4, 0);
+        assert!(compressed_lz4.is_empty());
+        let decompressed_lz4 = engine.decompress_data(&compressed_lz4);
+        assert!(decompressed_lz4.is_empty());
+
+        let compressed_zstd = engine.compress_data(data, CompressionAlgorithm::Zstd, 0);
+        assert!(compressed_zstd.is_empty());
+        let decompressed_zstd = engine.decompress_data(&compressed_zstd);
+        assert!(decompressed_zstd.is_empty());
+    }
+
+    #[test]
+    fn test_compression_stats() {
+        let mut engine = CompressionEngine::new();
+        let data = vec![0u8; 1000]; // Highly compressible data
+        
+        let compressed = engine.compress_data(&data, CompressionAlgorithm::LZ4, 0);
+        
+        let (original, comp, ratio) = engine.get_stats();
+        assert_eq!(original, 1000);
+        assert_eq!(comp, compressed.len() as u64);
+        assert!(ratio > 1.0);
+    }
+
+    #[test]
+    fn test_fallback_decompression() {
+        let engine = CompressionEngine::new();
+        // Test data without magic header (simulating old format or uncompressed data that falls through)
+        let data = b"some random data";
+        let decompressed = engine.decompress_data(data);
+        assert_eq!(decompressed, data);
+    }
 }
