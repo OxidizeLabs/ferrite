@@ -4582,29 +4582,134 @@ mod tests {
         }
 
         mod state_consistency {
+            use super::*;
+            use std::sync::Arc;
+            use std::collections::HashSet;
+            use std::ptr::NonNull;
+
+            fn count_nodes<K, V>(cache: &LRUCore<K, V>) -> usize 
+            where K: Copy + Eq + Hash {
+                let mut count = 0;
+                let mut current = cache.head;
+                while let Some(node_ptr) = current {
+                    count += 1;
+                    unsafe {
+                        current = node_ptr.as_ref().next;
+                    }
+                }
+                count
+            }
 
             #[test]
             fn test_hashmap_linkedlist_size_consistency() {
                 // Test that HashMap size always matches linked list node count
-                todo!()
+                let mut cache = LRUCore::new(10);
+                assert_eq!(cache.map.len(), count_nodes(&cache));
+
+                cache.insert(1, Arc::new(10));
+                assert_eq!(cache.map.len(), count_nodes(&cache));
+
+                cache.insert(2, Arc::new(20));
+                assert_eq!(cache.map.len(), count_nodes(&cache));
+
+                cache.remove(&1);
+                assert_eq!(cache.map.len(), count_nodes(&cache));
+                
+                cache.clear();
+                assert_eq!(cache.map.len(), count_nodes(&cache));
             }
 
             #[test]
             fn test_head_tail_pointer_consistency() {
                 // Test that head/tail pointers are consistent with actual list structure
-                todo!()
+                let mut cache = LRUCore::new(10);
+                
+                // Empty
+                assert!(cache.head.is_none());
+                assert!(cache.tail.is_none());
+
+                // One item
+                cache.insert(1, Arc::new(10));
+                assert!(cache.head.is_some());
+                assert!(cache.tail.is_some());
+                assert_eq!(cache.head, cache.tail);
+                
+                unsafe {
+                    assert!(cache.head.unwrap().as_ref().prev.is_none());
+                    assert!(cache.tail.unwrap().as_ref().next.is_none());
+                }
+
+                // Two items
+                cache.insert(2, Arc::new(20));
+                assert!(cache.head.is_some());
+                assert!(cache.tail.is_some());
+                assert_ne!(cache.head, cache.tail);
+                
+                unsafe {
+                    // Head should be 2 (MRU)
+                    assert_eq!(cache.head.unwrap().as_ref().key, 2);
+                    // Tail should be 1 (LRU)
+                    assert_eq!(cache.tail.unwrap().as_ref().key, 1);
+
+                    assert!(cache.head.unwrap().as_ref().prev.is_none());
+                    assert!(cache.tail.unwrap().as_ref().next.is_none());
+                    
+                    assert_eq!(cache.head.unwrap().as_ref().next, cache.tail);
+                    assert_eq!(cache.tail.unwrap().as_ref().prev, cache.head);
+                }
             }
 
             #[test]
             fn test_node_reference_consistency() {
                 // Test that all node references in HashMap point to valid list nodes
-                todo!()
+                let mut cache = LRUCore::new(10);
+                for i in 0..5 {
+                    cache.insert(i, Arc::new(i));
+                }
+
+                let mut list_ptrs = HashSet::new();
+                let mut current = cache.head;
+                while let Some(node_ptr) = current {
+                    list_ptrs.insert(node_ptr);
+                    unsafe {
+                        current = node_ptr.as_ref().next;
+                    }
+                }
+
+                assert_eq!(list_ptrs.len(), 5);
+                assert_eq!(cache.map.len(), 5);
+
+                for val in cache.map.values() {
+                    assert!(list_ptrs.contains(val));
+                }
             }
 
             #[test]
             fn test_doubly_linked_list_integrity() {
                 // Test forward and backward link consistency throughout list
-                todo!()
+                let mut cache = LRUCore::new(10);
+                for i in 0..5 {
+                    cache.insert(i, Arc::new(i));
+                }
+                
+                // Validate manually
+                let mut current = cache.head;
+                let mut prev: Option<NonNull<Node<i32, i32>>> = None;
+                
+                while let Some(node_ptr) = current {
+                     unsafe {
+                         let node = node_ptr.as_ref();
+                         assert_eq!(node.prev, prev);
+                         
+                         if let Some(p) = prev {
+                             assert_eq!(p.as_ref().next, Some(node_ptr));
+                         }
+                         
+                         prev = current;
+                         current = node.next;
+                     }
+                }
+                assert_eq!(prev, cache.tail);
             }
 
             #[test]
