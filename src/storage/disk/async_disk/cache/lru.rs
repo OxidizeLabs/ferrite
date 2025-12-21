@@ -5196,11 +5196,11 @@ mod tests {
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(10));
                 
-                let map_val = cache.get(&1).unwrap();
+                let map_val = cache.get(&1).unwrap().clone();
                 unsafe {
                     let node_val = &cache.head.unwrap().as_ref().value;
-                    assert_eq!(map_val, node_val);
-                    assert_eq!(**map_val, 10);
+                    assert_eq!(&map_val, node_val);
+                    assert_eq!(*map_val, 10);
                 }
             }
 
@@ -5270,7 +5270,7 @@ mod tests {
                 let val = cache.get(&1).cloned();
                 cache.remove(&1);
                 // val should still be valid (Arc)
-                assert_eq!(**val.unwrap(), 1);
+                assert_eq!(*val.unwrap(), 1);
             }
 
             #[test]
@@ -5351,7 +5351,7 @@ mod tests {
             #[test]
             fn test_state_after_drop() {
                 // Test proper cleanup state when cache is dropped
-                let cache = LRUCore::new(5);
+                let cache: LRUCore<i32, i32> = LRUCore::new(5);
                 drop(cache);
             }
 
