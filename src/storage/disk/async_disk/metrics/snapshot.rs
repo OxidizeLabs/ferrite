@@ -1,9 +1,20 @@
+//! # Metrics Snapshot
+//!
+//! Provides immutable, point-in-time views of system performance.
+//!
+//! Unlike `LiveMetrics` which changes constantly, a `MetricsSnapshot` captures a consistent state
+//! that is safe to pass around for reporting, logging, or dashboard rendering. It converts raw atomic
+//! counters into derived values like "operations per second" or "average latency".
+
 /// Snapshot of performance metrics
 #[derive(Debug, Default, Clone)]
 pub struct MetricsSnapshot {
     // I/O Performance
     pub read_latency_avg_ns: u64,
     pub write_latency_avg_ns: u64,
+    pub p50_latency_ns: u64,
+    pub p90_latency_ns: u64,
+    pub p99_latency_ns: u64,
     pub io_throughput_mb_per_sec: f64,
     pub io_queue_depth: usize,
 

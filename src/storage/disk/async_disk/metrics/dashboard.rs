@@ -1,3 +1,13 @@
+//! # Dashboard Types
+//!
+//! Data structures for the monitoring dashboard and high-level reporting.
+//!
+//! These types (`DashboardData`, `HealthReport`) aggregate low-level metrics into user-friendly categories:
+//! - **Performance**: Throughput, IOPS, Latency
+//! - **Cache**: Hit ratios, Memory usage
+//! - **Storage**: Utilization, Write amplification
+//! - **Health**: Component status and overall system score
+
 use crate::storage::disk::async_disk::metrics::alerts::AlertSummary;
 use tokio::time::Instant;
 
