@@ -8,7 +8,7 @@ use crate::storage::disk::async_disk::cache::cache_manager::CacheManager;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
 use crate::storage::disk::async_disk::config::{FsyncPolicy, IOPriority};
 use crate::storage::disk::async_disk::io::AsyncIOEngine;
-use crate::storage::disk::async_disk::memory::{WriteBufferStats, WriteManager};
+use crate::storage::disk::async_disk::memory::{DurabilityProvider, WriteBufferStats, WriteManager};
 use crate::storage::disk::async_disk::metrics::alerts::AlertSummary;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
 use crate::storage::disk::async_disk::metrics::dashboard::{
@@ -19,6 +19,7 @@ use crate::storage::disk::async_disk::metrics::prediction::TrendData;
 use crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot;
 use crate::storage::disk::async_disk::scheduler::{IOTask, IOTaskType, WorkStealingScheduler};
 use log::{debug, error, info, trace, warn};
+use std::future::Future;
 use std::io;
 use std::io::Result as IoResult;
 use std::sync::Arc;
@@ -51,6 +52,16 @@ pub struct AsyncDiskManager {
     // State tracking
     is_shutting_down: Arc<AtomicBool>,
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl DurabilityProvider for AsyncDiskManager {
+    fn sync_data(&self) -> impl Future<Output = IoResult<()>> + Send {
+        self.sync()
+    }
+
+    fn sync_log(&self) -> impl Future<Output = IoResult<()>> + Send {
+        self.sync_log()
+    }
 }
 
 impl AsyncDiskManager {
@@ -359,7 +370,7 @@ impl AsyncDiskManager {
         debug!("Buffering write for page {}", page_id);
         let flushed_pages = self
             .write_manager
-            .buffer_write(page_id, data.clone())
+            .buffer_write(page_id, data.clone(), self)
             .await?;
 
         // Update cache if caching is enabled
@@ -422,7 +433,7 @@ impl AsyncDiskManager {
         let start_time = std::time::Instant::now();
 
         // Get buffered pages to flush
-        let pages = self.write_manager.force_flush().await?;
+        let pages = self.write_manager.force_flush(self).await?;
 
         if !pages.is_empty() {
             debug!("Flushing {} pages to disk", pages.len());
@@ -430,6 +441,9 @@ impl AsyncDiskManager {
         }
 
         // Apply durability based on configuration
+        // Note: write_manager.force_flush(self) already applies durability if configured,
+        // but we might want to double check here if the pages were empty (no flush triggered internally)
+        // or if there are other pending writes.
         match self.config.fsync_policy {
             FsyncPolicy::OnFlush | FsyncPolicy::PerWrite | FsyncPolicy::Periodic(_) => {
                 debug!(
@@ -510,7 +524,7 @@ impl AsyncDiskManager {
 
         // Apply durability policy if needed
         debug!("Applying durability policy for {} pages", pages.len());
-        self.write_manager.apply_durability(&pages)?;
+        self.write_manager.apply_durability(&pages, self).await?;
 
         // Update metrics
         let elapsed = start_time.elapsed();
@@ -665,7 +679,7 @@ impl AsyncDiskManager {
                 trace!("Buffering page {} in batch write", page_id);
                 let flushed_pages = self
                     .write_manager
-                    .buffer_write(*page_id, data.clone())
+                    .buffer_write(*page_id, data.clone(), self)
                     .await?;
 
                 // Write any flushed pages to disk immediately
@@ -782,6 +796,13 @@ impl AsyncDiskManager {
         io_engine.sync_log_direct().await
     }
 
+    /// Syncs the log file to disk (standard path)
+    pub async fn sync_log(&self) -> IoResult<()> {
+        debug!("Syncing WAL/log file");
+        let io_engine = self.io_engine.read().await;
+        io_engine.sync_log().await
+    }
+
     /// Gets current metrics snapshot
     pub fn get_metrics(&self) -> MetricsSnapshot {
         debug!("Creating metrics snapshot");
@@ -802,7 +823,7 @@ impl AsyncDiskManager {
     /// Forces flush of all pending writes
     pub async fn force_flush_all(&self) -> IoResult<()> {
         warn!("Force flush all requested");
-        let pages = self.write_manager.force_flush().await?;
+        let pages = self.write_manager.force_flush(self).await?;
 
         if !pages.is_empty() {
             debug!("Force flushing {} pages to disk", pages.len());

@@ -6,7 +6,7 @@
 
 use super::{
     BufferManager, CoalesceResult, CoalescedSizeInfo, CoalescingEngine, DurabilityManager,
-    DurabilityResult, FlushCoordinator, FlushDecision, WriteBufferStats,
+    DurabilityProvider, DurabilityResult, FlushCoordinator, FlushDecision, WriteBufferStats,
 };
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
@@ -78,11 +78,15 @@ impl WriteManager {
     /// 3. Check flush conditions and coordinate flush if needed
     ///
     /// Returns: Optional list of pages that were flushed and need to be written to disk
-    pub async fn buffer_write(
+    pub async fn buffer_write<P>(
         &self,
         page_id: PageId,
         data: Vec<u8>,
-    ) -> IoResult<Option<Vec<(PageId, Vec<u8>)>>> {
+        provider: &P,
+    ) -> IoResult<Option<Vec<(PageId, Vec<u8>)>>>
+    where
+        P: DurabilityProvider,
+    {
         log::debug!(
             "WriteManager::buffer_write called for page {} with {} bytes",
             page_id,
@@ -144,7 +148,7 @@ impl WriteManager {
         // Step 3: Coordinate flush if needed
         let flushed_pages = if needs_flush {
             log::debug!("WriteManager::buffer_write triggering flush");
-            let pages = self.flush().await?;
+            let pages = self.flush(provider).await?;
             log::debug!(
                 "WriteManager::buffer_write flush returned {} pages",
                 pages.len()
@@ -175,7 +179,10 @@ impl WriteManager {
     /// 1. Coordinate flush timing to prevent concurrent flushes
     /// 2. Drain buffered writes from buffer manager
     /// 3. Apply durability guarantees through durability manager
-    pub async fn flush(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
+    pub async fn flush<P>(&self, provider: &P) -> IoResult<Vec<(PageId, Vec<u8>)>>
+    where
+        P: DurabilityProvider,
+    {
         // Step 1: Try to start flush coordination
         if !self.flush_coordinator.try_start_flush() {
             // Another flush is already in progress
@@ -183,7 +190,7 @@ impl WriteManager {
         }
 
         // Step 2: Perform the actual flush
-        let result = self.flush_internal().await;
+        let result = self.flush_internal(provider).await;
 
         // Step 3: Complete flush coordination
         self.flush_coordinator.complete_flush().await;
@@ -192,7 +199,10 @@ impl WriteManager {
     }
 
     /// Forces a flush regardless of thresholds
-    pub async fn force_flush(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
+    pub async fn force_flush<P>(&self, provider: &P) -> IoResult<Vec<(PageId, Vec<u8>)>>
+    where
+        P: DurabilityProvider,
+    {
         log::debug!("WriteManager::force_flush called");
 
         // Step 1: Force start flush coordination
@@ -212,7 +222,7 @@ impl WriteManager {
         log::debug!("WriteManager::force_flush acquired flush lock");
 
         // Step 2: Perform the actual flush
-        let result = self.flush_internal().await;
+        let result = self.flush_internal(provider).await;
 
         // Step 3: Complete flush coordination
         self.flush_coordinator.complete_flush().await;
@@ -226,7 +236,10 @@ impl WriteManager {
     }
 
     /// Internal flush implementation that coordinates between components
-    async fn flush_internal(&self) -> IoResult<Vec<(PageId, Vec<u8>)>> {
+    async fn flush_internal<P>(&self, provider: &P) -> IoResult<Vec<(PageId, Vec<u8>)>>
+    where
+        P: DurabilityProvider,
+    {
         log::debug!("WriteManager::flush_internal called");
 
         // Step 1: Drain pages from buffer manager
@@ -258,7 +271,10 @@ impl WriteManager {
         );
 
         // Step 2: Apply durability guarantees
-        let _durability_result = self.durability_manager.apply_durability(&pages_to_flush)?;
+        let _durability_result = self
+            .durability_manager
+            .apply_durability(&pages_to_flush, provider)
+            .await?;
 
         log::debug!(
             "WriteManager::flush_internal completed successfully with {} pages",
@@ -307,8 +323,17 @@ impl WriteManager {
     }
 
     /// Applies durability guarantees to a set of pages (for external callers)
-    pub fn apply_durability(&self, pages: &[(PageId, Vec<u8>)]) -> IoResult<DurabilityResult> {
-        self.durability_manager.apply_durability(pages)
+    pub async fn apply_durability<P>(
+        &self,
+        pages: &[(PageId, Vec<u8>)],
+        provider: &P,
+    ) -> IoResult<DurabilityResult>
+    where
+        P: DurabilityProvider,
+    {
+        self.durability_manager
+            .apply_durability(pages, provider)
+            .await
     }
 
     /// Updates coalescing configuration
@@ -364,6 +389,12 @@ mod tests {
     use super::*;
     use crate::storage::disk::async_disk::config::DiskManagerConfig;
 
+    struct MockDurabilityProvider;
+    impl DurabilityProvider for MockDurabilityProvider {
+        async fn sync_data(&self) -> IoResult<()> { Ok(()) }
+        async fn sync_log(&self) -> IoResult<()> { Ok(()) }
+    }
+
     #[tokio::test]
     async fn test_write_manager_creation() {
         let config = DiskManagerConfig::default();
@@ -379,13 +410,14 @@ mod tests {
     async fn test_buffer_write_basic() {
         let config = DiskManagerConfig::default();
         let write_manager = WriteManager::new(&config);
+        let provider = MockDurabilityProvider;
 
         let page_id = 1;
         let data = vec![1, 2, 3, 4];
 
         // Test buffer_write
         write_manager
-            .buffer_write(page_id, data.clone())
+            .buffer_write(page_id, data.clone(), &provider)
             .await
             .unwrap();
 
@@ -398,19 +430,20 @@ mod tests {
     async fn test_flush_coordination() {
         let config = DiskManagerConfig::default();
         let write_manager = WriteManager::new(&config);
+        let provider = MockDurabilityProvider;
 
         // Add some data
         write_manager
-            .buffer_write(1, vec![1, 2, 3, 4])
+            .buffer_write(1, vec![1, 2, 3, 4], &provider)
             .await
             .unwrap();
         write_manager
-            .buffer_write(2, vec![5, 6, 7, 8])
+            .buffer_write(2, vec![5, 6, 7, 8], &provider)
             .await
             .unwrap();
 
         // Test flush
-        let flushed_pages = write_manager.force_flush().await.unwrap();
+        let flushed_pages = write_manager.force_flush(&provider).await.unwrap();
         assert_eq!(flushed_pages.len(), 2);
 
         // Test buffer is empty after flush
@@ -422,6 +455,7 @@ mod tests {
     async fn test_coalescing_integration() {
         let config = DiskManagerConfig::default();
         let write_manager = WriteManager::new(&config);
+        let provider = MockDurabilityProvider;
 
         let page_id = 1;
         let first_data = vec![1, 2, 3, 4];
@@ -429,13 +463,13 @@ mod tests {
 
         // First write
         write_manager
-            .buffer_write(page_id, first_data)
+            .buffer_write(page_id, first_data, &provider)
             .await
             .unwrap();
 
         // Second write to same page (should be coalesced/merged)
         write_manager
-            .buffer_write(page_id, second_data.clone())
+            .buffer_write(page_id, second_data.clone(), &provider)
             .await
             .unwrap();
 
@@ -448,10 +482,11 @@ mod tests {
     async fn test_comprehensive_stats() {
         let config = DiskManagerConfig::default();
         let write_manager = WriteManager::new(&config);
+        let provider = MockDurabilityProvider;
 
         // Add some data
         write_manager
-            .buffer_write(1, vec![1, 2, 3, 4])
+            .buffer_write(1, vec![1, 2, 3, 4], &provider)
             .await
             .unwrap();
 
@@ -465,9 +500,10 @@ mod tests {
     async fn test_durability_integration() {
         let config = DiskManagerConfig::default();
         let write_manager = WriteManager::new(&config);
+        let provider = MockDurabilityProvider;
 
         let pages = vec![(1, vec![1, 2, 3, 4]), (2, vec![5, 6, 7, 8])];
-        let result = write_manager.apply_durability(&pages).unwrap();
+        let result = write_manager.apply_durability(&pages, &provider).await.unwrap();
 
         assert!(result.pages_synced > 0);
         assert_eq!(result.durability_level, config.durability_level);
@@ -477,6 +513,7 @@ mod tests {
     async fn test_coalescing_config_update() {
         let config = DiskManagerConfig::default();
         let write_manager = WriteManager::new(&config);
+        let provider = MockDurabilityProvider;
 
         // Update coalescing configuration
         write_manager
@@ -486,11 +523,11 @@ mod tests {
         // Verify configuration was updated (indirectly through behavior)
         // Add some writes to test the new configuration
         write_manager
-            .buffer_write(1, vec![1, 2, 3, 4])
+            .buffer_write(1, vec![1, 2, 3, 4], &provider)
             .await
             .unwrap();
         write_manager
-            .buffer_write(2, vec![5, 6, 7, 8])
+            .buffer_write(2, vec![5, 6, 7, 8], &provider)
             .await
             .unwrap();
 
@@ -502,10 +539,11 @@ mod tests {
     async fn test_clear_all_pending() {
         let config = DiskManagerConfig::default();
         let write_manager = WriteManager::new(&config);
+        let provider = MockDurabilityProvider;
 
         // Add some data that would be in coalescing engine
         write_manager
-            .buffer_write(1, vec![1, 2, 3, 4])
+            .buffer_write(1, vec![1, 2, 3, 4], &provider)
             .await
             .unwrap();
 
@@ -520,20 +558,23 @@ mod tests {
     async fn test_concurrent_flushes() {
         let config = DiskManagerConfig::default();
         let write_manager = Arc::new(WriteManager::new(&config));
+        let provider = Arc::new(MockDurabilityProvider);
 
         // Add some data
         write_manager
-            .buffer_write(1, vec![1, 2, 3, 4])
+            .buffer_write(1, vec![1, 2, 3, 4], &*provider)
             .await
             .unwrap();
 
         // Start concurrent flushes
         let wm1 = Arc::clone(&write_manager);
         let wm2 = Arc::clone(&write_manager);
+        let p1 = Arc::clone(&provider);
+        let p2 = Arc::clone(&provider);
 
-        let flush1 = tokio::spawn(async move { wm1.flush().await });
+        let flush1 = tokio::spawn(async move { wm1.flush(&*p1).await });
 
-        let flush2 = tokio::spawn(async move { wm2.flush().await });
+        let flush2 = tokio::spawn(async move { wm2.flush(&*p2).await });
 
         let results = tokio::try_join!(flush1, flush2).unwrap();
 
