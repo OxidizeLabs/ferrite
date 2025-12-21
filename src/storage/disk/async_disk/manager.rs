@@ -57,7 +57,6 @@ pub struct AsyncDiskManager {
     config: DiskManagerConfig,
 
     // Optimization components
-    prefetcher: Arc<Mutex<super::prefetching::MLPrefetcher>>,
     scheduler: Arc<WorkStealingScheduler>,
 
     // Metrics and monitoring
@@ -164,10 +163,6 @@ impl AsyncDiskManager {
         debug!("Initializing WriteManager");
         let write_manager = Arc::new(WriteManager::new(&config));
 
-        // Create prefetcher
-        debug!("Initializing MLPrefetcher");
-        let prefetcher = Arc::new(Mutex::new(super::prefetching::MLPrefetcher::new()));
-
         // Create scheduler
         debug!(
             "Initializing WorkStealingScheduler with {} threads",
@@ -181,7 +176,6 @@ impl AsyncDiskManager {
             write_manager,
             cache_manager,
             config,
-            prefetcher,
             scheduler,
             metrics_collector,
             is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -264,7 +258,7 @@ impl AsyncDiskManager {
         };
 
         debug!("Submitting read task for page {} to scheduler", page_id);
-        if let Err(e) = self.scheduler.submit_task(task) {
+        if let Err(e) = self.scheduler.submit_task(task).await {
             error!("Failed to submit read task for page {}: {:?}", page_id, e);
             return Err(std::io::Error::other(format!(
                 "Failed to submit read task: {:?}",
@@ -290,11 +284,6 @@ impl AsyncDiskManager {
                 if self.config.cache_size_mb > 0 {
                     trace!("Storing page {} in cache", page_id);
                     self.cache_manager.store_page(page_id, data.clone());
-                }
-
-                // Trigger prefetching if enabled
-                if self.config.prefetch_enabled {
-                    self.prefetch_related_pages(page_id).await;
                 }
 
                 Ok(data)
@@ -335,12 +324,7 @@ impl AsyncDiskManager {
             trace!("Storing page {} in cache", page_id);
             self.cache_manager.store_page(page_id, data.clone());
         }
-
-        // Trigger prefetching if enabled
-        if self.config.prefetch_enabled {
-            self.prefetch_related_pages(page_id).await;
-        }
-
+        
         Ok(data)
     }
 
@@ -493,7 +477,7 @@ impl AsyncDiskManager {
             "Submitting batch write task for {} pages to scheduler",
             pages.len()
         );
-        if let Err(e) = self.scheduler.submit_task(task) {
+        if let Err(e) = self.scheduler.submit_task(task).await {
             error!("Failed to submit batch write task: {:?}", e);
             return Err(std::io::Error::other(format!(
                 "Failed to submit batch write task: {:?}",
@@ -609,7 +593,7 @@ impl AsyncDiskManager {
             "Submitting batch read task for {} pages to scheduler",
             page_ids.len()
         );
-        if let Err(e) = self.scheduler.submit_task(task) {
+        if let Err(e) = self.scheduler.submit_task(task).await {
             error!("Failed to submit batch read task: {:?}", e);
             return Err(std::io::Error::other(format!(
                 "Failed to submit batch read task: {:?}",
@@ -1086,44 +1070,6 @@ impl AsyncDiskManager {
         // More metrics would be added here
         debug!("Prometheus metrics exported ({} bytes)", output.len());
         output
-    }
-
-    /// Prefetches related pages based on access patterns
-    async fn prefetch_related_pages(&self, current_page: PageId) {
-        if !self.config.prefetch_enabled {
-            return;
-        }
-
-        trace!("Checking prefetch opportunities for page {}", current_page);
-        let mut prefetcher = self.prefetcher.lock().await;
-        prefetcher.record_access(current_page);
-
-        let pages_to_prefetch = prefetcher.predict_prefetch(current_page);
-        if !pages_to_prefetch.is_empty() {
-            let prefetch_count =
-                std::cmp::min(pages_to_prefetch.len(), self.config.prefetch_distance);
-            debug!(
-                "Prefetching {} related pages for page {} (limited by config: {})",
-                prefetch_count, current_page, self.config.prefetch_distance
-            );
-
-            // Use scheduler for prefetch if work-stealing is enabled
-            if self.config.work_stealing_enabled && prefetch_count > 1 {
-                let (sender, _receiver) = oneshot::channel();
-                let task = IOTask {
-                    task_type: IOTaskType::Prefetch(
-                        pages_to_prefetch.into_iter().take(prefetch_count).collect(),
-                    ),
-                    priority: IOPriority::Low, // Prefetch is low priority
-                    creation_time: Instant::now(),
-                    completion_callback: Some(sender),
-                };
-
-                if let Err(e) = self.scheduler.submit_task(task) {
-                    warn!("Failed to submit prefetch task: {:?}", e);
-                }
-            }
-        }
     }
 
     /// Reads log data from the log file
