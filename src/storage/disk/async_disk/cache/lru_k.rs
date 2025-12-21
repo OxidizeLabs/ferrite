@@ -1,3 +1,70 @@
+//! LRU-K Cache Implementation.
+//!
+//! This module provides an implementation of the LRU-K replacement policy (specifically LRU-2 by default).
+//!
+//! # Architecture
+//!
+//! The implementation uses:
+//! - A `HashMap` to store key-value pairs along with their access history.
+//! - `VecDeque` for tracking the last K access timestamps for each item.
+//! - `SystemTime` for generating timestamps (in microseconds) to order accesses.
+//!
+//! Unlike the O(1) LRU implementation, this LRU-K implementation is **O(N)** for eviction operations
+//! because it must scan all entries to find the one with the maximum "backward K-distance".
+//! This design decision prioritizes simplicity and correctness of the complex LRU-K logic over raw performance,
+//! which is acceptable given that LRU-K is typically used in scenarios where hit ratios are more critical
+//! than eviction throughput (e.g., database buffer pools) or where N is manageable.
+//!
+//! # Key Features
+//!
+//! - **LRU-K Policy**: Evicts the item whose K-th most recent access is furthest in the past.
+//!   This creates a "correlated reference period" that prevents cold pages from being evicted
+//!   prematurely due to a single scan.
+//! - **Configurable K**: Defaults to K=2 (LRU-2), which provides a good balance between
+//!   responsiveness and scan resistance.
+//! - **Access History Tracking**: Maintains a history of the last K access times for each item.
+//!
+//! # Design Rationale
+//!
+//! - **Scan Resistance**: Standard LRU is vulnerable to sequential scans (e.g., table scans)
+//!   flushing the entire cache. LRU-K mitigates this by requiring K accesses before an item
+//!   is considered "hot" enough to be retained over others.
+//! - **Simplicity**: The current O(N) implementation avoids the complexity of maintaining
+//!   multiple priority queues or complex pointer structures required for an O(log N) or O(1) LRU-K.
+//!
+//! # Performance Characteristics
+//!
+//! - **Time Complexity**:
+//!   - `get`, `insert` (without eviction), `remove`: **O(1)** (average case HashMap).
+//!   - `insert` (with eviction), `pop_lru_k`: **O(N)** where N is the number of items in the cache.
+//!     It scans all items to calculate the K-distance.
+//! - **Space Overhead**:
+//!   - Per entry: Value storage + `VecDeque` of K timestamps (typically small, e.g., 2 `u64`s).
+//! - **Concurrency**:
+//!   - This struct is **not thread-safe**. It is intended to be wrapped in a `Mutex` or `RwLock`
+//!     (like `ConcurrentLRUCache` does for `LRUCore`) or used in single-threaded contexts.
+//!
+//! # Trade-offs
+//!
+//! - **Pros**:
+//!   - Better hit ratios than LRU for database workloads involving scans.
+//!   - Robust against "cache pollution" from one-time access patterns.
+//! - **Cons**:
+//!   - **O(N) Eviction**: Performance degrades linearly with cache size during evictions. This is
+//!     the major trade-off for the improved replacement policy logic without complex data structures.
+//!   - Memory overhead of storing timestamps.
+//!
+//! # When to Use
+//!
+//! - **Use when**:
+//!   - You are implementing a database buffer pool where scan resistance is critical.
+//!   - The cost of a cache miss (disk I/O) vastly outweighs the CPU cost of an O(N) eviction scan.
+//!   - The cache size is moderate, or eviction is infrequent compared to hits.
+//! - **Avoid when**:
+//!   - You need strictly bounded O(1) latency for all operations (use `LRUCache`).
+//!   - The cache size is extremely large (millions of items) and evictions are frequent.
+//!   - You are in a high-frequency, low-latency environment (e.g., CPU cache simulation).
+
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LRUKCacheTrait, MutableCache,
 };
