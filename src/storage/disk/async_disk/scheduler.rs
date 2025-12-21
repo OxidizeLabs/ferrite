@@ -19,7 +19,8 @@ use crate::storage::disk::async_disk::config::IOPriority;
 use std::io::Result as IoResult;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
+use std::sync::Arc;
 
 /// Advanced work-stealing I/O scheduler
 #[derive(Debug)]
@@ -115,6 +116,7 @@ pub struct PriorityTaskScheduler {
     high_receiver: Mutex<mpsc::Receiver<IOTask>>,
     normal_receiver: Mutex<mpsc::Receiver<IOTask>>,
     low_receiver: Mutex<mpsc::Receiver<IOTask>>,
+    notify: Arc<Notify>,
 }
 
 impl Default for PriorityTaskScheduler {
@@ -137,15 +139,22 @@ impl PriorityTaskScheduler {
             high_receiver: Mutex::new(high_receiver),
             normal_receiver: Mutex::new(normal_receiver),
             low_receiver: Mutex::new(low_receiver),
+            notify: Arc::new(Notify::new()),
         }
     }
 
     pub async fn submit_task(&self, task: IOTask) -> Result<(), mpsc::error::SendError<IOTask>> {
-        match task.priority {
+        let result = match task.priority {
             IOPriority::Critical | IOPriority::High => self.high_priority_queue.send(task).await,
             IOPriority::Normal => self.normal_priority_queue.send(task).await,
             IOPriority::Low => self.low_priority_queue.send(task).await,
+        };
+        
+        if result.is_ok() {
+            self.notify.notify_one();
         }
+        
+        result
     }
 
     pub fn get_next_task(&self) -> Option<IOTask> {
@@ -169,6 +178,16 @@ impl PriorityTaskScheduler {
         }
 
         None
+    }
+
+    /// Waits asynchronously for the next task
+    pub async fn next_task(&self) -> IOTask {
+        loop {
+            if let Some(task) = self.get_next_task() {
+                return task;
+            }
+            self.notify.notified().await;
+        }
     }
 }
 
