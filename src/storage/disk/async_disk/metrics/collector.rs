@@ -480,7 +480,7 @@ impl MetricsCollector {
             return 0;
         }
 
-        let target_count = (total_samples as f64 * percentile) as u64;
+        let target_count = (total_samples as f64 * percentile).ceil() as u64;
         let mut current_count = 0;
         
         let bucket_upper_bounds = [
