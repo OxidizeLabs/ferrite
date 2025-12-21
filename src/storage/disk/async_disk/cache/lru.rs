@@ -4715,67 +4715,206 @@ mod tests {
             #[test]
             fn test_invariants_after_every_operation() {
                 // Test all invariants are maintained after each cache operation
-                todo!()
+                let mut cache = LRUCore::new(5);
+                cache.validate_invariants();
+                
+                for i in 0..5 {
+                    cache.insert(i, Arc::new(i));
+                    cache.validate_invariants();
+                }
+                
+                cache.get(&2);
+                cache.validate_invariants();
+                
+                cache.insert(5, Arc::new(5)); // Eviction
+                cache.validate_invariants();
+                
+                cache.remove(&3);
+                cache.validate_invariants();
+                
+                cache.clear();
+                cache.validate_invariants();
             }
 
             #[test]
             fn test_memory_consistency_on_eviction() {
                 // Test memory state consistency during eviction operations
-                todo!()
+                let mut cache = LRUCore::new(2);
+                cache.insert(1, Arc::new(10));
+                cache.insert(2, Arc::new(20));
+                
+                assert_eq!(cache.map.len(), 2);
+                assert_eq!(count_nodes(&cache), 2);
+                
+                // Trigger eviction
+                cache.insert(3, Arc::new(30));
+                
+                assert_eq!(cache.map.len(), 2);
+                assert_eq!(count_nodes(&cache), 2);
+                assert!(cache.contains(&2));
+                assert!(cache.contains(&3));
+                assert!(!cache.contains(&1));
+                
+                cache.validate_invariants();
             }
 
             #[test]
             fn test_capacity_constraints_enforcement() {
                 // Test that cache never exceeds capacity constraints
-                todo!()
+                let capacity = 10;
+                let mut cache = LRUCore::new(capacity);
+                
+                for i in 0..capacity * 2 {
+                    cache.insert(i, Arc::new(i));
+                    assert!(cache.map.len() <= capacity);
+                    assert!(count_nodes(&cache) <= capacity);
+                }
             }
 
             #[test]
             fn test_empty_cache_state_invariants() {
                 // Test invariants when cache is empty (head=None, tail=None)
-                todo!()
+                let cache: LRUCore<i32, i32> = LRUCore::new(10);
+                assert!(cache.head.is_none());
+                assert!(cache.tail.is_none());
+                assert!(cache.map.is_empty());
+                assert_eq!(count_nodes(&cache), 0);
             }
 
             #[test]
             fn test_single_item_cache_state() {
                 // Test state consistency when cache has exactly one item
-                todo!()
+                let mut cache = LRUCore::new(10);
+                cache.insert(1, Arc::new(100));
+                
+                assert!(cache.head.is_some());
+                assert!(cache.tail.is_some());
+                assert_eq!(cache.head, cache.tail);
+                assert_eq!(cache.map.len(), 1);
+                assert_eq!(count_nodes(&cache), 1);
+                
+                unsafe {
+                    assert!(cache.head.unwrap().as_ref().prev.is_none());
+                    assert!(cache.tail.unwrap().as_ref().next.is_none());
+                }
             }
 
             #[test]
             fn test_full_cache_state_invariants() {
                 // Test invariants when cache is at full capacity
-                todo!()
+                let capacity = 3;
+                let mut cache = LRUCore::new(capacity);
+                for i in 0..capacity {
+                    cache.insert(i, Arc::new(i));
+                }
+                
+                assert_eq!(cache.map.len(), capacity);
+                assert_eq!(count_nodes(&cache), capacity);
+                assert!(cache.head.is_some());
+                assert!(cache.tail.is_some());
+                assert_ne!(cache.head, cache.tail);
+                
+                cache.validate_invariants();
             }
 
             #[test]
             fn test_state_after_clear_operation() {
                 // Test that cache state is properly reset after clear()
-                todo!()
+                let mut cache = LRUCore::new(5);
+                for i in 0..3 {
+                    cache.insert(i, Arc::new(i));
+                }
+                
+                cache.clear();
+                
+                assert!(cache.head.is_none());
+                assert!(cache.tail.is_none());
+                assert!(cache.map.is_empty());
+                assert_eq!(count_nodes(&cache), 0);
             }
 
             #[test]
             fn test_state_during_capacity_transitions() {
                 // Test state consistency during transitions between different fill levels
-                todo!()
+                let mut cache = LRUCore::new(5);
+                
+                // 0 -> 1
+                cache.insert(1, Arc::new(1));
+                assert_eq!(count_nodes(&cache), 1);
+                
+                // 1 -> 2
+                cache.insert(2, Arc::new(2));
+                assert_eq!(count_nodes(&cache), 2);
+                
+                // 2 -> 1
+                cache.remove(&1);
+                assert_eq!(count_nodes(&cache), 1);
+                
+                // 1 -> 0
+                cache.remove(&2);
+                assert_eq!(count_nodes(&cache), 0);
+                assert!(cache.head.is_none());
             }
 
             #[test]
             fn test_node_allocation_consistency() {
                 // Test that all allocated nodes are properly tracked and deallocated
-                todo!()
+                // We verify this by checking map size vs list size
+                let mut cache = LRUCore::new(10);
+                for i in 0..10 {
+                    cache.insert(i, Arc::new(i));
+                }
+                
+                assert_eq!(cache.map.len(), 10);
+                assert_eq!(count_nodes(&cache), 10);
+                
+                // Overwrite keys - should reuse or reallocate but keep consistency
+                for i in 0..5 {
+                    cache.insert(i, Arc::new(i + 100));
+                }
+                assert_eq!(cache.map.len(), 10);
+                assert_eq!(count_nodes(&cache), 10);
             }
 
             #[test]
             fn test_key_value_mapping_consistency() {
                 // Test that keys in HashMap correctly map to their values in nodes
-                todo!()
+                let mut cache = LRUCore::new(5);
+                for i in 0..5 {
+                    cache.insert(i, Arc::new(i * 10));
+                }
+                
+                for i in 0..5 {
+                    let node_ptr = cache.map.get(&i).unwrap();
+                    unsafe {
+                        let node = node_ptr.as_ref();
+                        assert_eq!(node.key, i);
+                        assert_eq!(*node.value, i * 10);
+                    }
+                }
             }
 
             #[test]
             fn test_lru_ordering_state_consistency() {
                 // Test that LRU ordering state matches actual access patterns
-                todo!()
+                let mut cache = LRUCore::new(3);
+                cache.insert(1, Arc::new(1));
+                cache.insert(2, Arc::new(2));
+                cache.insert(3, Arc::new(3));
+                
+                // Order: 3 -> 2 -> 1
+                unsafe {
+                    assert_eq!(cache.head.unwrap().as_ref().key, 3);
+                    assert_eq!(cache.tail.unwrap().as_ref().key, 1);
+                }
+                
+                // Access 1 -> moves to head
+                cache.get(&1);
+                // Order: 1 -> 3 -> 2
+                unsafe {
+                    assert_eq!(cache.head.unwrap().as_ref().key, 1);
+                    assert_eq!(cache.tail.unwrap().as_ref().key, 2);
+                }
             }
 
             #[test]
