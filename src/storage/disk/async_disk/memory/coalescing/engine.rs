@@ -1,7 +1,21 @@
-//! Write coalescing engine
+//! # Coalescing Engine
 //!
-//! This module provides the core write coalescing functionality including
-//! adjacent page detection, cleanup management, and coalescing decisions.
+//! The `CoalescingEngine` is the active component responsible for identifying and merging related write requests.
+//! It acts as a short-term holding area where adjacent page writes can be fused before being moved to the main buffer.
+//!
+//! ## Features
+//!
+//! - **Adjacent Detection**: Identifies writes to physically adjacent page IDs.
+//! - **Merge Logic**: Combines data for the same page (overwrite) or adjacent pages.
+//! - **Cleanup Policies**: Periodically evicts pending writes based on:
+//!     - **Time**: Writes waiting longer than `coalesce_window`.
+//!     - **Memory**: Eviction under memory pressure.
+//!     - **Access Frequency**: Prioritizes keeping "hot" regions that are actively being accumulated.
+//!
+//! ## Usage
+//!
+//! Used by `WriteManager` as the first step in the write pipeline. It effectively converts a stream of random
+//! 4KB page writes into larger (e.g., 64KB) sequential chunks where possible.
 
 use super::size_analyzer::{CoalescedSizeInfo, SizeAnalyzer};
 use crate::common::config::PageId;

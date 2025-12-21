@@ -1,8 +1,27 @@
-//! Orchestrated write management system
+//! # Orchestrated Write Manager
 //!
-//! This module contains the refactored WriteManager that follows the Single Responsibility Principle
-//! by orchestrating between specialized components for write buffering, flush coordination,
-//! write coalescing, and durability management.
+//! The `WriteManager` serves as the central nervous system for the memory-side write path. It strictly follows the
+//! Single Responsibility Principle by delegating specific tasks to specialized sub-components while orchestrating
+//! the overall flow of data from memory to disk.
+//!
+//! ## Architecture
+//!
+//! The `WriteManager` coordinates the following pipeline:
+//! 1. **Coalescing**: Incoming writes are first passed to the `CoalescingEngine` to check if they can be merged
+//!    with pending writes (optimizing I/O patterns).
+//! 2. **Buffering**: Data is then stored in the `BufferManager`, which tracks memory usage and optionally
+//!    compresses pages.
+//! 3. **Flush Coordination**: The `FlushCoordinator` is consulted to determine if a flush is required based on
+//!    memory pressure or timing.
+//! 4. **Durability**: When flushing, the `DurabilityManager` ensures that data is persisted according to the
+//!    configured safety policies (e.g., WAL write-ahead, fsync).
+//!
+//! ## Key Features
+//!
+//! - **Unified Interface**: Provides a simple `buffer_write` API that abstracts away the complexity of the write pipeline.
+//! - **Concurrency Control**: Manages locks and state across multiple components to ensure thread safety.
+//! - **Observability**: Aggregates statistics from all sub-components into a comprehensive status report.
+//! - **Adaptive Behavior**: dynamically adjusts strategies (e.g., flushing aggressiveness) based on system state.
 
 use super::{
     BufferManager, CoalesceResult, CoalescedSizeInfo, CoalescingEngine, DurabilityManager,

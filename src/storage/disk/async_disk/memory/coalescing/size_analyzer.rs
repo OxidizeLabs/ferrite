@@ -1,7 +1,20 @@
-//! Advanced size analysis for write coalescing
+//! # Coalescing Size Analyzer
 //!
-//! This module provides sophisticated size calculation and analysis capabilities
-//! for determining the efficiency and memory footprint of coalescing operations.
+//! The `SizeAnalyzer` provides the mathematical logic to determine the "cost vs. benefit" of coalescing operations.
+//! Merging pages is not always beneficial if it introduces too many gaps (wasted space) or excessive misalignment.
+//!
+//! ## Analysis Metrics
+//!
+//! - **Effective Span**: The total memory range covered by a coalesced write.
+//! - **Gap Ratio**: The percentage of the span that contains no useful data (holes between pages).
+//! - **Overhead**: Metadata, alignment padding, and other costs.
+//! - **Efficiency**: A boolean verdict on whether a specific merge operation should proceed.
+//!
+//! ## Key Features
+//!
+//! - **Alignment Awareness**: Calculates padding required to align writes to CPU cache lines or disk sectors.
+//! - **Compression Estimation**: Heuristically estimates potential savings if the coalesced block were compressed.
+//! - **Gap Analysis**: Identifies contiguous ranges vs. fragmented holes.
 
 use crate::common::config::PageId;
 use std::collections::HashMap;

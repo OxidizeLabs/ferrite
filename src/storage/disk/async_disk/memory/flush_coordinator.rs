@@ -1,7 +1,19 @@
-//! Flush coordination and timing management
+//! # Flush Coordinator
 //!
-//! This module handles flush operations coordination, timing decisions,
-//! and flush policy enforcement.
+//! The `FlushCoordinator` makes high-level decisions about when to persist buffered writes to disk.
+//! It balances the need to free up memory with the goal of batching I/O for performance.
+//!
+//! ## Logic
+//!
+//! It implements a dual-trigger strategy:
+//! 1. **Threshold-Based**: Triggers a flush when the number of dirty pages exceeds a configured limit (memory pressure).
+//! 2. **Time-Based**: Triggers a flush if data has remained in the buffer for too long (staleness limit).
+//!
+//! ## Key Features
+//!
+//! - **Atomic State**: Uses atomic flags to track if a flush is currently in progress, preventing concurrent flush storms.
+//! - **Decision Logic**: `should_flush` evaluates current state against policies to return a specific action (`ThresholdFlush`, `IntervalFlush`, etc.).
+//! - **Lock-Free Checks**: fast-path checks for flush status to minimize overhead in the write path.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};

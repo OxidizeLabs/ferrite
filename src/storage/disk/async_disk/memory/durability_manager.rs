@@ -1,7 +1,20 @@
-//! Durability management and sync policy enforcement
+//! # Durability Manager
 //!
-//! This module handles durability guarantees, WAL management,
-//! and fsync policy enforcement for write operations.
+//! The `DurabilityManager` is responsible for enforcing data persistence guarantees. It abstracts
+//! the complexities of `fsync`, `fdatasync`, and Write-Ahead Log (WAL) coordination.
+//!
+//! ## Durability Levels
+//!
+//! - **None**: No guarantees; high performance but risky (data lost on crash).
+//! - **Buffer**: Data is written to the OS page cache; survives process crash but not kernel panic/power loss.
+//! - **Sync**: Data is explicitly synced to disk (`fsync`); survives power loss.
+//! - **Durable**: Full ACID guarantee; coordinates with WAL to ensure log records persist before data pages.
+//!
+//! ## Key Features
+//!
+//! - **Policy Enforcement**: Translates high-level configuration (`FsyncPolicy`) into concrete I/O actions.
+//! - **Overhead Estimation**: Provides heuristics to estimate the latency cost of sync operations.
+//! - **WAL Integration**: Ensures the "Write-Ahead" property by syncing the log before data pages when required.
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
