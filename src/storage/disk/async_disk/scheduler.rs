@@ -17,16 +17,15 @@
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::IOPriority;
 use std::io::Result as IoResult;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 /// Advanced work-stealing I/O scheduler
 #[derive(Debug)]
 pub struct WorkStealingScheduler {
-    worker_queues: Vec<Arc<crossbeam_channel::Sender<IOTask>>>,
-    receivers: Vec<crossbeam_channel::Receiver<IOTask>>,
+    worker_queues: Vec<mpsc::Sender<IOTask>>,
+    receivers: Vec<Mutex<mpsc::Receiver<IOTask>>>,
     worker_count: usize,
     round_robin_counter: AtomicUsize,
 }
@@ -56,11 +55,13 @@ impl WorkStealingScheduler {
     pub fn new(worker_count: usize) -> Self {
         let mut worker_queues = Vec::new();
         let mut receivers = Vec::new();
+        // Use a reasonable bound to prevent OOM
+        let queue_capacity = 256;
 
         for _ in 0..worker_count {
-            let (sender, receiver) = crossbeam_channel::unbounded();
-            worker_queues.push(Arc::new(sender));
-            receivers.push(receiver);
+            let (sender, receiver) = mpsc::channel(queue_capacity);
+            worker_queues.push(sender);
+            receivers.push(Mutex::new(receiver));
         }
 
         Self {
@@ -72,38 +73,48 @@ impl WorkStealingScheduler {
     }
 
     /// Submits a task to the scheduler
-    pub fn submit_task(&self, task: IOTask) -> Result<(), crossbeam_channel::SendError<IOTask>> {
+    pub async fn submit_task(&self, task: IOTask) -> Result<(), mpsc::error::SendError<IOTask>> {
         // Use round-robin for now, could be improved with load balancing
         let worker_idx =
             self.round_robin_counter.fetch_add(1, Ordering::Relaxed) % self.worker_count;
-        self.worker_queues[worker_idx].send(task)
+        self.worker_queues[worker_idx].send(task).await
+    }
+
+    /// Tries to submit a task without waiting (useful for prefetching)
+    pub fn try_submit_task(&self, task: IOTask) -> Result<(), mpsc::error::TrySendError<IOTask>> {
+        let worker_idx =
+            self.round_robin_counter.fetch_add(1, Ordering::Relaxed) % self.worker_count;
+        self.worker_queues[worker_idx].try_send(task)
     }
 
     /// Tries to steal work from another worker's queue
     pub fn try_steal_work(&self, worker_id: usize) -> Option<IOTask> {
         for i in 1..self.worker_count {
             let steal_from = (worker_id + i) % self.worker_count;
-            if let Ok(task) = self.receivers[steal_from].try_recv() {
-                return Some(task);
+            if let Ok(mut rx) = self.receivers[steal_from].try_lock() {
+                if let Ok(task) = rx.try_recv() {
+                    return Some(task);
+                }
             }
         }
         None
     }
 
     /// Gets the receiver for a specific worker
-    pub fn get_worker_receiver(&self, worker_id: usize) -> &crossbeam_channel::Receiver<IOTask> {
+    pub fn get_worker_receiver(&self, worker_id: usize) -> &Mutex<mpsc::Receiver<IOTask>> {
         &self.receivers[worker_id]
     }
 }
 
 /// Task scheduler with priority queues
+#[derive(Debug)]
 pub struct PriorityTaskScheduler {
-    high_priority_queue: crossbeam_channel::Sender<IOTask>,
-    normal_priority_queue: crossbeam_channel::Sender<IOTask>,
-    low_priority_queue: crossbeam_channel::Sender<IOTask>,
-    high_receiver: crossbeam_channel::Receiver<IOTask>,
-    normal_receiver: crossbeam_channel::Receiver<IOTask>,
-    low_receiver: crossbeam_channel::Receiver<IOTask>,
+    high_priority_queue: mpsc::Sender<IOTask>,
+    normal_priority_queue: mpsc::Sender<IOTask>,
+    low_priority_queue: mpsc::Sender<IOTask>,
+    high_receiver: Mutex<mpsc::Receiver<IOTask>>,
+    normal_receiver: Mutex<mpsc::Receiver<IOTask>>,
+    low_receiver: Mutex<mpsc::Receiver<IOTask>>,
 }
 
 impl Default for PriorityTaskScheduler {
@@ -114,40 +125,47 @@ impl Default for PriorityTaskScheduler {
 
 impl PriorityTaskScheduler {
     pub fn new() -> Self {
-        let (high_sender, high_receiver) = crossbeam_channel::unbounded();
-        let (normal_sender, normal_receiver) = crossbeam_channel::unbounded();
-        let (low_sender, low_receiver) = crossbeam_channel::unbounded();
+        let capacity = 1024;
+        let (high_sender, high_receiver) = mpsc::channel(capacity);
+        let (normal_sender, normal_receiver) = mpsc::channel(capacity);
+        let (low_sender, low_receiver) = mpsc::channel(capacity);
 
         Self {
             high_priority_queue: high_sender,
             normal_priority_queue: normal_sender,
             low_priority_queue: low_sender,
-            high_receiver,
-            normal_receiver,
-            low_receiver,
+            high_receiver: Mutex::new(high_receiver),
+            normal_receiver: Mutex::new(normal_receiver),
+            low_receiver: Mutex::new(low_receiver),
         }
     }
 
-    pub fn submit_task(&self, task: IOTask) -> Result<(), crossbeam_channel::SendError<IOTask>> {
+    pub async fn submit_task(&self, task: IOTask) -> Result<(), mpsc::error::SendError<IOTask>> {
         match task.priority {
-            IOPriority::Critical | IOPriority::High => self.high_priority_queue.send(task),
-            IOPriority::Normal => self.normal_priority_queue.send(task),
-            IOPriority::Low => self.low_priority_queue.send(task),
+            IOPriority::Critical | IOPriority::High => self.high_priority_queue.send(task).await,
+            IOPriority::Normal => self.normal_priority_queue.send(task).await,
+            IOPriority::Low => self.low_priority_queue.send(task).await,
         }
     }
 
     pub fn get_next_task(&self) -> Option<IOTask> {
         // Try high priority first, then normal, then low
-        if let Ok(task) = self.high_receiver.try_recv() {
-            return Some(task);
+        if let Ok(mut rx) = self.high_receiver.try_lock() {
+            if let Ok(task) = rx.try_recv() {
+                return Some(task);
+            }
         }
 
-        if let Ok(task) = self.normal_receiver.try_recv() {
-            return Some(task);
+        if let Ok(mut rx) = self.normal_receiver.try_lock() {
+            if let Ok(task) = rx.try_recv() {
+                return Some(task);
+            }
         }
 
-        if let Ok(task) = self.low_receiver.try_recv() {
-            return Some(task);
+        if let Ok(mut rx) = self.low_receiver.try_lock() {
+            if let Ok(task) = rx.try_recv() {
+                return Some(task);
+            }
         }
 
         None
@@ -158,8 +176,8 @@ impl PriorityTaskScheduler {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_work_stealing_scheduler() {
+    #[tokio::test]
+    async fn test_work_stealing_scheduler() {
         let scheduler = WorkStealingScheduler::new(4);
 
         // Create a task
@@ -172,15 +190,15 @@ mod tests {
         };
 
         // Submit the task
-        scheduler.submit_task(task).unwrap();
+        scheduler.submit_task(task).await.unwrap();
 
         // Try to steal work
         let stolen = scheduler.try_steal_work(1);
         assert!(stolen.is_some());
     }
 
-    #[test]
-    fn test_priority_scheduler() {
+    #[tokio::test]
+    async fn test_priority_scheduler() {
         let scheduler = PriorityTaskScheduler::new();
 
         // Create tasks with different priorities
@@ -201,8 +219,8 @@ mod tests {
         };
 
         // Submit tasks in reverse priority order
-        scheduler.submit_task(low_task).unwrap();
-        scheduler.submit_task(high_task).unwrap();
+        scheduler.submit_task(low_task).await.unwrap();
+        scheduler.submit_task(high_task).await.unwrap();
 
         // High priority task should be returned first
         let next_task = scheduler.get_next_task().unwrap();
@@ -213,8 +231,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_round_robin_distribution_across_workers() {
+    #[tokio::test]
+    async fn test_round_robin_distribution_across_workers() {
         let scheduler = WorkStealingScheduler::new(3);
 
         // Submit 9 tasks which should distribute evenly across 3 workers (3 each)
@@ -226,13 +244,14 @@ mod tests {
                 creation_time: Instant::now(),
                 completion_callback: Some(sender),
             };
-            scheduler.submit_task(task).unwrap();
+            scheduler.submit_task(task).await.unwrap();
         }
 
         let mut counts = vec![0usize; 3];
         for (worker_id, item) in counts.iter_mut().enumerate().take(3) {
             let rx = scheduler.get_worker_receiver(worker_id);
-            while let Ok(_task) = rx.try_recv() {
+            let mut rx_guard = rx.lock().await;
+            while let Ok(_task) = rx_guard.try_recv() {
                 *item += 1;
             }
         }
@@ -240,8 +259,8 @@ mod tests {
         assert_eq!(counts, vec![3, 3, 3]);
     }
 
-    #[test]
-    fn test_try_steal_when_other_worker_has_tasks() {
+    #[tokio::test]
+    async fn test_try_steal_when_other_worker_has_tasks() {
         let scheduler = WorkStealingScheduler::new(2);
 
         // First task should go to worker 0 via round-robin
@@ -252,7 +271,7 @@ mod tests {
             creation_time: Instant::now(),
             completion_callback: Some(sender),
         };
-        scheduler.submit_task(task).unwrap();
+        scheduler.submit_task(task).await.unwrap();
 
         // Worker 1 attempts to steal and should get the task from worker 0
         let stolen = scheduler.try_steal_work(1);
@@ -260,18 +279,19 @@ mod tests {
 
         // Original worker 0 queue should now be empty
         let rx0 = scheduler.get_worker_receiver(0);
-        assert!(rx0.try_recv().is_err());
+        let mut rx0_guard = rx0.lock().await;
+        assert!(rx0_guard.try_recv().is_err());
     }
 
-    #[test]
-    fn test_try_steal_returns_none_when_no_tasks_available() {
+    #[tokio::test]
+    async fn test_try_steal_returns_none_when_no_tasks_available() {
         let scheduler = WorkStealingScheduler::new(2);
         let stolen = scheduler.try_steal_work(0);
         assert!(stolen.is_none());
     }
 
-    #[test]
-    fn test_priority_scheduler_fifo_within_same_priority() {
+    #[tokio::test]
+    async fn test_priority_scheduler_fifo_within_same_priority() {
         let scheduler = PriorityTaskScheduler::new();
 
         // Two high-priority tasks should be returned in FIFO order
@@ -290,8 +310,8 @@ mod tests {
             completion_callback: Some(s2),
         };
 
-        scheduler.submit_task(high1).unwrap();
-        scheduler.submit_task(high2).unwrap();
+        scheduler.submit_task(high1).await.unwrap();
+        scheduler.submit_task(high2).await.unwrap();
 
         let next1 = scheduler.get_next_task().unwrap();
         match next1.task_type {
@@ -306,8 +326,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_priority_levels_order_high_then_normal_then_low() {
+    #[tokio::test]
+    async fn test_priority_levels_order_high_then_normal_then_low() {
         let scheduler = PriorityTaskScheduler::new();
 
         // Enqueue normal and low first, then high
@@ -333,9 +353,9 @@ mod tests {
             completion_callback: Some(sh),
         };
 
-        scheduler.submit_task(normal).unwrap();
-        scheduler.submit_task(low).unwrap();
-        scheduler.submit_task(high).unwrap();
+        scheduler.submit_task(normal).await.unwrap();
+        scheduler.submit_task(low).await.unwrap();
+        scheduler.submit_task(high).await.unwrap();
 
         // High should preempt normal and low
         let first = scheduler.get_next_task().unwrap();
@@ -359,8 +379,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_priority_scheduler_empty_returns_none() {
+    #[tokio::test]
+    async fn test_priority_scheduler_empty_returns_none() {
         let scheduler = PriorityTaskScheduler::new();
         assert!(scheduler.get_next_task().is_none());
     }
