@@ -1185,7 +1185,7 @@ impl AsyncDiskManager {
         // Signal the IO engine to stop gracefully to prevent worker abort warnings
         debug!("Signaling AsyncIOEngine to stop gracefully");
         {
-            let io_engine = self.io_engine.read().await;
+            let mut io_engine = self.io_engine.write().await;
             // Cancel all pending operations to allow workers to exit cleanly
             let cancelled = io_engine
                 .cancel_all_pending_operations("System shutdown")
@@ -1198,11 +1198,11 @@ impl AsyncDiskManager {
             if cleared > 0 {
                 debug!("Cleared {} operations from queue during shutdown", cleared);
             }
-        }
 
-        // Give workers a brief moment to detect the empty queue and exit cleanly
-        debug!("Allowing time for workers to exit cleanly");
-        tokio::time::sleep(Duration::from_millis(100)).await;
+            // Stop the engine and wait for workers to exit
+            debug!("Stopping AsyncIOEngine and waiting for workers to exit");
+            io_engine.stop().await;
+        }
 
         // Cancel background tasks
         debug!("Cancelling background tasks");
