@@ -83,7 +83,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 /// Node in the doubly-linked list for LRU tracking
 /// Zero-copy design: Keys are Copy types, Values are Arc-wrapped for sharing
@@ -661,81 +662,81 @@ where
     /// Returns the previous Arc<V> if key existed
     pub fn insert(&self, key: K, value: V) -> Option<Arc<V>> {
         let value_arc = Arc::new(value); // Wrap in Arc once
-        let mut cache = self.inner.write().unwrap();
+        let mut cache = self.inner.write();
         cache.insert(key, value_arc)
     }
 
     /// Insert Arc<V> directly (zero-copy if already Arc-wrapped)
     pub fn insert_arc(&self, key: K, value: Arc<V>) -> Option<Arc<V>> {
-        let mut cache = self.inner.write().unwrap();
+        let mut cache = self.inner.write();
         cache.insert(key, value)
     }
 
     /// Get with LRU update (requires write lock)
     /// Returns Arc<V> for zero-copy sharing
     pub fn get(&self, key: &K) -> Option<Arc<V>> {
-        let mut cache = self.inner.write().unwrap();
+        let mut cache = self.inner.write();
         cache.get(key).map(Arc::clone)
     }
 
     /// Peek without LRU update (allows concurrent reads)
     /// Perfect for read-heavy buffer pool workloads
     pub fn peek(&self, key: &K) -> Option<Arc<V>> {
-        let cache = self.inner.read().unwrap();
+        let cache = self.inner.read();
         cache.peek(key)
     }
 
     /// Remove entry and return Arc<V>
     pub fn remove(&self, key: &K) -> Option<Arc<V>> {
-        let mut cache = self.inner.write().unwrap();
+        let mut cache = self.inner.write();
         cache.remove(key)
     }
 
     /// Touch entry to mark as recently used
     pub fn touch(&self, key: &K) -> bool {
-        let mut cache = self.inner.write().unwrap();
+        let mut cache = self.inner.write();
         cache.touch(key)
     }
 
     /// Get current cache length
     pub fn len(&self) -> usize {
-        let cache = self.inner.read().unwrap();
+        let cache = self.inner.read();
         cache.len()
     }
 
     /// Check if cache is empty
     pub fn is_empty(&self) -> bool {
-        let cache = self.inner.read().unwrap();
+        let cache = self.inner.read();
         cache.len() == 0
     }
 
     /// Get cache capacity
     pub fn capacity(&self) -> usize {
-        let cache = self.inner.read().unwrap();
+        let cache = self.inner.read();
         cache.capacity()
     }
 
     /// Check if key exists (read-only)
     pub fn contains(&self, key: &K) -> bool {
-        let cache = self.inner.read().unwrap();
+        let cache = self.inner.read();
         cache.contains(key)
     }
 
     /// Clear all entries
     pub fn clear(&self) {
-        let mut cache = self.inner.write().unwrap();
+        let mut cache = self.inner.write();
         cache.clear()
     }
 
     /// Pop least recently used entry
     pub fn pop_lru(&self) -> Option<(K, Arc<V>)> {
-        let mut cache = self.inner.write().unwrap();
+        let mut cache = self.inner.write();
         cache.pop_lru()
     }
 
     /// Peek at least recently used entry
     pub fn peek_lru(&self) -> Option<(K, Arc<V>)> {
-        let cache = self.inner.read().unwrap();
+        let cache = self.inner.read();
         cache.peek_lru().map(|(k, v)| (*k, Arc::clone(v)))
     }
 }
