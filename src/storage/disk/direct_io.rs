@@ -1,7 +1,24 @@
-//! Platform-specific direct I/O implementation for bypassing OS page cache
+//! Platform-specific direct I/O implementation for bypassing OS page cache.
 //!
-//! This module provides cross-platform direct I/O functionality to ensure
-//! database operations go directly to disk rather than being buffered by the OS.
+//! # Overview
+//!
+//! This module provides cross-platform direct I/O functionality to ensure database operations
+//! go directly to disk rather than being buffered by the OS page cache. This is critical for
+//! database systems to maintain control over buffer management and transaction durability.
+//!
+//! # Platform Support
+//!
+//! - **Linux**: Uses `O_DIRECT` flag. Requires strict alignment of memory buffers and file offsets.
+//! - **macOS**: Uses `fcntl(F_NOCACHE)` after opening. Does not enforce strict alignment but recommended.
+//! - **Windows**: Uses `FILE_FLAG_NO_BUFFERING`. Requires strict alignment.
+//! - **Others**: Fallback to standard buffered I/O with warnings.
+//!
+//! # Key Components
+//!
+//! - [`DirectIOConfig`]: Configuration for enabling direct I/O and setting alignment.
+//! - [`AlignedBuffer`]: A memory buffer that ensures proper alignment (e.g., 512 or 4096 bytes).
+//! - [`open_direct_io`]: Opens files with platform-specific direct I/O flags.
+//! - [`read_aligned`] / [`write_aligned`]: I/O operations that handle alignment requirements.
 
 use log::{debug, warn};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
