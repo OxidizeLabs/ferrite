@@ -4586,291 +4586,349 @@ mod tests {
             #[test]
             fn test_hashmap_linkedlist_size_consistency() {
                 // Test that HashMap size always matches linked list node count
+                todo!()
             }
 
             #[test]
             fn test_head_tail_pointer_consistency() {
                 // Test that head/tail pointers are consistent with actual list structure
+                todo!()
             }
 
             #[test]
             fn test_node_reference_consistency() {
                 // Test that all node references in HashMap point to valid list nodes
+                todo!()
             }
 
             #[test]
             fn test_doubly_linked_list_integrity() {
                 // Test forward and backward link consistency throughout list
+                todo!()
             }
 
             #[test]
             fn test_invariants_after_every_operation() {
                 // Test all invariants are maintained after each cache operation
+                todo!()
             }
 
             #[test]
             fn test_memory_consistency_on_eviction() {
                 // Test memory state consistency during eviction operations
+                todo!()
             }
 
             #[test]
             fn test_capacity_constraints_enforcement() {
                 // Test that cache never exceeds capacity constraints
+                todo!()
             }
 
             #[test]
             fn test_empty_cache_state_invariants() {
                 // Test invariants when cache is empty (head=None, tail=None)
+                todo!()
             }
 
             #[test]
             fn test_single_item_cache_state() {
                 // Test state consistency when cache has exactly one item
+                todo!()
             }
 
             #[test]
             fn test_full_cache_state_invariants() {
                 // Test invariants when cache is at full capacity
+                todo!()
             }
 
             #[test]
             fn test_state_after_clear_operation() {
                 // Test that cache state is properly reset after clear()
+                todo!()
             }
 
             #[test]
             fn test_state_during_capacity_transitions() {
                 // Test state consistency during transitions between different fill levels
+                todo!()
             }
 
             #[test]
             fn test_node_allocation_consistency() {
                 // Test that all allocated nodes are properly tracked and deallocated
+                todo!()
             }
 
             #[test]
             fn test_key_value_mapping_consistency() {
                 // Test that keys in HashMap correctly map to their values in nodes
+                todo!()
             }
 
             #[test]
             fn test_lru_ordering_state_consistency() {
                 // Test that LRU ordering state matches actual access patterns
+                todo!()
             }
 
             #[test]
             fn test_concurrent_state_consistency() {
                 // Test state consistency in concurrent access scenarios
+                todo!()
             }
 
             #[test]
             fn test_state_recovery_after_errors() {
                 // Test state consistency after error conditions
+                todo!()
             }
 
             #[test]
             fn test_arc_reference_count_consistency() {
                 // Test that Arc reference counts are consistent with expectations
+                todo!()
             }
 
             #[test]
             fn test_phantom_data_type_consistency() {
                 // Test that PhantomData correctly represents type relationships
+                todo!()
             }
 
             #[test]
             fn test_state_transitions_insert_remove() {
                 // Test state consistency during insert/remove cycles
+                todo!()
             }
 
             #[test]
             fn test_state_transitions_get_peek() {
                 // Test state consistency during get/peek operations
+                todo!()
             }
 
             #[test]
             fn test_state_transitions_touch_operations() {
                 // Test state consistency during touch operations
+                todo!()
             }
 
             #[test]
             fn test_node_pointer_validity() {
                 // Test that all NonNull pointers are valid and point to correct nodes
+                todo!()
             }
 
             #[test]
             fn test_circular_reference_prevention() {
                 // Test prevention of circular references in linked list
+                todo!()
             }
 
             #[test]
             fn test_orphaned_node_detection() {
                 // Test detection and prevention of orphaned nodes
+                todo!()
             }
 
             #[test]
             fn test_duplicate_node_prevention() {
                 // Test prevention of duplicate nodes for same key
+                todo!()
             }
 
             #[test]
             fn test_list_termination_consistency() {
                 // Test that list properly terminates (no infinite loops)
+                todo!()
             }
 
             #[test]
             fn test_head_node_properties() {
                 // Test that head node has prev=None and is most recent
+                todo!()
             }
 
             #[test]
             fn test_tail_node_properties() {
                 // Test that tail node has next=None and is least recent
+                todo!()
             }
 
             #[test]
             fn test_middle_node_properties() {
                 // Test that middle nodes have valid prev and next pointers
+                todo!()
             }
 
             #[test]
             fn test_key_uniqueness_in_list() {
                 // Test that no key appears twice in the linked list
+                todo!()
             }
 
             #[test]
             fn test_value_consistency_across_structures() {
                 // Test that values are consistent between HashMap and list nodes
+                todo!()
             }
 
             #[test]
             fn test_state_during_eviction_cascades() {
                 // Test state consistency during multiple evictions
+                todo!()
             }
 
             #[test]
             fn test_atomic_operation_consistency() {
                 // Test that operations are atomic with respect to state consistency
+                todo!()
             }
 
             #[test]
             fn test_rollback_state_on_failure() {
                 // Test state rollback when operations fail
+                todo!()
             }
 
             #[test]
             fn test_debug_invariant_validation() {
                 // Test the internal validate_invariants function thoroughly
+                todo!()
             }
 
             #[test]
             fn test_memory_leak_prevention() {
                 // Test that no memory leaks occur during normal operations
+                todo!()
             }
 
             #[test]
             fn test_double_free_prevention() {
                 // Test prevention of double-free errors
+                todo!()
             }
 
             #[test]
             fn test_use_after_free_prevention() {
                 // Test prevention of use-after-free errors
+                todo!()
             }
 
             #[test]
             fn test_thread_safety_state_consistency() {
                 // Test state consistency across multiple threads
+                todo!()
             }
 
             #[test]
             fn test_lock_state_consistency() {
                 // Test RwLock state consistency in concurrent scenarios
+                todo!()
             }
 
             #[test]
             fn test_poison_lock_recovery() {
                 // Test state consistency after lock poisoning
+                todo!()
             }
 
             #[test]
             fn test_capacity_zero_state_consistency() {
                 // Test state consistency for zero-capacity cache
+                todo!()
             }
 
             #[test]
             fn test_large_capacity_state_consistency() {
                 // Test state consistency for very large capacity caches
+                todo!()
             }
 
             #[test]
             fn test_state_after_drop() {
                 // Test proper cleanup state when cache is dropped
+                todo!()
             }
 
             #[test]
             fn test_partial_operation_state_consistency() {
                 // Test state consistency when operations are interrupted
+                todo!()
             }
 
             #[test]
             fn test_stress_state_consistency() {
                 // Test state consistency under high-stress conditions
+                todo!()
             }
 
             #[test]
             fn test_node_lifetime_consistency() {
                 // Test that node lifetimes are properly managed
+                todo!()
             }
 
             #[test]
             fn test_reallocation_state_consistency() {
                 // Test state consistency during HashMap reallocation
+                todo!()
             }
 
             #[test]
             fn test_hash_collision_state_consistency() {
                 // Test state consistency when hash collisions occur
+                todo!()
             }
 
             #[test]
             fn test_boundary_condition_state() {
                 // Test state consistency at various boundary conditions
+                todo!()
             }
 
             #[test]
             fn test_state_serialization_consistency() {
                 // Test that cache state could be consistently serialized/deserialized
+                todo!()
             }
 
             #[test]
             fn test_clone_state_consistency() {
                 // Test state consistency of concurrent cache cloning
+                todo!()
             }
 
             #[test]
             fn test_recursive_operation_state() {
                 // Test state consistency during recursive operations (if any)
+                todo!()
             }
 
             #[test]
             fn test_error_propagation_state() {
                 // Test state consistency during error propagation
+                todo!()
             }
 
             #[test]
             fn test_deterministic_state_reproduction() {
                 // Test that same operations produce same internal state
+                todo!()
             }
 
             #[test]
             fn test_state_checkpointing() {
                 // Test ability to checkpoint and verify cache state
+                todo!()
             }
 
             #[test]
             fn test_incremental_state_validation() {
                 // Test state validation at incremental checkpoints
+                todo!()
             }
         }
     }
@@ -4883,331 +4941,397 @@ mod tests {
         #[test]
         fn test_no_memory_leaks_on_eviction() {
             // This test relies on tools like valgrind or miri to detect leaks
+            todo!()
         }
 
         #[test]
         fn test_no_memory_leaks_on_remove() {
             // Test that removing items doesn't leak memory
+            todo!()
         }
 
         #[test]
         fn test_no_memory_leaks_on_pop_lru() {
             // Test that popping LRU items doesn't leak memory
+            todo!()
         }
 
         #[test]
         fn test_no_memory_leaks_on_clear() {
             // Test that clearing cache doesn't leak memory
+            todo!()
         }
 
         #[test]
         fn test_no_memory_leaks_on_drop() {
             // Test that dropping cache properly cleans up all memory
+            todo!()
         }
 
         #[test]
         fn test_no_double_free_on_eviction() {
             // Test prevention of double-free during eviction
+            todo!()
         }
 
         #[test]
         fn test_no_double_free_on_remove() {
             // Test prevention of double-free during removal
+            todo!()
         }
 
         #[test]
         fn test_no_double_free_on_clear() {
             // Test prevention of double-free during clear
+            todo!()
         }
 
         #[test]
         fn test_no_use_after_free_access() {
             // Test prevention of use-after-free when accessing freed nodes
+            todo!()
         }
 
         #[test]
         fn test_no_use_after_free_traversal() {
             // Test prevention of use-after-free during list traversal
+            todo!()
         }
 
         #[test]
         fn test_safe_node_allocation() {
             // Test that node allocation is memory-safe
+            todo!()
         }
 
         #[test]
         fn test_safe_node_deallocation() {
             // Test that node deallocation is memory-safe
+            todo!()
         }
 
         #[test]
         fn test_safe_pointer_arithmetic() {
             // Test that NonNull pointer operations are safe
+            todo!()
         }
 
         #[test]
         fn test_safe_list_manipulation() {
             // Test that linked list manipulation is memory-safe
+            todo!()
         }
 
         #[test]
         fn test_arc_reference_counting_safety() {
             // Test that Arc reference counting prevents premature deallocation
+            todo!()
         }
 
         #[test]
         fn test_arc_cyclic_reference_prevention() {
             // Test prevention of cyclic references with Arc
+            todo!()
         }
 
         #[test]
         fn test_memory_alignment_safety() {
             // Test that all allocations maintain proper memory alignment
+            todo!()
         }
 
         #[test]
         fn test_stack_overflow_prevention() {
             // Test prevention of stack overflow in recursive operations
+            todo!()
         }
 
         #[test]
         fn test_heap_corruption_prevention() {
             // Test prevention of heap corruption
+            todo!()
         }
 
         #[test]
         fn test_null_pointer_dereference_prevention() {
             // Test prevention of null pointer dereferences
+            todo!()
         }
 
         #[test]
         fn test_dangling_pointer_prevention() {
             // Test prevention of dangling pointer access
+            todo!()
         }
 
         #[test]
         fn test_buffer_overflow_prevention() {
             // Test prevention of buffer overflows
+            todo!()
         }
 
         #[test]
         fn test_memory_bounds_checking() {
             // Test memory bounds are properly checked
+            todo!()
         }
 
         #[test]
         fn test_safe_concurrent_access() {
             // Test memory safety in concurrent access scenarios
+            todo!()
         }
 
         #[test]
         fn test_safe_concurrent_modification() {
             // Test memory safety during concurrent modifications
+            todo!()
         }
 
         #[test]
         fn test_lock_poisoning_memory_safety() {
             // Test memory safety when locks are poisoned
+            todo!()
         }
 
         #[test]
         fn test_panic_safety_memory_cleanup() {
             // Test memory cleanup when operations panic
+            todo!()
         }
 
         #[test]
         fn test_exception_safety_guarantees() {
             // Test exception safety guarantees are maintained
+            todo!()
         }
 
         #[test]
         fn test_memory_leak_detection_valgrind() {
             // Test using valgrind for memory leak detection
+            todo!()
         }
 
         #[test]
         fn test_memory_leak_detection_miri() {
             // Test using miri for memory leak detection
+            todo!()
         }
 
         #[test]
         fn test_memory_safety_under_stress() {
             // Test memory safety under high-stress conditions
+            todo!()
         }
 
         #[test]
         fn test_memory_fragmentation_handling() {
             // Test handling of memory fragmentation
+            todo!()
         }
 
         #[test]
         fn test_large_allocation_safety() {
             // Test safety when allocating large amounts of memory
+            todo!()
         }
 
         #[test]
         fn test_allocation_failure_handling() {
             // Test handling of allocation failures
+            todo!()
         }
 
         #[test]
         fn test_deallocation_order_safety() {
             // Test that deallocation order doesn't cause issues
+            todo!()
         }
 
         #[test]
         fn test_phantom_data_memory_safety() {
             // Test that PhantomData doesn't cause memory issues
+            todo!()
         }
 
         #[test]
         fn test_zero_sized_type_safety() {
             // Test memory safety with zero-sized types
+            todo!()
         }
 
         #[test]
         fn test_copy_type_memory_efficiency() {
             // Test memory efficiency of Copy types for keys
+            todo!()
         }
 
         #[test]
         fn test_move_semantics_safety() {
             // Test safety of move semantics for values
+            todo!()
         }
 
         #[test]
         fn test_lifetime_parameter_safety() {
             // Test that lifetime parameters prevent unsafe access
+            todo!()
         }
 
         #[test]
         fn test_send_sync_memory_safety() {
             // Test memory safety of Send/Sync implementations
+            todo!()
         }
 
         #[test]
         fn test_drop_trait_memory_cleanup() {
             // Test that Drop trait properly cleans up memory
+            todo!()
         }
 
         #[test]
         fn test_clone_memory_safety() {
             // Test memory safety of cloning operations
+            todo!()
         }
 
         #[test]
         fn test_serialization_memory_safety() {
             // Test memory safety during serialization
+            todo!()
         }
 
         #[test]
         fn test_deserialization_memory_safety() {
             // Test memory safety during deserialization
+            todo!()
         }
 
         #[test]
         fn test_unsafe_block_soundness() {
             // Test that all unsafe blocks are sound
+            todo!()
         }
 
         #[test]
         fn test_raw_pointer_safety() {
             // Test safety of raw pointer operations
+            todo!()
         }
 
         #[test]
         fn test_transmute_safety() {
             // Test safety of any transmute operations
+            todo!()
         }
 
         #[test]
         fn test_memory_ordering_safety() {
             // Test memory ordering safety in concurrent scenarios
+            todo!()
         }
 
         #[test]
         fn test_aba_problem_prevention() {
             // Test prevention of ABA problems in concurrent access
+            todo!()
         }
 
         #[test]
         fn test_memory_reclamation_safety() {
             // Test safe memory reclamation strategies
+            todo!()
         }
 
         #[test]
         fn test_gc_interaction_safety() {
             // Test interaction safety with garbage collection (if applicable)
+            todo!()
         }
 
         #[test]
         fn test_memory_pressure_handling() {
             // Test handling of memory pressure situations
+            todo!()
         }
 
         #[test]
         fn test_oom_handling_safety() {
             // Test safety during out-of-memory conditions
+            todo!()
         }
 
         #[test]
         fn test_memory_mapped_io_safety() {
             // Test safety when used with memory-mapped I/O
+            todo!()
         }
 
         #[test]
         fn test_cross_thread_memory_safety() {
             // Test memory safety when sharing across threads
+            todo!()
         }
 
         #[test]
         fn test_signal_handler_memory_safety() {
             // Test memory safety in signal handler contexts
+            todo!()
         }
 
         #[test]
         fn test_ffi_boundary_memory_safety() {
             // Test memory safety at FFI boundaries
+            todo!()
         }
 
         #[test]
         fn test_async_memory_safety() {
             // Test memory safety in async contexts
+            todo!()
         }
 
         #[test]
         fn test_future_memory_safety() {
             // Test memory safety with Future types
+            todo!()
         }
 
         #[test]
         fn test_pin_memory_safety() {
             // Test memory safety with pinned memory
+            todo!()
         }
 
         #[test]
         fn test_unwind_safety() {
             // Test unwind safety during panics
+            todo!()
         }
 
         #[test]
         fn test_memory_sanitizer_compatibility() {
             // Test compatibility with memory sanitizers
+            todo!()
         }
 
         #[test]
         fn test_address_sanitizer_compatibility() {
             // Test compatibility with address sanitizers
+            todo!()
         }
 
         #[test]
         fn test_thread_sanitizer_compatibility() {
             // Test compatibility with thread sanitizers
+            todo!()
         }
 
         #[test]
         fn test_leak_sanitizer_compatibility() {
             // Test compatibility with leak sanitizers
+            todo!()
         }
     }
 }
