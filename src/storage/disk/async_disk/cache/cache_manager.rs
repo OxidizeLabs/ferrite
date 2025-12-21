@@ -4,6 +4,17 @@
 //! disk I/O performance for the Async Disk Manager. It employs a tiered architecture to
 //! handle different data access patterns efficiently, distinguishing between hot, warm, and cold data.
 //!
+//! ## Architecture Note: Two-Level Caching
+//!
+//! This component serves as the **Level 2 (Read)** cache in the system hierarchy, sitting below
+//! the `BufferPoolManager` (Level 1).
+//!
+//! - **L1 (Buffer Pool)**: Semantic-aware caching of `Page` objects for the execution engine.
+//! - **L2 (This Cache)**: Block-aware caching of raw/compressed data to mask disk latency.
+//!
+//! It provides a "Victim Cache" or "Second Chance" mechanism for pages evicted from the L1 pool,
+//! and accelerates read misses from L1 by serving them from faster L2 memory instead of disk.
+//!
 //! ## Architecture
 //!
 //! The cache is organized into three distinct levels (L1, L2, L3), each utilizing a specialized

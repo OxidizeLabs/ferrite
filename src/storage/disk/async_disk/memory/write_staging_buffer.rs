@@ -3,6 +3,18 @@
 //! The `WriteStagingBuffer` handles the in-memory storage of dirty pages waiting to be flushed to disk.
 //! It optimizes memory usage through compression and provides precise tracking of buffer occupancy.
 //!
+//! ## Architecture Note: Two-Level Caching
+//!
+//! This component is part of the **Level 2 (I/O)** cache layer. It acts as a specialized
+//! "Write Back" buffer that sits below the main `BufferPoolManager` (Level 1).
+//!
+//! - **L1 (Buffer Pool)**: Optimizes for CPU access speed (uncompressed `Page` objects).
+//! - **L2 (This Buffer)**: Optimizes for I/O throughput (compressed `Vec<u8>`, batched writes).
+//!
+//! Data arriving here has effectively been "evicted" or "flushed" from the perspective of the
+//! higher-level Buffer Pool, allowing the main application threads to proceed without waiting
+//! for physical disk I/O.
+//!
 //! ## Features
 //!
 //! - **Compressed Buffering**: Supports storing pages in compressed formats (LZ4, Zstd) to maximize

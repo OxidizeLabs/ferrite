@@ -1,6 +1,28 @@
-use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
-use crate::common::config::INVALID_PAGE_ID;
-use crate::common::config::{DB_PAGE_SIZE, FrameId, PageId};
+//! # Buffer Pool Manager
+//!
+//! The `BufferPoolManager` is responsible for managing the buffer pool,
+//! including fetching and unpinning pages, and handling page replacement.
+//! This version integrates with the new `AsyncDiskManager` for better performance
+//! and implements coordinated caching to avoid duplication.
+//!
+//! ## Architecture Note: Two-Level Caching
+//!
+//! This component acts as the **Level 1 (Application)** cache, storing uncompressed `Page` objects
+//! ready for CPU processing. It works in tandem with the `AsyncDiskManager`, which acts as the
+//! **Level 2 (I/O)** cache.
+//!
+//! While this architecture may result in transient double buffering (data existing in both layers),
+//! it provides significant benefits:
+//! - **Latency Hiding**: Flushes to L2 are non-blocking, allowing the L1 Buffer Pool to resume immediately.
+//! - **I/O Optimization**: The L2 layer handles compression, coalescing, and scheduling without blocking execution.
+//! - **Coordination**: The `use_disk_manager_cache` flag helps manage duplication by coordinating L1/L2 roles.
+//!
+//! ## Key Responsibilities
+//!
+//! - **Frame Management**: Tracks free frames and page-to-frame mappings.
+//! - **Page Lifecycle**: Loads pages from disk (L2) into memory (L1) and evicts them when full.
+//! - **Pinning/Unpinning**: Prevents eviction of pages currently in use by execution threads.
+//! - **Replacement Policy**: Uses `LRUKReplacer` to optimize eviction decisions based on access history.
 use crate::common::exception::DeletePageError;
 use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use crate::storage::page::page_guard::{PageGuard, PageUnpinner};
@@ -13,6 +35,8 @@ use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
 
 // Type aliases for complex types
 type PageCollection = Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>;
