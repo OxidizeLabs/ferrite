@@ -36,7 +36,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
-use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE};
+use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 
 // Type aliases for complex types
 type PageCollection = Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>;
