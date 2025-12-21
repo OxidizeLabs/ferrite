@@ -492,6 +492,7 @@ mod tests {
         fn test_capacity_enforcement() {
             let mut cache = LRUKCache::new(2);
             cache.insert(1, 1);
+            thread::sleep(Duration::from_millis(1));
             cache.insert(2, 2);
             assert_eq!(cache.len(), 2);
             
@@ -635,6 +636,7 @@ mod tests {
             let mut cache = LRUKCache::with_k(2, 5); // K=5, Cap=2
             
             cache.insert(1, 10);
+            thread::sleep(Duration::from_millis(1)); // Ensure t1 < t2
             cache.insert(2, 20);
             
             // Access them a few times
