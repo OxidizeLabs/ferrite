@@ -1,5 +1,19 @@
-// AsyncDiskManager implementation
-// Refactored from the original async_disk_manager.rs file
+//! AsyncDiskManager Implementation
+//!
+//! This module provides the `AsyncDiskManager`, a high-performance, asynchronous disk management
+//! system designed for database workloads. It integrates several advanced features to optimize
+//! I/O operations:
+//!
+//! - **Asynchronous I/O**: Uses `tokio` for non-blocking file operations.
+//! - **Direct I/O Support**: Optional support for Direct I/O (O_DIRECT) to bypass OS page cache.
+//! - **Caching**: Integrated cache manager for hot pages with LRU-based eviction.
+//! - **Write Buffering**: Sophisticated write manager for buffering writes and batching disk operations.
+//! - **Work Stealing Scheduler**: Priority-based task scheduling with work stealing.
+//! - **Prefetching**: Machine learning-based prefetcher to predict and load future page accesses.
+//! - **Metrics & Monitoring**: Comprehensive metrics collection for performance analysis.
+//!
+//! The `AsyncDiskManager` serves as the primary interface for upper layers of the database to
+//! interact with persistent storage, abstracting away the complexities of concurrent I/O and durability.
 
 use super::config::DiskManagerConfig;
 use crate::common::config::{PageId, DB_PAGE_SIZE};

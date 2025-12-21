@@ -58,7 +58,6 @@ use crate::storage::disk::async_disk::cache::cache_traits::{
 };
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
-use crate::storage::disk::async_disk::prefetching::MLPrefetcher;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -244,9 +243,6 @@ pub struct CacheManager {
     // Predictive prefetching
     prefetch_engine: Arc<RwLock<PrefetchEngine>>,
 
-    // ML-based prefetcher
-    ml_prefetcher: Arc<RwLock<MLPrefetcher>>,
-
     // Cache admission control
     admission_controller: Arc<AdmissionController>,
 
@@ -303,9 +299,6 @@ impl CacheManager {
             max_memory: total_cache_mb * 1024 * 1024, // Convert to bytes
         });
 
-        // Initialize ML prefetcher
-        let ml_prefetcher = Arc::new(RwLock::new(MLPrefetcher::new()));
-
         // Initialize hot/cold data tracker
         let hot_data_tracker = Arc::new(RwLock::new(HashMap::new()));
 
@@ -325,7 +318,6 @@ impl CacheManager {
             warm_cache_size,
             cold_cache_size,
             prefetch_engine,
-            ml_prefetcher,
             admission_controller,
             hot_data_tracker,
             dedup_engine,
@@ -460,11 +452,6 @@ impl CacheManager {
                 .entry(page_id)
                 .or_insert_with(Vec::new)
                 .push(page_id);
-        }
-
-        // Update ML prefetcher
-        if let Ok(mut ml_prefetcher) = self.ml_prefetcher.try_write() {
-            ml_prefetcher.record_access(page_id);
         }
 
         // Update hot/cold data tracker
@@ -628,14 +615,6 @@ impl CacheManager {
         } else {
             0.5 // No data yet - moderate prefetching
         };
-
-        // Get predictions from ML prefetcher
-        if let Ok(ml_prefetcher) = self.ml_prefetcher.try_read() {
-            let ml_accuracy = ml_prefetcher.get_accuracy();
-            if ml_accuracy > 0.5 && current_accuracy > 0.3 {
-                predicted_pages.extend(ml_prefetcher.predict_prefetch(current_page));
-            }
-        }
 
         // Get predictions from basic prefetch engine
         if let Ok(prefetch_engine) = self.prefetch_engine.try_read() {
@@ -1202,27 +1181,6 @@ mod tests {
         assert!(!predicted_pages.is_empty());
         assert!(predicted_pages.contains(&4));
         assert!(predicted_pages.len() <= 8); // Limited to 8 predictions
-    }
-
-    #[test]
-    fn test_ml_prefetcher_learning() {
-        let config = DiskManagerConfig::default();
-        let cache_manager = CacheManager::new(&config);
-
-        // Create a repeating pattern: 1->2->3, 1->2->3, 1->2->3
-        for _ in 0..10 {
-            for page_id in [1, 2, 3] {
-                let data = vec![page_id as u8; 64];
-                cache_manager.store_page(page_id, data);
-                let _ = cache_manager.get_page(page_id);
-            }
-        }
-
-        // After learning the pattern, check if ML prefetcher can predict
-        let predicted_pages = cache_manager.predict_prefetch_pages(2);
-
-        // Should include some predictions based on learned patterns
-        assert!(!predicted_pages.is_empty());
     }
 
     #[test]

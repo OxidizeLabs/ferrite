@@ -1,6 +1,18 @@
-//! Work-stealing I/O scheduler for the Async Disk Manager
+//! I/O Scheduler Implementation
 //!
-//! This module contains the work-stealing scheduler for I/O tasks.
+//! This module provides scheduling mechanisms for asynchronous I/O operations within the
+//! `AsyncDiskManager`. It implements two types of schedulers:
+//!
+//! - **WorkStealingScheduler**: A scalable scheduler that distributes tasks across multiple
+//!   worker threads. It uses a round-robin approach for initial assignment and allows idle
+//!   workers to "steal" tasks from busy workers, ensuring balanced load distribution.
+//!
+//! - **PriorityTaskScheduler**: A priority-based scheduler that manages tasks across
+//!   different priority levels (Critical/High, Normal, Low). This ensures that critical
+//!   operations like WAL writes or metadata updates are processed before background tasks like prefetching.
+//!
+//! The module also defines the `IOTask` structure and `IOTaskType` enum, which encapsulate
+//! the unit of work for the I/O system.
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::IOPriority;

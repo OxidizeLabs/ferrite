@@ -7,7 +7,6 @@ pub mod manager;
 
 // Optimization components
 pub mod compression;
-pub mod prefetching;
 pub mod scheduler;
 // Cache implementations
 pub mod cache;
