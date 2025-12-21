@@ -9,7 +9,7 @@
 //! The `WriteManager` coordinates the following pipeline:
 //! 1. **Coalescing**: Incoming writes are first passed to the `CoalescingEngine` to check if they can be merged
 //!    with pending writes (optimizing I/O patterns).
-//! 2. **Buffering**: Data is then stored in the `BufferManager`, which tracks memory usage and optionally
+//! 2. **Buffering**: Data is then stored in the `WriteStagingBuffer`, which tracks memory usage and optionally
 //!    compresses pages.
 //! 3. **Flush Coordination**: The `FlushCoordinator` is consulted to determine if a flush is required based on
 //!    memory pressure or timing.
@@ -24,8 +24,8 @@
 //! - **Adaptive Behavior**: dynamically adjusts strategies (e.g., flushing aggressiveness) based on system state.
 
 use super::{
-    BufferManager, CoalesceResult, CoalescedSizeInfo, CoalescingEngine, DurabilityManager,
-    DurabilityProvider, DurabilityResult, FlushCoordinator, FlushDecision, WriteBufferStats,
+    CoalesceResult, CoalescedSizeInfo, CoalescingEngine, DurabilityManager, DurabilityProvider,
+    DurabilityResult, FlushCoordinator, FlushDecision, WriteBufferStats, WriteStagingBuffer,
 };
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
@@ -36,14 +36,14 @@ use tokio::sync::{Mutex, RwLock};
 /// Orchestrated write management system following Single Responsibility Principle
 ///
 /// The WriteManager acts as a coordinator between specialized components:
-/// - BufferManager: Handles write buffering and compression
+/// - WriteStagingBuffer: Handles write buffering and compression
 /// - FlushCoordinator: Manages flush timing and coordination
 /// - CoalescingEngine: Handles write coalescing and optimization
 /// - DurabilityManager: Ensures durability guarantees and sync policies
 #[derive(Debug)]
 pub struct WriteManager {
     // Write buffering component
-    buffer_manager: Arc<Mutex<BufferManager>>,
+    buffer_manager: Arc<Mutex<WriteStagingBuffer>>,
 
     // Flush coordination component
     pub(crate) flush_coordinator: Arc<FlushCoordinator>,
@@ -60,7 +60,7 @@ impl WriteManager {
     pub fn new(config: &DiskManagerConfig) -> Self {
         let max_buffer_size = config.write_buffer_size_mb * 1024 * 1024; // Convert to bytes
 
-        let buffer_manager = Arc::new(Mutex::new(BufferManager::new(
+        let buffer_manager = Arc::new(Mutex::new(WriteStagingBuffer::new(
             max_buffer_size,
             config.compression_enabled,
         )));
