@@ -1,3 +1,9 @@
+//! Heap-based table storage implementation managing pages and physical tuple access.
+//!
+//! `TableHeap` organizes table data as a doubly linked list of pages. It handles
+//! low-level page management, tuple insertion/update/deletion, and interacts directly
+//! with the buffer pool manager.
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::{INVALID_PAGE_ID, INVALID_TXN_ID, PageId, TableOidT};

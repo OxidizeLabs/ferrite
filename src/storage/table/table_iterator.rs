@@ -1,3 +1,8 @@
+//! Iterator implementations for sequential table scanning with MVCC visibility checks.
+//!
+//! This module provides iterators that traverse the table heap, ensuring that only
+//! tuples visible to the current transaction (based on snapshot isolation) are returned.
+
 use crate::common::config::{INVALID_PAGE_ID, PageId};
 use crate::common::rid::RID;
 use crate::sql::execution::transaction_context::TransactionContext;

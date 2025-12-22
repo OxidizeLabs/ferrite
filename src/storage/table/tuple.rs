@@ -1,3 +1,8 @@
+//! Tuple representation and metadata for the storage engine.
+//!
+//! This module defines the core data structures for storing rows (`Tuple`) and their
+//! MVCC metadata (`TupleMeta`), including visibility states and version chain links.
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{storage_bincode_config, Timestamp, TxnId};
