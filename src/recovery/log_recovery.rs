@@ -662,8 +662,6 @@ mod tests {
             let flush_txn = self.create_test_transaction(999);
             self.wal_manager.write_commit_record(&flush_txn);
 
-            self.wal_manager.force_run_flush_thread();
-
             sleep(Duration::from_millis(20));
         }
     }
@@ -680,7 +678,7 @@ mod tests {
         use super::*;
 
         /// Test analyzing logs with no transactions
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_analysis_empty_log() {
             let ctx = TestContext::new("analysis_empty_test").await;
 
@@ -708,7 +706,7 @@ mod tests {
         }
 
         /// Test analyzing logs with a single complete transaction
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_analysis_complete_transaction() {
             let ctx = TestContext::new("analysis_complete_txn_test").await;
 
@@ -735,7 +733,7 @@ mod tests {
         }
 
         /// Test analyzing logs with an incomplete transaction
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_analysis_incomplete_transaction() {
             let ctx = TestContext::new("analysis_incomplete_txn_test").await;
 
@@ -780,7 +778,7 @@ mod tests {
         use super::*;
 
         /// Test redo with no operations to replay
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_redo_empty_log() {
             let ctx = TestContext::new("redo_empty_test").await;
 
@@ -790,7 +788,7 @@ mod tests {
         }
 
         /// Test redo with update operations
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_redo_update_operations() {
             let ctx = TestContext::new("redo_update_test").await;
 
@@ -835,7 +833,7 @@ mod tests {
         use super::*;
 
         /// Test undo with no incomplete transactions
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_undo_no_active_transactions() {
             let ctx = TestContext::new("undo_no_active_txn_test").await;
 
@@ -863,7 +861,7 @@ mod tests {
         }
 
         /// Test undo with incomplete transactions
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_undo_active_transactions() {
             let ctx = TestContext::new("undo_active_txn_test").await;
 
@@ -905,7 +903,7 @@ mod tests {
         use super::*;
 
         /// Test complete recovery process with multiple transactions
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_complete_recovery_process() {
             let ctx = TestContext::new("complete_recovery_test").await;
 
@@ -970,7 +968,7 @@ mod tests {
         }
 
         /// Test recovery after a crash during recovery
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_recovery_after_recovery_crash() {
             let ctx = TestContext::new("recovery_after_crash_test").await;
 
