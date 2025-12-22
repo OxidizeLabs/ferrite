@@ -810,6 +810,10 @@ impl DBInstance {
     pub fn get_recovery_manager(&self) -> Option<&Arc<LogRecoveryManager>> {
         self.recovery_manager.as_ref()
     }
+
+    pub fn get_log_manager(&self) -> &Arc<RwLock<LogManager>> {
+        &self.log_manager
+    }
 }
 
 #[cfg(test)]
@@ -832,8 +836,9 @@ mod tests {
         let _ = fs::remove_file(&config.db_log_filename);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_recovery_integration() {
+        crate::common::logger::initialize_logger();
         // Create a unique test path
         let test_prefix = get_unique_path();
         let db_file = format!("tests/data/{}.db", test_prefix);
@@ -878,8 +883,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
-        }
 
+            // Explicitly shut down log manager to ensure flush thread stops and resources are released
+            db_instance.get_log_manager().write().shut_down();
+        }
+        
         // Second session - open existing DB (should trigger recovery)
         {
             let db_instance = DBInstance::new(config.clone()).await.unwrap();
@@ -897,7 +905,13 @@ mod tests {
                     &mut writer,
                 )
                 .await;
+            if let Err(e) = &result {
+                println!("Query failed: {:?}", e);
+            }
             assert!(result.is_ok(), "Should be able to query recovered table");
+            
+            // Explicitly shut down log manager
+            db_instance.get_log_manager().write().shut_down();
         }
 
         // Clean up test files
