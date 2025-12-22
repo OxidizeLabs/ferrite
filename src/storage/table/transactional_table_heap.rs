@@ -1,3 +1,9 @@
+//! Transaction-aware wrapper around TableHeap implementing MVCC and version chain management.
+//!
+//! `TransactionalTableHeap` coordinates with the transaction manager and lock manager
+//! to handle MVCC operations, including version chain updates, undo log management,
+//! and visibility decisions during tuple access.
+
 use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::config::{INVALID_PAGE_ID, INVALID_TS, TableOidT};

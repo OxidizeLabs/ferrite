@@ -1,3 +1,8 @@
+//! Record wrapper combining tuple data with its location (RID) and schema.
+//!
+//! A `Record` extends a `Tuple` with context like its Record ID (RID) and optional
+//! schema information, useful for higher-level processing and debugging.
+
 use crate::catalog::schema::Schema;
 use crate::common::config::storage_bincode_config;
 use crate::common::exception::TupleError;
