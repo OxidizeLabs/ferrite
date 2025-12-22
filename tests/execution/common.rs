@@ -69,6 +69,7 @@ impl TestContext {
         );
 
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
+        log_manager.write().run_flush_thread();
 
         // Create WAL manager with the log manager
         let wal_manager = Arc::new(WALManager::new(log_manager.clone()));

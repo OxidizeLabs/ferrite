@@ -54,7 +54,7 @@ impl TransactionManagerFactory {
     ) -> Self {
         let lock_manager = Arc::new(LockManager::new());
 
-        wal_manager.force_run_flush_thread();
+        // wal_manager.force_run_flush_thread();
 
         Self {
             transaction_manager,
