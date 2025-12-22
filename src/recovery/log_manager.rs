@@ -404,7 +404,7 @@ mod tests {
     mod basic_functionality {
         use super::*;
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_log_manager_initialization() {
             let ctx = TestContext::new("init_test").await;
 
@@ -412,7 +412,7 @@ mod tests {
             assert_eq!(ctx.log_manager.get_persistent_lsn(), INVALID_LSN);
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_append_log_record() {
             let mut ctx = TestContext::new("append_test").await;
 
@@ -434,7 +434,7 @@ mod tests {
             assert_eq!(ctx.log_manager.get_next_lsn(), 1);
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_multiple_append_operations() {
             let mut ctx = TestContext::new("multiple_append_test").await;
 
@@ -452,7 +452,7 @@ mod tests {
             assert_eq!(ctx.log_manager.get_next_lsn(), 5);
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_persistent_lsn_management() {
             let mut ctx = TestContext::new("persistent_lsn_test").await;
 
@@ -464,7 +464,7 @@ mod tests {
             assert_eq!(ctx.log_manager.get_persistent_lsn(), test_lsn);
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_log_record_types() {
             let mut ctx = TestContext::new("record_types_test").await;
             let mut next_lsn = 0;
@@ -525,12 +525,12 @@ mod tests {
         use crate::common::config::PageId;
         use parking_lot::RwLock;
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_lifecycle() {
             let mut ctx = TestContext::new("flush_thread_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.log_manager.run_flush_thread();
 
             // Allow some time for thread to start
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -549,7 +549,7 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_concurrent_log_appends() {
             let ctx = Arc::new(RwLock::new(TestContext::new("concurrent_test").await));
             let thread_count = 5;
@@ -580,12 +580,12 @@ mod tests {
             assert_eq!(ctx.read().log_manager.get_next_lsn() as usize, thread_count);
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_shutdown_behavior() {
             let mut ctx = TestContext::new("shutdown_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.log_manager.run_flush_thread();
 
             // Append some records
             for i in 0..3 {
@@ -602,14 +602,14 @@ mod tests {
             ctx.log_manager.shut_down(); // Second shutdown should not panic
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_concurrent_shutdown() {
             let ctx = Arc::new(RwLock::new(
                 TestContext::new("concurrent_shutdown_test").await,
             ));
 
-            // Start flush thread
-            ctx.write().log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.write().log_manager.run_flush_thread();
 
             // Append some records
             for i in 0..3 {
@@ -642,12 +642,12 @@ mod tests {
             ctx.write().log_manager.get_next_lsn();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_periodic_flush() {
             let mut ctx = TestContext::new("periodic_flush_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.log_manager.run_flush_thread();
 
             // Append some log records
             for i in 0..5 {
@@ -672,12 +672,12 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_commit_flush() {
             let mut ctx = TestContext::new("commit_flush_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.log_manager.run_flush_thread();
 
             // Append a begin record
             let begin_record = Arc::new(LogRecord::new_transaction_record(
@@ -707,12 +707,12 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_buffer_full() {
             let mut ctx = TestContext::new("buffer_full_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.log_manager.run_flush_thread();
 
             // Use a commit record to guarantee a flush happens
             for i in 0..10 {
@@ -746,12 +746,12 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_continuous_operation() {
             let mut ctx = TestContext::new("continuous_operation_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.log_manager.run_flush_thread();
 
             // Initialize flush thread with a marker record and wait for it to be processed
             let init_record = Arc::new(LogRecord::new_transaction_record(
@@ -837,14 +837,14 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_concurrent_commits() {
             let ctx = Arc::new(RwLock::new(
                 TestContext::new("concurrent_commits_test").await,
             ));
 
-            // Start flush thread
-            ctx.write().log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.write().log_manager.run_flush_thread();
 
             // Launch multiple threads, each doing a begin+commit transaction
             let thread_count = 5;
@@ -898,12 +898,12 @@ mod tests {
             ctx.write().log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_mixed_operations() {
             let mut ctx = TestContext::new("mixed_operations_test").await;
 
-            // Start flush thread
-            ctx.log_manager.run_flush_thread();
+            // Start flush thread (already started in TestContext::new)
+            // ctx.log_manager.run_flush_thread();
 
             // Perform a mix of operations with different record types
             let txn_id = 42 as TxnId;
@@ -964,7 +964,7 @@ mod tests {
     mod read_and_write_tests {
         use super::*;
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_write_and_read_log_record() {
             let mut ctx = TestContext::new("write_read_test").await;
 
@@ -1002,7 +1002,7 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_read_with_invalid_offset() {
             let mut ctx = TestContext::new("invalid_offset_test").await;
 
@@ -1013,7 +1013,7 @@ mod tests {
             ctx.log_manager.shut_down();
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_parse_log_record_rejects_empty() {
             let ctx = TestContext::new("parse_empty_test").await;
             assert!(ctx.log_manager.parse_log_record(&[]).is_none());
