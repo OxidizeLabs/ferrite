@@ -1,7 +1,193 @@
-//! Tuple representation and metadata for the storage engine.
+//! # Tuple and Tuple Metadata
 //!
-//! This module defines the core data structures for storing rows (`Tuple`) and their
-//! MVCC metadata (`TupleMeta`), including visibility states and version chain links.
+//! This module provides the core data structures for storing rows in the database:
+//! `Tuple` (the raw column values) and `TupleMeta` (MVCC metadata for visibility,
+//! deletion status, and version chain links).
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   On-Disk Tuple Storage (in TablePage)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                           Slot Entry                                    │
+//!   │  ┌───────────────────────────────────────────────────────────────────┐  │
+//!   │  │                        TupleMeta                                  │  │
+//!   │  │  creator_txn_id: u64  │  commit_ts: Option<u64>  │  deleted: bool │  │
+//!   │  │  undo_log_idx: Option<u64>                                        │  │
+//!   │  └───────────────────────────────────────────────────────────────────┘  │
+//!   │  ┌───────────────────────────────────────────────────────────────────┐  │
+//!   │  │                          Tuple                                    │  │
+//!   │  │  ┌─────────┬─────────┬─────────┬─────────┐                        │  │
+//!   │  │  │ Value 0 │ Value 1 │ Value 2 │   ...   │  (column values)       │  │
+//!   │  │  └─────────┴─────────┴─────────┴─────────┘                        │  │
+//!   │  └───────────────────────────────────────────────────────────────────┘  │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## MVCC Version Chain
+//!
+//! ```text
+//!   Version Chain via undo_log_idx
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   TablePage (current version)          Transaction's Undo Log
+//!   ┌─────────────────────────┐          ┌─────────────────────────────────┐
+//!   │ TupleMeta               │          │  idx 0: (prev TupleMeta, Tuple) │
+//!   │   undo_log_idx: 2  ─────┼─────┐    │  idx 1: ...                     │
+//!   │ Tuple (newest values)   │     │    │  idx 2: (older meta, values) ◀──┘
+//!   └─────────────────────────┘     │    │  idx 3: ...                     │
+//!                                   │    └─────────────────────────────────┘
+//!                                   │
+//!                                   └────▶ Points to older version in undo log
+//!
+//!   To read the correct version for a snapshot:
+//!   1. Start at page tuple (newest version)
+//!   2. Check visibility_status(reader_txn_id, read_ts)
+//!   3. If Invisible → follow undo_log_idx to older version
+//!   4. Repeat until Visible or Deleted (tombstone) or chain ends
+//! ```
+//!
+//! ## TupleVisibility States
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                    TupleVisibility (tri-state)                          │
+//!   ├─────────────┬───────────────────────────────────────────────────────────┤
+//!   │  Invisible  │  Version not applicable to reader's snapshot              │
+//!   │             │  → Follow undo chain to find older version                │
+//!   ├─────────────┼───────────────────────────────────────────────────────────┤
+//!   │  Visible    │  Version is visible and represents a LIVE row             │
+//!   │             │  → Return this tuple to the reader                        │
+//!   ├─────────────┼───────────────────────────────────────────────────────────┤
+//!   │  Deleted    │  Version is visible but marks row as DELETED (tombstone)  │
+//!   │             │  → Row does not exist at this snapshot (stop traversal)   │
+//!   └─────────────┴───────────────────────────────────────────────────────────┘
+//!
+//!   Why tri-state? A visible tombstone must terminate version-chain traversal.
+//!   If we only had Visible/Invisible, we'd incorrectly return an older version
+//!   after skipping the delete marker.
+//! ```
+//!
+//! ## Visibility Rules
+//!
+//! ```text
+//!   visibility_status(txn_id, read_ts) Decision Tree
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌─────────────────────────────────┐
+//!   │ Is creator_txn_id == txn_id?    │
+//!   └───────────────┬─────────────────┘
+//!                   │
+//!        ┌──────────┴──────────┐
+//!        │ Yes                 │ No
+//!        ▼                     ▼
+//!   ┌─────────────┐     ┌─────────────────────┐
+//!   │ Own version │     │ Is committed?       │
+//!   │ always      │     └──────────┬──────────┘
+//!   │ applicable  │                │
+//!   └──────┬──────┘         ┌──────┴──────┐
+//!          │                │ No          │ Yes
+//!          ▼                ▼             ▼
+//!   ┌────────────┐   ┌───────────┐  ┌─────────────────────┐
+//!   │ deleted?   │   │ Invisible │  │ commit_ts ≤ read_ts?│
+//!   └─────┬──────┘   └───────────┘  └──────────┬──────────┘
+//!         │                              ┌─────┴─────┐
+//!    ┌────┴────┐                         │ No        │ Yes
+//!    │Yes  │No │                         ▼           ▼
+//!    ▼     ▼   │                   ┌───────────┐ ┌─────────────┐
+//! Deleted Visible                  │ Invisible │ │ deleted?    │
+//!                                  └───────────┘ └──────┬──────┘
+//!                                                  ┌────┴────┐
+//!                                                  │Yes  │No │
+//!                                                  ▼     ▼
+//!                                               Deleted Visible
+//! ```
+//!
+//! ## TupleMeta Fields
+//!
+//! | Field | Type | Description |
+//! |-------|------|-------------|
+//! | `creator_txn_id` | `TxnId` | Transaction that created/modified this version |
+//! | `commit_timestamp` | `Option<Timestamp>` | When committed (None = uncommitted) |
+//! | `deleted` | `bool` | True if this is a deletion tombstone |
+//! | `undo_log_idx` | `Option<u64>` | Index into creator's undo log for older version |
+//!
+//! ## Tuple Serialization
+//!
+//! ```text
+//!   What IS serialized (via bincode):
+//!   ┌─────────┬─────────┬─────────┬─────────┐
+//!   │ Value 0 │ Value 1 │ Value 2 │   ...   │
+//!   └─────────┴─────────┴─────────┴─────────┘
+//!
+//!   What is NOT serialized:
+//!   - RID (derived from page_id + slot_num context)
+//!
+//!   After deserialization, caller must call set_rid() to restore location.
+//! ```
+//!
+//! ## Key Operations
+//!
+//! ### TupleMeta
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `new(txn_id)` | Create uncommitted metadata |
+//! | `visibility_status(txn_id, read_ts)` | Get tri-state visibility |
+//! | `is_visible_to(txn_id, read_ts)` | True if Visible (live row) |
+//! | `is_applicable_to(txn_id, read_ts)` | True if Visible OR Deleted |
+//! | `set_commit_timestamp(ts)` | Mark as committed at timestamp |
+//! | `set_undo_log_idx(idx)` | Link to older version |
+//!
+//! ### Tuple
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `new(values, schema, rid)` | Create tuple with validation |
+//! | `serialize_to(buf)` | Serialize to byte buffer |
+//! | `deserialize_from(buf)` | Deserialize (RID = default) |
+//! | `get_value(idx)` | Get column value (cloned) |
+//! | `get_value_ref(idx)` | Borrow column value (no clone) |
+//! | `combine(other)` | Join two tuples (for joins) |
+//! | `keys_from_tuple(attrs)` | Extract key columns |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::table::tuple::{Tuple, TupleMeta, TupleVisibility};
+//!
+//! // Create tuple metadata for new row
+//! let mut meta = TupleMeta::new(txn_id);
+//!
+//! // Create tuple with values
+//! let values = vec![Value::new(1), Value::new("Alice")];
+//! let tuple = Tuple::new(&values, &schema, rid);
+//!
+//! // On commit, set timestamp
+//! meta.set_commit_timestamp(commit_ts);
+//!
+//! // Check visibility for a reader
+//! match meta.visibility_status(reader_txn_id, reader_snapshot_ts) {
+//!     TupleVisibility::Visible => println!("Row exists: {:?}", tuple),
+//!     TupleVisibility::Deleted => println!("Row was deleted"),
+//!     TupleVisibility::Invisible => println!("Version not visible, check undo log"),
+//! }
+//!
+//! // For version chain traversal
+//! if let Ok(undo_idx) = meta.try_get_undo_log_idx() {
+//!     // Follow chain to older version
+//!     let older_version = txn.get_undo_log(undo_idx);
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `Tuple` has value semantics; cloning creates an independent copy
+//! - `TupleMeta` is `Copy` for efficient pass-by-value
+//! - Both implement `bincode::Encode/Decode` for serialization
+//! - Page-level locking protects concurrent access to stored tuples
 
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
