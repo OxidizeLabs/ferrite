@@ -1,28 +1,207 @@
-//! # Buffer Pool Manager
+//! # Buffer Pool Manager (Async)
 //!
-//! The `BufferPoolManager` is responsible for managing the buffer pool,
-//! including fetching and unpinning pages, and handling page replacement.
-//! This version integrates with the new `AsyncDiskManager` for better performance
-//! and implements coordinated caching to avoid duplication.
+//! This module implements the **Buffer Pool Manager (BPM)**, the central memory management
+//! component that mediates all page-level I/O between the database engine and disk storage.
+//! It integrates with the async `AsyncDiskManager` for non-blocking I/O operations.
 //!
-//! ## Architecture Note: Two-Level Caching
+//! ## Architecture
 //!
-//! This component acts as the **Level 1 (Application)** cache, storing uncompressed `Page` objects
-//! ready for CPU processing. It works in tandem with the `AsyncDiskManager`, which acts as the
-//! **Level 2 (I/O)** cache.
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                           Buffer Pool Manager                                    │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                  │
+//! │   ┌─────────────────────────────────────────────────────────────────────────┐   │
+//! │   │                         Frame Pool (L1 Cache)                            │   │
+//! │   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐            │   │
+//! │   │  │ Frame 0 │ │ Frame 1 │ │ Frame 2 │ │ Frame 3 │ │ Frame N │   ...      │   │
+//! │   │  │ Page 5  │ │ Page 12 │ │  Empty  │ │ Page 3  │ │ Page 42 │            │   │
+//! │   │  │ pin: 2  │ │ pin: 0  │ │         │ │ pin: 1  │ │ pin: 0  │            │   │
+//! │   │  │ dirty:Y │ │ dirty:N │ │         │ │ dirty:Y │ │ dirty:N │            │   │
+//! │   │  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘            │   │
+//! │   └─────────────────────────────────────────────────────────────────────────┘   │
+//! │                                    │                                             │
+//! │   ┌────────────────────────────────┼────────────────────────────────────────┐   │
+//! │   │                                ▼                                         │   │
+//! │   │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐   │   │
+//! │   │  │    Page Table    │  │  LRU-K Replacer  │  │      Free List       │   │   │
+//! │   │  │  PageId → FrameId│  │  (eviction order)│  │  [frame_2, ...]      │   │   │
+//! │   │  │  5 → 0, 12 → 1   │  │  Tracks K recent │  │  Available frames    │   │   │
+//! │   │  │  3 → 3, 42 → N   │  │  accesses/frame  │  │  for new pages       │   │   │
+//! │   │  └──────────────────┘  └──────────────────┘  └──────────────────────┘   │   │
+//! │   └─────────────────────────────────────────────────────────────────────────┘   │
+//! │                                    │                                             │
+//! │                    ┌───────────────┴───────────────┐                            │
+//! │                    ▼                               ▼                            │
+//! │   ┌─────────────────────────────────────────────────────────────────────────┐   │
+//! │   │                     AsyncDiskManager (L2 Cache + I/O)                    │   │
+//! │   │  ┌───────────────┐  ┌───────────────┐  ┌──────────────────────────────┐ │   │
+//! │   │  │  Read Cache   │  │  Write Buffer │  │  Async I/O (tokio)           │ │   │
+//! │   │  │  (compressed) │  │  (coalescing) │  │  read_page / write_page      │ │   │
+//! │   │  └───────────────┘  └───────────────┘  └──────────────────────────────┘ │   │
+//! │   └─────────────────────────────────────────────────────────────────────────┘   │
+//! │                                    │                                             │
+//! │                                    ▼                                             │
+//! │                          ┌─────────────────┐                                    │
+//! │                          │    Disk File    │                                    │
+//! │                          │   (database)    │                                    │
+//! │                          └─────────────────┘                                    │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! While this architecture may result in transient double buffering (data existing in both layers),
-//! it provides significant benefits:
-//! - **Latency Hiding**: Flushes to L2 are non-blocking, allowing the L1 Buffer Pool to resume immediately.
-//! - **I/O Optimization**: The L2 layer handles compression, coalescing, and scheduling without blocking execution.
-//! - **Coordination**: The `use_disk_manager_cache` flag helps manage duplication by coordinating L1/L2 roles.
+//! ## Two-Level Caching Architecture
+//!
+//! This component acts as the **Level 1 (Application)** cache, storing uncompressed `Page`
+//! objects ready for CPU processing. It works in tandem with `AsyncDiskManager` (L2 cache):
+//!
+//! | Level | Component         | Data Format    | Purpose                           |
+//! |-------|-------------------|----------------|-----------------------------------|
+//! | L1    | BufferPoolManager | Uncompressed   | CPU-ready pages, hot data         |
+//! | L2    | AsyncDiskManager  | Compressed     | I/O optimization, batch writes    |
+//! | Disk  | Database File     | Persistent     | Durable storage                   |
+//!
+//! Benefits of the two-level approach:
+//! - **Latency Hiding**: Flushes to L2 are non-blocking
+//! - **I/O Optimization**: L2 handles compression, coalescing, and scheduling
+//! - **Coordination**: `use_disk_manager_cache` flag manages duplication
+//!
+//! ## Key Components
+//!
+//! | Component                  | Description                                           |
+//! |----------------------------|-------------------------------------------------------|
+//! | `BufferPoolManager`        | Main struct managing the buffer pool                  |
+//! | `PageGuard<T>`             | RAII guard for pinned pages with auto-unpin           |
+//! | `LRUKReplacer`             | Eviction policy based on K-th access timestamp        |
+//! | `BufferPoolHealthStatus`   | Health and performance metrics                        |
+//! | `CacheCoordinationStats`   | L1/L2 cache coordination statistics                   |
+//!
+//! ## Page Lifecycle
+//!
+//! ```text
+//! ┌─────────────┐    new_page()     ┌─────────────┐
+//! │             │ ─────────────────▶│   Pinned    │
+//! │   (none)    │                   │  (pin > 0)  │
+//! │             │◀───────────────── │   dirty?    │
+//! └─────────────┘   delete_page()   └──────┬──────┘
+//!                                          │
+//!                                  unpin() │ (pin--)
+//!                                          ▼
+//!                                   ┌─────────────┐
+//!                   fetch_page() ──▶│  Evictable  │
+//!                  (pin++, evict=F) │  (pin = 0)  │
+//!                                   └──────┬──────┘
+//!                                          │
+//!                           LRU-K eviction │ (if dirty, flush first)
+//!                                          ▼
+//!                                   ┌─────────────┐
+//!                                   │   Evicted   │
+//!                                   │ (on disk)   │
+//!                                   └─────────────┘
+//! ```
+//!
+//! ## Core Operations
+//!
+//! | Operation                     | Description                                       | Complexity |
+//! |-------------------------------|---------------------------------------------------|------------|
+//! | `new_page::<T>()`             | Allocate a new page of type T                     | O(1) avg   |
+//! | `fetch_page::<T>(page_id)`    | Load or retrieve page from pool                   | O(1) avg   |
+//! | `flush_page(page_id)`         | Write dirty page to disk                          | O(1) + I/O |
+//! | `flush_page_async(page_id)`   | Async version, non-blocking                       | O(1)       |
+//! | `delete_page(page_id)`        | Remove page from pool (must be unpinned)          | O(1)       |
+//! | `flush_all_pages()`           | Flush all dirty pages                             | O(n) + I/O |
+//!
+//! ## Async Operations
+//!
+//! This BPM provides both sync and async variants for I/O operations:
+//!
+//! | Sync (Deprecated)             | Async (Preferred)                    |
+//! |-------------------------------|--------------------------------------|
+//! | `flush_page()`                | `flush_page_async()`                 |
+//! | `flush_dirty_pages_batch()`   | `flush_dirty_pages_batch_async()`    |
+//! | `get_health_status()`         | `get_health_status_async()`          |
+//! | `health_check()`              | `health_check_async()`               |
+//!
+//! The sync variants use `futures::executor::block_on` internally and are deprecated.
+//! Prefer async variants for better performance and non-blocking behavior.
+//!
+//! ## Concurrency
+//!
+//! - **Frame Pool**: `Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>`
+//! - **Page Table**: `Arc<RwLock<HashMap<PageId, FrameId>>>`
+//! - **Replacer**: `Arc<RwLock<LRUKReplacer>>`
+//! - **Free List**: `Arc<RwLock<Vec<FrameId>>>`
+//!
+//! Uses `parking_lot::RwLock` for lower overhead than `std::sync::RwLock`.
+//!
+//! ## Example Usage
+//!
+//! ```rust,no_run
+//! use std::sync::Arc;
+//!
+//! // Create buffer pool with async disk manager
+//! let bpm = Arc::new(BufferPoolManager::new_with_config(
+//!     100,  // pool size
+//!     "db.file".to_string(),
+//!     "db.log".to_string(),
+//!     DiskManagerConfig::default(),
+//! ).await?);
+//!
+//! // Create a new page
+//! let guard = bpm.new_page::<BasicPage>()?;
+//! let page_id = guard.read().get_page_id();
+//!
+//! // Modify the page
+//! {
+//!     let mut page = guard.write();
+//!     page.get_data_mut()[0] = 42;
+//!     page.set_dirty(true);
+//! }
+//!
+//! // Drop guard to unpin
+//! drop(guard);
+//!
+//! // Flush to disk (async preferred)
+//! bpm.flush_page_async(page_id).await?;
+//!
+//! // Fetch page back
+//! let guard = bpm.fetch_page::<BasicPage>(page_id)?;
+//! ```
+//!
+//! ## Batch Operations
+//!
+//! For better I/O performance, use batch operations:
+//!
+//! ```rust,no_run
+//! // Load multiple pages in batch
+//! let guards = bpm.load_pages_batch::<BasicPage>(vec![1, 2, 3, 4, 5]).await;
+//!
+//! // Flush dirty pages in batch
+//! let flushed = bpm.flush_dirty_pages_batch_async(100).await?;
+//!
+//! // Prefetch pages to disk cache
+//! bpm.prefetch_to_disk_cache(vec![10, 11, 12]).await?;
+//! ```
+//!
+//! ## Health Monitoring
+//!
+//! ```rust,no_run
+//! // Get comprehensive health status
+//! let status = bpm.get_health_status_async().await;
+//! println!("Pool utilization: {:.1}%", status.pool_utilization);
+//! println!("Cache hit ratio: {:.2}", status.cache_hit_ratio);
+//!
+//! // Get cache coordination stats
+//! let stats = bpm.get_cache_coordination_stats().await;
+//! println!("Total efficiency: {:.1}%", stats.total_cache_efficiency);
+//! ```
 //!
 //! ## Key Responsibilities
 //!
-//! - **Frame Management**: Tracks free frames and page-to-frame mappings.
-//! - **Page Lifecycle**: Loads pages from disk (L2) into memory (L1) and evicts them when full.
-//! - **Pinning/Unpinning**: Prevents eviction of pages currently in use by execution threads.
-//! - **Replacement Policy**: Uses `LRUKReplacer` to optimize eviction decisions based on access history.
+//! - **Frame Management**: Tracks free frames and page-to-frame mappings
+//! - **Page Lifecycle**: Loads pages from disk (L2) into memory (L1), evicts when full
+//! - **Pinning/Unpinning**: Prevents eviction of pages in use by execution threads
+//! - **Replacement Policy**: Uses `LRUKReplacer` for access-frequency-based eviction
+//! - **Cache Coordination**: Manages L1/L2 cache interaction and efficiency
 use crate::common::exception::DeletePageError;
 use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use crate::storage::page::page_guard::{PageGuard, PageUnpinner};
