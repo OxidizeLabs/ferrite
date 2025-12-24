@@ -1,7 +1,89 @@
+//! # Build Script - SQLLogic Test Generator
+//!
+//! This build script automatically discovers and generates Rust test functions
+//! for all `.slt` (SQL Logic Test) files in the `tests/sqllogic/` directory.
+//!
+//! ## Overview
+//!
+//! ```text
+//!   Build Time                              Runtime
+//!   ───────────────────────────────────     ───────────────────────────────
+//!
+//!   tests/sqllogic/                         cargo test
+//!       │                                       │
+//!       ├── select.slt                          ▼
+//!       ├── insert.slt                      Generated tests:
+//!       ├── join.slt                        ┌─────────────────────────────┐
+//!       └── subdir/                         │ #[tokio::test]              │
+//!           └── complex.slt                 │ async fn slt_select() {...} │
+//!               │                           │                             │
+//!               │                           │ #[tokio::test]              │
+//!               ▼                           │ async fn slt_insert() {...} │
+//!       ┌───────────────────┐               │                             │
+//!       │    build.rs       │               │ #[tokio::test]              │
+//!       │                   │ ─────────►    │ async fn slt_join() {...}   │
+//!       │ collect_slt_files │               │                             │
+//!       │ make_test_name    │               │ #[tokio::test]              │
+//!       │ generate code     │               │ async fn slt_subdir_        │
+//!       └───────────────────┘               │   complex() {...}           │
+//!               │                           └─────────────────────────────┘
+//!               ▼
+//!       $OUT_DIR/sqllogic_tests.rs
+//! ```
+//!
+//! ## Generated Output
+//!
+//! For each `.slt` file found, the script generates a test like:
+//!
+//! ```rust,ignore
+//! #[tokio::test(flavor = "multi_thread")]
+//! async fn slt_select() -> Result<(), Box<dyn std::error::Error>> {
+//!     run_single_slt_file(std::path::Path::new("/path/to/select.slt"))
+//!         .await
+//! }
+//! ```
+//!
+//! ## Test Name Generation
+//!
+//! File paths are converted to valid Rust identifiers:
+//!
+//! | File Path                      | Generated Test Name         |
+//! |--------------------------------|-----------------------------|
+//! | `select.slt`                   | `slt_select`                |
+//! | `basic/insert.slt`             | `slt_basic_insert`          |
+//! | `complex-join.slt`             | `slt_complex_join`          |
+//! | `TPC-H/query01.slt`            | `slt_tpc_h_query01`         |
+//!
+//! Rules:
+//! - Prefix with `slt_`
+//! - Alphanumeric characters → lowercase
+//! - All other characters → underscore `_`
+//! - `.slt` extension removed
+//!
+//! ## Rerun Behavior
+//!
+//! The script reruns when any file in `tests/sqllogic/` changes:
+//! ```text
+//! cargo:rerun-if-changed=tests/sqllogic
+//! ```
+//!
+//! ## Integration
+//!
+//! Tests are included in `tests/sqllogic/runner.rs` via:
+//!
+//! ```rust,ignore
+//! include!(concat!(env!("OUT_DIR"), "/sqllogic_tests.rs"));
+//! ```
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Entry point for the build script.
+///
+/// 1. Collects all `.slt` files from `tests/sqllogic/`
+/// 2. Generates a Rust test function for each file
+/// 3. Writes the generated code to `$OUT_DIR/sqllogic_tests.rs`
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
@@ -36,6 +118,18 @@ fn main() {
     println!("cargo:rerun-if-changed=tests/sqllogic");
 }
 
+/// Recursively collects all `.slt` files from the given directory.
+///
+/// # Arguments
+///
+/// * `dir` - The directory to search
+/// * `files` - Accumulator for discovered file paths
+///
+/// # Behavior
+///
+/// - Recursively descends into subdirectories
+/// - Collects files with `.slt` extension (case-insensitive)
+/// - Results are later sorted for deterministic test ordering
 fn collect_slt_files(dir: &Path, files: &mut Vec<PathBuf>) {
     if !dir.exists() {
         return;
