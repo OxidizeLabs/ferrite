@@ -1,3 +1,294 @@
+//! # Database Instance
+//!
+//! This module provides `DBInstance`, the central orchestrator for the Ferrite database.
+//! It initializes and coordinates all core subsystems: storage, buffer management, catalog,
+//! transactions, recovery, and query execution.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────────────┐
+//!   │                              DBInstance                                          │
+//!   │                                                                                  │
+//!   │   ┌────────────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  Storage Layer                                                             │ │
+//!   │   │                                                                            │ │
+//!   │   │   AsyncDiskManager ──► BufferPoolManager ──► LRUKReplacer                  │ │
+//!   │   │        │                      │                                            │ │
+//!   │   │        │                      │                                            │ │
+//!   │   │   (disk I/O)            (page cache)                                       │ │
+//!   │   └────────────────────────────────────────────────────────────────────────────┘ │
+//!   │                                      │                                           │
+//!   │   ┌────────────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  Metadata Layer                  │                                         │ │
+//!   │   │                                  ▼                                         │ │
+//!   │   │   Catalog ◄──────────────────────┘                                         │ │
+//!   │   │      │                                                                     │ │
+//!   │   │      ├── Tables (TableInfo, TableHeap)                                     │ │
+//!   │   │      ├── Indexes (IndexInfo)                                               │ │
+//!   │   │      └── Schemas                                                           │ │
+//!   │   └────────────────────────────────────────────────────────────────────────────┘ │
+//!   │                                      │                                           │
+//!   │   ┌────────────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  Transaction & Recovery Layer    │                                         │ │
+//!   │   │                                  ▼                                         │ │
+//!   │   │   TransactionManagerFactory ──► TransactionManager                         │ │
+//!   │   │            │                          │                                    │ │
+//!   │   │            ▼                          ▼                                    │ │
+//!   │   │   WALManager ──────────────► LogManager                                    │ │
+//!   │   │            │                          │                                    │ │
+//!   │   │            ▼                          ▼                                    │ │
+//!   │   │   LogRecoveryManager ◄──────── (log file)                                  │ │
+//!   │   └────────────────────────────────────────────────────────────────────────────┘ │
+//!   │                                      │                                           │
+//!   │   ┌────────────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  Execution Layer                 │                                         │ │
+//!   │   │                                  ▼                                         │ │
+//!   │   │   ExecutionEngine                                                          │ │
+//!   │   │        │                                                                   │ │
+//!   │   │        ├── SQL Parser                                                      │ │
+//!   │   │        ├── Query Planner                                                   │ │
+//!   │   │        ├── Optimizer                                                       │ │
+//!   │   │        └── Executor                                                        │ │
+//!   │   └────────────────────────────────────────────────────────────────────────────┘ │
+//!   │                                      │                                           │
+//!   │   ┌────────────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  Client Layer                    │                                         │ │
+//!   │   │                                  ▼                                         │ │
+//!   │   │   client_sessions: HashMap<u64, ClientSession>                             │ │
+//!   │   │   prepared_statements: HashMap<u64, PreparedStatement>                     │ │
+//!   │   │   writer: dyn ResultWriter                                                 │ │
+//!   │   └────────────────────────────────────────────────────────────────────────────┘ │
+//!   └──────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Initialization Flow
+//!
+//! ```text
+//!   DBInstance::new(config)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  1. Check if database files exist                                      │
+//!   │     db_file_exists = Path::exists(db_filename)                         │
+//!   │     log_file_exists = Path::exists(db_log_filename)                    │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  2. Initialize storage components                                      │
+//!   │     AsyncDiskManager → BufferPoolManager → LRUKReplacer                │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  3. Initialize recovery components                                     │
+//!   │     LogManager (start flush thread)                                    │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  4. Initialize transaction components                                  │
+//!   │     TransactionManager → Catalog → WALManager → TransactionFactory     │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  5. Initialize execution engine                                        │
+//!   │     ExecutionEngine(catalog, buffer_pool, transaction_factory, wal)    │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  6. Run recovery if needed                                             │
+//!   │     if (db_file_exists && log_file_exists && enable_logging)           │
+//!   │         LogRecoveryManager::start_recovery()                           │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  7. Rebuild catalog from system tables                                 │
+//!   │     catalog.rebuild_from_system_catalog()                              │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Query Execution Flow
+//!
+//! ```text
+//!   execute_sql("SELECT * FROM users", IsolationLevel::ReadCommitted, writer)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  1. Begin transaction                                                  │
+//!   │     txn_ctx = transaction_factory.begin_transaction(isolation_level)   │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  2. Create execution context                                           │
+//!   │     exec_ctx = ExecutionContext(buffer_pool, catalog, txn_ctx)         │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  3. Execute query                                                      │
+//!   │     engine.execute_sql(sql, exec_ctx, writer)                          │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ├──── Success ────►  transaction_factory.commit_transaction(txn_ctx)
+//!        │
+//!        └──── Error ──────►  transaction_factory.abort_transaction(txn_ctx)
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component               | Type                            | Purpose                      |
+//! |-------------------------|---------------------------------|------------------------------|
+//! | `buffer_pool_manager`   | `Arc<BufferPoolManager>`        | Page caching and I/O         |
+//! | `catalog`               | `Arc<RwLock<Catalog>>`          | Metadata (tables, indexes)   |
+//! | `transaction_factory`   | `Arc<TransactionManagerFactory>`| Transaction lifecycle        |
+//! | `execution_engine`      | `Arc<Mutex<ExecutionEngine>>`   | SQL processing               |
+//! | `log_manager`           | `Arc<RwLock<LogManager>>`       | WAL persistence              |
+//! | `wal_manager`           | `Arc<WALManager>`               | Transaction logging          |
+//! | `recovery_manager`      | `Option<Arc<LogRecoveryManager>>`| Crash recovery              |
+//! | `client_sessions`       | `HashMap<u64, ClientSession>`   | Per-client state             |
+//! | `prepared_statements`   | `HashMap<u64, PreparedStatement>`| Prepared statement cache   |
+//!
+//! ## DBConfig Fields
+//!
+//! | Field                        | Type     | Default        | Description                  |
+//! |------------------------------|----------|----------------|------------------------------|
+//! | `db_filename`                | `String` | "test.db"      | Database file path           |
+//! | `db_log_filename`            | `String` | "test.log"     | WAL file path                |
+//! | `buffer_pool_size`           | `usize`  | 1024           | Buffer pool capacity (pages) |
+//! | `enable_logging`             | `bool`   | true           | Enable WAL                   |
+//! | `enable_managed_transactions`| `bool`   | true           | Auto-manage transactions     |
+//! | `lru_k`                      | `usize`  | 10             | LRU-K parameter              |
+//! | `lru_sample_size`            | `usize`  | 7              | LRU-K sample size            |
+//! | `server_enabled`             | `bool`   | false          | Enable TCP server            |
+//! | `server_host`                | `String` | "127.0.0.1"    | Server bind address          |
+//! | `server_port`                | `u16`    | 5432           | Server port                  |
+//! | `max_connections`            | `u32`    | 100            | Max concurrent connections   |
+//! | `connection_timeout`         | `u64`    | 30             | Connection timeout (seconds) |
+//!
+//! ## Core API
+//!
+//! | Method                     | Description                                    |
+//! |----------------------------|------------------------------------------------|
+//! | `new(config)`              | Create and initialize database instance        |
+//! | `execute_sql(sql, iso, w)` | Execute SQL with auto-commit                   |
+//! | `execute_transaction()`    | Execute within existing transaction            |
+//! | `begin_transaction(iso)`   | Start new transaction                          |
+//! | `commit_transaction(id)`   | Commit transaction by ID                       |
+//! | `abort_transaction(id)`    | Abort transaction by ID                        |
+//! | `handle_network_query()`   | Process client request (server mode)           |
+//! | `display_tables(writer)`   | List all tables                                |
+//! | `get_table_info(name)`     | Get table schema details                       |
+//!
+//! ## Session Management
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │  Client Session Lifecycle                                                │
+//!   │                                                                          │
+//!   │   1. create_client_session(client_id)                                    │
+//!   │      └── Creates ClientSession { id, transaction: None, isolation }      │
+//!   │                                                                          │
+//!   │   2. handle_network_query(request, client_id)                            │
+//!   │      ├── Query(sql)        → execute with session's transaction          │
+//!   │      ├── BeginTransaction  → start explicit transaction                  │
+//!   │      ├── Commit            → commit session's transaction                │
+//!   │      ├── Rollback          → abort session's transaction                 │
+//!   │      ├── Prepare(sql)      → create prepared statement                   │
+//!   │      ├── Execute(id, args) → run prepared statement                      │
+//!   │      └── Close(id)         → deallocate prepared statement               │
+//!   │                                                                          │
+//!   │   3. remove_client_session(client_id)                                    │
+//!   │      └── Aborts any active transaction, removes session                  │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::common::db_instance::{DBInstance, DBConfig};
+//! use crate::common::result_writer::CliResultWriter;
+//! use crate::concurrency::transaction::IsolationLevel;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Configure and create instance
+//!     let config = DBConfig {
+//!         db_filename: "my_database.db".to_string(),
+//!         db_log_filename: "my_database.log".to_string(),
+//!         buffer_pool_size: 2048,
+//!         ..Default::default()
+//!     };
+//!
+//!     let db = DBInstance::new(config).await?;
+//!
+//!     // Execute SQL with auto-commit
+//!     let mut writer = CliResultWriter::new();
+//!     db.execute_sql(
+//!         "CREATE TABLE users (id INT, name VARCHAR(100))",
+//!         IsolationLevel::ReadCommitted,
+//!         &mut writer,
+//!     ).await?;
+//!
+//!     db.execute_sql(
+//!         "INSERT INTO users VALUES (1, 'Alice')",
+//!         IsolationLevel::ReadCommitted,
+//!         &mut writer,
+//!     ).await?;
+//!
+//!     db.execute_sql(
+//!         "SELECT * FROM users",
+//!         IsolationLevel::ReadCommitted,
+//!         &mut writer,
+//!     ).await?;
+//!
+//!     // Explicit transaction
+//!     let txn_ctx = db.begin_transaction(IsolationLevel::Serializable);
+//!     db.execute_transaction("INSERT INTO users VALUES (2, 'Bob')", txn_ctx.clone(), &mut writer).await?;
+//!     db.execute_transaction("INSERT INTO users VALUES (3, 'Charlie')", txn_ctx.clone(), &mut writer).await?;
+//!     // Commit handled by transaction_factory
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `DBInstance` is `Clone` (all fields are `Arc`-wrapped)
+//! - Safe to share across threads/tasks
+//! - Internal components use appropriate synchronization:
+//!   - `Mutex` for exclusive access (execution_engine, client_sessions)
+//!   - `RwLock` for read-heavy access (catalog, log_manager)
+//!
+//! ## Recovery Behavior
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  Recovery Decision Matrix                                               │
+//!   │                                                                         │
+//!   │   db_file_exists │ log_file_exists │ enable_logging │ Recovery?         │
+//!   │   ───────────────┼─────────────────┼────────────────┼─────────────────  │
+//!   │   false          │ false           │ *              │ No (fresh start)  │
+//!   │   true           │ false           │ *              │ No (no log)       │
+//!   │   false          │ true            │ *              │ No (no db)        │
+//!   │   true           │ true            │ false          │ No (disabled)     │
+//!   │   true           │ true            │ true           │ YES               │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Implementation Notes
+//!
+//! - **Shared TransactionManager**: Single instance shared between Catalog and Factory
+//! - **Async Initialization**: `new()` is async for disk I/O and recovery
+//! - **Auto-Commit**: `execute_sql()` auto-commits unless ROLLBACK is executed
+//! - **Prepared Statements**: Server-side caching with parameter type validation
+//! - **Debug Mode**: Optional verbose logging for client operations
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalog::Catalog;
@@ -24,7 +315,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Configuration options for DB instance
+/// Configuration options for DB instance.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct DBConfig {
