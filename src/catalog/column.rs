@@ -1,3 +1,167 @@
+//! # Column Definition
+//!
+//! This module provides the `Column` type representing a single column in a
+//! database table schema. Columns capture type information, storage parameters,
+//! and SQL constraints for use in schema management and query execution.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                           ┌──────────────────────────────────────────┐
+//!                           │               Column                     │
+//!                           │                                          │
+//!                           │  ┌────────────────────────────────────┐  │
+//!                           │  │         Core Properties            │  │
+//!                           │  │  • column_name: String             │  │
+//!                           │  │  • column_type: TypeId             │  │
+//!                           │  │  • length: usize                   │  │
+//!                           │  │  • column_offset: usize            │  │
+//!                           │  └────────────────────────────────────┘  │
+//!                           │                                          │
+//!                           │  ┌────────────────────────────────────┐  │
+//!                           │  │         Numeric Precision          │  │
+//!                           │  │  • precision: Option<u8>           │  │
+//!                           │  │  • scale: Option<u8>               │  │
+//!                           │  └────────────────────────────────────┘  │
+//!                           │                                          │
+//!                           │  ┌────────────────────────────────────┐  │
+//!                           │  │           Constraints              │  │
+//!                           │  │  • is_primary_key: bool            │  │
+//!                           │  │  • is_not_null: bool               │  │
+//!                           │  │  • is_unique: bool                 │  │
+//!                           │  │  • check_constraint: Option<String>│  │
+//!                           │  │  • default_value: Option<Value>    │  │
+//!                           │  │  • foreign_key: Option<FK>         │  │
+//!                           │  └────────────────────────────────────┘  │
+//!                           └──────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component              | Description                                       |
+//! |------------------------|---------------------------------------------------|
+//! | `Column`               | Core column definition with type and constraints  |
+//! | `ColumnBuilder`        | Fluent builder for constructing columns           |
+//! | `ColumnSqlInfo`        | Parameters struct for SQL-based column creation   |
+//! | `ForeignKeyConstraint` | Foreign key reference and actions                 |
+//! | `ReferentialAction`    | ON DELETE/UPDATE behavior enum                    |
+//!
+//! ## Supported Type Categories
+//!
+//! | Category          | Types                                      | Length/Precision |
+//! |-------------------|--------------------------------------------|--------------------|
+//! | Integer           | TinyInt, SmallInt, Integer, BigInt         | Fixed size         |
+//! | Floating Point    | Float, Decimal                             | Optional precision |
+//! | String            | Char, VarChar                              | Variable length    |
+//! | Binary            | Binary                                     | Variable length    |
+//! | Temporal          | Date, Time, Timestamp, Interval            | Fixed/precision    |
+//! | Boolean           | Boolean                                    | Fixed (1 byte)     |
+//! | Special           | Vector, JSON, UUID, Point, Enum, Array     | Type-specific      |
+//!
+//! ## Constraint Support
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────┐
+//! │                         SQL Constraints                             │
+//! ├─────────────────┬───────────────────────────────────────────────────┤
+//! │ PRIMARY KEY     │ is_primary_key = true                             │
+//! │ NOT NULL        │ is_not_null = true                                │
+//! │ UNIQUE          │ is_unique = true                                  │
+//! │ CHECK (expr)    │ check_constraint = Some("expr")                   │
+//! │ DEFAULT value   │ default_value = Some(Value)                       │
+//! │ FOREIGN KEY     │ foreign_key = Some(ForeignKeyConstraint)          │
+//! └─────────────────┴───────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Builder Pattern
+//!
+//! ```text
+//!   Column::builder("price", TypeId::Decimal)
+//!       │
+//!       ├──► .with_precision_and_scale(10, 2)
+//!       │
+//!       ├──► .as_not_null()
+//!       │
+//!       ├──► .with_default_value(Value::from(0.00))
+//!       │
+//!       └──► .build()
+//!                │
+//!                ▼
+//!           Column {
+//!             column_name: "price",
+//!             column_type: Decimal,
+//!             precision: Some(10),
+//!             scale: Some(2),
+//!             is_not_null: true,
+//!             default_value: Some(0.00),
+//!             ...
+//!           }
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::catalog::column::{Column, ColumnBuilder, ForeignKeyConstraint, ReferentialAction};
+//! use crate::types_db::type_id::TypeId;
+//!
+//! // Simple column
+//! let id_col = Column::new("id", TypeId::Integer);
+//!
+//! // Primary key column
+//! let pk_col = Column::new_primary_key("user_id", TypeId::BigInt);
+//!
+//! // Variable-length column
+//! let name_col = Column::new_varlen("name", TypeId::VarChar, 100);
+//!
+//! // Decimal with precision and scale
+//! let price_col = Column::new_decimal("price", Some(10), Some(2));
+//!
+//! // Complex column with builder
+//! let email_col = Column::builder("email", TypeId::VarChar)
+//!     .with_length(255)
+//!     .as_not_null()
+//!     .as_unique()
+//!     .build();
+//!
+//! // Foreign key column
+//! let fk_col = Column::builder("department_id", TypeId::Integer)
+//!     .with_foreign_key(ForeignKeyConstraint {
+//!         referenced_table: "departments".to_string(),
+//!         referenced_column: "id".to_string(),
+//!         on_delete: Some(ReferentialAction::Cascade),
+//!         on_update: Some(ReferentialAction::NoAction),
+//!     })
+//!     .build();
+//! ```
+//!
+//! ## Default Type Sizes
+//!
+//! | TypeId     | Default Size (bytes)         |
+//! |------------|------------------------------|
+//! | Boolean    | 1                            |
+//! | TinyInt    | 1                            |
+//! | SmallInt   | 2                            |
+//! | Integer    | 4                            |
+//! | BigInt     | 8                            |
+//! | Decimal    | 8                            |
+//! | Float      | 4                            |
+//! | VarChar    | 255                          |
+//! | Char       | 255                          |
+//! | Vector     | 1024                         |
+//! | UUID       | 16                           |
+//!
+//! ## Serialization
+//!
+//! Columns implement `bincode::Encode` and `bincode::Decode` for efficient
+//! binary serialization, used when persisting schema metadata to the system
+//! catalog tables.
+//!
+//! ## Thread Safety
+//!
+//! `Column` is `Send + Sync` and can be safely shared across threads. The
+//! struct is typically used immutably after construction; mutable access
+//! (e.g., `set_offset`) is used during schema building phases.
+
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use bincode::{Decode, Encode};
