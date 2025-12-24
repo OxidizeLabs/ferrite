@@ -1,21 +1,193 @@
 //! # I/O Operation Queue
 //!
-//! The `IOQueueManager` implements a thread-safe, priority-based scheduling queue for pending I/O operations.
-//! It ensures that critical database operations (like WAL writes) are processed before background tasks
-//! (like prefetching).
+//! This module provides `IOQueueManager`, a thread-safe, priority-based scheduling queue for
+//! pending I/O operations. It ensures critical database operations (like WAL writes) are
+//! processed before background tasks (like prefetching).
 //!
 //! ## Architecture
 //!
-//! The queue is backed by a `BinaryHeap` wrapped in a `Mutex`, allowing concurrent access from multiple
-//! producers (callers) and consumers (workers). Operations are ordered by their `priority` field.
+//! ```text
+//!   AsyncDiskManager / Callers
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ enqueue_operation(op_type, priority, id)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                        IOQueueManager                                   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  queue: Arc<Mutex<BinaryHeap<IOOperation>>>                     │   │
+//!   │   │                                                                 │   │
+//!   │   │  Priority ordering (max-heap):                                  │   │
+//!   │   │                                                                 │   │
+//!   │   │         ┌─────────────────────────────────────────┐             │   │
+//!   │   │  Top ─► │ priority=255 (WAL sync)                 │             │   │
+//!   │   │         ├─────────────────────────────────────────┤             │   │
+//!   │   │         │ priority=200 (log write)                │             │   │
+//!   │   │         ├─────────────────────────────────────────┤             │   │
+//!   │   │         │ priority=100 (page write)               │             │   │
+//!   │   │         ├─────────────────────────────────────────┤             │   │
+//!   │   │         │ priority=50 (page read)                 │             │   │
+//!   │   │         ├─────────────────────────────────────────┤             │   │
+//!   │   │  Bot ─► │ priority=10 (prefetch)                  │             │   │
+//!   │   │         └─────────────────────────────────────────┘             │   │
+//!   │   │                                                                 │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ dequeue_operation() → highest priority first
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │              IOWorkerManager (workers)                                  │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Key Features
+//! ## IOOperation Structure
 //!
-//! - **Priority-Based Ordering**: Operations with higher priority values are dequeued first.
-//! - **FIFO Tie-Breaking**: Operations with equal priority are ordered by submission time to prevent starvation.
-//! - **Thread Safety**: Safe for concurrent enqueue/dequeue operations.
-//! - **Observability**: Provides methods to inspect queue size and peek at high-priority items.
-//! - **Drain Capability**: Supports bulk removal of operations, useful for cancellation or shutdown sequences.
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  IOOperation                                                            │
+//!   │                                                                         │
+//!   │  ┌────────────────┬────────────────────────────────────────────────┐    │
+//!   │  │ Field          │ Purpose                                        │    │
+//!   │  ├────────────────┼────────────────────────────────────────────────┤    │
+//!   │  │ priority: u8   │ Ordering key (higher = dequeued first)         │    │
+//!   │  │ id: u64        │ Unique operation ID (for tracking/completion)  │    │
+//!   │  │ operation_type │ ReadPage, WritePage, Sync, etc.                │    │
+//!   │  │ submitted_at   │ Instant when enqueued (FIFO tie-breaking)      │    │
+//!   │  └────────────────┴────────────────────────────────────────────────┘    │
+//!   │                                                                         │
+//!   │  Ord implementation: Compares by (priority DESC, submitted_at ASC)      │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Priority Ordering
+//!
+//! ```text
+//!   Priority Values (higher = more urgent)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   255 ─┬─ Maximum priority (WAL sync, critical durability)
+//!        │
+//!   200 ─┼─ Log operations (append, read)
+//!        │
+//!   150 ─┼─ Page writes (dirty page flush)
+//!        │
+//!   100 ─┼─ Page reads (user-initiated)
+//!        │
+//!    50 ─┼─ Background operations
+//!        │
+//!     0 ─┴─ Minimum priority (prefetch, speculative reads)
+//!
+//!   Tie-breaking: When priorities are equal, earlier submitted_at wins
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component         | Description                                         |
+//! |-------------------|-----------------------------------------------------|
+//! | `IOQueueManager`  | Thread-safe queue wrapper with priority ordering    |
+//! | `PriorityQueue<T>`| Type alias for `Arc<Mutex<BinaryHeap<T>>>`          |
+//! | `IOOperation`     | Operation with priority, id, type, and timestamp    |
+//!
+//! ## Core Operations
+//!
+//! | Method                  | Description                                    |
+//! |-------------------------|------------------------------------------------|
+//! | `new()`                 | Create empty queue manager                     |
+//! | `enqueue_operation()`   | Add operation with priority and ID             |
+//! | `dequeue_operation()`   | Remove and return highest-priority operation   |
+//! | `queue_size()`          | Get current number of pending operations       |
+//! | `is_empty()`            | Check if queue has no operations               |
+//! | `peek_highest_priority()`| Get priority of next operation (no removal)   |
+//! | `clear_queue()`         | Remove all operations, return count            |
+//! | `drain_queue()`         | Remove all operations, return them as Vec      |
+//!
+//! ## Producer-Consumer Pattern
+//!
+//! ```text
+//!   Producers (multiple)                     Consumer (workers)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌─────────────┐
+//!   │ Caller A    │──┐
+//!   └─────────────┘  │
+//!                    │  enqueue_operation()
+//!   ┌─────────────┐  │           ┌────────────────────┐
+//!   │ Caller B    │──┼──────────►│   IOQueueManager   │
+//!   └─────────────┘  │           │                    │
+//!                    │           │  ┌──────────────┐  │  dequeue_operation()
+//!   ┌─────────────┐  │           │  │ BinaryHeap   │  │◄──────────────────────┐
+//!   │ Caller C    │──┘           │  │ (max-heap)   │  │                       │
+//!   └─────────────┘              │  └──────────────┘  │       ┌─────────────┐ │
+//!                                └────────────────────┘       │ Worker 0    │─┘
+//!                                                             ├─────────────┤
+//!   Thread-safe via tokio::sync::Mutex                        │ Worker 1    │
+//!   • Lock acquired for each operation                        ├─────────────┤
+//!   • Short critical sections                                 │ Worker 2    │
+//!                                                             └─────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::io::queue::IOQueueManager;
+//! use crate::storage::disk::async_disk::io::operations::{IOOperationType, priorities};
+//!
+//! // Create queue manager
+//! let queue_manager = IOQueueManager::new();
+//!
+//! // Enqueue operations with different priorities
+//! queue_manager.enqueue_operation(
+//!     IOOperationType::ReadPage { page_id: 42 },
+//!     priorities::PAGE_READ,
+//!     1, // operation ID
+//! ).await;
+//!
+//! queue_manager.enqueue_operation(
+//!     IOOperationType::SyncLog,
+//!     priorities::LOG_SYNC,  // Higher priority
+//!     2,
+//! ).await;
+//!
+//! // Check queue state
+//! println!("Queue size: {}", queue_manager.queue_size().await);
+//! println!("Highest priority: {:?}", queue_manager.peek_highest_priority().await);
+//!
+//! // Dequeue highest-priority operation (SyncLog comes first)
+//! if let Some(op) = queue_manager.dequeue_operation().await {
+//!     println!("Processing: {:?} with priority {}", op.operation_type, op.priority);
+//! }
+//!
+//! // Drain all remaining operations (for shutdown)
+//! let remaining = queue_manager.drain_queue().await;
+//! for op in remaining {
+//!     // Cancel or complete each operation
+//! }
+//! ```
+//!
+//! ## Drain vs Clear
+//!
+//! ```text
+//!   clear_queue()                          drain_queue()
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Returns: usize (count of removed)      Returns: Vec<IOOperation>
+//!
+//!   Use when:                              Use when:
+//!   • Just need to empty the queue         • Need to process/cancel each operation
+//!   • Don't care about dropped operations  • Want to complete pending receivers
+//!   • Quick cleanup                        • Graceful shutdown
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `queue`: `Arc<Mutex<BinaryHeap<IOOperation>>>` (tokio async mutex)
+//! - All operations acquire the lock for the duration of the operation
+//! - Short critical sections minimize contention
+//! - Safe for concurrent enqueue from multiple producers
+//! - Safe for concurrent dequeue from multiple workers
+//! - Implements `Default` for easy construction
 
 use super::operations::{IOOperation, IOOperationType};
 use std::collections::BinaryHeap;
