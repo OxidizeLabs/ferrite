@@ -1,20 +1,223 @@
 //! # Coalescing Size Analyzer
 //!
-//! The `SizeAnalyzer` provides the mathematical logic to determine the "cost vs. benefit" of coalescing operations.
-//! Merging pages is not always beneficial if it introduces too many gaps (wasted space) or excessive misalignment.
+//! This module provides `SizeAnalyzer`, which calculates the cost vs. benefit of coalescing
+//! write operations. Merging pages is not always beneficial if it introduces too many gaps
+//! (wasted space) or excessive memory overhead.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   CoalescingEngine
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ Should we coalesce these pages?
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                         SizeAnalyzer                                    │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Input: adjacent_pages, new_data, pending_writes                │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                              │                                          │
+//!   │                              ▼                                          │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Step 1: Build Page Ranges                                      │   │
+//!   │   │                                                                 │   │
+//!   │   │  Pages: [1, 2, 3, 6, 7, 10]                                     │   │
+//!   │   │            │                                                    │   │
+//!   │   │            ▼                                                    │   │
+//!   │   │  Ranges: [1-3] [6-7] [10]  ← Contiguous groups                  │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                              │                                          │
+//!   │                              ▼                                          │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Step 2: Analyze Gaps                                           │   │
+//!   │   │                                                                 │   │
+//!   │   │  [1-3] ──gap(4-5)──> [6-7] ──gap(8-9)──> [10]                   │   │
+//!   │   │         2 pages              2 pages                            │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                              │                                          │
+//!   │                              ▼                                          │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Step 3: Calculate Costs                                        │   │
+//!   │   │                                                                 │   │
+//!   │   │  • data_size:         Sum of actual page data                   │   │
+//!   │   │  • metadata_overhead: Headers, page metadata, gap markers       │   │
+//!   │   │  • alignment_padding: Cache line (64B) + page (4KB) alignment   │   │
+//!   │   │  • compression_savings: Estimated savings from compression      │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                              │                                          │
+//!   │                              ▼                                          │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Step 4: Efficiency Verdict                                     │   │
+//!   │   │                                                                 │   │
+//!   │   │  is_efficient = overhead_ratio < 25% AND gap_ratio <= 20%       │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ CoalescedSizeInfo { total_size, is_efficient, ... }
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  CoalescingEngine: Proceed with merge or keep separate?                 │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Page Range Construction
+//!
+//! ```text
+//!   Input: unsorted page IDs [3, 1, 6, 2, 7]
+//!
+//!   Step 1: Sort → [1, 2, 3, 6, 7]
+//!
+//!   Step 2: Group contiguous pages
+//!
+//!   ┌─────┬─────┬─────┐     ┌─────┬─────┐
+//!   │  1  │  2  │  3  │     │  6  │  7  │
+//!   └─────┴─────┴─────┘     └─────┴─────┘
+//!         Range 1                Range 2
+//!        start=1                start=6
+//!        end=3                  end=7
+//!        size=sum of bytes      size=sum of bytes
+//!
+//!   Gap between Range 1 and Range 2: pages 4-5 (2 × 4KB = 8KB)
+//! ```
 //!
 //! ## Analysis Metrics
 //!
-//! - **Effective Span**: The total memory range covered by a coalesced write.
-//! - **Gap Ratio**: The percentage of the span that contains no useful data (holes between pages).
-//! - **Overhead**: Metadata, alignment padding, and other costs.
-//! - **Efficiency**: A boolean verdict on whether a specific merge operation should proceed.
+//! | Metric            | Description                                            |
+//! |-------------------|--------------------------------------------------------|
+//! | `data_size`       | Sum of actual page data bytes                          |
+//! | `effective_span`  | Total memory range (including gaps if ratio < 50%)     |
+//! | `gap_ratio`       | `total_gap_size / data_size` (holes between pages)     |
+//! | `overhead_ratio`  | `(total_size - data_size) / data_size`                 |
+//! | `is_efficient`    | `overhead_ratio < 25% AND gap_ratio <= 20%`            |
 //!
-//! ## Key Features
+//! ## Key Components
 //!
-//! - **Alignment Awareness**: Calculates padding required to align writes to CPU cache lines or disk sectors.
-//! - **Compression Estimation**: Heuristically estimates potential savings if the coalesced block were compressed.
-//! - **Gap Analysis**: Identifies contiguous ranges vs. fragmented holes.
+//! | Component          | Description                                           |
+//! |--------------------|-------------------------------------------------------|
+//! | `SizeAnalyzer`     | Stateless analyzer providing all calculation methods  |
+//! | `PageRange`        | Contiguous range of pages with start, end, size       |
+//! | `CoalescedSizeInfo`| Detailed breakdown of coalescing costs and benefits   |
+//!
+//! ## CoalescedSizeInfo Fields
+//!
+//! | Field               | Description                                         |
+//! |---------------------|-----------------------------------------------------|
+//! | `total_size`        | Final size including all overhead                   |
+//! | `data_size`         | Raw data size without overhead                      |
+//! | `metadata_overhead` | Headers + page metadata + gap markers               |
+//! | `num_ranges`        | Number of contiguous segments                       |
+//! | `compression_savings`| Estimated bytes saved via compression              |
+//! | `alignment_padding` | Bytes added for cache line/page alignment           |
+//! | `is_efficient`      | Whether coalescing is recommended                   |
+//!
+//! ## Core Operations
+//!
+//! | Method                           | Description                              |
+//! |----------------------------------|------------------------------------------|
+//! | `calculate_coalesced_size()`     | Simple total size calculation            |
+//! | `calculate_detailed_coalesced_size()` | Full breakdown with all metrics     |
+//! | `build_page_ranges()`            | Group pages into contiguous ranges       |
+//! | `analyze_page_gaps()`            | Find gaps between ranges                 |
+//! | `calculate_effective_span()`     | Memory span considering gap strategy     |
+//! | `calculate_metadata_overhead()`  | Sum of all metadata costs                |
+//! | `calculate_alignment_overhead()` | Cache line + page alignment padding      |
+//! | `estimate_compression_savings()` | Heuristic compression benefit estimate   |
+//! | `analyze_coalescing_efficiency()`| Final go/no-go decision                  |
+//! | `validate_page_ranges()`         | Check for overlaps and ordering          |
+//!
+//! ## Overhead Constants
+//!
+//! | Constant               | Value   | Purpose                               |
+//! |------------------------|---------|---------------------------------------|
+//! | `ALIGNMENT_BOUNDARY`   | 64 B    | CPU cache line size                   |
+//! | `PAGE_ALIGNMENT`       | 4096 B  | Disk page size                        |
+//! | `RANGE_HEADER_SIZE`    | 32 B    | Metadata per contiguous range         |
+//! | `PAGE_METADATA_SIZE`   | 8 B     | Metadata per individual page          |
+//! | `GAP_METADATA_SIZE`    | 16 B    | Metadata per gap between ranges       |
+//!
+//! ## Efficiency Thresholds
+//!
+//! | Threshold                        | Value | Meaning                         |
+//! |----------------------------------|-------|---------------------------------|
+//! | `COMPRESSION_EFFICIENCY_THRESHOLD`| 75%  | Min compression ratio to apply  |
+//! | `MAX_EFFICIENT_GAP_RATIO`        | 20%   | Max acceptable gap percentage   |
+//! | `MAX_OVERHEAD_RATIO`             | 25%   | Max acceptable overhead         |
+//! | `MAX_SPAN_GAP_RATIO`             | 50%   | Above this, use separate ranges |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::memory::coalescing::size_analyzer::SizeAnalyzer;
+//! use std::collections::HashMap;
+//!
+//! let analyzer = SizeAnalyzer::new();
+//!
+//! // Simulate pending writes
+//! let mut pending_writes = HashMap::new();
+//! pending_writes.insert(1, vec![0u8; 4096]);
+//! pending_writes.insert(2, vec![0u8; 4096]);
+//! pending_writes.insert(5, vec![0u8; 4096]); // Gap at pages 3-4
+//!
+//! // Analyze coalescing for a new write
+//! let adjacent_pages = vec![1, 2, 5];
+//! let new_data = vec![0u8; 4096];
+//!
+//! let info = analyzer.calculate_detailed_coalesced_size(
+//!     &adjacent_pages,
+//!     &new_data,
+//!     &pending_writes,
+//! );
+//!
+//! println!("Data size: {} bytes", info.data_size);
+//! println!("Total size: {} bytes", info.total_size);
+//! println!("Overhead: {} bytes", info.metadata_overhead + info.alignment_padding);
+//! println!("Compression savings: {} bytes", info.compression_savings);
+//! println!("Number of ranges: {}", info.num_ranges);
+//! println!("Is efficient: {}", info.is_efficient);
+//!
+//! if info.is_efficient {
+//!     // Proceed with coalesced write
+//! } else {
+//!     // Write pages separately
+//! }
+//! ```
+//!
+//! ## Gap Analysis Decision
+//!
+//! ```text
+//!   gap_ratio = total_gap_size / data_size
+//!
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ gap_ratio <= 50%                                                       │
+//!   │                                                                        │
+//!   │   Use FULL SPAN (include gaps in memory layout)                        │
+//!   │                                                                        │
+//!   │   [Range 1]────gap────[Range 2]                                        │
+//!   │   ◄───────── effective_span ──────────►                                │
+//!   │                                                                        │
+//!   │   Better for sequential I/O, simpler memory layout                     │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ gap_ratio > 50%                                                        │
+//!   │                                                                        │
+//!   │   Use SEPARATE RANGES (skip gaps)                                      │
+//!   │                                                                        │
+//!   │   [Range 1]        [Range 2]                                           │
+//!   │   ◄─span─►         ◄─span─►                                            │
+//!   │                                                                        │
+//!   │   Better for sparse data, avoids wasting memory on holes               │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `SizeAnalyzer` is stateless (`struct SizeAnalyzer;`)
+//! - All methods take `&self` and operate on provided data
+//! - Safe for concurrent use from multiple threads
+//! - Implements `Default` for easy construction
 
 use crate::common::config::PageId;
 use std::collections::HashMap;
