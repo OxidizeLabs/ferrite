@@ -1,3 +1,62 @@
+//! Directory page implementation for extendable hash table indexes.
+//!
+//! This module provides [`ExtendableHTableDirectoryPage`], which manages the
+//! mapping between hash values and bucket pages in an extendable hash table.
+//! The directory dynamically grows and shrinks as data is inserted and deleted.
+//!
+//! # Extendable Hashing Concepts
+//!
+//! The directory uses bit prefixes of hash values to route lookups:
+//!
+//! ```text
+//! Hash: 0b11010110...
+//!          ^^
+//!          └─ Use first `global_depth` bits as directory index
+//! ```
+//!
+//! # Directory Structure
+//!
+//! ```text
+//! global_depth = 2 (directory size = 4)
+//! ┌───────┬──────────────┬─────────────┐
+//! │ Index │ Bucket Page  │ Local Depth │
+//! ├───────┼──────────────┼─────────────┤
+//! │  00   │     P1       │      2      │
+//! │  01   │     P2       │      2      │
+//! │  10   │     P3       │      1      │  ← Shared: 10 and 11 point
+//! │  11   │     P3       │      1      │    to same bucket
+//! └───────┴──────────────┴─────────────┘
+//! ```
+//!
+//! # Global vs Local Depth
+//!
+//! - **Global depth**: Number of bits used to index the directory.
+//!   Directory size = 2^global_depth.
+//! - **Local depth**: Number of bits distinguishing entries in a bucket.
+//!   When `local_depth < global_depth`, multiple directory slots share the bucket.
+//!
+//! # Directory Operations
+//!
+//! - **Lookup**: [`hash_to_bucket_index`](ExtendableHTableDirectoryPage::hash_to_bucket_index)
+//!   masks the hash with global depth bits to find the directory slot.
+//! - **Growth**: When a bucket splits and its `local_depth` would exceed `global_depth`,
+//!   the directory doubles in size via [`grow_directory`].
+//! - **Split**: [`split_bucket`](ExtendableHTableDirectoryPage::split_bucket) handles
+//!   bucket overflow by redistributing directory pointers.
+//! - **Merge**: [`merge_bucket`](ExtendableHTableDirectoryPage::merge_bucket) combines
+//!   buddy buckets when possible.
+//!
+//! # Invariants
+//!
+//! The directory maintains several invariants (verified by [`verify_integrity`]):
+//! - All local depths ≤ global depth
+//! - Each bucket has exactly 2^(global_depth - local_depth) directory pointers
+//! - All slots pointing to the same bucket have the same local depth
+//!
+//! # Capacity
+//!
+//! Maximum directory size is defined by [`HTABLE_DIRECTORY_MAX_DEPTH`] (2^9 = 512 entries).
+
 use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
 use crate::storage::page::PAGE_TYPE_OFFSET;
