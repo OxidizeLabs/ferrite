@@ -1,3 +1,41 @@
+//! RAII-based page guard for safe buffer pool page access.
+//!
+//! This module provides [`PageGuard`], a smart pointer that manages page pinning
+//! and unpinning through RAII semantics. When a page guard is created, the
+//! underlying page is pinned; when dropped, it is automatically unpinned.
+//!
+//! # Key Features
+//!
+//! - **Automatic pin management**: Pages are pinned on guard creation and unpinned
+//!   on drop, preventing accidental page eviction while in use.
+//! - **Dirty tracking**: Write access through the guard automatically marks the
+//!   page as dirty for write-back.
+//! - **Buffer pool integration**: Guards can delegate unpinning to a [`PageUnpinner`]
+//!   callback, enabling seamless integration with the buffer pool manager.
+//! - **Typed and untyped access**: Supports both concrete page types (`PageGuard<P>`)
+//!   and trait objects (`PageGuard<dyn PageTrait>`).
+//!
+//! # Usage
+//!
+//! ```ignore
+//! // Fetch a page from the buffer pool (creates a guard)
+//! let guard = bpm.fetch_page::<BasicPage>(page_id)?;
+//!
+//! // Read access
+//! let data = guard.read();
+//!
+//! // Write access (automatically marks page dirty)
+//! let mut data = guard.write();
+//! data.get_data_mut()[10] = 42;
+//!
+//! // Guard is dropped here, unpinning the page
+//! ```
+//!
+//! # Concurrency
+//!
+//! The guard uses `parking_lot::RwLock` internally, allowing multiple concurrent
+//! readers or a single exclusive writer. Pin count operations are thread-safe.
+
 use crate::common::config::PageId;
 use crate::storage::page::{Page, PageTrait, PageType};
 use log::trace;

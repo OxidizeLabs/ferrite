@@ -1,3 +1,27 @@
+//! Core page abstractions and implementations for the storage layer.
+//!
+//! This module defines the fundamental traits and types for database pages:
+//!
+//! - [`PageTrait`]: The primary trait for dynamic dispatch, providing common page
+//!   operations like pin count management, dirty flag tracking, and data access.
+//! - [`PageTypeId`]: A marker trait providing compile-time page type identification.
+//! - [`Page`]: Combines `PageTrait` and `PageTypeId` for typed page implementations.
+//! - [`BasicPage`]: The default page implementation used for general-purpose storage.
+//!
+//! # Page Layout
+//!
+//! Each page has a fixed size ([`DB_PAGE_SIZE`]) with a header containing:
+//! - Byte 0: Page type identifier (see [`PageType`])
+//! - Bytes 1-4: Page ID
+//!
+//! # Page Types
+//!
+//! The system supports multiple page types for different storage structures:
+//! - Basic pages for general data
+//! - Table pages for row storage
+//! - Hash table pages (header, directory, bucket) for hash indexes
+//! - B+Tree pages (header, internal, leaf, node) for B+Tree indexes
+
 use crate::common::config::*;
 use crate::common::exception::PageError;
 use std::any::Any;
