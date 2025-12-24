@@ -369,11 +369,57 @@ For detailed guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 🗺️ Roadmap
 
+### Phase 1: Alpha Release
+*Goal: Make basic types and SQL statements production-ready*
+
+- [ ] **Core SQL Completeness**
+  - [ ] IN operator support (`WHERE id IN (1, 2, 3)`)
+  - [ ] BETWEEN operator (`WHERE age BETWEEN 18 AND 65`)
+  - [ ] LIKE/ILIKE pattern matching (`WHERE name LIKE 'A%'`)
+  - [ ] DEFAULT values in INSERT statements
+  - [ ] Subquery support in WHERE clauses
+- [ ] **Index Improvements**
+  - [ ] VarChar index support
+  - [ ] Composite/multi-column index support
+- [ ] **Window Functions**
+  - [ ] ROW_NUMBER, RANK, DENSE_RANK
+  - [ ] LAG, LEAD, FIRST_VALUE, LAST_VALUE
+
+### Phase 2: Beta Release
+
+- [ ] **Advanced SQL**
+  - [ ] UNION, INTERSECT, EXCEPT (set operations)
+  - [ ] Common Table Expressions (WITH clause / CTEs)
+  - [ ] Correlated subqueries
+- [ ] **Prepared Statement Parameters**
+  - [ ] Bind parameter support (`$1`, `?` placeholders)
+- [ ] **Optimizer Improvements**
+  - [ ] Cost-based join selection
+  - [ ] Join reordering
+  - [ ] Predicate pushdown optimizations
+- [ ] **Savepoint Support**
+  - [ ] Partial transaction rollback (`ROLLBACK TO SAVEPOINT`)
+
+### Phase 3: Production Hardening
+
+- [ ] **MVCC Completion**
+  - [ ] Garbage collection for old versions
+  - [ ] Snapshot isolation
+- [ ] **Security**
+  - [ ] User authentication
+  - [ ] Role-based access control (RBAC)
+  - [ ] Connection encryption (TLS)
+- [ ] **Observability**
+  - [ ] Tracing integration
+  - [ ] Prometheus metrics export
+  - [ ] EXPLAIN ANALYZE
+
+### Phase 4: Advanced Features
+
 - [ ] NUMA affinity for operators and buffer frames
-- [ ] Tracing integration and Prometheus metrics
-- [ ] Enhanced cost-based optimizer
-- [ ] Secondary index improvements
-- [ ] Full MVCC implementation
+- [ ] Parallel query execution
+- [ ] Materialized views
+- [ ] Stored procedures / user-defined functions
 
 ---
 
