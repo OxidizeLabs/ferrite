@@ -1,3 +1,212 @@
+//! # Database Container
+//!
+//! This module provides the `Database` struct which represents a single database
+//! instance containing tables and indexes. Each database maintains its own
+//! namespace for table and index names, with separate OID counters for
+//! allocating unique identifiers.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                           ┌────────────────────────────────────────────┐
+//!                           │                 Database                   │
+//!                           │                                            │
+//!                           │  name: "mydb"        db_oid: 42            │
+//!                           │                                            │
+//!                           │  ┌──────────────────────────────────────┐  │
+//!                           │  │              Tables                  │  │
+//!                           │  │  ┌─────────────────────────────────┐ │  │
+//!                           │  │  │  table_names    │    tables     │ │  │
+//!                           │  │  │ "users" → 5     │  5 → TableInfo│ │  │
+//!                           │  │  │ "orders" → 6    │  6 → TableInfo│ │  │
+//!                           │  │  └─────────────────────────────────┘ │  │
+//!                           │  │           next_table_oid: 7          │  │
+//!                           │  └──────────────────────────────────────┘  │
+//!                           │                                            │
+//!                           │  ┌──────────────────────────────────────┐  │
+//!                           │  │              Indexes                 │  │
+//!                           │  │  ┌─────────────────────────────────┐ │  │
+//!                           │  │  │  index_names    │    indexes    │ │  │
+//!                           │  │  │ "users_pk" → 0  │ 0 → (Info,B+) │ │  │
+//!                           │  │  │ "orders_idx" →1 │ 1 → (Info,B+) │ │  │
+//!                           │  │  └─────────────────────────────────┘ │  │
+//!                           │  │           next_index_oid: 2          │  │
+//!                           │  └──────────────────────────────────────┘  │
+//!                           │                                            │
+//!                           │  ┌────────────────────┐ ┌───────────────┐  │
+//!                           │  │ BufferPoolManager  │ │  TxnManager   │  │
+//!                           │  └────────────────────┘ └───────────────┘  │
+//!                           └────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component       | Description                                           |
+//! |-----------------|-------------------------------------------------------|
+//! | `Database`      | Container for tables and indexes with OID management  |
+//! | `tables`        | Map from OID to `TableInfo` metadata                  |
+//! | `table_names`   | Map from name to OID for fast lookup                  |
+//! | `indexes`       | Map from OID to `(IndexInfo, BPlusTree)` pairs        |
+//! | `index_names`   | Map from name to OID for fast lookup                  |
+//!
+//! ## Table Creation Flow
+//!
+//! ```text
+//!   create_table("users", schema)
+//!            │
+//!            ▼
+//!   ┌─────────────────────────┐
+//!   │ Check name uniqueness   │
+//!   └───────────┬─────────────┘
+//!               │
+//!               ▼
+//!   ┌─────────────────────────┐
+//!   │ Validate FK constraints │
+//!   │ (referenced tables must │
+//!   │  exist with columns)    │
+//!   └───────────┬─────────────┘
+//!               │
+//!               ▼
+//!   ┌─────────────────────────┐
+//!   │ Allocate table OID      │
+//!   │ Create TableHeap        │
+//!   └───────────┬─────────────┘
+//!               │
+//!               ▼
+//!   ┌─────────────────────────┐
+//!   │ Register with           │
+//!   │ TransactionManager      │
+//!   │ (TransactionalTableHeap)│
+//!   └───────────┬─────────────┘
+//!               │
+//!               ▼
+//!   ┌─────────────────────────┐
+//!   │ Update internal maps    │
+//!   │ Return TableInfo        │
+//!   └─────────────────────────┘
+//! ```
+//!
+//! ## Index Creation Flow
+//!
+//! ```text
+//!   create_index("users_pk", "users", key_schema, ...)
+//!            │
+//!            ▼
+//!   ┌─────────────────────────┐
+//!   │ Verify table exists     │
+//!   │ Verify name is unique   │
+//!   └───────────┬─────────────┘
+//!               │
+//!               ▼
+//!   ┌─────────────────────────┐
+//!   │ Allocate index OID      │
+//!   │ Create IndexInfo        │
+//!   │ Create BPlusTree        │
+//!   └───────────┬─────────────┘
+//!               │
+//!               ▼
+//!   ┌─────────────────────────┐
+//!   │ Populate index with     │
+//!   │ existing table data     │
+//!   │ (full table scan)       │
+//!   └───────────┬─────────────┘
+//!               │
+//!               ▼
+//!   ┌─────────────────────────┐
+//!   │ Update internal maps    │
+//!   │ Return (IndexInfo, B+)  │
+//!   └─────────────────────────┘
+//! ```
+//!
+//! ## OID Management
+//!
+//! ```text
+//!   Global: NEXT_DATABASE_ID (AtomicU64)
+//!              │
+//!              ▼
+//!        Database::new() ─────► db_oid = fetch_add(1)
+//!
+//!   Per-Database:
+//!        next_table_oid ─────► Starts at SYS_COLUMNS_OID + 1
+//!        next_index_oid ─────► Starts at 0
+//! ```
+//!
+//! Table OIDs start after system catalog table OIDs to avoid conflicts.
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::catalog::database::Database;
+//! use crate::catalog::schema::Schema;
+//! use crate::catalog::column::Column;
+//! use crate::types_db::type_id::TypeId;
+//!
+//! // Create a new database
+//! let mut db = Database::new("mydb".to_string(), bpm.clone(), txn_manager.clone());
+//!
+//! // Create a table
+//! let schema = Schema::new(vec![
+//!     Column::new("id", TypeId::Integer),
+//!     Column::new("name", TypeId::VarChar),
+//! ]);
+//! let table_info = db.create_table("users".to_string(), schema.clone());
+//!
+//! // Create an index
+//! let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+//! let index = db.create_index(
+//!     "users_pk",
+//!     "users",
+//!     key_schema,
+//!     vec![0],  // column indices
+//!     4,        // key size
+//!     true,     // unique
+//!     IndexType::BPlusTreeIndex,
+//! );
+//!
+//! // Query metadata
+//! let table = db.get_table("users");
+//! let indexes = db.get_table_indexes("users");
+//! ```
+//!
+//! ## Foreign Key Validation
+//!
+//! When creating tables with foreign key constraints, the database validates:
+//!
+//! 1. Referenced table must exist in the database
+//! 2. Referenced column must exist in the referenced table's schema
+//!
+//! If validation fails, table creation is rejected with a warning.
+//!
+//! ## Thread Safety
+//!
+//! - `Database` itself is not internally synchronized
+//! - Individual components are thread-safe:
+//!   - `BufferPoolManager`: Internal locking
+//!   - `BPlusTree`: Wrapped in `Arc<RwLock<...>>`
+//!   - `TransactionManager`: Thread-safe
+//! - Global `NEXT_DATABASE_ID` uses atomic operations
+//! - Callers typically wrap `Database` in `Arc<RwLock<Database>>`
+//!
+//! ## Recovery
+//!
+//! The `with_existing_data` constructor allows restoring a database from
+//! persisted metadata (e.g., from system catalog tables):
+//!
+//! ```rust,ignore
+//! let db = Database::with_existing_data(
+//!     "restored_db".to_string(),
+//!     bpm,
+//!     next_index_oid,
+//!     next_table_oid,
+//!     tables,      // HashMap<TableOidT, TableInfo>
+//!     indexes,     // HashMap<IndexOidT, (Arc<IndexInfo>, Arc<RwLock<BPlusTree>>)>
+//!     table_names, // HashMap<String, TableOidT>
+//!     index_names, // HashMap<String, IndexOidT>
+//!     txn_manager,
+//!     db_oid,
+//! );
+//! ```
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
