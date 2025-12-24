@@ -1,40 +1,152 @@
-//! RAII-based page guard for safe buffer pool page access.
+//! # Page Guard
 //!
-//! This module provides [`PageGuard`], a smart pointer that manages page pinning
-//! and unpinning through RAII semantics. When a page guard is created, the
-//! underlying page is pinned; when dropped, it is automatically unpinned.
+//! This module provides [`PageGuard`], an RAII-based smart pointer that manages
+//! page pinning/unpinning and dirty tracking. Guards ensure pages cannot be evicted
+//! from the buffer pool while in use and automatically propagate dirty state on drop.
 //!
-//! # Key Features
+//! ## Architecture
 //!
-//! - **Automatic pin management**: Pages are pinned on guard creation and unpinned
-//!   on drop, preventing accidental page eviction while in use.
-//! - **Dirty tracking**: Write access through the guard automatically marks the
-//!   page as dirty for write-back.
-//! - **Buffer pool integration**: Guards can delegate unpinning to a [`PageUnpinner`]
-//!   callback, enabling seamless integration with the buffer pool manager.
-//! - **Typed and untyped access**: Supports both concrete page types (`PageGuard<P>`)
-//!   and trait objects (`PageGuard<dyn PageTrait>`).
+//! ```text
+//!   Buffer Pool Manager                           Page Guard
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! # Usage
-//!
-//! ```ignore
-//! // Fetch a page from the buffer pool (creates a guard)
-//! let guard = bpm.fetch_page::<BasicPage>(page_id)?;
-//!
-//! // Read access
-//! let data = guard.read();
-//!
-//! // Write access (automatically marks page dirty)
-//! let mut data = guard.write();
-//! data.get_data_mut()[10] = 42;
-//!
-//! // Guard is dropped here, unpinning the page
+//!   ┌─────────────────────────┐          ┌─────────────────────────────────────┐
+//!   │   BufferPoolManager     │          │            PageGuard<P>             │
+//!   │                         │ creates  │                                     │
+//!   │  fetch_page() ──────────┼─────────►│  page: Arc<RwLock<P>>               │
+//!   │  new_page()             │          │  page_id: PageId                    │
+//!   │                         │          │  unpinner: Option<Arc<PageUnpinner>>│
+//!   │  ┌───────────────────┐  │          │  dirty: AtomicBool                  │
+//!   │  │  PageUnpinner     │◄─┼──────────┤                                     │
+//!   │  │  (callback)       │  │  on drop │  ┌───────────────────────────────┐  │
+//!   │  └───────────────────┘  │          │  │       Arc<RwLock<P>>          │  │
+//!   │                         │          │  │  ┌─────────────────────────┐  │  │
+//!   │  page_table: HashMap    │          │  │  │         Page            │  │  │
+//!   │    page_id → Arc<...>   │          │  │  │  - data: [u8; 4096]     │  │  │
+//!   │                         │          │  │  │  - pin_count: i32       │  │  │
+//!   └─────────────────────────┘          │  │  │  - is_dirty: bool       │  │  │
+//!                                        │  │  └─────────────────────────┘  │  │
+//!                                        │  └───────────────────────────────┘  │
+//!                                        └─────────────────────────────────────┘
 //! ```
 //!
-//! # Concurrency
+//! ## RAII Lifecycle
 //!
-//! The guard uses `parking_lot::RwLock` internally, allowing multiple concurrent
-//! readers or a single exclusive writer. Pin count operations are thread-safe.
+//! ```text
+//!   Guard Creation                          Guard Usage                 Guard Drop
+//!   ══════════════════════════════════════════════════════════════════════════════
+//!
+//!   fetch_page(id)                         read() / write()            drop(guard)
+//!        │                                      │                           │
+//!        ▼                                      ▼                           ▼
+//!   ┌──────────────┐                     ┌─────────────┐              ┌───────────┐
+//!   │ Increment    │                     │ Acquire     │              │ Check     │
+//!   │ pin_count    │                     │ RwLock      │              │ dirty     │
+//!   └──────┬───────┘                     └──────┬──────┘              └─────┬─────┘
+//!          │                                    │                           │
+//!          ▼                                    ▼                           ▼
+//!   ┌──────────────┐                     ┌─────────────┐              ┌───────────┐
+//!   │ Create guard │                     │ write()     │              │ Unpinner  │
+//!   │ with unpinner│                     │ sets dirty  │              │ callback  │
+//!   │ callback     │                     │ flag        │              │ OR local  │
+//!   └──────────────┘                     └─────────────┘              │ decrement │
+//!                                                                     └───────────┘
+//!          │                                                                │
+//!   Page CANNOT be                                              Page CAN be evicted
+//!   evicted (pinned)                                            (if pin_count = 0)
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component       | Description                                              |
+//! |-----------------|----------------------------------------------------------|
+//! | `PageGuard<P>`  | Generic guard for typed pages (`P: Page`)                |
+//! | `PageGuard<dyn>`| Untyped guard for trait object pages                     |
+//! | `PageUnpinner`  | Callback trait for buffer pool unpin delegation          |
+//! | `dirty`         | AtomicBool tracking if guard performed write access      |
+//!
+//! ## Core Operations
+//!
+//! | Method           | Description                                             |
+//! |------------------|---------------------------------------------------------|
+//! | `new()`          | Create guard for existing page (increments pin count)  |
+//! | `new_for_new_page()` | Create guard for newly allocated page              |
+//! | `read()`         | Acquire shared read lock (`RwLockReadGuard`)           |
+//! | `write()`        | Acquire exclusive write lock, marks dirty              |
+//! | `get_page_id()`  | Return the page's ID                                   |
+//! | `get_page_type()`| Read page type from underlying page                    |
+//! | `get_page()`     | Expose raw `Arc<RwLock<P>>` for advanced use cases     |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
+//! use crate::storage::page::{BasicPage, PageTrait};
+//!
+//! // Fetch an existing page (creates a guard, increments pin count)
+//! let guard = bpm.fetch_page::<BasicPage>(page_id)?;
+//!
+//! // Multiple concurrent reads are allowed
+//! {
+//!     let data1 = guard.read();
+//!     let data2 = guard.read();  // Would deadlock! Use separate guards
+//! }
+//!
+//! // Write access (exclusive lock, auto-marks dirty)
+//! {
+//!     let mut data = guard.write();
+//!     data.get_data_mut()[10] = 42;
+//!     // dirty flag is automatically set
+//! }
+//!
+//! // Multiple guards for the same page
+//! let guard2 = bpm.fetch_page::<BasicPage>(page_id)?;
+//! assert_eq!(guard.read().get_pin_count(), 2);  // Both guards pin the page
+//!
+//! // Guards dropped here → unpin callbacks invoked
+//! // When pin_count reaches 0, page becomes eligible for eviction
+//! ```
+//!
+//! ## Dirty Flag Semantics
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                        Dirty Flag Propagation                           │
+//!   │                                                                         │
+//!   │   guard.write()                                                         │
+//!   │        │                                                                │
+//!   │        ├──► guard.dirty.store(true)     (guard-level flag)              │
+//!   │        │                                                                │
+//!   │        └──► page.set_dirty(true)        (page-level flag)               │
+//!   │                                                                         │
+//!   │   drop(guard)                                                           │
+//!   │        │                                                                │
+//!   │        └──► unpinner.unpin_page(id, is_dirty)                           │
+//!   │                  │                                                      │
+//!   │                  └──► Buffer pool schedules write-back if dirty         │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - **RwLock**: Guards use `parking_lot::RwLock` for read/write synchronization
+//! - **AtomicBool**: The `dirty` flag uses atomic operations for thread-safe updates
+//! - **Multiple guards**: Multiple threads can hold guards to the same page
+//! - **Pin count**: Protected by the RwLock, updated atomically with page access
+//!
+//! ## Untyped Guards
+//!
+//! For cases where the concrete page type is unknown at compile time, use
+//! `PageGuard<dyn PageTrait>`:
+//!
+//! ```rust,ignore
+//! // Create untyped guard (used internally by buffer pool)
+//! let untyped_guard = PageGuard::new_untyped(page_arc, page_id, Some(unpinner));
+//!
+//! // Access via trait methods
+//! let data = untyped_guard.read();
+//! let page_type = data.get_page_type();
+//! ```
 
 use crate::common::config::PageId;
 use crate::storage::page::{Page, PageTrait, PageType};

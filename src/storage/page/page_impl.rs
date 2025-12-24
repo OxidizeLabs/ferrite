@@ -1,26 +1,136 @@
-//! Core page abstractions and implementations for the storage layer.
+//! # Core Page Abstractions
 //!
-//! This module defines the fundamental traits and types for database pages:
+//! This module defines the fundamental traits and types for database pages, forming
+//! the foundation of the storage layer. All page types in the system implement these
+//! abstractions to enable polymorphic page handling by the buffer pool and disk manager.
 //!
-//! - [`PageTrait`]: The primary trait for dynamic dispatch, providing common page
-//!   operations like pin count management, dirty flag tracking, and data access.
-//! - [`PageTypeId`]: A marker trait providing compile-time page type identification.
-//! - [`Page`]: Combines `PageTrait` and `PageTypeId` for typed page implementations.
-//! - [`BasicPage`]: The default page implementation used for general-purpose storage.
+//! ## Architecture
 //!
-//! # Page Layout
+//! ```text
+//!   Trait Hierarchy
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! Each page has a fixed size ([`DB_PAGE_SIZE`]) with a header containing:
-//! - Byte 0: Page type identifier (see [`PageType`])
-//! - Bytes 1-4: Page ID
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                            PageTrait                                    │
+//!   │         (Dynamic dispatch: pin count, dirty flag, data access)          │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!                                      │
+//!                                      │ requires
+//!                                      ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                            PageTypeId                                   │
+//!   │              (Static type info: const TYPE_ID: PageType)                │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!                                      │
+//!                                      │ combines both + new()
+//!                                      ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                              Page                                       │
+//!   │            (Fully typed page: PageTrait + PageTypeId + new)             │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!                                      │
+//!                    ┌─────────────────┼─────────────────┐
+//!                    │                 │                 │
+//!                    ▼                 ▼                 ▼
+//!              ┌───────────┐    ┌───────────┐    ┌───────────────┐
+//!              │ BasicPage │    │ TablePage │    │ BTreeLeafPage │  ...
+//!              └───────────┘    └───────────┘    └───────────────┘
+//! ```
 //!
-//! # Page Types
+//! ## Page Layout (Fixed Size: `DB_PAGE_SIZE`)
 //!
-//! The system supports multiple page types for different storage structures:
-//! - Basic pages for general data
-//! - Table pages for row storage
-//! - Hash table pages (header, directory, bucket) for hash indexes
-//! - B+Tree pages (header, internal, leaf, node) for B+Tree indexes
+//! ```text
+//!   ┌───────────────────────────────────────────────────────────────────────────┐
+//!   │  Offset 0    │  Offset 1-4      │  Offset 5+                              │
+//!   │  (1 byte)    │  (4 bytes)       │  (DB_PAGE_SIZE - 5 bytes)               │
+//!   ├──────────────┼──────────────────┼─────────────────────────────────────────┤
+//!   │  Page Type   │  Page ID         │  Page-Specific Data                     │
+//!   │  (u8 enum)   │  (u32)           │  (varies by page type)                  │
+//!   └──────────────┴──────────────────┴─────────────────────────────────────────┘
+//! ```
+//!
+//! ## Supported Page Types
+//!
+//! | Type ID | Variant               | Description                              |
+//! |---------|-----------------------|------------------------------------------|
+//! | 0       | `Invalid`             | Uninitialized or corrupted page          |
+//! | 1       | `Basic`               | General-purpose data storage             |
+//! | 2       | `Table`               | Row storage with slotted page format     |
+//! | 3       | `HashTableDirectory`  | Hash index directory (bucket pointers)   |
+//! | 4       | `HashTableBucket`     | Hash index bucket (key-value entries)    |
+//! | 5       | `HashTableHeader`     | Hash index metadata                      |
+//! | 6       | `BTreeHeader`         | B+Tree root/metadata page                |
+//! | 7       | `BTreeInternal`       | B+Tree internal node (keys + children)   |
+//! | 8       | `BTreeLeaf`           | B+Tree leaf node (keys + values)         |
+//! | 9       | `BTreeNode`           | Generic B+Tree node                      |
+//!
+//! ## Key Components
+//!
+//! | Component     | Description                                                  |
+//! |---------------|--------------------------------------------------------------|
+//! | `PageTrait`   | Core trait for runtime polymorphism (dyn-compatible)        |
+//! | `PageTypeId`  | Marker trait providing compile-time `TYPE_ID` constant      |
+//! | `Page`        | Combined trait with constructor requirement (`fn new()`)    |
+//! | `BasicPage`   | Default implementation for general storage                  |
+//! | `PageType`    | Enum representing all valid page type variants              |
+//!
+//! ## PageTrait Methods
+//!
+//! | Method                 | Description                                        |
+//! |------------------------|----------------------------------------------------|
+//! | `get_page_id()`        | Returns the page's unique identifier               |
+//! | `get_page_type()`      | Reads page type from first byte of data            |
+//! | `is_dirty()`           | Checks if page has unsaved modifications           |
+//! | `set_dirty(bool)`      | Marks page as modified (needs flush to disk)       |
+//! | `get_pin_count()`      | Returns current pin count (in-use references)      |
+//! | `increment_pin_count()`| Increases pin count (page in use)                  |
+//! | `decrement_pin_count()`| Decreases pin count (page released)                |
+//! | `get_data()`           | Returns immutable reference to raw page bytes      |
+//! | `get_data_mut()`       | Returns mutable reference to raw page bytes        |
+//! | `set_data(offset, &[u8])` | Writes data at offset (preserves page type)     |
+//! | `reset_memory()`       | Zeros page data, preserving page type byte         |
+//! | `as_any()` / `as_any_mut()` | Downcast support for concrete type access     |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::page::page_impl::{BasicPage, Page, PageTrait, PageType};
+//!
+//! // Create a new page
+//! let mut page = BasicPage::new(42);  // page_id = 42
+//!
+//! // Check initial state
+//! assert_eq!(page.get_page_id(), 42);
+//! assert_eq!(page.get_page_type(), PageType::Basic);
+//! assert_eq!(page.get_pin_count(), 1);  // Starts pinned
+//! assert!(!page.is_dirty());
+//!
+//! // Modify page data
+//! page.set_data(10, &[1, 2, 3, 4]).unwrap();
+//! assert!(page.is_dirty());  // Automatically marked dirty
+//!
+//! // Pin count management
+//! page.increment_pin_count();
+//! assert_eq!(page.get_pin_count(), 2);
+//! page.decrement_pin_count();
+//! assert_eq!(page.get_pin_count(), 1);
+//!
+//! // Downcast for type-specific operations
+//! let basic: &BasicPage = page.as_any().downcast_ref().unwrap();
+//! ```
+//!
+//! ## Page Type Preservation
+//!
+//! The page type byte at offset 0 is **always preserved** by `set_data()` when
+//! writing to offset 0. This ensures page type integrity even when bulk-copying
+//! data from disk. The `reset_memory()` method also preserves the page type.
+//!
+//! ## Thread Safety
+//!
+//! Individual pages are **not thread-safe**. Concurrent access must be protected
+//! by the caller, typically via `PageGuard` (which wraps pages in `Arc<RwLock<T>>`).
+//! The `PageTrait` requires `Send + Sync` to allow pages to be shared across
+//! threads when properly synchronized.
 
 use crate::common::config::*;
 use crate::common::exception::PageError;
