@@ -1,19 +1,179 @@
 //! # Flush Coordinator
 //!
-//! The `FlushCoordinator` makes high-level decisions about when to persist buffered writes to disk.
-//! It balances the need to free up memory with the goal of batching I/O for performance.
+//! This module provides `FlushCoordinator`, which makes high-level decisions about when to
+//! persist buffered writes to disk. It balances memory pressure relief with I/O batching
+//! for optimal performance.
 //!
-//! ## Logic
+//! ## Architecture
 //!
-//! It implements a dual-trigger strategy:
-//! 1. **Threshold-Based**: Triggers a flush when the number of dirty pages exceeds a configured limit (memory pressure).
-//! 2. **Time-Based**: Triggers a flush if data has remained in the buffer for too long (staleness limit).
+//! ```text
+//!   WriteManager
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ should_flush(dirty_pages, time_since_flush)?
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                      FlushCoordinator                                   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Configuration                                                  │   │
+//!   │   │                                                                 │   │
+//!   │   │  flush_threshold: usize        ← Max dirty pages before flush   │   │
+//!   │   │  flush_interval: Duration      ← Max staleness before flush     │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  State                                                          │   │
+//!   │   │                                                                 │   │
+//!   │   │  flush_in_progress: AtomicBool ← Prevents concurrent flushes    │   │
+//!   │   │  last_flush: Mutex<Instant>    ← Tracks timing for interval     │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ FlushDecision
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  NoFlush | ThresholdFlush | IntervalFlush | ForceFlush                  │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Key Features
+//! ## Dual-Trigger Strategy
 //!
-//! - **Atomic State**: Uses atomic flags to track if a flush is currently in progress, preventing concurrent flush storms.
-//! - **Decision Logic**: `should_flush` evaluates current state against policies to return a specific action (`ThresholdFlush`, `IntervalFlush`, etc.).
-//! - **Lock-Free Checks**: fast-path checks for flush status to minimize overhead in the write path.
+//! ```text
+//!   should_flush(dirty_pages, time_since_flush)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────┐
+//!   │ dirty_pages >= flush_threshold?│
+//!   └───────────────┬────────────────┘
+//!                   │
+//!        ┌──────────┴──────────┐
+//!        │ Yes                 │ No
+//!        ▼                     ▼
+//!   ┌──────────────┐    ┌────────────────────────────────┐
+//!   │ Threshold    │    │ time_since_flush >= interval?  │
+//!   │ Flush        │    └───────────────┬────────────────┘
+//!   └──────────────┘                    │
+//!                          ┌────────────┴────────────┐
+//!                          │ Yes                     │ No
+//!                          ▼                         ▼
+//!                    ┌──────────────┐         ┌──────────────┐
+//!                    │ Interval     │         │ No Flush     │
+//!                    │ Flush        │         │ (continue    │
+//!                    └──────────────┘         │  buffering)  │
+//!                                             └──────────────┘
+//!
+//!   Threshold Flush: Memory pressure - too many dirty pages
+//!   Interval Flush:  Staleness limit - data too old in buffer
+//!   No Flush:        Keep buffering for better I/O batching
+//! ```
+//!
+//! ## Concurrent Flush Prevention
+//!
+//! ```text
+//!   Task A                          Task B
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!      │                               │
+//!      │ try_start_flush()             │
+//!      │    ↓                          │
+//!      │ CAS(false→true) ✓             │ try_start_flush()
+//!      │    ↓                          │    ↓
+//!      │ Returns true                  │ CAS(false→true) ✗ (already true)
+//!      │    ↓                          │    ↓
+//!      │ [performing flush...]         │ Returns false (skip flush)
+//!      │    ↓                          │
+//!      │ complete_flush()              │
+//!      │    ↓                          │
+//!      │ Store(false)                  │
+//!      │                               │
+//!
+//!   CAS = Compare-And-Swap (atomic operation)
+//!   Only one flush can proceed at a time
+//! ```
+//!
+//! ## Flush Decisions
+//!
+//! | Decision         | Trigger Condition                              |
+//! |------------------|------------------------------------------------|
+//! | `NoFlush`        | Below threshold AND within interval            |
+//! | `ThresholdFlush` | dirty_pages >= flush_threshold                 |
+//! | `IntervalFlush`  | time_since_flush >= flush_interval             |
+//! | `ForceFlush`     | Explicit request (shutdown, checkpoint)        |
+//!
+//! ## Key Components
+//!
+//! | Component          | Description                                     |
+//! |--------------------|-------------------------------------------------|
+//! | `FlushCoordinator` | Main coordinator with thresholds and timing     |
+//! | `FlushDecision`    | Enum result from `should_flush()`               |
+//! | `flush_in_progress`| Atomic flag preventing concurrent flushes       |
+//! | `last_flush`       | Timestamp of last completed flush               |
+//!
+//! ## Core Operations
+//!
+//! | Method                    | Description                                 |
+//! |---------------------------|---------------------------------------------|
+//! | `new()`                   | Create with threshold and interval          |
+//! | `should_flush()`          | Evaluate if flush is needed                 |
+//! | `try_start_flush()`       | Atomically claim flush ownership            |
+//! | `complete_flush()`        | Release flush lock, update timestamp        |
+//! | `is_flush_in_progress()`  | Check if flush is ongoing                   |
+//! | `time_since_last_flush()` | Get elapsed time since last flush           |
+//! | `force_complete()`        | Emergency release (shutdown scenarios)      |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::memory::flush_coordinator::{
+//!     FlushCoordinator, FlushDecision,
+//! };
+//! use std::time::Duration;
+//!
+//! // Create coordinator: flush at 100 pages or 5 seconds
+//! let coordinator = FlushCoordinator::new(100, Duration::from_secs(5));
+//!
+//! // Check if flush is needed
+//! let dirty_pages = 150;
+//! let time_since_flush = buffer.time_since_last_flush();
+//!
+//! match coordinator.should_flush(dirty_pages, time_since_flush).await {
+//!     FlushDecision::ThresholdFlush => {
+//!         if coordinator.try_start_flush() {
+//!             // Perform flush...
+//!             do_flush().await;
+//!             coordinator.complete_flush().await;
+//!         }
+//!     }
+//!     FlushDecision::IntervalFlush => {
+//!         if coordinator.try_start_flush() {
+//!             // Perform flush...
+//!             do_flush().await;
+//!             coordinator.complete_flush().await;
+//!         }
+//!     }
+//!     FlushDecision::NoFlush => {
+//!         // Continue buffering writes
+//!     }
+//!     FlushDecision::ForceFlush => {
+//!         // Always flush
+//!     }
+//! }
+//! ```
+//!
+//! ## Configuration Guidelines
+//!
+//! | Workload Type      | Threshold    | Interval      | Rationale                  |
+//! |--------------------|--------------|---------------|----------------------------|
+//! | OLTP (many txns)   | 50-100 pages | 100-500 ms    | Frequent small flushes     |
+//! | OLAP (batch)       | 500+ pages   | 5-30 seconds  | Large batched writes       |
+//! | Mixed              | 100-200      | 1-5 seconds   | Balanced approach          |
+//!
+//! ## Thread Safety
+//!
+//! - `flush_in_progress`: `AtomicBool` with `SeqCst` ordering for visibility
+//! - `last_flush`: `Mutex<Instant>` for safe timestamp updates
+//! - `try_start_flush()` uses CAS for lock-free mutual exclusion
+//! - Safe for concurrent calls from multiple async tasks
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
