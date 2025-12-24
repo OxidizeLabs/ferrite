@@ -1,3 +1,120 @@
+//! # In-Memory B+ Tree Index
+//!
+//! This module provides an **in-memory B+ tree** implementation for indexing key-value
+//! pairs. Unlike [`super::b_plus_tree_index`] which is disk-based, this implementation
+//! stores all nodes directly in memory using `Arc<RwLock<BPlusTreeNode>>`.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────┐
+//! │                    In-Memory B+ Tree Structure                          │
+//! ├─────────────────────────────────────────────────────────────────────────┤
+//! │                                                                         │
+//! │              ┌────────────────────────────────┐                         │
+//! │              │         BPlusTree              │                         │
+//! │              │  ┌──────────────────────────┐  │                         │
+//! │              │  │ root: Arc<RwLock<Node>>  │  │                         │
+//! │              │  │ order: usize             │  │                         │
+//! │              │  │ metadata: Arc<IndexInfo> │  │                         │
+//! │              │  └───────────┬──────────────┘  │                         │
+//! │              └──────────────┼─────────────────┘                         │
+//! │                             │                                           │
+//! │                             ▼                                           │
+//! │              ┌──────────────────────────────┐                           │
+//! │              │    Internal Node (Root)      │                           │
+//! │              │    keys: [5, 10]             │                           │
+//! │              │    children: [→, →, →]       │                           │
+//! │              └──────┬────┬────┬─────────────┘                           │
+//! │                     │    │    │                                         │
+//! │           ┌─────────┘    │    └─────────┐                               │
+//! │           ▼              ▼              ▼                               │
+//! │     ┌──────────┐  ┌──────────┐  ┌──────────┐                            │
+//! │     │  Leaf    │→ │  Leaf    │→ │  Leaf    │→ None                      │
+//! │     │[1,2,3,4] │  │[5,6,7,8] │  │[10,11,12]│                            │
+//! │     │ values   │  │ values   │  │ values   │                            │
+//! │     └──────────┘  └──────────┘  └──────────┘                            │
+//! │           ↑                                                             │
+//! │     next_leaf pointers for range scans                                  │
+//! └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! - **[`BPlusTree`]**: Main tree structure holding the root node, order, and metadata
+//! - **[`BPlusTreeNode`]**: Internal struct representing both internal and leaf nodes
+//! - **[`NodeType`]**: Enum distinguishing `Internal` from `Leaf` nodes
+//!
+//! ## Features
+//!
+//! ### Core Operations
+//! - **Insert**: O(log n) insertion with automatic node splitting
+//! - **Delete**: O(log n) deletion with rebalancing (borrow/merge)
+//! - **Point Query**: `scan_key()` finds all entries matching a key
+//! - **Range Scan**: `scan_range()` returns all entries in a key range
+//! - **Full Scan**: `scan_full()` traverses all leaf nodes
+//!
+//! ### Duplicate Key Support
+//! Multiple entries with the same key but different RIDs are supported.
+//! Duplicates are stored in sorted order within nodes.
+//!
+//! ### Concurrency
+//! Uses `parking_lot::RwLock` for fine-grained node-level locking:
+//! - Read operations acquire read locks
+//! - Write operations acquire write locks
+//! - Locks are released as soon as child nodes are accessed
+//!
+//! ## Index Trait Implementation
+//!
+//! Implements the [`Index`] trait for integration with the query executor:
+//! - `insert_entry()` / `delete_entry()` for DML operations
+//! - `scan_key()` for point lookups
+//! - `create_iterator()` / `create_point_iterator()` for cursor-based access
+//!
+//! ## Node Splitting & Merging
+//!
+//! **Splitting** (when node overflows):
+//! - Leaf: Copy right half to new node, first key of new node goes to parent
+//! - Internal: Middle key promoted to parent, children split accordingly
+//!
+//! **Rebalancing** (when node underflows after deletion):
+//! 1. Try borrowing from left sibling
+//! 2. Try borrowing from right sibling
+//! 3. Merge with a sibling if borrowing not possible
+//!
+//! ## Example Usage
+//!
+//! ```ignore
+//! let metadata = Arc::new(IndexInfo::new(...));
+//! let mut tree = BPlusTree::new(4, metadata);  // Order 4
+//!
+//! // Insert entries
+//! tree.insert(Value::new(42), RID::new(1, 5));
+//! tree.insert(Value::new(10), RID::new(1, 2));
+//!
+//! // Range scan
+//! let start = create_tuple(10, ...);
+//! let end = create_tuple(50, ...);
+//! let results = tree.scan_range(&start, &end, true)?;
+//!
+//! // Full scan
+//! let all_entries = tree.scan_full()?;
+//!
+//! // Visualize tree structure
+//! println!("{}", tree.visualize());
+//! ```
+//!
+//! ## Comparison with Disk-Based B+ Tree
+//!
+//! | Feature | In-Memory (`BPlusTree`) | Disk-Based (`BPlusTreeIndex`) |
+//! |---------|-------------------------|-------------------------------|
+//! | Storage | `Arc<RwLock<Node>>` | Buffer pool pages |
+//! | Persistence | None (volatile) | Persisted to disk |
+//! | Key Type | `Value` | Generic `K: KeyType` |
+//! | Value Type | `RID` | Generic `V: ValueType` |
+//! | Concurrency | `RwLock` per node | Latch crabbing |
+//! | Use Case | Testing, small datasets | Production workloads |
+
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::index::index_iterator_mem::IndexIterator;
