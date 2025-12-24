@@ -1,3 +1,185 @@
+//! # Catalog Implementation
+//!
+//! This module provides the central metadata repository for the DBMS, managing
+//! databases, tables, indexes, and their associated schemas. The catalog serves
+//! as the authoritative source for all schema information used by the query
+//! execution engine.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                              ┌─────────────────────────────────────────┐
+//!                              │               Catalog                   │
+//!                              │                                         │
+//!                              │  ┌─────────────────────────────────┐    │
+//!                              │  │      databases: HashMap         │    │
+//!                              │  │  ┌───────────┐  ┌───────────┐   │    │
+//!                              │  │  │ "default" │  │  "db1"    │   │    │
+//!                              │  │  │  Database │  │  Database │   │    │
+//!                              │  │  └─────┬─────┘  └─────┬─────┘   │    │
+//!                              │  └────────┼──────────────┼─────────┘    │
+//!                              │           │              │              │
+//!                              │  ┌────────▼──────────────▼─────────┐    │
+//!                              │  │    Per-Database Metadata        │    │
+//!                              │  │  ┌─────────┐  ┌─────────────┐   │    │
+//!                              │  │  │ Tables  │  │   Indexes   │   │    │
+//!                              │  │  │ HashMap │  │   HashMap   │   │    │
+//!                              │  │  └─────────┘  └─────────────┘   │    │
+//!                              │  └──────────────────────────────────┘   │
+//!                              │                                         │
+//!                              │  ┌─────────────────────────────────┐    │
+//!                              │  │     System Catalog Tables       │    │
+//!                              │  │  __tables  │  __indexes         │    │
+//!                              │  │  (persisted metadata)           │    │
+//!                              │  └─────────────────────────────────┘    │
+//!                              └─────────────────────────────────────────┘
+//!                                               │
+//!                                               ▼
+//!                              ┌─────────────────────────────────────────┐
+//!                              │         BufferPoolManager               │
+//!                              │    (backing storage for all tables)     │
+//!                              └─────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component               | Description                                              |
+//! |-------------------------|----------------------------------------------------------|
+//! | `Catalog`               | Central metadata manager for all databases               |
+//! | `Database`              | Per-database container for tables and indexes            |
+//! | `CatalogCreationParams` | Parameters for bootstrapping with existing data          |
+//! | `IndexCreationParams`   | Parameters for creating new indexes                      |
+//! | `SystemCatalogTables`   | Persistent storage for table/index metadata              |
+//!
+//! ## Database Operations
+//!
+//! ```text
+//! ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+//! │ create_database │     │  use_database   │     │  get_database   │
+//! │     ("db1")     │     │    ("db1")      │     │    ("db1")      │
+//! └────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+//!          │                       │                       │
+//!          ▼                       ▼                       ▼
+//!    Creates new            Sets current_database    Returns &Database
+//!    Database instance      to "db1"                 reference
+//! ```
+//!
+//! ## Table & Index Lifecycle
+//!
+//! ```text
+//!  CREATE TABLE users (...)           CREATE INDEX idx ON users(id)
+//!          │                                    │
+//!          ▼                                    ▼
+//! ┌────────────────────┐             ┌────────────────────┐
+//! │   create_table()   │             │   create_index()   │
+//! └─────────┬──────────┘             └─────────┬──────────┘
+//!           │                                  │
+//!           ▼                                  ▼
+//! ┌────────────────────┐             ┌────────────────────┐
+//! │ Database.create_   │             │ Database.create_   │
+//! │   table()          │             │   index()          │
+//! └─────────┬──────────┘             └─────────┬──────────┘
+//!           │                                  │
+//!           ▼                                  ▼
+//! ┌────────────────────┐             ┌────────────────────┐
+//! │ record_system_     │             │ record_system_     │
+//! │   table()          │             │   index()          │
+//! │ (persist to        │             │ (persist to        │
+//! │  __tables)         │             │  __indexes)        │
+//! └────────────────────┘             └────────────────────┘
+//! ```
+//!
+//! ## System Catalog Tables
+//!
+//! The catalog maintains two internal tables for persistence:
+//!
+//! | Table       | Purpose                              | Key Fields                        |
+//! |-------------|--------------------------------------|-----------------------------------|
+//! | `__tables`  | Stores table metadata                | oid, name, first_page, last_page, schema |
+//! | `__indexes` | Stores index metadata                | oid, name, table_oid, key_attrs, unique  |
+//!
+//! ## Recovery & Rebuild
+//!
+//! ```text
+//!                    rebuild_from_system_catalog()
+//!                              │
+//!          ┌───────────────────┼───────────────────┐
+//!          ▼                   ▼                   ▼
+//!   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+//!   │   Load      │    │   Scan      │    │   Rebuild   │
+//!   │  snapshot   │    │  __tables   │    │  in-memory  │
+//!   │ (optional)  │    │   heap      │    │   maps      │
+//!   └─────────────┘    └─────────────┘    └─────────────┘
+//!                              │
+//!                              ▼
+//!                    ┌─────────────────┐
+//!                    │  Save updated   │
+//!                    │    snapshot     │
+//!                    └─────────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::catalog::catalog_impl::Catalog;
+//! use crate::catalog::schema::Schema;
+//! use crate::catalog::column::Column;
+//! use crate::types_db::type_id::TypeId;
+//!
+//! // Create catalog with buffer pool and transaction manager
+//! let mut catalog = Catalog::new(bpm.clone(), txn_manager.clone());
+//!
+//! // Create and switch to a new database
+//! catalog.create_database("mydb".to_string());
+//! catalog.use_database("mydb");
+//!
+//! // Define schema and create table
+//! let schema = Schema::new(vec![
+//!     Column::new("id", TypeId::Integer),
+//!     Column::new("name", TypeId::VarChar),
+//! ]);
+//! let table_info = catalog.create_table("users".to_string(), schema.clone());
+//!
+//! // Create index on the table
+//! let key_schema = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+//! let index = catalog.create_index(
+//!     "users_pk",
+//!     "users",
+//!     key_schema,
+//!     vec![0],  // key_attrs: column indices
+//!     4,        // key_size
+//!     true,     // unique
+//!     IndexType::BPlusTree,
+//! );
+//!
+//! // Query metadata
+//! if let Some(table) = catalog.get_table("users") {
+//!     let heap = table.get_table_heap();
+//!     // ... perform operations
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - The `Catalog` itself is not internally synchronized
+//! - Individual components use appropriate synchronization:
+//!   - `BufferPoolManager`: Thread-safe via internal locks
+//!   - `BPlusTree`: Wrapped in `Arc<RwLock<BPlusTree>>`
+//!   - `TableHeap`: Thread-safe via page-level locking
+//! - Callers should synchronize access to the `Catalog` when used from
+//!   multiple threads (typically wrapped in `Arc<RwLock<Catalog>>`)
+//!
+//! ## Design Notes
+//!
+//! - **Non-persistent in-memory maps**: The hashmaps are rebuilt on startup
+//!   from system catalog tables for durability
+//! - **Snapshot acceleration**: Catalog snapshots (`catalog.snapshot`) speed
+//!   up rebuild by caching serialized metadata
+//! - **OID generation**: Each database maintains its own OID counters for
+//!   tables and indexes
+//! - **Schema serialization**: Uses `bincode` for compact schema storage in
+//!   system catalog rows
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::database::Database;
