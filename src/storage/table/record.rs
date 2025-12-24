@@ -1,7 +1,134 @@
-//! Record wrapper combining tuple data with its location (RID) and schema.
+//! # Record
 //!
-//! A `Record` extends a `Tuple` with context like its Record ID (RID) and optional
-//! schema information, useful for higher-level processing and debugging.
+//! This module provides the `Record` type, which combines a `Tuple` with its
+//! storage location (RID) and optional schema metadata. Records are the primary
+//! unit returned by table scans and query execution, providing both data and
+//! context for higher-level processing.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                              Record                                     │
+//!   │                                                                         │
+//!   │  ┌─────────────────────────────────────────────────────────────────┐    │
+//!   │  │                          Tuple                                  │    │
+//!   │  │  ┌─────────┬─────────┬─────────┬─────────┐                      │    │
+//!   │  │  │ Value 0 │ Value 1 │ Value 2 │   ...   │  (column values)     │    │
+//!   │  │  └─────────┴─────────┴─────────┴─────────┘                      │    │
+//!   │  └─────────────────────────────────────────────────────────────────┘    │
+//!   │                                                                         │
+//!   │  ┌───────────────────┐    ┌────────────────────────────────────────┐    │
+//!   │  │        RID        │    │         Schema (optional)              │    │
+//!   │  │  page_id: 5       │    │  Arc<Schema> for column names          │    │
+//!   │  │  slot_num: 3      │    │  (not serialized, for formatting)      │    │
+//!   │  └───────────────────┘    └────────────────────────────────────────┘    │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Record vs Tuple
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────┐
+//!   │                        Comparison                                    │
+//!   ├───────────────────┬──────────────────────────────────────────────────┤
+//!   │     Component     │  Tuple              │  Record                    │
+//!   ├───────────────────┼─────────────────────┼────────────────────────────┤
+//!   │  Column values    │  ✓ (serialized)     │  ✓ (via inner Tuple)       │
+//!   │  RID              │  ✓ (embedded)       │  ✓ (explicit field)        │
+//!   │  Schema metadata  │  ✗                  │  ✓ (optional Arc<Schema>)  │
+//!   │  Display/Debug    │  Synthetic names    │  Real column names         │
+//!   │  Use case         │  Storage layer      │  Query results             │
+//!   └───────────────────┴─────────────────────┴────────────────────────────┘
+//! ```
+//!
+//! ## Serialization
+//!
+//! ```text
+//!   On-Disk Format (via bincode)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   What IS serialized:
+//!   ┌─────────┬─────────┬─────────┬─────────┐
+//!   │ Value 0 │ Value 1 │ Value 2 │   ...   │  ← Tuple data only
+//!   └─────────┴─────────┴─────────┴─────────┘
+//!
+//!   What is NOT serialized:
+//!   - RID (provided by page/slot context when loading)
+//!   - Schema (attached at runtime by caller)
+//!
+//!   This design avoids redundancy: the page and slot already encode
+//!   the record's location, so serializing RID would be wasteful.
+//! ```
+//!
+//! ## Key Operations
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `new(tuple, rid, schema)` | Create record with location and schema |
+//! | `serialize_to(buf)` | Serialize to byte buffer |
+//! | `deserialize_from(buf)` | Deserialize from bytes (RID = default) |
+//! | `get_value(idx)` | Get column value by index |
+//! | `get_rid()` / `set_rid()` | Access/modify record location |
+//! | `get_length()` | Get serialized size in bytes |
+//! | `set_schema()` / `get_schema()` | Attach/retrieve schema metadata |
+//! | `format_with_schema()` | Format with column names |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::table::record::Record;
+//! use crate::storage::table::tuple::Tuple;
+//! use crate::common::rid::RID;
+//!
+//! // Create a record from a tuple
+//! let values = vec![Value::new(1), Value::new("Alice")];
+//! let tuple = Tuple::new(&values, &schema, RID::default());
+//! let rid = RID::new(5, 3);  // page 5, slot 3
+//! let record = Record::new(tuple, rid, schema.clone());
+//!
+//! // Access values
+//! let id = record.get_value(0);      // → Value(1)
+//! let name = record.get_value(1);    // → Value("Alice")
+//! let location = record.get_rid();   // → RID(5, 3)
+//!
+//! // Format for display
+//! println!("{}", record);
+//! // → "RID: page_id: 5 slot_num: 3, id: 1, name: Alice"
+//!
+//! // Serialize to disk
+//! let mut buf = vec![0u8; 1024];
+//! let len = record.serialize_to(&mut buf)?;
+//!
+//! // Deserialize (RID must be reattached)
+//! let mut loaded = Record::deserialize_from(&buf[..len])?;
+//! loaded.set_rid(rid);  // Restore RID from page context
+//! loaded.set_schema(schema);  // Restore schema for formatting
+//! ```
+//!
+//! ## Display and Debug
+//!
+//! ```text
+//!   Formatting Behavior
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   With schema attached:
+//!     Display: "RID: page_id: 5 slot_num: 3, id: 1, name: Alice"
+//!     Debug:   "Record { rid: page_id: 5 slot_num: 3, tuple: ... }"
+//!
+//!   Without schema:
+//!     Display: "RID: page_id: 5 slot_num: 3, col_0: 1, col_1: Alice
+//!               [schema unavailable; synthetic column names]"
+//!
+//!   The schema is optional so Records can be created quickly without
+//!   requiring schema lookup, but formatting is richer when available.
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `Record` is `Send` and `Sync` when its inner types are
+//! - `Schema` is wrapped in `Arc` for cheap cloning and sharing
+//! - Records are typically owned by a single thread (query executor)
 
 use crate::catalog::schema::Schema;
 use crate::common::config::storage_bincode_config;
