@@ -1,3 +1,149 @@
+//! # Schema Definition
+//!
+//! This module provides the `Schema` type representing the structure of a
+//! database table. A schema is an ordered collection of columns with computed
+//! storage layout information used by the tuple storage layer.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                        ┌─────────────────────────────────────────────┐
+//!                        │                  Schema                     │
+//!                        │                                             │
+//!                        │  ┌───────────────────────────────────────┐  │
+//!                        │  │          columns: Vec<Column>         │  │
+//!                        │  │  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      │  │
+//!                        │  │  │ id  │ │name │ │ age │ │email│ ...  │  │
+//!                        │  │  │off:0│ │off:4│ │off:12│off:16│      │  │
+//!                        │  │  └─────┘ └─────┘ └─────┘ └─────┘      │  │
+//!                        │  └───────────────────────────────────────┘  │
+//!                        │                                             │
+//!                        │  ┌───────────────────────────────────────┐  │
+//!                        │  │         Storage Metadata              │  │
+//!                        │  │  • length: 24 (total inlined bytes)   │  │
+//!                        │  │  • tuple_is_inlined: false            │  │
+//!                        │  │  • unlined_columns: [1, 3]            │  │
+//!                        │  │  • primary_key_columns: [0]           │  │
+//!                        │  └───────────────────────────────────────┘  │
+//!                        └─────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Storage Layout
+//!
+//! During construction, the schema calculates byte offsets for each column:
+//!
+//! ```text
+//!   Tuple Memory Layout:
+//!   ┌────────┬────────────┬────────┬────────────┐
+//!   │  id    │  name_ptr  │  age   │ email_ptr  │
+//!   │ 4 bytes│  8 bytes   │ 4 bytes│  8 bytes   │
+//!   │ off: 0 │  off: 4    │ off: 12│  off: 16   │
+//!   └────────┴────────────┴────────┴────────────┘
+//!         ▲                              ▲
+//!         │                              │
+//!      Inlined                    Non-inlined (pointer)
+//!      (Integer)                     (VarChar)
+//! ```
+//!
+//! - **Inlined columns**: Fixed-size types stored directly in the tuple
+//! - **Non-inlined columns**: Variable-length types stored as pointers
+//!
+//! ## Key Operations
+//!
+//! | Method                       | Description                                |
+//! |------------------------------|--------------------------------------------|
+//! | `new(columns)`               | Create schema, compute offsets             |
+//! | `copy_schema(from, attrs)`   | Create schema from subset of columns       |
+//! | `get_column_index(name)`     | Lookup column index by name                |
+//! | `get_qualified_column_index` | Lookup with `table.column` syntax support  |
+//! | `merge(left, right)`         | Concatenate two schemas                    |
+//! | `merge_with_aliases`         | Merge with table alias prefixes            |
+//!
+//! ## Column Name Resolution
+//!
+//! The schema supports both simple and qualified column names:
+//!
+//! ```text
+//!   get_qualified_column_index("users.id")
+//!                    │
+//!       ┌────────────┴────────────┐
+//!       ▼                         ▼
+//!   Try exact match         Parse as table.column
+//!   "users.id"                    │
+//!       │                    ┌────┴────┐
+//!       │                    ▼         ▼
+//!       │              table="users"  col="id"
+//!       │                    │
+//!       ▼                    ▼
+//!   Not found?         Match "users.id" in schema
+//!       │                    │
+//!       ▼                    ▼
+//!   Try unqualified    Or match just "id" if no dots
+//!   fallback
+//! ```
+//!
+//! ## Schema Merging (Joins)
+//!
+//! ```text
+//!   left_schema: [id, name]     right_schema: [dept_id, salary]
+//!        │                              │
+//!        └──────────┬───────────────────┘
+//!                   ▼
+//!          merge(&left, &right)
+//!                   │
+//!                   ▼
+//!   merged_schema: [id, name, dept_id, salary]
+//!
+//!   With aliases:
+//!          merge_with_aliases(&left, &right, Some("u"), Some("e"))
+//!                   │
+//!                   ▼
+//!   merged_schema: [u.id, u.name, e.dept_id, e.salary]
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::catalog::schema::Schema;
+//! use crate::catalog::column::Column;
+//! use crate::types_db::type_id::TypeId;
+//!
+//! // Create a schema
+//! let columns = vec![
+//!     Column::new("id", TypeId::Integer),
+//!     Column::new("name", TypeId::VarChar),
+//!     Column::new("age", TypeId::Integer),
+//! ];
+//! let mut schema = Schema::new(columns);
+//!
+//! // Set primary key
+//! schema.set_primary_key_columns(vec![0]);
+//!
+//! // Query schema properties
+//! assert_eq!(schema.get_column_count(), 3);
+//! assert_eq!(schema.get_column_index("name"), Some(1));
+//! assert!(!schema.is_inlined()); // VarChar is non-inlined
+//!
+//! // Copy subset of columns
+//! let projection = Schema::copy_schema(&schema, &[0, 2]); // id, age only
+//!
+//! // Merge for joins
+//! let other = Schema::new(vec![Column::new("dept", TypeId::VarChar)]);
+//! let joined = Schema::merge(&schema, &other);
+//! ```
+//!
+//! ## Serialization
+//!
+//! `Schema` implements `bincode::Encode` and `bincode::Decode` for efficient
+//! binary serialization, used when persisting schema metadata to the system
+//! catalog.
+//!
+//! ## Thread Safety
+//!
+//! `Schema` is `Send + Sync`. It is typically constructed once and then shared
+//! immutably. Mutable operations like `set_primary_key_columns` are used during
+//! schema construction phases.
+
 use crate::catalog::column::Column;
 use bincode::{Decode, Encode};
 use std::fmt;
