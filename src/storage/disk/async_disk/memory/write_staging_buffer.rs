@@ -1,33 +1,236 @@
 //! # Write Staging Buffer
 //!
-//! The `WriteStagingBuffer` handles the in-memory storage of dirty pages waiting to be flushed to disk.
-//! It optimizes memory usage through compression and provides precise tracking of buffer occupancy.
+//! This module provides `WriteStagingBuffer`, which handles in-memory storage of dirty pages
+//! waiting to be flushed to disk. It optimizes memory usage through optional compression and
+//! provides precise tracking of buffer occupancy.
 //!
-//! ## Architecture Note: Two-Level Caching
+//! ## Architecture
 //!
-//! This component is part of the **Level 2 (I/O)** cache layer. It acts as a specialized
-//! "Write Back" buffer that sits below the main `BufferPoolManager` (Level 1).
+//! ```text
+//!   WriteManager
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ buffer_write(page_id, data)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                      WriteStagingBuffer                                 │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  CompressedWriteBuffer                                          │   │
+//!   │   │                                                                 │   │
+//!   │   │  ┌───────────────────────────────────────────────────────────┐  │   │
+//!   │   │  │  buffer: HashMap<PageId, Vec<u8>>                         │  │   │
+//!   │   │  │                                                           │  │   │
+//!   │   │  │  ┌──────┬──────────────────────────────────────────┐      │  │   │
+//!   │   │  │  │ PID  │ Compressed Page Data                     │      │  │   │
+//!   │   │  │  ├──────┼──────────────────────────────────────────┤      │  │   │
+//!   │   │  │  │  1   │ [LZ4 compressed bytes...]                │      │  │   │
+//!   │   │  │  │  5   │ [LZ4 compressed bytes...]                │      │  │   │
+//!   │   │  │  │  12  │ [LZ4 compressed bytes...]                │      │  │   │
+//!   │   │  │  └──────┴──────────────────────────────────────────┘      │  │   │
+//!   │   │  └───────────────────────────────────────────────────────────┘  │   │
+//!   │   │                                                                 │   │
+//!   │   │  Tracking:                                                      │   │
+//!   │   │    dirty_pages:       AtomicUsize  ← Count of unique pages      │   │
+//!   │   │    buffer_size_bytes: AtomicUsize  ← Total compressed size      │   │
+//!   │   │    max_buffer_size:   usize        ← Capacity limit             │   │
+//!   │   │    last_flush:        Instant      ← For staleness tracking     │   │
+//!   │   │    compression_ratio: AtomicU64    ← Running ratio (×10000)     │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ drain_buffer() → Vec<(PageId, Vec<u8>)>
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │              WriteManager → Disk I/O                                    │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! - **L1 (Buffer Pool)**: Optimizes for CPU access speed (uncompressed `Page` objects).
-//! - **L2 (This Buffer)**: Optimizes for I/O throughput (compressed `Vec<u8>`, batched writes).
+//! ## Two-Level Caching Architecture
 //!
-//! Data arriving here has effectively been "evicted" or "flushed" from the perspective of the
-//! higher-level Buffer Pool, allowing the main application threads to proceed without waiting
-//! for physical disk I/O.
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  L1: BufferPoolManager                                                  │
+//!   │  • Optimizes for CPU access speed                                       │
+//!   │  • Uncompressed Page objects                                            │
+//!   │  • Application threads work here                                        │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │ evict / flush
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  L2: WriteStagingBuffer (this component)                                │
+//!   │  • Optimizes for I/O throughput                                         │
+//!   │  • Compressed Vec<u8> data                                              │
+//!   │  • Batches writes for disk                                              │
+//!   │  • Application threads don't wait here                                  │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │ flush to disk
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  Disk                                                                   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Features
+//! ## Write Flow
 //!
-//! - **Compressed Buffering**: Supports storing pages in compressed formats (LZ4, Zstd) to maximize
-//!   the effective capacity of the write buffer.
-//! - **Capacity Management**: Enforces strict memory limits, rejecting writes when the buffer is full
-//!   to trigger backpressure/flushing.
-//! - **Change Tracking**: Tracks "dirty" pages and calculating the memory delta for every operation.
-//! - **Statistics**: Provides real-time metrics on buffer utilization, compression ratios, and dirty page counts.
+//! ```text
+//!   buffer_write(page_id, data)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 1: COMPRESSION (if enabled)                                       │
+//!   │                                                                        │
+//!   │   compress_data(data, LZ4, level=6)                                    │
+//!   │        │                                                               │
+//!   │        └── Returns compressed bytes (or original if disabled)          │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 2: CAPACITY CHECK                                                 │
+//!   │                                                                        │
+//!   │   current_size + size_delta > max_buffer_size?                         │
+//!   │        │                                                               │
+//!   │        ├── Yes: Return Ok(false) ← Backpressure signal                 │
+//!   │        │                                                               │
+//!   │        └── No:  Continue to insert                                     │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 3: INSERT INTO BUFFER                                             │
+//!   │                                                                        │
+//!   │   buffer.insert(page_id, compressed_data)                              │
+//!   │        │                                                               │
+//!   │        ├── New page:      dirty_pages += 1                             │
+//!   │        │                                                               │
+//!   │        └── Existing page: dirty_pages unchanged (overwrite)            │
+//!   │                                                                        │
+//!   │   buffer_size_bytes += size_delta                                      │
+//!   │   Return Ok(true) ← Successfully buffered                              │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Usage
+//! ## Key Components
 //!
-//! This component is primarily used by the `WriteManager` to temporarily hold data. It does not decide
-//! *when* to flush, only *what* to store and *how* to store it.
+//! | Component               | Description                                      |
+//! |-------------------------|--------------------------------------------------|
+//! | `WriteStagingBuffer`    | Public API wrapper around `CompressedWriteBuffer`|
+//! | `CompressedWriteBuffer` | Internal storage with compression and tracking   |
+//! | `WriteBufferStats`      | Statistics snapshot for monitoring               |
+//!
+//! ## Core Operations
+//!
+//! | Method                   | Description                                     |
+//! |--------------------------|-------------------------------------------------|
+//! | `new()`                  | Create with max size and compression flag       |
+//! | `buffer_write()`         | Add page to buffer, returns false if full       |
+//! | `drain_buffer()`         | Remove all pages, reset counters                |
+//! | `is_empty()`             | Check if buffer has no pages                    |
+//! | `dirty_page_count()`     | Get count of unique pages in buffer             |
+//! | `buffer_size_bytes()`    | Get current compressed size                     |
+//! | `max_buffer_size()`      | Get capacity limit                              |
+//! | `time_since_last_flush()`| Get staleness for flush decisions               |
+//! | `get_stats()`            | Get comprehensive statistics snapshot           |
+//! | `decompress_data()`      | Decompress previously compressed data           |
+//!
+//! ## WriteBufferStats Fields
+//!
+//! | Field                  | Description                                      |
+//! |------------------------|--------------------------------------------------|
+//! | `dirty_pages`          | Number of unique pages in buffer                 |
+//! | `buffer_size_bytes`    | Current memory usage (compressed)                |
+//! | `max_buffer_size`      | Maximum allowed buffer size                      |
+//! | `utilization_percent`  | `buffer_size / max_size * 100`                   |
+//! | `compression_ratio`    | Ratio of compressed to original size             |
+//! | `compression_enabled`  | Whether compression is active                    |
+//! | `time_since_last_flush`| Duration since last `drain_buffer()`             |
+//!
+//! ## Compression Algorithms
+//!
+//! | Algorithm | Characteristics                                        |
+//! |-----------|--------------------------------------------------------|
+//! | `None`    | No compression, fastest, no size reduction             |
+//! | `LZ4`     | Fast compression/decompression, moderate ratio         |
+//! | `Zstd`    | Better ratio, configurable level, slower than LZ4      |
+//!
+//! Note: Current implementation stubs return uncompressed data. Real
+//! implementations would use `lz4` and `zstd` crates.
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::memory::write_staging_buffer::WriteStagingBuffer;
+//!
+//! // Create a 1MB buffer with compression enabled
+//! let mut buffer = WriteStagingBuffer::new(1024 * 1024, true);
+//!
+//! // Buffer a page write
+//! let page_id = 42;
+//! let page_data = vec![0u8; 4096];
+//!
+//! match buffer.buffer_write(page_id, page_data)? {
+//!     true => println!("Page buffered successfully"),
+//!     false => println!("Buffer full - need to flush!"),
+//! }
+//!
+//! // Check buffer status
+//! let stats = buffer.get_stats();
+//! println!("Dirty pages: {}", stats.dirty_pages);
+//! println!("Utilization: {:.1}%", stats.utilization_percent);
+//! println!("Compression ratio: {:.2}", stats.compression_ratio);
+//!
+//! // Overwriting same page doesn't increase dirty count
+//! let new_data = vec![1u8; 4096];
+//! buffer.buffer_write(page_id, new_data)?;
+//! assert_eq!(buffer.dirty_page_count(), 1); // Still 1
+//!
+//! // Drain all pages for flushing
+//! let pages_to_flush = buffer.drain_buffer();
+//! for (pid, data) in pages_to_flush {
+//!     disk_manager.write_page(pid, &data).await?;
+//! }
+//!
+//! // Buffer is now empty
+//! assert!(buffer.is_empty());
+//! ```
+//!
+//! ## Backpressure Mechanism
+//!
+//! ```text
+//!   Caller (WriteManager)
+//!        │
+//!        │ buffer_write(page_id, data)
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ WriteStagingBuffer                                                     │
+//!   │                                                                        │
+//!   │   current_size + new_size > max_buffer_size?                           │
+//!   │        │                                                               │
+//!   │        │ Yes                           │ No                            │
+//!   │        ▼                               ▼                               │
+//!   │   ┌──────────────────┐           ┌──────────────────┐                  │
+//!   │   │ Return Ok(false) │           │ Insert page      │                  │
+//!   │   │ (buffer full)    │           │ Return Ok(true)  │                  │
+//!   │   └──────────────────┘           └──────────────────┘                  │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   WriteManager sees Ok(false):
+//!        │
+//!        └──► Triggers flush() before retrying
+//!
+//!   This mechanism prevents unbounded memory growth and ensures
+//!   the system responds to memory pressure.
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `dirty_pages`: `AtomicUsize` for lock-free counting
+//! - `buffer_size_bytes`: `AtomicUsize` for lock-free size tracking
+//! - `compression_ratio`: `AtomicU64` for lock-free ratio updates
+//! - The `HashMap` buffer requires external synchronization (provided by `WriteManager`'s `Mutex`)
+//! - `WriteStagingBuffer` is designed to be wrapped in `Arc<Mutex<>>` by `WriteManager`
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
