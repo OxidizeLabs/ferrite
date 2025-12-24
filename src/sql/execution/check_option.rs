@@ -1,3 +1,103 @@
+//! # Optimizer Check Options
+//!
+//! This module provides a flag-based system for controlling which optimizer
+//! transformations are applied during query planning. The optimizer uses these
+//! flags to selectively enable or disable specific optimization passes.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                      ┌─────────────────────────────────────┐
+//!                      │           CheckOptions              │
+//!                      │  ┌─────────────────────────────┐    │
+//!                      │  │   HashSet<CheckOption>      │    │
+//!                      │  │                             │    │
+//!                      │  │  ┌─────────────────────┐    │    │
+//!                      │  │  │ EnableNljCheck      │────┼────┼──► NLJ → Index Join
+//!                      │  │  ├─────────────────────┤    │    │
+//!                      │  │  │ EnableTopnCheck     │────┼────┼──► Sort+Limit → TopN
+//!                      │  │  ├─────────────────────┤    │    │
+//!                      │  │  │ EnablePushdownCheck │────┼────┼──► Predicate Pushdown
+//!                      │  │  └─────────────────────┘    │    │
+//!                      │  └─────────────────────────────┘    │
+//!                      └─────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component       | Description                                           |
+//! |-----------------|-------------------------------------------------------|
+//! | `CheckOption`   | Enum of individual optimizer transformation flags    |
+//! | `CheckOptions`  | Set-based collection for managing multiple flags     |
+//!
+//! ## Available Check Options
+//!
+//! | Flag                  | Value | Optimization Enabled                     |
+//! |-----------------------|-------|------------------------------------------|
+//! | `EnableNljCheck`      | 0     | Convert Nested Loop Join to Index Join   |
+//! | `EnableTopnCheck`     | 1     | Merge Sort + Limit into TopN executor    |
+//! | `EnablePushdownCheck` | 2     | Push predicates closer to data sources   |
+//!
+//! ## Optimization Flow
+//!
+//! ```text
+//! ┌──────────────┐    ┌───────────────────┐    ┌──────────────────┐
+//! │ Logical Plan │───►│     Optimizer     │───►│ Optimized Plan   │
+//! └──────────────┘    │                   │    └──────────────────┘
+//!                     │  CheckOptions:    │
+//!                     │  ┌─────────────┐  │
+//!                     │  │ NljCheck ✓  │──┼──► Apply NLJ→IndexJoin
+//!                     │  │ TopN ✓      │──┼──► Apply Sort+Limit→TopN
+//!                     │  │ Pushdown ✗  │──┼──► Skip predicate pushdown
+//!                     │  └─────────────┘  │
+//!                     └───────────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::sql::execution::check_option::{CheckOption, CheckOptions};
+//!
+//! // Create options with specific optimizations enabled
+//! let mut options = CheckOptions::new();
+//! options.add_check(CheckOption::EnableNljCheck);
+//! options.add_check(CheckOption::EnableTopnCheck);
+//!
+//! // Check if optimization should be applied
+//! if options.has_check(&CheckOption::EnableNljCheck) {
+//!     // Apply nested loop join to index join transformation
+//! }
+//!
+//! // Disable an optimization
+//! options.remove_check(&CheckOption::EnableTopnCheck);
+//!
+//! // Check if any optimizations are enabled
+//! if options.is_modify() {
+//!     // Run optimizer with enabled transformations
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! The structs themselves are not internally synchronized. For concurrent access,
+//! wrap in `Arc<RwLock<CheckOptions>>` as shown in the tests:
+//!
+//! ```rust,ignore
+//! let options = Arc::new(RwLock::new(CheckOptions::new()));
+//! let options_clone = Arc::clone(&options);
+//!
+//! // In another thread
+//! let mut guard = options_clone.write();
+//! guard.add_check(CheckOption::EnableNljCheck);
+//! ```
+//!
+//! ## Design Notes
+//!
+//! - Uses `HashSet` for O(1) lookup of enabled flags
+//! - Derives `Clone`, `PartialEq`, `Eq`, `Hash` for enum to support set operations
+//! - `Default` implementation creates an empty set (no optimizations enabled)
+//! - `is_modify()` returns true if any optimizations are pending
+
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
