@@ -1,7 +1,176 @@
-//! Iterator implementations for sequential table scanning with MVCC visibility checks.
+//! # Table Iterator
 //!
-//! This module provides iterators that traverse the table heap, ensuring that only
-//! tuples visible to the current transaction (based on snapshot isolation) are returned.
+//! This module provides iterators for sequential table scanning with MVCC visibility
+//! checks. Iterators traverse the table heap page-by-page, slot-by-slot, returning
+//! only tuples visible to the current transaction based on isolation level rules.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   Iterator Hierarchy
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                       TableScanIterator                                 │
+//!   │  (high-level, with TableInfo metadata and reset capability)             │
+//!   │                                                                         │
+//!   │  ┌─────────────────────────────────────────────────────────────────┐    │
+//!   │  │                      TableIterator                              │    │
+//!   │  │  (low-level, with start/stop RID bounds)                        │    │
+//!   │  │                                                                 │    │
+//!   │  │  ┌─────────────────────────────────────────────────────────┐    │    │
+//!   │  │  │           TransactionalTableHeap                        │    │    │
+//!   │  │  │  (MVCC visibility via TransactionContext)               │    │    │
+//!   │  │  │                                                         │    │    │
+//!   │  │  │  ┌─────────────────────────────────────────────────┐    │    │    │
+//!   │  │  │  │              TableHeap                          │    │    │    │
+//!   │  │  │  │  (physical page traversal)                      │    │    │    │
+//!   │  │  │  └─────────────────────────────────────────────────┘    │    │    │
+//!   │  │  └─────────────────────────────────────────────────────────┘    │    │
+//!   │  └─────────────────────────────────────────────────────────────────┘    │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Iteration Flow
+//!
+//! ```text
+//!   TableIterator::next()
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌──────────────────┐
+//!   │  is_end()?       │───── Yes ───▶ return None
+//!   └────────┬─────────┘
+//!            │ No
+//!            ▼
+//!   ┌──────────────────┐
+//!   │ Get tuple at     │
+//!   │ current_rid      │
+//!   └────────┬─────────┘
+//!            │
+//!            ├─── txn_ctx present? ─── Yes ───▶ table_heap.get_tuple(rid, txn_ctx)
+//!            │                                  (MVCC visibility check)
+//!            │
+//!            └─── No txn_ctx ─────────────────▶ table_heap.get_tuple(rid)
+//!                                               (direct access)
+//!            │
+//!            ▼
+//!   ┌──────────────────┐
+//!   │  advance()       │  Move to next slot/page
+//!   └────────┬─────────┘
+//!            │
+//!            ▼
+//!   ┌──────────────────┐
+//!   │ Tuple found?     │───── No ────▶ loop (skip invisible/deleted)
+//!   └────────┬─────────┘
+//!            │ Yes
+//!            ▼
+//!       return Some((meta, tuple))
+//! ```
+//!
+//! ## Page Traversal
+//!
+//! ```text
+//!   advance() Logic
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   Current Position: Page 1, Slot 2
+//!
+//!   Page 0              Page 1              Page 2
+//!   ┌────────────┐      ┌────────────┐      ┌────────────┐
+//!   │ Slot 0     │      │ Slot 0     │      │ Slot 0     │
+//!   │ Slot 1     │      │ Slot 1     │      │ Slot 1     │
+//!   │ Slot 2     │      │ Slot 2 ◀───│──────│            │
+//!   │ Slot 3     │      │ Slot 3     │      │            │
+//!   └────────────┘      └────────────┘      └────────────┘
+//!
+//!   Case 1: next_slot < num_tuples
+//!   ───────────────────────────────
+//!   → Move to Slot 3 on same page
+//!   → current_rid = RID(page_id=1, slot=3)
+//!
+//!   Case 2: next_slot >= num_tuples
+//!   ────────────────────────────────
+//!   → Move to Slot 0 on next page
+//!   → current_rid = RID(page_id=2, slot=0)
+//!
+//!   Case 3: No next page
+//!   ─────────────────────
+//!   → Set to INVALID
+//!   → current_rid = RID(INVALID_PAGE_ID, 0)
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `TableIterator` | Low-level iterator with RID bounds and optional txn context |
+//! | `TableScanIterator` | High-level iterator with TableInfo and reset support |
+//! | `current_rid` | Next tuple position to return |
+//! | `last_returned_rid` | RID of most recently returned tuple |
+//! | `stop_at_rid` | Upper bound for iteration (exclusive) |
+//!
+//! ## Bound Checking
+//!
+//! ```text
+//!   is_end() Logic
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   1. current_rid.page_id == INVALID_PAGE_ID → END
+//!
+//!   2. If stop_at_rid is set:
+//!      - current_rid.page_id > stop_at_rid.page_id → END
+//!      - Same page AND current_rid.slot > stop_at_rid.slot → END
+//!
+//!   Example with stop_at_rid = (page=2, slot=5):
+//!
+//!   ┌────────────────────────────────────────────────────────────────────┐
+//!   │ (0,0) (0,1) ... (1,0) (1,1) ... (2,0) ... (2,5) │ (2,6) (3,0) ...  │
+//!   │ ◀──────────────── valid range ────────────────▶ │ ◀─── END ──────▶ │
+//!   └────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::table::table_iterator::{TableIterator, TableScanIterator};
+//!
+//! // Low-level iteration with bounds
+//! let start = RID::new(0, 0);
+//! let stop = RID::new(INVALID_PAGE_ID, 0);  // scan to end
+//! let iter = TableIterator::new(table_heap, start, stop, Some(txn_ctx));
+//!
+//! for (meta, tuple) in iter {
+//!     println!("RID: {:?}, Value: {:?}", tuple.get_rid(), tuple.get_value(0));
+//! }
+//!
+//! // High-level scan with TableInfo
+//! let mut scan = TableScanIterator::new(table_info.clone());
+//!
+//! while let Some((meta, tuple)) = scan.next() {
+//!     println!("Found: {:?}", tuple);
+//! }
+//!
+//! // Reset and iterate again
+//! scan.reset();
+//! for (meta, tuple) in scan {
+//!     // Process tuple...
+//! }
+//! ```
+//!
+//! ## Transaction Visibility
+//!
+//! | With `txn_ctx` | Behavior |
+//! |----------------|----------|
+//! | `Some(ctx)` | Uses `TransactionalTableHeap::get_tuple()` with MVCC visibility |
+//! | `None` | Uses `TableHeap::get_tuple()` directly (no visibility check) |
+//!
+//! Invisible or deleted tuples are automatically skipped by the iterator loop.
+//!
+//! ## Thread Safety
+//!
+//! - Acquires `table_heap.latch.read()` during page traversal
+//! - `Arc` wrappers for shared ownership of heap and transaction context
+//! - Iterator is not `Sync` (single-threaded iteration)
 
 use crate::common::config::{INVALID_PAGE_ID, PageId};
 use crate::common::rid::RID;
