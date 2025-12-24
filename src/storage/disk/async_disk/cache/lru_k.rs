@@ -1,69 +1,259 @@
-//! LRU-K Cache Implementation.
+//! # LRU-K Cache Implementation
 //!
-//! This module provides an implementation of the LRU-K replacement policy (specifically LRU-2 by default).
+//! This module provides an implementation of the LRU-K replacement policy (specifically LRU-2
+//! by default). LRU-K improves upon standard LRU by tracking the K-th most recent access time,
+//! providing resistance to cache pollution from sequential scans.
 //!
-//! # Architecture
+//! ## Architecture
 //!
-//! The implementation uses:
-//! - A `HashMap` to store key-value pairs along with their access history.
-//! - `VecDeque` for tracking the last K access timestamps for each item.
-//! - `SystemTime` for generating timestamps (in microseconds) to order accesses.
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                          LRUKCache<K, V>                                 │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  HashMap<K, (V, VecDeque<u64>)>                                    │ │
+//!   │   │                                                                    │ │
+//!   │   │  ┌─────────┬───────────────────────────────────────────────────┐   │ │
+//!   │   │  │   Key   │  (Value, Access History)                          │   │ │
+//!   │   │  ├─────────┼───────────────────────────────────────────────────┤   │ │
+//!   │   │  │ page_1  │  (data, [t₁, t₅, t₉])  ← 3 accesses, K=3          │   │ │
+//!   │   │  │ page_2  │  (data, [t₃])          ← 1 access (< K)           │   │ │
+//!   │   │  │ page_3  │  (data, [t₂, t₇])      ← 2 accesses (< K if K=3)  │   │ │
+//!   │   │  └─────────┴───────────────────────────────────────────────────┘   │ │
+//!   │   │                                                                    │ │
+//!   │   │  VecDeque stores last K timestamps (microseconds since epoch)      │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   Configuration:                                                         │
+//!   │   • capacity: Maximum entries                                            │
+//!   │   • k: Number of accesses to track (default: 2)                          │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! Unlike the O(1) LRU implementation, this LRU-K implementation is **O(N)** for eviction operations
-//! because it must scan all entries to find the one with the maximum "backward K-distance".
-//! This design decision prioritizes simplicity and correctness of the complex LRU-K logic over raw performance,
-//! which is acceptable given that LRU-K is typically used in scenarios where hit ratios are more critical
-//! than eviction throughput (e.g., database buffer pools) or where N is manageable.
+//! ## LRU-K Eviction Policy
 //!
-//! # Key Features
+//! ```text
+//!   Eviction Priority (highest to lowest):
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! - **LRU-K Policy**: Evicts the item whose K-th most recent access is furthest in the past.
-//!   This creates a "correlated reference period" that prevents cold pages from being evicted
-//!   prematurely due to a single scan.
-//! - **Configurable K**: Defaults to K=2 (LRU-2), which provides a good balance between
-//!   responsiveness and scan resistance.
-//! - **Access History Tracking**: Maintains a history of the last K access times for each item.
+//!   PRIORITY 1: Items with fewer than K accesses (< K)
+//!   ─────────────────────────────────────────────────────────────────────────────
+//!     • These items haven't proven their "hotness"
+//!     • Among them, evict the one with the EARLIEST first access
 //!
-//! # Design Rationale
+//!     Example (K=2):
+//!       page_A: [t₁]        ← 1 access, earliest = t₁  ← EVICT THIS
+//!       page_B: [t₃]        ← 1 access, earliest = t₃
 //!
-//! - **Scan Resistance**: Standard LRU is vulnerable to sequential scans (e.g., table scans)
-//!   flushing the entire cache. LRU-K mitigates this by requiring K accesses before an item
-//!   is considered "hot" enough to be retained over others.
-//! - **Simplicity**: The current O(N) implementation avoids the complexity of maintaining
-//!   multiple priority queues or complex pointer structures required for an O(log N) or O(1) LRU-K.
+//!   PRIORITY 2: Items with K or more accesses (≥ K)
+//!   ─────────────────────────────────────────────────────────────────────────────
+//!     • Only considered if ALL items have ≥ K accesses
+//!     • Evict the one with the OLDEST K-th most recent access (backward K-distance)
 //!
-//! # Performance Characteristics
+//!     Example (K=2):
+//!       page_C: [t₂, t₈]    ← K-distance = t₂  ← EVICT THIS (oldest K-dist)
+//!       page_D: [t₅, t₉]    ← K-distance = t₅
 //!
-//! - **Time Complexity**:
-//!   - `get`, `insert` (without eviction), `remove`: **O(1)** (average case HashMap).
-//!   - `insert` (with eviction), `pop_lru_k`: **O(N)** where N is the number of items in the cache.
-//!     It scans all items to calculate the K-distance.
-//! - **Space Overhead**:
-//!   - Per entry: Value storage + `VecDeque` of K timestamps (typically small, e.g., 2 `u64`s).
-//! - **Concurrency**:
-//!   - This struct is **not thread-safe**. It is intended to be wrapped in a `Mutex` or `RwLock`
-//!     (like `ConcurrentLRUCache` does for `LRUCore`) or used in single-threaded contexts.
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! # Trade-offs
+//!   K-Distance Calculation:
 //!
-//! - **Pros**:
-//!   - Better hit ratios than LRU for database workloads involving scans.
-//!   - Robust against "cache pollution" from one-time access patterns.
-//! - **Cons**:
-//!   - **O(N) Eviction**: Performance degrades linearly with cache size during evictions. This is
-//!     the major trade-off for the improved replacement policy logic without complex data structures.
-//!   - Memory overhead of storing timestamps.
+//!     History: [t_oldest, ..., t_recent]   (VecDeque, front=oldest)
+//!     K-distance = history[len - K]        (K-th from the end)
 //!
-//! # When to Use
+//!     Example (K=2, history=[t₁, t₅, t₉]):
+//!       len = 3
+//!       K-distance index = 3 - 2 = 1
+//!       K-distance = t₅
+//! ```
 //!
-//! - **Use when**:
-//!   - You are implementing a database buffer pool where scan resistance is critical.
-//!   - The cost of a cache miss (disk I/O) vastly outweighs the CPU cost of an O(N) eviction scan.
-//!   - The cache size is moderate, or eviction is infrequent compared to hits.
-//! - **Avoid when**:
-//!   - You need strictly bounded O(1) latency for all operations (use `LRUCache`).
-//!   - The cache size is extremely large (millions of items) and evictions are frequent.
-//!   - You are in a high-frequency, low-latency environment (e.g., CPU cache simulation).
+//! ## Scan Resistance Explained
+//!
+//! ```text
+//!   Problem with standard LRU:
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Cache: [A, B, C, D]  (A = MRU, D = LRU)
+//!
+//!   Sequential scan reads pages X₁, X₂, X₃, X₄ (one-time access each):
+//!
+//!     After X₁:  [X₁, A, B, C]  ← D evicted
+//!     After X₂:  [X₂, X₁, A, B] ← C evicted
+//!     After X₃:  [X₃, X₂, X₁, A] ← B evicted
+//!     After X₄:  [X₄, X₃, X₂, X₁] ← A evicted  ← ALL hot pages gone!
+//!
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   LRU-K (K=2) solution:
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Cache (with access counts):
+//!     A: 5 accesses (K-dist = t₁₀)  ← "hot" page
+//!     B: 3 accesses (K-dist = t₈)   ← "hot" page
+//!     C: 2 accesses (K-dist = t₅)   ← "warm" page
+//!     D: 1 access   (< K)           ← "cold" page
+//!
+//!   Sequential scan reads X₁:
+//!     X₁ has 1 access (< K)
+//!     D also has 1 access (< K)
+//!     X₁ is newer than D → D is evicted (not the hot pages!)
+//!
+//!   Result: Hot pages A, B, C survive the scan!
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component        | Description                                        |
+//! |------------------|----------------------------------------------------|
+//! | `LRUKCache<K,V>` | Main cache struct with capacity and K value        |
+//! | `cache`          | `HashMap<K, (V, VecDeque<u64>)>` storing entries   |
+//! | `capacity`       | Maximum number of entries                          |
+//! | `k`              | Number of accesses to track (default: 2)           |
+//!
+//! ## Core Operations (CoreCache + MutableCache + LRUKCacheTrait)
+//!
+//! | Method              | Complexity | Description                              |
+//! |---------------------|------------|------------------------------------------|
+//! | `new(capacity)`     | O(1)       | Create cache with K=2 (default)          |
+//! | `with_k(cap, k)`    | O(1)       | Create cache with custom K value         |
+//! | `insert(key, val)`  | O(N)*      | Insert/update, may trigger O(N) eviction |
+//! | `get(&key)`         | O(1)       | Get value, updates access history        |
+//! | `contains(&key)`    | O(1)       | Check if key exists                      |
+//! | `remove(&key)`      | O(1)       | Remove entry by key                      |
+//! | `len()`             | O(1)       | Current number of entries                |
+//! | `capacity()`        | O(1)       | Maximum capacity                         |
+//! | `clear()`           | O(N)       | Remove all entries                       |
+//!
+//! ## LRU-K Specific Operations (LRUKCacheTrait)
+//!
+//! | Method               | Complexity | Description                             |
+//! |----------------------|------------|-----------------------------------------|
+//! | `pop_lru_k()`        | O(N)       | Remove and return victim entry          |
+//! | `peek_lru_k()`       | O(N)       | Peek at victim without removing         |
+//! | `k_value()`          | O(1)       | Get the K value                         |
+//! | `access_history()`   | O(K)       | Get timestamps (most recent first)      |
+//! | `access_count()`     | O(1)       | Get number of accesses for key          |
+//! | `k_distance()`       | O(1)       | Get K-distance (None if < K accesses)   |
+//! | `touch(&key)`        | O(1)       | Update access time without getting      |
+//! | `k_distance_rank()`  | O(N log N) | Get eviction priority rank              |
+//!
+//! ## Performance Characteristics
+//!
+//! | Operation              | Time       | Notes                              |
+//! |------------------------|------------|------------------------------------|
+//! | `get`, `insert` (hit)  | O(1)       | HashMap lookup + VecDeque update   |
+//! | `insert` (eviction)    | O(N)       | Scans all entries for victim       |
+//! | `pop_lru_k`            | O(N)       | Scans all entries for victim       |
+//! | `peek_lru_k`           | O(N)       | Scans all entries                  |
+//! | `k_distance_rank`      | O(N log N) | Collects and sorts all entries     |
+//! | Per-entry overhead     | ~24 bytes  | VecDeque + K × 8 bytes timestamps  |
+//!
+//! ## Design Rationale
+//!
+//! - **Scan Resistance**: Standard LRU flushes entire cache on sequential scans.
+//!   LRU-K requires K accesses before an item is considered "hot".
+//! - **Simplicity**: O(N) eviction avoids complex multi-queue or heap structures
+//!   needed for O(log N) implementations.
+//! - **Correctness First**: Prioritizes correct LRU-K semantics over raw performance.
+//!
+//! ## Trade-offs
+//!
+//! | Aspect           | Pros                               | Cons                            |
+//! |------------------|------------------------------------|---------------------------------|
+//! | Hit Ratio        | Better than LRU for DB workloads   | Overhead for simple patterns    |
+//! | Scan Resistance  | Excellent (core feature)           | -                               |
+//! | Eviction Time    | -                                  | O(N) scans all entries          |
+//! | Memory           | Bounded history (K timestamps)     | Extra ~24 + 8K bytes per entry  |
+//! | Complexity       | Simple HashMap-based               | No advanced data structures     |
+//!
+//! ## When to Use
+//!
+//! **Use when:**
+//! - Implementing a database buffer pool where scan resistance is critical
+//! - Cost of cache miss (disk I/O) >> CPU cost of O(N) eviction scan
+//! - Cache size is moderate, or evictions are infrequent vs. hits
+//!
+//! **Avoid when:**
+//! - You need strictly bounded O(1) latency (use `LRUCache`)
+//! - Cache size is very large (millions of items) with frequent evictions
+//! - High-frequency, low-latency environment (e.g., CPU cache simulation)
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::cache::lru_k::LRUKCache;
+//! use crate::storage::disk::async_disk::cache::cache_traits::{
+//!     CoreCache, MutableCache, LRUKCacheTrait,
+//! };
+//!
+//! // Create LRU-2 cache (default K=2)
+//! let mut cache: LRUKCache<u32, String> = LRUKCache::new(100);
+//!
+//! // Or with custom K value
+//! let mut cache: LRUKCache<u32, String> = LRUKCache::with_k(100, 3);
+//!
+//! // Insert items
+//! cache.insert(1, "page_data_1".to_string());
+//! cache.insert(2, "page_data_2".to_string());
+//!
+//! // Access items (updates history)
+//! if let Some(value) = cache.get(&1) {
+//!     println!("Got: {}", value);
+//! }
+//!
+//! // Check access count
+//! assert_eq!(cache.access_count(&1), Some(2)); // insert + get
+//!
+//! // Touch without retrieving (useful for pinned pages)
+//! cache.touch(&1);
+//! assert_eq!(cache.access_count(&1), Some(3));
+//!
+//! // Check K-distance (None if < K accesses)
+//! if let Some(k_dist) = cache.k_distance(&1) {
+//!     println!("K-distance: {} microseconds", k_dist);
+//! }
+//!
+//! // Get access history (most recent first)
+//! if let Some(history) = cache.access_history(&1) {
+//!     println!("Access times: {:?}", history);
+//! }
+//!
+//! // Peek at eviction victim without removing
+//! if let Some((key, value)) = cache.peek_lru_k() {
+//!     println!("Next victim: key={}, value={}", key, value);
+//! }
+//!
+//! // Manually evict
+//! if let Some((key, value)) = cache.pop_lru_k() {
+//!     println!("Evicted: key={}, value={}", key, value);
+//! }
+//!
+//! // Check eviction priority rank (0 = first to be evicted)
+//! if let Some(rank) = cache.k_distance_rank(&2) {
+//!     println!("Eviction rank: {}", rank);
+//! }
+//! ```
+//!
+//! ## Comparison with Other Policies
+//!
+//! | Policy | K-distance | Scan Resistant | Eviction | Best For                |
+//! |--------|------------|----------------|----------|-------------------------|
+//! | LRU    | K=1        | No             | O(1)     | Simple recency patterns |
+//! | LRU-2  | K=2        | Yes            | O(N)     | DB buffer pools         |
+//! | LRU-K  | Any K      | Yes            | O(N)     | Tunable scan resistance |
+//! | LFU    | Frequency  | Partial        | O(log N) | Frequency-heavy loads   |
+//!
+//! ## Thread Safety
+//!
+//! - `LRUKCache` is **NOT thread-safe**
+//! - Wrap in `Mutex` or `RwLock` for concurrent access
+//! - Or use single-threaded context
+//!
+//! ## Academic Reference
+//!
+//! O'Neil, E. J., O'Neil, P. E., & Weikum, G. (1993).
+//! "The LRU-K page replacement algorithm for database disk buffering."
+//! ACM SIGMOD Record, 22(2), 297-306.
 
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LRUKCacheTrait, MutableCache,
