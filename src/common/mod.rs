@@ -6,5 +6,4 @@ pub mod performance_monitor;
 pub mod result_writer;
 pub mod rid;
 pub mod statement_type;
-pub mod time;
 pub mod util;
