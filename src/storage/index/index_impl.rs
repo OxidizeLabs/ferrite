@@ -1,3 +1,119 @@
+//! # Index Abstractions and Metadata
+//!
+//! This module defines the core abstractions for the index subsystem, providing
+//! a unified interface for different index implementations (B+ tree, hash table, etc.).
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────┐
+//! │                        Index Subsystem                                  │
+//! ├─────────────────────────────────────────────────────────────────────────┤
+//! │                                                                         │
+//! │  ┌─────────────────────────────────────────────────────────────────┐    │
+//! │  │                      Index (trait)                              │    │
+//! │  │  ┌─────────────────┬───────────────────┬─────────────────────┐  │    │
+//! │  │  │  insert_entry() │   delete_entry()  │     scan_key()      │  │    │
+//! │  │  │  create_iterator() │ create_point_iterator() │ get_metadata()│  │    │
+//! │  │  └─────────────────┴───────────────────┴─────────────────────┘  │    │
+//! │  └──────────────────────────────┬──────────────────────────────────┘    │
+//! │                                 │ implemented by                        │
+//! │                 ┌───────────────┼───────────────┐                       │
+//! │                 ▼               ▼               ▼                       │
+//! │          ┌──────────┐    ┌──────────┐    ┌──────────┐                   │
+//! │          │ BPlusTree│    │HashTable │    │  Future  │                   │
+//! │          │  Index   │    │  Index   │    │  Index   │                   │
+//! │          └──────────┘    └──────────┘    └──────────┘                   │
+//! │                                                                         │
+//! │  ┌─────────────────────────────────────────────────────────────────┐    │
+//! │  │                      IndexInfo                                  │    │
+//! │  │  ┌──────────────┬───────────────┬─────────────┬─────────────┐   │    │
+//! │  │  │  key_schema  │  index_name   │  index_oid  │ table_name  │   │    │
+//! │  │  │  key_size    │ is_primary_key│ index_type  │  key_attrs  │   │    │
+//! │  │  └──────────────┴───────────────┴─────────────┴─────────────┘   │    │
+//! │  └─────────────────────────────────────────────────────────────────┘    │
+//! │                                                                         │
+//! └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! - **[`Index`]**: Trait defining the interface for all index implementations
+//! - **[`IndexInfo`]**: Metadata struct containing index properties and schema
+//! - **[`IndexType`]**: Enum of supported index types (B+ tree, hash table, etc.)
+//!
+//! ## Index Trait
+//!
+//! The [`Index`] trait provides a unified interface for index operations:
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `insert_entry()` | Insert a key-RID pair into the index |
+//! | `delete_entry()` | Remove a key-RID pair from the index |
+//! | `scan_key()` | Find all RIDs matching a key |
+//! | `create_iterator()` | Create a range scan iterator |
+//! | `create_point_iterator()` | Create a point lookup iterator |
+//! | `get_metadata()` | Access index metadata |
+//!
+//! ## IndexInfo Metadata
+//!
+//! The [`IndexInfo`] struct stores comprehensive metadata about an index:
+//!
+//! - **key_schema**: Schema defining the types of indexed columns
+//! - **index_name**: Human-readable name for the index
+//! - **index_oid**: Unique object identifier for catalog lookups
+//! - **table_name**: Name of the table this index belongs to
+//! - **key_size**: Total size of the index key in bytes
+//! - **is_primary_key**: Whether this is the primary key index
+//! - **index_type**: The type of index structure (B+ tree, hash, etc.)
+//! - **key_attrs**: Column indices in the base table that form the key
+//!
+//! ## Supported Index Types
+//!
+//! | Type | Description | Use Case |
+//! |------|-------------|----------|
+//! | `BPlusTreeIndex` | Balanced tree with sorted keys | Range scans, ordered access |
+//! | *(future)* `HashTableIndex` | Hash-based lookup | Point queries |
+//!
+//! ## Example Usage
+//!
+//! ```ignore
+//! // Create index metadata
+//! let info = IndexInfo::new(
+//!     key_schema,
+//!     "users_pk".to_string(),
+//!     1,  // index_oid
+//!     "users".to_string(),
+//!     4,  // key_size (i32)
+//!     true,  // is_primary_key
+//!     IndexType::BPlusTreeIndex,
+//!     vec![0],  // key_attrs (first column)
+//! );
+//!
+//! // Use with an index implementation
+//! let index = BPlusTree::new(Box::new(info));
+//! let txn = Transaction::new(...);
+//!
+//! // Insert entries
+//! index.insert_entry(&key_tuple, RID::new(1, 5), &txn);
+//!
+//! // Point lookup
+//! let results = index.scan_key(&search_key, &txn)?;
+//!
+//! // Range scan with iterator
+//! let iter = index.create_iterator(Some(start), Some(end));
+//! for (key, rid) in iter {
+//!     // Process entries
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! The [`Index`] trait requires `Send + Sync`, ensuring all implementations
+//! are safe for concurrent access. Individual implementations handle their
+//! own synchronization (e.g., `RwLock` for in-memory trees, latch crabbing
+//! for disk-based trees).
+
 use crate::catalog::schema::Schema;
 use crate::common::config::IndexOidT;
 use crate::common::rid::RID;
