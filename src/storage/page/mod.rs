@@ -1,4 +1,3 @@
-mod page_factory;
 pub mod page_guard;
 pub(crate) mod page_impl;
 pub mod page_types;
