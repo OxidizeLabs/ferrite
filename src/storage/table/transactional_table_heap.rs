@@ -1,8 +1,255 @@
-//! Transaction-aware wrapper around TableHeap implementing MVCC and version chain management.
+//! # Transactional Table Heap
 //!
-//! `TransactionalTableHeap` coordinates with the transaction manager and lock manager
-//! to handle MVCC operations, including version chain updates, undo log management,
-//! and visibility decisions during tuple access.
+//! This module provides `TransactionalTableHeap`, a transaction-aware wrapper around
+//! `TableHeap` that implements MVCC (Multi-Version Concurrency Control), version chain
+//! management, and constraint validation. It coordinates with the transaction manager
+//! and lock manager to ensure ACID properties.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   Query Execution Layer
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!                           SQL Executor
+//!                               │
+//!                               ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                   TransactionalTableHeap                                │
+//!   │                                                                         │
+//!   │  ┌─────────────────────────────────────────────────────────────────┐    │
+//!   │  │                  Transaction Integration                        │    │
+//!   │  │                                                                 │    │
+//!   │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │    │
+//!   │  │  │TransactionCtx│  │LockManager  │  │TransactionManager      │  │    │
+//!   │  │  │  (txn state)│  │(IX/X locks) │  │(undo links, commit)    │  │    │
+//!   │  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │    │
+//!   │  └─────────────────────────────────────────────────────────────────┘    │
+//!   │                                                                         │
+//!   │  ┌─────────────────────────────────────────────────────────────────┐    │
+//!   │  │                    Constraint Validation                        │    │
+//!   │  │                                                                 │    │
+//!   │  │  NOT NULL │ CHECK │ PRIMARY KEY │ UNIQUE │ FOREIGN KEY          │    │
+//!   │  └─────────────────────────────────────────────────────────────────┘    │
+//!   │                                                                         │
+//!   │  ┌─────────────────────────────────────────────────────────────────┐    │
+//!   │  │                      TableHeap                                  │    │
+//!   │  │               (physical tuple storage)                          │    │
+//!   │  └─────────────────────────────────────────────────────────────────┘    │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## MVCC Insert Flow
+//!
+//! ```text
+//!   insert_tuple(meta, tuple, txn_ctx)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌──────────────────────┐
+//!   │ 1. Transaction Check │
+//!   │    state == Running? │
+//!   └──────────┬───────────┘
+//!              │
+//!              ▼
+//!   ┌──────────────────────┐
+//!   │ 2. Lock Acquisition  │
+//!   │    IX lock on table  │
+//!   └──────────┬───────────┘
+//!              │
+//!              ▼
+//!   ┌──────────────────────┐
+//!   │ 3. Meta Validation   │
+//!   │    - creator == txn  │
+//!   │    - uncommitted     │
+//!   │    - not deleted     │
+//!   │    - no undo link    │
+//!   └──────────┬───────────┘
+//!              │
+//!              ▼
+//!   ┌──────────────────────┐
+//!   │ 4. Physical Insert   │
+//!   │    table_heap.insert │
+//!   └──────────┬───────────┘
+//!              │
+//!              ▼
+//!   ┌──────────────────────┐
+//!   │ 5. Write Set Update  │
+//!   │    txn.append_write  │
+//!   └──────────┬───────────┘
+//!              │
+//!              ▼
+//!          return RID
+//! ```
+//!
+//! ## MVCC Update Flow with Undo Logging
+//!
+//! ```text
+//!   update_tuple(meta, tuple, rid, txn_ctx)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   Before Update:
+//!   ┌─────────────────────────────────────────────────────────────────────┐
+//!   │ Page Tuple                         Transaction Undo Log             │
+//!   │ ┌───────────────────┐              (empty)                          │
+//!   │ │ meta: creator=T1  │                                               │
+//!   │ │       commit_ts=5 │                                               │
+//!   │ │       undo_idx=∅  │                                               │
+//!   │ │ tuple: (1, 100)   │                                               │
+//!   │ └───────────────────┘                                               │
+//!   └─────────────────────────────────────────────────────────────────────┘
+//!
+//!   After Update by T2:
+//!   ┌─────────────────────────────────────────────────────────────────────┐
+//!   │ Page Tuple                         T2's Undo Log                    │
+//!   │ ┌───────────────────┐              ┌─────────────────────────────┐  │
+//!   │ │ meta: creator=T2  │              │ idx=0:                      │  │
+//!   │ │       commit_ts=∅ │              │   is_deleted: false         │  │
+//!   │ │       undo_idx=0 ─┼─────────────▶│   tuple: (1, 100)           │  │
+//!   │ │ tuple: (1, 200)   │              │   ts: 5                     │  │
+//!   │ └───────────────────┘              │   prev: (T1, ∅)             │  │
+//!   │                                    └─────────────────────────────┘  │
+//!   │                                                                     │
+//!   │ Version Chain Map:                                                  │
+//!   │   RID ──▶ UndoLink(T2, 0)                                           │
+//!   └─────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## MVCC Delete Flow
+//!
+//! ```text
+//!   delete_tuple(rid, txn_ctx)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   Same as update, but:
+//!   - Undo log: is_deleted = true, stores pre-delete tuple
+//!   - New meta: deleted = true
+//!
+//!   After Delete by T2:
+//!   ┌───────────────────┐              ┌─────────────────────────────┐
+//!   │ meta: creator=T2  │              │ idx=0:                      │
+//!   │       deleted=true│              │   is_deleted: true          │
+//!   │       undo_idx=0 ─┼─────────────▶│   tuple: (1, 100) ◀─restore │
+//!   │ tuple: (1, 100)   │              │   original_rid: Some(rid)   │
+//!   └───────────────────┘              └─────────────────────────────┘
+//! ```
+//!
+//! ## Version Chain Traversal
+//!
+//! ```text
+//!   get_visible_version(rid, txn, txn_manager, meta, tuple)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌──────────────────────────────────────────────────────────────────────┐
+//!   │ Reader: txn_id=5, read_ts=10                                         │
+//!   │                                                                      │
+//!   │ Page (newest)          Undo Log Chain                                │
+//!   │ ┌────────────────┐     ┌────────────────┐     ┌────────────────┐     │
+//!   │ │ creator=T4     │     │ ts=12          │     │ ts=8           │     │
+//!   │ │ commit_ts=15   │────▶│ tuple:(1,300)  │────▶│ tuple:(1,200)  │     │
+//!   │ │ tuple:(1,400)  │     │ prev→          │     │ prev→          │     │
+//!   │ └────────────────┘     └────────────────┘     └────────────────┘     │
+//!   │       ↑                      ↑                      ↑                │
+//!   │   Invisible              Invisible               Visible!            │
+//!   │   (15 > 10)              (12 > 10)               (8 ≤ 10)            │
+//!   │                                                                      │
+//!   │ Returns: (meta with ts=8, tuple:(1,200))                             │
+//!   └──────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `TransactionalTableHeap` | MVCC wrapper around TableHeap |
+//! | `table_heap` | Underlying physical storage |
+//! | `table_oid` | Table object identifier for locking |
+//!
+//! ## Core Operations
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `insert_tuple(meta, tuple, txn_ctx)` | Insert with transaction context |
+//! | `insert_tuple_from_values(values, schema, txn_ctx)` | Insert from values with constraints |
+//! | `update_tuple(meta, tuple, rid, txn_ctx)` | Update with undo logging |
+//! | `delete_tuple(rid, txn_ctx)` | Mark deleted with undo logging |
+//! | `get_tuple(rid, txn_ctx)` | Get with MVCC visibility |
+//! | `make_iterator(txn_ctx)` | Create MVCC-aware iterator |
+//! | `bulk_insert_tuples_from_values_async(...)` | Optimized async bulk insert |
+//!
+//! ## Isolation Level Handling
+//!
+//! ```text
+//!   get_tuple() Visibility Logic
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────┐
+//!   │                                                                     │
+//!   │  READ_UNCOMMITTED:                                                  │
+//!   │    └─▶ Return latest version (even uncommitted)                     │
+//!   │                                                                     │
+//!   │  READ_COMMITTED:                                                    │
+//!   │    ├─▶ Own txn's version? → Return                                  │
+//!   │    ├─▶ Committed? → Return                                          │
+//!   │    └─▶ Else → Walk chain for latest committed                       │
+//!   │                                                                     │
+//!   │  REPEATABLE_READ / SERIALIZABLE:                                    │
+//!   │    └─▶ Walk chain for version visible at read_ts                    │
+//!   │                                                                     │
+//!   └─────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Constraint Validation
+//!
+//! | Constraint | Validation Method |
+//! |------------|-------------------|
+//! | NOT NULL | `validate_not_null_constraints()` |
+//! | CHECK | `validate_check_constraints()` / `evaluate_simple_constraint()` |
+//! | PRIMARY KEY | `check_primary_key_violation()` |
+//! | UNIQUE | `check_unique_constraint_violation()` |
+//! | FOREIGN KEY | `validate_foreign_key_reference()` |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
+//!
+//! // Create transactional wrapper
+//! let txn_heap = TransactionalTableHeap::new(table_heap.clone(), table_oid);
+//!
+//! // Insert with transaction
+//! let values = vec![Value::new(1), Value::new("Alice")];
+//! let rid = txn_heap.insert_tuple_from_values(values, &schema, txn_ctx.clone())?;
+//!
+//! // Update with undo logging
+//! let new_values = vec![Value::new(1), Value::new("Bob")];
+//! let new_tuple = Tuple::new(&new_values, &schema, rid);
+//! txn_heap.update_tuple(&meta, &new_tuple, rid, txn_ctx.clone())?;
+//!
+//! // Delete (creates tombstone)
+//! txn_heap.delete_tuple(rid, txn_ctx.clone())?;
+//!
+//! // Read with MVCC visibility
+//! let (meta, tuple) = txn_heap.get_tuple(rid, txn_ctx)?;
+//!
+//! // Iterate with visibility checks
+//! for (meta, tuple) in txn_heap.make_iterator(Some(txn_ctx)) {
+//!     println!("{:?}", tuple);
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - Table-level IX/X locking via `LockManager`
+//! - Write set tracking per transaction
+//! - Undo links protected by `TransactionManager`
+//! - Underlying `TableHeap` uses page-level latching
+//!
+//! ## Performance Optimizations
+//!
+//! - `bulk_insert_tuples_from_values_async()`: Batched async inserts
+//! - Chunked processing (50 tuples per chunk) for memory efficiency
+//! - Single lock acquisition for entire batch
+//! - Async page flushing integration
 
 use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
