@@ -1,3 +1,55 @@
+//! Bucket page implementation for chained/directory-based hash table indexes.
+//!
+//! This module provides [`HashTableBucketPage`], which stores key-value pairs
+//! in a bucket for use with chained hashing or directory-based hash tables.
+//! Unlike linear probing, buckets are independent containers that can overflow
+//! to additional pages.
+//!
+//! # Bucket Layout
+//!
+//! Keys and values are stored in a fixed-size array within the bucket:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │ (K₀,V₀) │ (K₁,V₁) │ (K₂,V₂) │ ... │ (Kₙ₋₁,Vₙ₋₁) │ (empty) │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Slot State Tracking
+//!
+//! Each slot has two state bits tracked in separate bitmaps:
+//!
+//! | Occupied | Readable | Meaning                              |
+//! |----------|----------|--------------------------------------|
+//! |    0     |    0     | Empty (available for insertion)      |
+//! |    1     |    1     | Valid entry (key-value pair)         |
+//! |    1     |    0     | Tombstone (deleted entry)            |
+//!
+//! The distinction between occupied and readable enables efficient reuse of
+//! deleted slots while maintaining correct lookup semantics.
+//!
+//! # Thread Safety
+//!
+//! The bucket uses atomic operations for bitmap updates and a mutex for the
+//! key-value array, supporting concurrent access:
+//!
+//! - Bitmaps use `AtomicU8` with `SeqCst` ordering
+//! - Key-value array protected by `Mutex`
+//!
+//! # Key Operations
+//!
+//! - [`insert`](HashTableBucketPage::insert): Insert if not duplicate and not full
+//! - [`remove`](HashTableBucketPage::remove): Find and tombstone matching entry
+//! - [`get_value`](HashTableBucketPage::get_value): Collect all values for a key
+//! - [`is_full`](HashTableBucketPage::is_full) / [`is_empty`](HashTableBucketPage::is_empty):
+//!   Capacity checks for overflow/merge decisions
+//!
+//! # Generics
+//!
+//! - `KeyType`: The key type (must be `Clone + Default`)
+//! - `ValueType`: The value type (must be `Clone + Default + PartialEq`)
+//! - `KeyComparator`: A function `Fn(&K, &K) -> bool` for key equality
+
 use crate::storage::page::page_types::hash_table_page_defs::bucket_array_size;
 use log::info;
 use std::marker::PhantomData;

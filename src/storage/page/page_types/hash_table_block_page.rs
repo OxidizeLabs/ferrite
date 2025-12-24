@@ -1,3 +1,55 @@
+//! Block page implementation for linear probe hash table indexes.
+//!
+//! This module provides [`HashTableBlockPage`], which stores key-value pairs
+//! in a flat array format for use in linear probing hash tables. It supports
+//! non-unique keys and thread-safe concurrent access.
+//!
+//! # Block Layout
+//!
+//! Keys and values are stored contiguously in a fixed-size array:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │ (K₀,V₀) │ (K₁,V₁) │ (K₂,V₂) │ ... │ (Kₙ₋₁,Vₙ₋₁) │ (empty) │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Slot State Tracking
+//!
+//! Each slot has two state bits tracked in separate bitmaps:
+//!
+//! | Occupied | Readable | Meaning                              |
+//! |----------|----------|--------------------------------------|
+//! |    0     |    0     | Empty (never used)                   |
+//! |    1     |    1     | Valid entry (key-value pair)         |
+//! |    1     |    0     | Tombstone (deleted, skip during probe)|
+//!
+//! This distinction enables efficient linear probing: probes continue past
+//! tombstones but stop at empty slots.
+//!
+//! # Thread Safety
+//!
+//! The block uses atomic operations for bitmap updates and a mutex for the
+//! key-value array, enabling concurrent inserts and removes:
+//!
+//! - [`insert_at`](HashTableBlockPage::insert_at): Atomically claims a slot
+//! - [`remove_at`](HashTableBlockPage::remove_at): Marks slot as tombstone
+//! - Bitmaps use `AtomicU8` with `SeqCst` ordering
+//!
+//! # Key Operations
+//!
+//! - [`insert`](HashTableBlockPage::insert): Find empty slot and insert
+//! - [`remove`](HashTableBlockPage::remove): Find matching entry and tombstone it
+//! - [`get_value`](HashTableBlockPage::get_value): Scan for all values matching a key
+//! - [`is_full`](HashTableBlockPage::is_full) / [`is_empty`](HashTableBlockPage::is_empty):
+//!   Capacity checks
+//!
+//! # Generics
+//!
+//! - `KeyType`: The key type (must be `Clone + Default`)
+//! - `ValueType`: The value type (must be `Clone + Default + PartialEq`)
+//! - `KeyComparator`: A function `Fn(&K, &K) -> bool` for key equality
+
 use crate::storage::page::page_types::hash_table_page_defs::{MappingType, block_array_size};
 use log::info;
 use std::marker::PhantomData;

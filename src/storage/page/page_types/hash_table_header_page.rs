@@ -1,3 +1,54 @@
+//! Header page implementation for linear probing hash table indexes.
+//!
+//! This module provides [`HashTableHeaderPage`], which serves as the metadata
+//! and entry point for a linear probing hash table. It tracks all block pages
+//! that store the actual key-value entries.
+//!
+//! # Page Layout
+//!
+//! The header has a compact 16-byte fixed format:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │ LSN (4) │ Size (4) │ PageId (4) │ NextBlockIndex (4)        │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! Followed by a dynamic array of block page IDs.
+//!
+//! # Linear Probing Structure
+//!
+//! The hash table consists of:
+//!
+//! ```text
+//! ┌──────────────┐
+//! │ Header Page  │ ← Metadata + block page list
+//! └──────┬───────┘
+//!        │
+//!   ┌────┴────┬────────┬────────┐
+//!   ▼         ▼        ▼        ▼
+//! [Block₀] [Block₁] [Block₂] ... [Blockₙ]
+//! ```
+//!
+//! Each block page stores key-value pairs using linear probing for collision
+//! resolution.
+//!
+//! # Key Operations
+//!
+//! - [`add_block_page_id`](HashTableHeaderPage::add_block_page_id): Append a new block
+//! - [`get_block_page_id`](HashTableHeaderPage::get_block_page_id): Access block by index
+//! - [`num_blocks`](HashTableHeaderPage::num_blocks): Get current block count
+//! - [`set_size`](HashTableHeaderPage::set_size): Update hash table size
+//!
+//! # Recovery Support
+//!
+//! The [`lsn`](HashTableHeaderPage::get_lsn) (Log Sequence Number) field supports
+//! write-ahead logging for crash recovery.
+//!
+//! # Thread Safety
+//!
+//! Block page IDs are protected by a `Mutex` for concurrent access.
+
 use crate::common::config::PageId;
 use std::sync::Mutex;
 
