@@ -1,3 +1,167 @@
+//! # System Catalog
+//!
+//! This module provides the internal system catalog tables that store metadata
+//! about user-created tables, indexes, databases, and columns. These tables are
+//! bootstrapped at database startup and used for catalog persistence and recovery.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                         ┌─────────────────────────────────────────────┐
+//!                         │            System Catalog                   │
+//!                         │                                             │
+//!                         │  ┌───────────────────────────────────────┐  │
+//!                         │  │        SystemCatalogSchemas           │  │
+//!                         │  │  (Schema definitions for sys tables)  │  │
+//!                         │  └───────────────────────────────────────┘  │
+//!                         │                     │                       │
+//!                         │                     ▼                       │
+//!                         │  ┌───────────────────────────────────────┐  │
+//!                         │  │        SystemCatalogTables            │  │
+//!                         │  │  (TableInfo instances for sys tables) │  │
+//!                         │  │                                       │  │
+//!                         │  │  __tables   (OID: 1)                  │  │
+//!                         │  │  __indexes  (OID: 2)                  │  │
+//!                         │  │  __dbs      (OID: 3)                  │  │
+//!                         │  │  __columns  (OID: 4)                  │  │
+//!                         │  └───────────────────────────────────────┘  │
+//!                         └─────────────────────────────────────────────┘
+//! ```
+//!
+//! ## System Tables
+//!
+//! | Table        | OID | Purpose                              |
+//! |--------------|-----|--------------------------------------|
+//! | `__tables`   | 1   | Stores table metadata                |
+//! | `__indexes`  | 2   | Stores index metadata                |
+//! | `__dbs`      | 3   | Stores database metadata             |
+//! | `__columns`  | 4   | Stores column metadata               |
+//!
+//! ## Table Schemas
+//!
+//! ### `__tables` Schema
+//!
+//! | Column        | Type     | Description                    |
+//! |---------------|----------|--------------------------------|
+//! | table_oid     | BigInt   | Unique table identifier        |
+//! | table_name    | VarChar  | Name of the table              |
+//! | first_page_id | BigInt   | First page in table heap       |
+//! | last_page_id  | BigInt   | Last page in table heap        |
+//! | schema_bin    | Binary   | Serialized Schema (bincode)    |
+//!
+//! ### `__indexes` Schema
+//!
+//! | Column         | Type     | Description                    |
+//! |----------------|----------|--------------------------------|
+//! | index_oid      | BigInt   | Unique index identifier        |
+//! | index_name     | VarChar  | Name of the index              |
+//! | table_oid      | BigInt   | Associated table OID           |
+//! | unique         | Boolean  | Whether index enforces unique  |
+//! | index_type     | Integer  | Index type enum value          |
+//! | key_attrs      | Binary   | Serialized key column indices  |
+//! | key_schema_bin | Binary   | Serialized key Schema          |
+//!
+//! ### `__dbs` Schema
+//!
+//! | Column   | Type     | Description                    |
+//! |----------|----------|--------------------------------|
+//! | db_oid   | BigInt   | Unique database identifier     |
+//! | db_name  | VarChar  | Name of the database           |
+//!
+//! ### `__columns` Schema
+//!
+//! | Column      | Type     | Description                    |
+//! |-------------|----------|--------------------------------|
+//! | table_oid   | BigInt   | Parent table OID               |
+//! | column_name | VarChar  | Name of the column             |
+//! | ordinal     | Integer  | Column position (0-indexed)    |
+//! | column_type | Integer  | TypeId enum value              |
+//! | column_len  | Integer  | Storage length in bytes        |
+//! | is_pk       | Boolean  | Whether column is primary key  |
+//!
+//! ## Key Components
+//!
+//! | Component              | Description                                      |
+//! |------------------------|--------------------------------------------------|
+//! | `SystemCatalogSchemas` | Schema definitions for all system tables         |
+//! | `SystemCatalogTables`  | `TableInfo` instances with heap storage          |
+//! | `TableCatalogRow`      | Serializable row for `__tables`                  |
+//! | `IndexCatalogRow`      | Serializable row for `__indexes`                 |
+//!
+//! ## Bootstrap Flow
+//!
+//! ```text
+//!   Database Startup
+//!         │
+//!         ▼
+//!   SystemCatalogTables::bootstrap(bpm)
+//!         │
+//!         ├──► Create SystemCatalogSchemas
+//!         │
+//!         ├──► Create TableHeap for each system table
+//!         │         __tables  (OID 1)
+//!         │         __indexes (OID 2)
+//!         │         __dbs     (OID 3)
+//!         │         __columns (OID 4)
+//!         │
+//!         └──► Wrap in TableInfo with schema
+//!                    │
+//!                    ▼
+//!              SystemCatalogTables ready
+//! ```
+//!
+//! ## Row Conversion
+//!
+//! ```text
+//!   TableCatalogRow                        Tuple (in __tables heap)
+//!   ┌─────────────────┐                   ┌─────────────────┐
+//!   │ table_oid: 100  │   to_values()     │ [BigInt(100),   │
+//!   │ table_name: "x" │ ───────────────►  │  VarChar("x"),  │
+//!   │ first_page: 5   │                   │  BigInt(5),     │
+//!   │ last_page: 10   │                   │  BigInt(10),    │
+//!   │ schema_bin: ... │                   │  Binary(...)]   │
+//!   └─────────────────┘                   └─────────────────┘
+//!
+//!                       from_tuple()
+//!                     ◄───────────────
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::catalog::system_catalog::{SystemCatalogTables, TableCatalogRow};
+//!
+//! // Bootstrap system catalog during database init
+//! let system = SystemCatalogTables::bootstrap(bpm.clone());
+//!
+//! // Insert a new table record
+//! let row = TableCatalogRow {
+//!     table_oid: 100,
+//!     table_name: "users".to_string(),
+//!     first_page_id: 5,
+//!     last_page_id: 10,
+//!     schema_bin: serialized_schema,
+//! };
+//!
+//! let values = row.to_values();
+//! let heap = system.tables.get_table_heap();
+//! heap.insert_tuple_from_values(values, &schema, meta);
+//!
+//! // Scan and reconstruct during recovery
+//! let mut scan = TableScanIterator::new(system.tables.clone());
+//! while let Some((_, tuple)) = scan.next() {
+//!     if let Some(row) = TableCatalogRow::from_tuple(&tuple) {
+//!         // Rebuild in-memory catalog from row
+//!     }
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `SystemCatalogTables` holds `Arc<TableInfo>` for each system table
+//! - Thread-safe access is provided by the underlying `TableHeap` and buffer pool
+//! - Multiple readers can scan system tables concurrently
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{storage_bincode_config, IndexOidT, PageId, TableOidT};
