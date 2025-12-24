@@ -1,24 +1,155 @@
-//! Platform-specific direct I/O implementation for bypassing OS page cache.
+//! # Direct I/O
 //!
-//! # Overview
+//! This module provides cross-platform direct I/O functionality to bypass the OS page cache,
+//! ensuring database operations go directly to disk. This is critical for database systems
+//! to maintain control over buffer management and guarantee transaction durability.
 //!
-//! This module provides cross-platform direct I/O functionality to ensure database operations
-//! go directly to disk rather than being buffered by the OS page cache. This is critical for
-//! database systems to maintain control over buffer management and transaction durability.
+//! ## Architecture
 //!
-//! # Platform Support
+//! ```text
+//!   Standard Buffered I/O                      Direct I/O
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! - **Linux**: Uses `O_DIRECT` flag. Requires strict alignment of memory buffers and file offsets.
-//! - **macOS**: Uses `fcntl(F_NOCACHE)` after opening. Does not enforce strict alignment but recommended.
-//! - **Windows**: Uses `FILE_FLAG_NO_BUFFERING`. Requires strict alignment.
-//! - **Others**: Fallback to standard buffered I/O with warnings.
+//!   ┌─────────────────┐                    ┌─────────────────┐
+//!   │   Application   │                    │   Application   │
+//!   │  (BufferPool)   │                    │  (BufferPool)   │
+//!   └────────┬────────┘                    └────────┬────────┘
+//!            │                                      │
+//!            ▼                                      │
+//!   ┌─────────────────┐                             │
+//!   │  OS Page Cache  │  ← double buffering!       │ bypassed!
+//!   │  (wastes RAM)   │                             │
+//!   └────────┬────────┘                             │
+//!            │                                      │
+//!            ▼                                      ▼
+//!   ┌─────────────────┐                    ┌─────────────────┐
+//!   │      Disk       │                    │      Disk       │
+//!   └─────────────────┘                    └─────────────────┘
 //!
-//! # Key Components
+//!   Problems with buffered I/O:            Benefits of direct I/O:
+//!   • Double caching (app + OS)            • Single cache (app only)
+//!   • Unpredictable eviction               • Controlled eviction (LRU-K)
+//!   • fsync() may be delayed               • Immediate durability
+//!   • Wasted memory                        • Predictable memory usage
+//! ```
 //!
-//! - [`DirectIOConfig`]: Configuration for enabling direct I/O and setting alignment.
-//! - [`AlignedBuffer`]: A memory buffer that ensures proper alignment (e.g., 512 or 4096 bytes).
-//! - [`open_direct_io`]: Opens files with platform-specific direct I/O flags.
-//! - [`read_aligned`] / [`write_aligned`]: I/O operations that handle alignment requirements.
+//! ## Platform Support
+//!
+//! | Platform | Mechanism               | Alignment Required | Notes                    |
+//! |----------|-------------------------|--------------------|--------------------------|
+//! | Linux    | `O_DIRECT` flag         | **Yes** (strict)   | Buffer, offset, size     |
+//! | macOS    | `fcntl(F_NOCACHE)`      | No (recommended)   | Best-effort cache bypass |
+//! | Windows  | `FILE_FLAG_NO_BUFFERING`| **Yes** (strict)   | Buffer, offset, size     |
+//! | Others   | Buffered I/O fallback   | No                 | Warning logged           |
+//!
+//! ## AlignedBuffer Memory Layout
+//!
+//! ```text
+//!   AlignedBuffer (alignment = 512)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Memory Address:  0x...000  0x...200  0x...400  0x...600  0x...800
+//!                    │         │         │         │         │
+//!                    ▼         ▼         ▼         ▼         ▼
+//!   ┌────────────────┬─────────┬─────────┬─────────┬─────────┐
+//!   │  Sector 0      │ Sector 1│ Sector 2│ Sector 3│   ...   │
+//!   │  (512 bytes)   │         │         │         │         │
+//!   └────────────────┴─────────┴─────────┴─────────┴─────────┘
+//!   ▲
+//!   │
+//!   ptr is aligned to 512-byte boundary (ptr % 512 == 0)
+//!
+//!   Layout: { ptr: *mut u8, size: usize, layout: Layout }
+//!   - Allocated via std::alloc::alloc_zeroed with proper Layout
+//!   - Deallocated in Drop with matching Layout
+//!   - Send + Sync for cross-thread usage
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component          | Description                                          |
+//! |--------------------|------------------------------------------------------|
+//! | `DirectIOConfig`   | Configuration: enabled flag and alignment (512/4096)|
+//! | `AlignedBuffer`    | Heap-allocated buffer with guaranteed alignment      |
+//! | `open_direct_io()` | Open file with platform-specific direct I/O flags    |
+//! | `read_aligned()`   | Read into new AlignedBuffer with alignment handling  |
+//! | `read_aligned_into()`| Read into user-provided buffer (bounce if needed) |
+//! | `write_aligned()`  | Write with alignment validation (or bounce buffer)   |
+//! | `sync_file()`      | fsync or flush based on durability requirements      |
+//!
+//! ## Core Operations
+//!
+//! | Function                  | Description                                    |
+//! |---------------------------|------------------------------------------------|
+//! | `create_aligned_buffer()` | Allocate zeroed buffer with alignment          |
+//! | `round_up_to_alignment()` | Round size up to alignment boundary            |
+//! | `is_aligned()`            | Check if buffer pointer is aligned             |
+//! | `is_size_aligned()`       | Check if size is multiple of alignment         |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::direct_io::{
+//!     DirectIOConfig, AlignedBuffer, open_direct_io,
+//!     read_aligned, write_aligned, sync_file,
+//! };
+//!
+//! // Configure direct I/O (typically 512 or 4096 byte alignment)
+//! let config = DirectIOConfig {
+//!     enabled: true,
+//!     alignment: 4096,
+//! };
+//!
+//! // Open file with direct I/O
+//! let mut file = open_direct_io("data.db", true, true, true, &config)?;
+//!
+//! // Create aligned buffer for a page
+//! let mut buffer = AlignedBuffer::new(4096, config.alignment);
+//! buffer[0..4].copy_from_slice(b"PAGE");
+//!
+//! // Write at aligned offset
+//! write_aligned(&mut file, 0, &buffer, &config)?;
+//!
+//! // Ensure durability
+//! sync_file(&mut file, true)?;
+//!
+//! // Read back
+//! let read_buffer = read_aligned(&mut file, 0, 4096, &config)?;
+//! assert_eq!(&read_buffer[0..4], b"PAGE");
+//! ```
+//!
+//! ## Alignment Requirements
+//!
+//! For Linux and Windows direct I/O, **all three** must be aligned:
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  Alignment Checklist (Linux/Windows)                                    │
+//!   │                                                                         │
+//!   │  ✓ Buffer pointer:  buffer.as_ptr() % alignment == 0                    │
+//!   │  ✓ File offset:     offset % alignment == 0                             │
+//!   │  ✓ I/O size:        size % alignment == 0                               │
+//!   │                                                                         │
+//!   │  If any fails → EINVAL / ERROR_INVALID_PARAMETER                        │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `AlignedBuffer` is `Send + Sync` (owns memory exclusively)
+//! - `DirectIOConfig` is `Clone` (no shared state)
+//! - File handles should be protected by caller (e.g., `Mutex<File>`)
+//! - Multiple threads can use separate `AlignedBuffer` instances safely
+//!
+//! ## Error Handling
+//!
+//! | Error Condition             | Result                                      |
+//! |-----------------------------|---------------------------------------------|
+//! | Unaligned offset (strict)   | `Err(InvalidInput)` with message            |
+//! | Unaligned size (strict)     | `Err(InvalidInput)` with message            |
+//! | Unaligned buffer (strict)   | Automatic bounce buffer (transparent)       |
+//! | Zero alignment config       | `Err(InvalidInput)` - invalid configuration |
+//! | Non-power-of-two alignment  | `Err(InvalidInput)` - invalid configuration |
 
 use log::{debug, warn};
 use std::alloc::{alloc_zeroed, dealloc, Layout};
