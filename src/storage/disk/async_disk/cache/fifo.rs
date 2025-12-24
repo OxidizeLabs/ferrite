@@ -1,335 +1,286 @@
+//! # FIFO (First In, First Out) Cache Implementation
+//!
+//! This module provides a high-performance FIFO cache that evicts the oldest (first inserted)
+//! items when capacity is reached. FIFO provides predictable, deterministic eviction behavior
+//! without the complexity of tracking access patterns.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                          FIFOCache<K, V>                                 │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  cache: HashMap<Arc<K>, Arc<V>>                                    │ │
+//!   │   │                                                                    │ │
+//!   │   │  ┌─────────────┬────────────────────────────────────────────────┐  │ │
+//!   │   │  │   Arc<K>    │  Arc<V>                                        │  │ │
+//!   │   │  ├─────────────┼────────────────────────────────────────────────┤  │ │
+//!   │   │  │  Arc(key1)  │  Arc(value1)                                   │  │ │
+//!   │   │  │  Arc(key2)  │  Arc(value2)                                   │  │ │
+//!   │   │  │  Arc(key3)  │  Arc(value3)                                   │  │ │
+//!   │   │  └─────────────┴────────────────────────────────────────────────┘  │ │
+//!   │   │                                                                    │ │
+//!   │   │  O(1) lookup by key (via hash)                                     │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  insertion_order: VecDeque<Arc<K>>                                 │ │
+//!   │   │                                                                    │ │
+//!   │   │  front ──► [Arc(key1)] ─ [Arc(key2)] ─ [Arc(key3)] ◄── back        │ │
+//!   │   │            (oldest)                      (newest)                  │ │
+//!   │   │                                                                    │ │
+//!   │   │  O(1) pop_front for FIFO eviction                                  │ │
+//!   │   │  O(1) push_back for new insertions                                 │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   capacity: usize                                                        │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## FIFO Eviction Flow
+//!
+//! ```text
+//!   insert(new_key, new_value)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Key already exists?                                                    │
+//!   │                                                                        │
+//!   │   YES → Update value, keep insertion position, return old value        │
+//!   │   NO  → Continue to capacity check                                     │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Cache at capacity?                                                     │
+//!   │                                                                        │
+//!   │   NO  → Add to HashMap + push_back to VecDeque                         │
+//!   │   YES → Evict oldest, then add new entry                               │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼ (capacity reached)
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ FIFO Eviction:                                                         │
+//!   │                                                                        │
+//!   │   1. pop_front() from VecDeque → oldest Arc<K>                         │
+//!   │   2. Skip if stale (key not in HashMap)                                │
+//!   │   3. Remove from HashMap                                               │
+//!   │   4. Add new entry: HashMap.insert + VecDeque.push_back                │
+//!   │                                                                        │
+//!   │   Eviction is O(1) amortized (may skip stale entries)                  │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## FIFO vs Other Policies
+//!
+//! ```text
+//!   Access pattern: A, B, C, A, A, A, D  (A accessed 4 times, others 1 each)
+//!   Cache capacity: 3
+//!
+//!   FIFO (insertion-order based):
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!     After A,B,C: [A, B, C]  (A = oldest, C = newest)
+//!     After A,A,A: [A, B, C]  (accesses don't change order)
+//!     Insert D:    [B, C, D]  ← A evicted (oldest) despite 4 accesses!
+//!
+//!   LRU (recency-based):
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!     After A,B,C: [C, B, A]  (A = MRU)
+//!     After A,A,A: [A, C, B]  (A moves to MRU each time)
+//!     Insert D:    [D, A, C]  ← B evicted (LRU)
+//!
+//!   Key difference: FIFO ignores access patterns, LRU adapts to them.
+//!   FIFO is simpler but can evict hot items.
+//! ```
+//!
+//! ## Stale Entry Handling
+//!
+//! ```text
+//!   Stale entries occur when:
+//!   - An item is removed via remove() but VecDeque entry remains
+//!   - The update path creates a new HashMap entry but keeps old VecDeque entry
+//!
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Initial state:
+//!     HashMap:     { A: v1, B: v2, C: v3 }
+//!     VecDeque:    [A, B, C]
+//!
+//!   After remove(&B):
+//!     HashMap:     { A: v1, C: v3 }         ← B removed
+//!     VecDeque:    [A, B, C]                ← B still present (STALE)
+//!
+//!   During eviction:
+//!     1. pop_front() → A (valid, evict)
+//!     2. pop_front() → B (stale, skip)      ← Lazy cleanup
+//!     3. pop_front() → C (valid, evict)
+//!
+//!   ═══════════════════════════════════════════════════════════════════════════
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component          | Type                    | Purpose                       |
+//! |--------------------|-------------------------|-------------------------------|
+//! | `cache`            | `HashMap<Arc<K>,Arc<V>>`| O(1) key-value storage        |
+//! | `insertion_order`  | `VecDeque<Arc<K>>`      | Tracks insertion order        |
+//! | `capacity`         | `usize`                 | Maximum entries               |
+//!
+//! ## Core Operations (CoreCache)
+//!
+//! | Method           | Complexity | Description                              |
+//! |------------------|------------|------------------------------------------|
+//! | `new(capacity)`  | O(1)       | Create cache with given capacity         |
+//! | `insert(k, v)`   | O(1)*      | Insert/update, may trigger eviction      |
+//! | `get(&k)`        | O(1)       | Get value (no order change in FIFO)      |
+//! | `contains(&k)`   | O(1)       | Check if key exists                      |
+//! | `len()`          | O(1)       | Current number of entries                |
+//! | `capacity()`     | O(1)       | Maximum capacity                         |
+//! | `clear()`        | O(n)       | Remove all entries                       |
+//!
+//! \* Amortized, may skip stale entries during eviction
+//!
+//! ## FIFO-Specific Operations (FIFOCacheTrait)
+//!
+//! | Method                | Complexity | Description                          |
+//! |-----------------------|------------|--------------------------------------|
+//! | `pop_oldest()`        | O(1)*      | Remove and return oldest entry       |
+//! | `peek_oldest()`       | O(n)*      | Peek at oldest without removing      |
+//! | `pop_oldest_batch(n)` | O(n)       | Remove n oldest entries              |
+//! | `age_rank(&k)`        | O(n)       | Get position (0 = oldest)            |
+//!
+//! \* May need to skip stale entries
+//!
+//! ## Performance Characteristics
+//!
+//! | Operation          | Time       | Notes                              |
+//! |--------------------|------------|------------------------------------|
+//! | `get`              | O(1)       | HashMap lookup only                |
+//! | `insert` (no evict)| O(1)       | HashMap + VecDeque push            |
+//! | `insert` (evict)   | O(1)*      | + pop_front + HashMap remove       |
+//! | `pop_oldest`       | O(1)*      | pop_front + HashMap remove         |
+//! | `peek_oldest`      | O(n)*      | May scan for valid entry           |
+//! | `age_rank`         | O(n)       | Linear scan of VecDeque            |
+//! | Per-entry overhead | ~48 bytes  | 2 × Arc + HashMap + VecDeque entry |
+//!
+//! \* Amortized, skipping stale entries
+//!
+//! ## Trade-offs
+//!
+//! | Aspect           | Pros                              | Cons                            |
+//! |------------------|-----------------------------------|---------------------------------|
+//! | Simplicity       | No access tracking needed         | Can evict hot items             |
+//! | Predictability   | Deterministic eviction order      | Ignores access patterns         |
+//! | Performance      | O(1) get (no order update)        | O(n) for age_rank, peek         |
+//! | Memory           | Arc enables zero-copy sharing     | Arc overhead per entry          |
+//!
+//! ## When to Use
+//!
+//! **Use FIFO when:**
+//! - Eviction order should be predictable and deterministic
+//! - Access patterns don't strongly indicate item importance
+//! - Simplicity is preferred over adaptive behavior
+//! - All items have roughly equal access probability
+//!
+//! **Avoid FIFO when:**
+//! - Hot items should be retained (use LRU or LFU)
+//! - Access patterns indicate item importance
+//! - Scan resistance is needed (use LRU-K)
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::cache::fifo::FIFOCache;
+//! use crate::storage::disk::async_disk::cache::cache_traits::{
+//!     CoreCache, FIFOCacheTrait,
+//! };
+//!
+//! // Create cache
+//! let mut cache: FIFOCache<String, i32> = FIFOCache::new(100);
+//!
+//! // Insert items
+//! cache.insert("key1".to_string(), 100);
+//! cache.insert("key2".to_string(), 200);
+//! cache.insert("key3".to_string(), 300);
+//!
+//! // Get doesn't affect order (unlike LRU)
+//! if let Some(value) = cache.get(&"key1".to_string()) {
+//!     println!("Got: {}", value);
+//! }
+//!
+//! // Check age rank (0 = oldest)
+//! assert_eq!(cache.age_rank(&"key1".to_string()), Some(0)); // oldest
+//! assert_eq!(cache.age_rank(&"key3".to_string()), Some(2)); // newest
+//!
+//! // Peek at oldest without removing
+//! if let Some((key, value)) = cache.peek_oldest() {
+//!     println!("Oldest: {} = {}", key, value);
+//! }
+//!
+//! // Pop oldest (FIFO eviction)
+//! if let Some((key, value)) = cache.pop_oldest() {
+//!     println!("Evicted: {} = {}", key, value);
+//! }
+//!
+//! // Batch eviction
+//! let evicted = cache.pop_oldest_batch(2);
+//! println!("Batch evicted {} items", evicted.len());
+//!
+//! // Thread-safe usage
+//! use std::sync::{Arc, RwLock};
+//! let shared_cache = Arc::new(RwLock::new(FIFOCache::<u64, Vec<u8>>::new(1000)));
+//!
+//! // Write access
+//! {
+//!     let mut cache = shared_cache.write().unwrap();
+//!     cache.insert(page_id, page_data);
+//! }
+//!
+//! // Read access
+//! {
+//!     let cache = shared_cache.read().unwrap();
+//!     if let Some(data) = cache.get(&page_id) {
+//!         // use data
+//!     }
+//! }
+//! ```
+//!
+//! ## Comparison with Other Policies
+//!
+//! | Policy   | Eviction Basis     | Get Time | Evict Time | Best For              |
+//! |----------|--------------------|----------|------------|-----------------------|
+//! | FIFO     | Insertion order    | O(1)     | O(1)       | Predictable behavior  |
+//! | LRU      | Recency            | O(1)*    | O(1)       | Temporal locality     |
+//! | LFU      | Frequency          | O(1)     | O(n)       | Stable access patterns|
+//! | LRU-K    | K-th access        | O(1)     | O(n)       | Scan resistance       |
+//!
+//! \* LRU get requires order update
+//!
+//! ## Thread Safety
+//!
+//! - `FIFOCache` is **NOT thread-safe**
+//! - Wrap in `Arc<RwLock<FIFOCache>>` for concurrent access
+//! - Designed for single-threaded use with external synchronization
+//! - Follows Rust's zero-cost abstractions principle
+//!
+//! ## Implementation Notes
+//!
+//! - **Arc Sharing**: Keys and values wrapped in `Arc` for zero-copy sharing
+//! - **Stale Entries**: VecDeque may contain entries not in HashMap (lazy cleanup)
+//! - **Update Semantics**: Updating existing key preserves insertion position
+//! - **Zero Capacity**: Supported - rejects all insertions
+
 use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::Hash;
 use std::sync::Arc;
-/// # FIFO (First In, First Out) Cache Implementation
+
+/// FIFO (First In, First Out) Cache.
 ///
-/// This module provides a high-performance FIFO cache that evicts the oldest (first inserted)
-/// items when the cache reaches capacity. The implementation is optimized for use in database
-/// buffer pool management and other scenarios requiring predictable eviction patterns.
-///
-/// ## How It Works
-///
-/// The FIFO cache maintains two core data structures:
-/// - **HashMap<Arc<K>, Arc<V>>**: Provides O(1) average-case lookups, insertions, and deletions
-/// - **VecDeque<Arc<K>>**: Tracks insertion order for O(1) FIFO eviction from the front
-///
-/// When the cache reaches capacity, the oldest item (at the front of the VecDeque) is evicted
-/// to make room for new insertions. This ensures predictable cache behavior where the
-/// "stalest" data is always removed first.
-///
-/// ## Time Complexity
-///
-/// | Operation | Average Case | Worst Case | Notes |
-/// |-----------|--------------|------------|-------|
-/// | `get()`   | O(1)         | O(n)       | HashMap lookup + Arc comparison |
-/// | `insert()`| O(1)         | O(n)       | HashMap insert + VecDeque push |
-/// | `remove()`| O(n)         | O(n)       | Must scan VecDeque to find key |
-/// | `eviction`| O(1)         | O(1)       | VecDeque pop_front + HashMap remove |
-/// | `clear()` | O(n)         | O(n)       | Clear both data structures |
-/// | `age_rank()`| O(n)       | O(n)       | Linear scan of insertion order |
-///
-/// **Note**: `get()` and `insert()` require Arc<K> comparison which may scan the HashMap
-/// in the worst case, but typically perform at O(1) due to hash distribution.
-///
-/// ## Space Complexity
-///
-/// - **Memory Usage**: O(capacity)
-/// - **Storage**: Each key and value is wrapped in Arc<> for zero-copy sharing
-/// - **Overhead**: HashMap overhead + VecDeque overhead + Arc reference counting
-/// - **Stale Entries**: VecDeque may temporarily contain more entries than HashMap
-///   during rapid insertions/evictions, but this is bounded and cleaned up lazily
-///
-/// ## Concurrency Model
-///
-/// **⚠️ IMPORTANT: This cache is NOT thread-safe by design.**
-///
-/// The FIFOCache is designed for single-threaded use within a thread-safe wrapper.
-/// In Ferrite, it should be used as:
-///
-/// ```rust,no_run
-/// # use std::sync::{Arc, RwLock};
-/// # use std::collections::HashMap;
-/// # use std::collections::VecDeque;
-/// # use std::hash::Hash;
-/// #
-/// # #[derive(Debug)]
-/// # pub struct FIFOCache<K, V> where K: Eq + Hash {
-/// #     capacity: usize,
-/// #     cache: HashMap<Arc<K>, Arc<V>>,
-/// #     insertion_order: VecDeque<Arc<K>>,
-/// # }
-/// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self {
-/// #         FIFOCache {
-/// #             capacity,
-/// #             cache: HashMap::with_capacity(capacity),
-/// #             insertion_order: VecDeque::with_capacity(capacity),
-/// #         }
-/// #     }
-/// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> { None }
-/// # }
-///
-/// // Correct usage in multithreaded environment
-/// let thread_safe_cache = Arc::new(RwLock::new(FIFOCache::new(1000)));
-///
-/// // Multiple threads can safely access through the RwLock
-/// let cache_clone = thread_safe_cache.clone();
-/// std::thread::spawn(move || {
-///     let mut cache = cache_clone.write().unwrap();
-///     cache.insert("key".to_string(), "value".to_string());
-/// });
-/// ```
-///
-/// **Why this design?**
-/// - Avoids internal locking overhead for single-threaded scenarios
-/// - Allows the wrapper to choose appropriate synchronization (RwLock, Mutex, etc.)
-/// - Enables lock-free optimizations in single-threaded contexts
-/// - Follows Rust's principle of zero-cost abstractions
-///
-/// ## Limitations
-///
-/// 1. **No Thread Safety**: Must be wrapped in Arc<RwLock<>> or Arc<Mutex<>> for concurrent use
-/// 2. **No TTL/Expiration**: Items are only evicted based on insertion order, not time
-/// 3. **Key Comparison Overhead**: Uses Arc<K> which requires dereferencing for comparisons
-/// 4. **Memory Overhead**: Arc<> wrapper adds memory overhead vs. direct ownership
-/// 5. **Stale Entry Accumulation**: VecDeque may temporarily grow larger than capacity
-/// 6. **No Custom Eviction**: Strictly FIFO - cannot customize eviction policy
-/// 7. **Remove Performance**: O(n) removal requires scanning the insertion order queue
-///
-/// ## Usage Examples
-///
-/// ### Basic Single-Threaded Usage
-///
-/// ```rust
-/// # use std::collections::HashMap;
-/// # use std::collections::VecDeque;
-/// # use std::hash::Hash;
-/// # use std::sync::Arc;
-/// # trait CoreCache<K, V> {
-/// #     fn len(&self) -> usize;
-/// #     fn contains(&self, key: &K) -> bool;
-/// # }
-/// # #[derive(Debug)]
-/// # pub struct FIFOCache<K, V> where K: Eq + Hash {
-/// #     capacity: usize,
-/// #     cache: HashMap<Arc<K>, Arc<V>>,
-/// #     insertion_order: VecDeque<Arc<K>>,
-/// # }
-/// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self {
-/// #         FIFOCache {
-/// #             capacity,
-/// #             cache: HashMap::with_capacity(capacity),
-/// #             insertion_order: VecDeque::with_capacity(capacity),
-/// #         }
-/// #     }
-/// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> {
-/// #         if self.cache.len() >= self.capacity {
-/// #             self.insertion_order.pop_front();
-/// #         }
-/// #         let key_arc = Arc::new(key);
-/// #         let value_arc = Arc::new(value);
-/// #         self.insertion_order.push_back(key_arc.clone());
-/// #         self.cache.insert(key_arc, value_arc)
-/// #     }
-/// # }
-/// # impl<K, V> CoreCache<K, V> for FIFOCache<K, V> where K: Eq + Hash {
-/// #     fn len(&self) -> usize { self.cache.len() }
-/// #     fn contains(&self, key: &K) -> bool {
-/// #         self.cache.keys().any(|k| k.as_ref() == key)
-/// #     }
-/// # }
-///
-/// let mut cache = FIFOCache::new(3);
-///
-/// // Insert items
-/// cache.insert("key1".to_string(), "value1".to_string());
-/// cache.insert("key2".to_string(), "value2".to_string());
-/// cache.insert("key3".to_string(), "value3".to_string());
-///
-/// // Cache is now at capacity
-/// assert_eq!(cache.len(), 3);
-///
-/// // Next insertion will evict the oldest item ("key1")
-/// cache.insert("key4".to_string(), "value4".to_string());
-/// assert_eq!(cache.len(), 3);
-/// assert!(!cache.contains(&"key1".to_string()));
-/// assert!(cache.contains(&"key4".to_string()));
-/// ```
-///
-/// ### Thread-Safe Usage in Ferrite
-///
-/// ```rust,no_run
-/// use std::sync::{Arc, RwLock};
-/// # use std::collections::HashMap;
-/// # use std::collections::VecDeque;
-/// # use std::hash::Hash;
-/// # trait CoreCache<K, V> {
-/// #     fn get(&self, key: &K) -> Option<&V>;
-/// # }
-/// # #[derive(Debug)]
-/// # pub struct FIFOCache<K, V> where K: Eq + Hash {
-/// #     capacity: usize,
-/// #     cache: HashMap<Arc<K>, Arc<V>>,
-/// #     insertion_order: VecDeque<Arc<K>>,
-/// # }
-/// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self {
-/// #         FIFOCache {
-/// #             capacity,
-/// #             cache: HashMap::with_capacity(capacity),
-/// #             insertion_order: VecDeque::with_capacity(capacity),
-/// #         }
-/// #     }
-/// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> { None }
-/// # }
-/// # impl<K, V> CoreCache<K, V> for FIFOCache<K, V> where K: Eq + Hash {
-/// #     fn get(&self, key: &K) -> Option<&V> { None }
-/// # }
-///
-/// // Create thread-safe cache
-/// let cache = Arc::new(RwLock::new(FIFOCache::new(1000)));
-///
-/// // Multiple threads can safely access
-/// let cache_clone = cache.clone();
-/// let handle = std::thread::spawn(move || {
-///     // Write access
-///     {
-///         let mut cache_guard = cache_clone.write().unwrap();
-///         cache_guard.insert("key".to_string(), "data".to_string());
-///     }
-///
-///     // Read access
-///     {
-///         let cache_guard = cache_clone.read().unwrap();
-///         if let Some(value) = cache_guard.get(&"key".to_string()) {
-///             println!("Found: {}", value);
-///         }
-///     }
-/// });
-///
-/// handle.join().unwrap();
-/// ```
-///
-/// ### FIFO-Specific Operations
-///
-/// ```rust,no_run
-/// # use std::collections::HashMap;
-/// # use std::collections::VecDeque;
-/// # use std::hash::Hash;/// #
-/// use std::sync::Arc;
-///
-/// trait CoreCache<K, V> {}
-/// # trait FIFOCacheTrait<K, V> {
-/// #     fn peek_oldest(&self) -> Option<(&K, &V)>;
-/// #     fn pop_oldest(&mut self) -> Option<(K, V)>;
-/// #     fn pop_oldest_batch(&mut self, count: usize) -> Vec<(K, V)>;
-/// #     fn age_rank(&self, key: &K) -> Option<usize>;
-/// # }
-/// # #[derive(Debug)]
-/// # pub struct FIFOCache<K, V> where K: Eq + Hash {
-/// #     capacity: usize,
-/// #     cache: HashMap<Arc<K>, Arc<V>>,
-/// #     insertion_order: VecDeque<Arc<K>>,
-/// # }
-/// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self {
-/// #         FIFOCache {
-/// #             capacity,
-/// #             cache: HashMap::with_capacity(capacity),
-/// #             insertion_order: VecDeque::with_capacity(capacity),
-/// #         }
-/// #     }
-/// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> { None }
-/// # }
-/// # impl<K, V> CoreCache<K, V> for FIFOCache<K, V> where K: Eq + Hash {}
-/// # impl<K, V> FIFOCacheTrait<K, V> for FIFOCache<K, V> where K: Eq + Hash {
-/// #     fn peek_oldest(&self) -> Option<(&K, &V)> { None }
-/// #     fn pop_oldest(&mut self) -> Option<(K, V)> { None }
-/// #     fn pop_oldest_batch(&mut self, count: usize) -> Vec<(K, V)> { Vec::new() }
-/// #     fn age_rank(&self, key: &K) -> Option<usize> { None }
-/// # }
-///
-/// let mut cache = FIFOCache::new(5);
-///
-/// // Fill the cache
-/// for i in 0..5 {
-///     cache.insert(format!("key{}", i), format!("value{}", i));
-/// }
-///
-/// // Peek at oldest item without removing it
-/// if let Some((key, value)) = cache.peek_oldest() {
-///     println!("Oldest: {} -> {}", key, value);
-/// }
-///
-/// // Remove oldest item
-/// if let Some((key, value)) = cache.pop_oldest() {
-///     println!("Evicted: {} -> {}", key, value);
-/// }
-///
-/// // Remove multiple oldest items
-/// let evicted = cache.pop_oldest_batch(2);
-/// println!("Batch evicted: {} items", evicted.len());
-///
-/// // Check age rank of a key (0 = oldest, higher = newer)
-/// if let Some(rank) = cache.age_rank(&"key4".to_string()) {
-///     println!("Key age rank: {}", rank);
-/// }
-/// ```
-///
-/// ## Integration with Ferrite Buffer Pool
-///
-/// This cache is designed to be used within Ferrite's buffer pool manager for page caching:
-///
-/// ```rust,no_run
-/// use std::sync::{Arc, RwLock};
-/// # use std::collections::HashMap;
-/// # use std::collections::VecDeque;
-/// # use std::hash::Hash;
-/// # trait CoreCache<K, V> {
-/// #     fn get(&self, key: &K) -> Option<&V>;
-/// # }
-/// # #[derive(Debug)]
-/// # pub struct FIFOCache<K, V> where K: Eq + Hash {
-/// #     capacity: usize,
-/// #     cache: HashMap<Arc<K>, Arc<V>>,
-/// #     insertion_order: VecDeque<Arc<K>>,
-/// # }
-/// # impl<K, V> FIFOCache<K, V> where K: Eq + Hash {
-/// #     pub fn new(capacity: usize) -> Self {
-/// #         FIFOCache {
-/// #             capacity,
-/// #             cache: HashMap::with_capacity(capacity),
-/// #             insertion_order: VecDeque::with_capacity(capacity),
-/// #         }
-/// #     }
-/// #     pub fn insert(&mut self, key: K, value: V) -> Option<Arc<V>> { None }
-/// # }
-/// # impl<K, V> CoreCache<K, V> for FIFOCache<K, V> where K: Eq + Hash {
-/// #     fn get(&self, key: &K) -> Option<&V> { None }
-/// # }
-/// # type PageId = u32;
-/// # type PageData = Vec<u8>;
-///
-/// // In buffer pool manager
-/// struct BufferPool {
-///     page_cache: Arc<RwLock<FIFOCache<PageId, PageData>>>,
-/// }
-///
-/// impl BufferPool {
-///     fn get_page(&self, page_id: PageId) -> Option<PageData> {
-///         let cache = self.page_cache.read().unwrap();
-///         cache.get(&page_id).cloned()
-///     }
-///
-///     fn cache_page(&self, page_id: PageId, data: PageData) {
-///         let mut cache = self.page_cache.write().unwrap();
-///         cache.insert(page_id, data);
-///     }
-/// }
-/// ```
+/// Evicts the oldest (first inserted) item when capacity is reached.
+/// See module-level documentation for details.
 #[derive(Debug)]
 pub struct FIFOCache<K, V>
 where
