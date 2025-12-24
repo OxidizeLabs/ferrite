@@ -1,3 +1,123 @@
+//! # In-Memory Index Iterator
+//!
+//! This module provides a cursor-based iterator for traversing entries in an
+//! in-memory B+ tree index. It supports range scans, full scans, and seeking
+//! with batched result fetching for efficiency.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────┐
+//! │                      IndexIterator State Machine                        │
+//! ├─────────────────────────────────────────────────────────────────────────┤
+//! │                                                                         │
+//! │  ┌─────────────────────────────────────────────────────────────────┐    │
+//! │  │                     IndexIterator                               │    │
+//! │  │  ┌───────────────┬───────────────┬───────────────────────────┐  │    │
+//! │  │  │ current_batch │   position    │        exhausted          │  │    │
+//! │  │  │ [(k1,rid1),   │      ↓        │    false → true when      │  │    │
+//! │  │  │  (k2,rid2),   │   [0,1,2...]  │    no more results        │  │    │
+//! │  │  │  ...]         │               │                           │  │    │
+//! │  │  └───────────────┴───────────────┴───────────────────────────┘  │    │
+//! │  └─────────────────────────────────────────────────────────────────┘    │
+//! │                                                                         │
+//! │  Iteration Flow:                                                        │
+//! │  ┌─────────┐    ┌─────────────┐    ┌─────────────┐    ┌───────────┐    │
+//! │  │  next() │───▶│ pos < len?  │─N─▶│ fetch_batch │───▶│ exhausted?│    │
+//! │  └─────────┘    └──────┬──────┘    └─────────────┘    └─────┬─────┘    │
+//! │                        │ Y                                  │          │
+//! │                        ▼                                    ▼          │
+//! │                 ┌────────────┐                        ┌──────────┐     │
+//! │                 │ Return RID │                        │ Return   │     │
+//! │                 │ pos++      │                        │ None     │     │
+//! │                 └────────────┘                        └──────────┘     │
+//! │                                                                         │
+//! └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Features
+//!
+//! ### Scan Modes
+//! - **Range Scan**: Iterate entries between `start_key` and `end_key`
+//! - **Full Scan**: Iterate all entries in the index (both keys = `None`)
+//!
+//! ### Batched Fetching
+//! Results are fetched in batches from the underlying B+ tree, reducing
+//! lock contention and improving cache locality. The `last_key` field
+//! tracks progress for seamless continuation across batches.
+//!
+//! ### Error Handling
+//! - **Fallible API**: `try_next()` and `try_seek()` return `Result<Option<RID>, String>`
+//! - **Error Storage**: Errors are stored in `last_error` for later retrieval
+//! - **Graceful Degradation**: `Iterator::next()` returns `None` on error
+//!
+//! ## Key Methods
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `new()` | Create iterator with optional range bounds |
+//! | `next()` | Standard iterator - returns next RID |
+//! | `try_next()` | Fallible version that surfaces errors |
+//! | `seek()` | Jump to a specific key position |
+//! | `reset()` | Restart iteration from the beginning |
+//! | `is_end()` | Check if iterator is exhausted |
+//! | `get_rid()` | Peek at current RID without advancing |
+//!
+//! ## Trait Implementations
+//!
+//! - **`Iterator`**: Standard forward iteration, yields `RID`
+//! - **`DoubleEndedIterator`**: Reverse iteration from current batch
+//!
+//! ## Example Usage
+//!
+//! ```ignore
+//! let tree = Arc::new(RwLock::new(BPlusTree::new(4, metadata)));
+//!
+//! // Range scan from key 10 to key 50
+//! let start = Arc::new(create_tuple(10, ...));
+//! let end = Arc::new(create_tuple(50, ...));
+//! let iter = IndexIterator::new(tree.clone(), Some(start), Some(end));
+//!
+//! // Standard iteration
+//! for rid in iter {
+//!     println!("Found RID: {:?}", rid);
+//! }
+//!
+//! // Full scan (all entries)
+//! let full_iter = IndexIterator::new(tree.clone(), None, None);
+//!
+//! // Fallible iteration with error handling
+//! let mut iter = IndexIterator::new(tree.clone(), Some(start), Some(end));
+//! loop {
+//!     match iter.try_next() {
+//!         Ok(Some(rid)) => println!("RID: {:?}", rid),
+//!         Ok(None) => break,  // End of iteration
+//!         Err(e) => {
+//!             eprintln!("Error: {}", e);
+//!             break;
+//!         }
+//!     }
+//! }
+//!
+//! // Seek to specific key
+//! iter.reset();
+//! if let Some(rid) = iter.seek(&search_key) {
+//!     println!("Found at {:?}", rid);
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! The iterator holds an `Arc<RwLock<BPlusTree>>` reference, acquiring read
+//! locks only during batch fetches. This allows concurrent read access to
+//! the tree while iterating.
+//!
+//! ## Limitations
+//!
+//! - Both `start_key` and `end_key` must be `Some` or both `None`
+//! - `DoubleEndedIterator` only works within the current batch
+//! - Single-column index keys only (per B+ tree limitation)
+
 use crate::common::rid::RID;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::table::tuple::Tuple;
