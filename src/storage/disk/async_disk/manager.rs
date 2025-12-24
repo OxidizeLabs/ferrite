@@ -1,19 +1,239 @@
-//! AsyncDiskManager Implementation
+//! # Async Disk Manager
 //!
-//! This module provides the `AsyncDiskManager`, a high-performance, asynchronous disk management
-//! system designed for database workloads. It integrates several advanced features to optimize
-//! I/O operations:
+//! This module provides `AsyncDiskManager`, a high-performance asynchronous disk management
+//! system designed for database workloads. It integrates caching, write buffering, work-stealing
+//! scheduling, and comprehensive metrics to optimize I/O operations.
 //!
-//! - **Asynchronous I/O**: Uses `tokio` for non-blocking file operations.
-//! - **Direct I/O Support**: Optional support for Direct I/O (O_DIRECT) to bypass OS page cache.
-//! - **Caching**: Integrated cache manager for hot pages with LRU-based eviction.
-//! - **Write Buffering**: Sophisticated write manager for buffering writes and batching disk operations.
-//! - **Work Stealing Scheduler**: Priority-based task scheduling with work stealing.
-//! - **Prefetching**: Machine learning-based prefetcher to predict and load future page accesses.
-//! - **Metrics & Monitoring**: Comprehensive metrics collection for performance analysis.
+//! ## Architecture
 //!
-//! The `AsyncDiskManager` serves as the primary interface for upper layers of the database to
-//! interact with persistent storage, abstracting away the complexities of concurrent I/O and durability.
+//! ```text
+//!   Buffer Pool Manager / Query Execution
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!                          │
+//!                          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                        AsyncDiskManager                                 │
+//!   │                                                                         │
+//!   │  ┌──────────────────────────────────────────────────────────────────┐   │
+//!   │  │                    Read/Write Request                            │   │
+//!   │  └───────────────────────────┬──────────────────────────────────────┘   │
+//!   │                              │                                          │
+//!   │         ┌────────────────────┼────────────────────┐                     │
+//!   │         ▼                    ▼                    ▼                     │
+//!   │  ┌─────────────┐     ┌─────────────┐     ┌───────────────┐              │
+//!   │  │CacheManager │     │WriteManager │     │WorkStealing   │              │
+//!   │  │             │     │             │     │Scheduler      │              │
+//!   │  │ Hot/Warm/   │     │ Buffer &    │     │               │              │
+//!   │  │ Cold Tiers  │     │ Batch       │     │ Priority      │              │
+//!   │  │ (LRU-based) │     │ Writes      │     │ Task Queues   │              │
+//!   │  └──────┬──────┘     └──────┬──────┘     └───────┬───────┘              │
+//!   │         │                   │                    │                      │
+//!   │         └───────────────────┼────────────────────┘                      │
+//!   │                             ▼                                           │
+//!   │  ┌──────────────────────────────────────────────────────────────────┐   │
+//!   │  │                      AsyncIOEngine                               │   │
+//!   │  │  • Worker threads for async I/O                                  │   │
+//!   │  │  • Direct I/O support (O_DIRECT / F_NOCACHE)                     │   │
+//!   │  │  • Aligned buffer management                                     │   │
+//!   │  └───────────────────────────┬──────────────────────────────────────┘   │
+//!   │                              │                                          │
+//!   │  ┌──────────────────────────────────────────────────────────────────┐   │
+//!   │  │                    MetricsCollector                              │   │
+//!   │  │  • Latency, throughput, IOPS tracking                            │   │
+//!   │  │  • Health scoring & alerts                                       │   │
+//!   │  │  • Prometheus export                                             │   │
+//!   │  └──────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!                              │
+//!                              ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                    Disk (DB File + WAL File)                            │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Read Path
+//!
+//! ```text
+//!   read_page(page_id)
+//!        │
+//!        ▼
+//!   ┌────────────────┐     ┌────────────────┐
+//!   │ Check Cache    │────►│ Cache Hit?     │
+//!   └────────────────┘     └───────┬────────┘
+//!                                  │
+//!                    ┌─────────────┴─────────────┐
+//!                    │ Yes                       │ No
+//!                    ▼                           ▼
+//!             ┌─────────────┐           ┌────────────────────┐
+//!             │ Return      │           │ work_stealing?     │
+//!             │ cached data │           └─────────┬──────────┘
+//!             └─────────────┘                     │
+//!                                   ┌─────────────┴─────────────┐
+//!                                   │ Yes                       │ No
+//!                                   ▼                           ▼
+//!                          ┌────────────────┐          ┌────────────────┐
+//!                          │ Submit to      │          │ Direct read    │
+//!                          │ Scheduler      │          │ via IOEngine   │
+//!                          └───────┬────────┘          └───────┬────────┘
+//!                                  │                           │
+//!                                  └───────────┬───────────────┘
+//!                                              ▼
+//!                                    ┌─────────────────┐
+//!                                    │ Store in cache  │
+//!                                    │ Return data     │
+//!                                    └─────────────────┘
+//! ```
+//!
+//! ## Write Path
+//!
+//! ```text
+//!   write_page(page_id, data)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  WriteManager.buffer_write()                                           │
+//!   │                                                                        │
+//!   │  ┌──────────────────┐     ┌──────────────────┐                         │
+//!   │  │ Add to write     │────►│ Buffer full?     │                         │
+//!   │  │ buffer           │     └─────────┬────────┘                         │
+//!   │  └──────────────────┘               │                                  │
+//!   │                       ┌─────────────┴─────────────┐                    │
+//!   │                       │ Yes                       │ No                 │
+//!   │                       ▼                           ▼                    │
+//!   │              ┌────────────────┐          ┌────────────────┐            │
+//!   │              │ Return pages   │          │ Return None    │            │
+//!   │              │ to flush       │          │ (buffered)     │            │
+//!   │              └───────┬────────┘          └────────────────┘            │
+//!   └──────────────────────┼─────────────────────────────────────────────────┘
+//!                          │
+//!                          ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  write_pages_to_disk()                                                 │
+//!   │                                                                        │
+//!   │  For each (page_id, data):                                             │
+//!   │    IOEngine.write_page(page_id, data)                                  │
+//!   │                                                                        │
+//!   │  Apply durability policy (fsync based on FsyncPolicy)                  │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component             | Description                                          |
+//! |-----------------------|------------------------------------------------------|
+//! | `AsyncDiskManager`    | Main entry point for all disk I/O operations        |
+//! | `AsyncIOEngine`       | Low-level async I/O with worker threads             |
+//! | `CacheManager`        | Multi-tier LRU cache (hot/warm/cold)                 |
+//! | `WriteManager`        | Write buffering and batch coalescing                 |
+//! | `WorkStealingScheduler`| Priority-based task scheduling                      |
+//! | `MetricsCollector`    | Performance metrics and health monitoring            |
+//!
+//! ## Core Operations
+//!
+//! | Method                    | Description                                      |
+//! |---------------------------|--------------------------------------------------|
+//! | `new()`                   | Create manager with DB and log file paths        |
+//! | `read_page()`             | Read page (from cache or disk)                   |
+//! | `write_page()`            | Buffer write for later flush                     |
+//! | `read_pages_batch()`      | Read multiple pages in one operation             |
+//! | `write_pages_batch()`     | Write multiple pages in one operation            |
+//! | `flush()`                 | Flush buffered writes to disk                    |
+//! | `sync()`                  | Force fsync on DB file                           |
+//! | `sync_log()`              | Force fsync on WAL file                          |
+//! | `read_log()` / `write_log()` | WAL operations for recovery                   |
+//! | `shutdown()`              | Graceful shutdown with flush                     |
+//!
+//! ## Configuration (`DiskManagerConfig`)
+//!
+//! | Option                  | Default | Description                              |
+//! |-------------------------|---------|------------------------------------------|
+//! | `io_threads`            | 4       | Number of I/O worker threads             |
+//! | `cache_size_mb`         | 64      | Cache size in MB (0 = disabled)          |
+//! | `batch_size`            | 32      | Pages per batch for batch operations     |
+//! | `direct_io`             | false   | Enable O_DIRECT / F_NOCACHE              |
+//! | `work_stealing_enabled` | true    | Use work-stealing scheduler              |
+//! | `prefetch_enabled`      | true    | Enable read-ahead prefetching            |
+//! | `fsync_policy`          | OnFlush | When to call fsync (Never/PerWrite/etc.) |
+//! | `compression_enabled`   | false   | Enable page compression                  |
+//!
+//! ## Fsync Policies
+//!
+//! ```text
+//!   FsyncPolicy::Never      → No fsync (fastest, no durability guarantee)
+//!   FsyncPolicy::PerWrite   → fsync after every write (slowest, safest)
+//!   FsyncPolicy::OnFlush    → fsync on explicit flush() calls
+//!   FsyncPolicy::Periodic(n)→ fsync every n milliseconds
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+//!
+//! // Create with default configuration
+//! let config = DiskManagerConfig {
+//!     io_threads: 4,
+//!     cache_size_mb: 128,
+//!     direct_io: true,
+//!     ..Default::default()
+//! };
+//!
+//! let mut manager = AsyncDiskManager::new(
+//!     "data.db".to_string(),
+//!     "wal.log".to_string(),
+//!     config,
+//! ).await?;
+//!
+//! // Write a page
+//! let page_data = vec![0u8; 4096];
+//! manager.write_page(42, page_data).await?;
+//!
+//! // Ensure durability
+//! manager.flush().await?;
+//!
+//! // Read back
+//! let data = manager.read_page(42).await?;
+//!
+//! // Batch operations
+//! let pages = vec![(1, data1), (2, data2), (3, data3)];
+//! manager.write_pages_batch(pages).await?;
+//!
+//! // Graceful shutdown
+//! manager.shutdown().await?;
+//! ```
+//!
+//! ## Metrics and Monitoring
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                        Metrics Available                                │
+//!   │                                                                         │
+//!   │  Performance:           Cache:              Storage:                    │
+//!   │  • Read latency         • Hit ratio         • Buffer utilization        │
+//!   │  • Write latency        • Hot/warm/cold     • Compression ratio         │
+//!   │  • IOPS                 • Promotions        • Flush frequency           │
+//!   │  • Throughput (MB/s)    • Evictions         • Write amplification       │
+//!   │                                                                         │
+//!   │  Export: get_metrics(), export_prometheus_metrics()                     │
+//!   │  Health: health_check(), get_health_report(), get_dashboard_data()      │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `AsyncDiskManager` is designed for concurrent access via `Arc<AsyncDiskManager>`
+//! - Internal components use `RwLock` and `Mutex` for synchronization
+//! - I/O engine uses `Arc<RwLock<AsyncIOEngine>>` for thread-safe access
+//! - Write manager uses internal locking for buffer operations
+//! - Safe to call from multiple tokio tasks concurrently
+//!
+//! ## WAL Handling
+//!
+//! The WAL (Write-Ahead Log) file uses **buffered I/O** (not direct I/O) because:
+//! - Append-heavy workload with variable-length records
+//! - O_DIRECT alignment constraints are impractical for WAL
+//! - OS buffer cache is beneficial for sequential writes
+//! - Durability is ensured via explicit `sync_log()` calls
 
 use super::config::DiskManagerConfig;
 use crate::common::config::{PageId, DB_PAGE_SIZE};
