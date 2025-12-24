@@ -1,3 +1,184 @@
+//! # Disk-Based Extendable Hash Table
+//!
+//! This module provides `DiskExtendableHashTable`, an extendable hash table backed
+//! by the buffer pool manager. It supports dynamic growth/shrinkage through bucket
+//! splitting and merging, and allows non-unique keys.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   Three-Level Structure
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Level 1: Header Page (single page, top-level entry point)
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                    ExtendableHTableHeaderPage                           │
+//!   │                                                                         │
+//!   │   max_depth: 4  (supports up to 2^4 = 16 directory pages)               │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  directory_page_ids[0..16]                                      │   │
+//!   │   │  [Dir0] [Dir0] [Dir0] [Dir0] [Dir1] [Dir1] ...                  │   │
+//!   │   └────┬─────────────────────────────┬──────────────────────────────┘   │
+//!   └────────┼─────────────────────────────┼──────────────────────────────────┘
+//!            │                             │
+//!            ▼                             ▼
+//!   Level 2: Directory Pages (multiple, map hash → bucket)
+//!   ┌─────────────────────────────┐  ┌─────────────────────────────┐
+//!   │ ExtendableHTableDirectoryPage│  │ ExtendableHTableDirectoryPage│
+//!   │                             │  │                             │
+//!   │ global_depth: 2             │  │ global_depth: 2             │
+//!   │                             │  │                             │
+//!   │ bucket_page_ids:            │  │ bucket_page_ids:            │
+//!   │ [B0] [B1] [B0] [B1]         │  │ [B2] [B3] [B2] [B3]         │
+//!   │                             │  │                             │
+//!   │ local_depths:               │  │ local_depths:               │
+//!   │ [1]  [1]  [1]  [1]          │  │ [1]  [1]  [1]  [1]          │
+//!   └───┬────┬────────────────────┘  └───┬────┬────────────────────┘
+//!       │    │                           │    │
+//!       ▼    ▼                           ▼    ▼
+//!   Level 3: Bucket Pages (store actual key-value pairs)
+//!   ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+//!   │ Bucket Page B0  │ │ Bucket Page B1  │ │ Bucket Page B2  │ ...
+//!   │                 │ │                 │ │                 │
+//!   │ [(k1,v1)]       │ │ [(k2,v2)]       │ │ [(k4,v4)]       │
+//!   │ [(k3,v3)]       │ │                 │ │ [(k5,v5)]       │
+//!   └─────────────────┘ └─────────────────┘ └─────────────────┘
+//! ```
+//!
+//! ## Lookup Flow
+//!
+//! ```text
+//!   get_value(key)
+//!        │
+//!        ▼
+//!   ┌────────────────┐
+//!   │ hash = H(key)  │
+//!   └───────┬────────┘
+//!           │
+//!           ▼
+//!   ┌────────────────────────────────────────┐
+//!   │ Header: directory_index =              │
+//!   │         hash >> (32 - header_max_depth)│
+//!   └───────────────────┬────────────────────┘
+//!                       │
+//!                       ▼
+//!   ┌────────────────────────────────────────┐
+//!   │ Directory: bucket_index =              │
+//!   │            hash & ((1 << global_depth) │
+//!   │                      - 1)              │
+//!   └───────────────────┬────────────────────┘
+//!                       │
+//!                       ▼
+//!   ┌────────────────────────────────────────┐
+//!   │ Bucket: linear scan for key match      │
+//!   │         return value if found          │
+//!   └────────────────────────────────────────┘
+//! ```
+//!
+//! ## Bucket Split Process
+//!
+//! ```text
+//!   insert(key, value) when bucket is full
+//!        │
+//!        ▼
+//!   ┌───────────────────────────────────────────────────────────────────────┐
+//!   │                         Before Split                                  │
+//!   │                                                                       │
+//!   │   Directory (global_depth = 1):  [B0] [B0]  ← both point to same      │
+//!   │   Bucket B0 (local_depth = 1):   [k1] [k2] [k3] [FULL!]               │
+//!   └───────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        │  1. Create new bucket B1
+//!        │  2. Increment local_depth of B0 and B1
+//!        │  3. Update directory pointers
+//!        │  4. Redistribute entries based on new bit
+//!        ▼
+//!   ┌───────────────────────────────────────────────────────────────────────┐
+//!   │                         After Split                                   │
+//!   │                                                                       │
+//!   │   Directory (global_depth = 1):  [B0] [B1]  ← now different           │
+//!   │   Bucket B0 (local_depth = 2):   [k1] [k3]  ← keys with bit 0 = 0     │
+//!   │   Bucket B1 (local_depth = 2):   [k2]       ← keys with bit 0 = 1     │
+//!   └───────────────────────────────────────────────────────────────────────┘
+//!
+//!   If global_depth < local_depth after split → directory doubles
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component                  | Description                                   |
+//! |----------------------------|-----------------------------------------------|
+//! | `DiskExtendableHashTable`  | Main struct managing the hash table           |
+//! | `header_page_id`           | Root page ID for lookups                      |
+//! | `hash_fn`                  | Hash function for key → u32 conversion        |
+//! | `directory_max_depth`      | Maximum depth for directory (limits buckets)  |
+//! | `bucket_max_size`          | Maximum entries per bucket before split       |
+//!
+//! ## Core Operations
+//!
+//! | Method          | Description                                          |
+//! |-----------------|------------------------------------------------------|
+//! | `new()`         | Create hash table with header, directory, and bucket |
+//! | `insert()`      | Insert key-value pair, split bucket if full          |
+//! | `get_value()`   | Lookup value by key, returns `Option<RID>`           |
+//! | `remove()`      | Remove key-value pair, merge bucket if empty         |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
+//! use crate::container::hash_function::HashFunction;
+//! use crate::common::rid::RID;
+//! use crate::types_db::value::Value;
+//!
+//! // Create hash table
+//! let mut ht = DiskExtendableHashTable::new(
+//!     "my_index".to_string(),
+//!     bpm.clone(),
+//!     HashFunction::new(),
+//!     4,   // header_max_depth: up to 16 directory pages
+//!     4,   // directory_max_depth: up to 16 buckets per directory
+//!     256, // bucket_max_size: entries per bucket
+//! )?;
+//!
+//! // Insert entries
+//! let key = Value::from(42);
+//! let rid = RID::new(1, 0);
+//! ht.insert(key.clone(), rid);
+//!
+//! // Lookup
+//! let result = ht.get_value(&key);
+//! assert_eq!(result, Some(rid));
+//!
+//! // Remove
+//! ht.remove(&key);
+//! assert_eq!(ht.get_value(&key), None);
+//! ```
+//!
+//! ## Configuration
+//!
+//! | Parameter             | Effect                                          |
+//! |-----------------------|-------------------------------------------------|
+//! | `header_max_depth`    | Controls max directory pages (2^depth)          |
+//! | `directory_max_depth` | Controls max buckets per directory (2^depth)    |
+//! | `bucket_max_size`     | Entries before split; smaller = more splits     |
+//!
+//! ## Thread Safety
+//!
+//! The current implementation is **not thread-safe**. The `insert()` and `remove()`
+//! methods require `&mut self`. External synchronization (e.g., `RwLock`) is needed
+//! for concurrent access. Read-only `get_value()` takes `&self` but may race with
+//! concurrent modifications.
+//!
+//! ## Limitations
+//!
+//! - **Non-unique keys**: Multiple values can be stored for the same key, but only
+//!   the first match is returned by `get_value()`.
+//! - **No range scans**: Hash tables only support point lookups.
+//! - **Insert retry limit**: Failed splits after `MAX_INSERT_RETRIES` cause insert
+//!   to return `false`.
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::config::INVALID_PAGE_ID;
 use crate::common::config::PageId;
