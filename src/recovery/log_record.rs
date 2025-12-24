@@ -1,3 +1,170 @@
+//! # Log Record
+//!
+//! This module defines the `LogRecord` structure used for Write-Ahead Logging (WAL).
+//! Log records capture database operations for crash recovery, enabling the system
+//! to redo committed transactions and undo uncommitted ones after a failure.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                        ┌──────────────────────────────────────────────────────┐
+//!                        │                    LogRecord                         │
+//!                        │                                                      │
+//!                        │  ┌────────────────────────────────────────────────┐  │
+//!                        │  │                    Header                      │  │
+//!                        │  │  ┌──────────┬──────────┬──────────┬─────────┐  │  │
+//!                        │  │  │  size    │   lsn    │  txn_id  │prev_lsn │  │  │
+//!                        │  │  │  (i32)   │(AtomicU64│  (u64)   │  (u64)  │  │  │
+//!                        │  │  └──────────┴──────────┴──────────┴─────────┘  │  │
+//!                        │  │  ┌────────────────────────────────────────┐    │  │
+//!                        │  │  │           log_record_type              │    │  │
+//!                        │  │  │  (Begin|Commit|Abort|Insert|Update|...)│    │  │
+//!                        │  │  └────────────────────────────────────────┘    │  │
+//!                        │  └────────────────────────────────────────────────┘  │
+//!                        │                                                      │
+//!                        │  ┌────────────────────────────────────────────────┐  │
+//!                        │  │              Payload (type-dependent)          │  │
+//!                        │  │                                                │  │
+//!                        │  │  Insert/Delete:  rid + tuple                   │  │
+//!                        │  │  Update:         rid + old_tuple + new_tuple   │  │
+//!                        │  │  NewPage:        prev_page_id + page_id        │  │
+//!                        │  │  Transaction:    (no additional payload)       │  │
+//!                        │  └────────────────────────────────────────────────┘  │
+//!                        └──────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Log Record Types
+//!
+//! | Type | Category | Description |
+//! |------|----------|-------------|
+//! | `Begin` | Transaction | Transaction started |
+//! | `Commit` | Transaction | Transaction committed (durability point) |
+//! | `Abort` | Transaction | Transaction aborted |
+//! | `Insert` | Data | Tuple inserted |
+//! | `MarkDelete` | Data | Tuple marked for deletion |
+//! | `ApplyDelete` | Data | Deletion finalized |
+//! | `RollbackDelete` | Data | Deletion rolled back |
+//! | `Update` | Data | Tuple updated (old → new) |
+//! | `NewPage` | Structure | New page allocated |
+//!
+//! ## LSN Chain (Per-Transaction)
+//!
+//! ```text
+//!   Transaction T1 Log Chain
+//!   ═════════════════════════════════════════════════════════════════▶
+//!
+//!   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+//!   │   BEGIN     │     │   INSERT    │     │   UPDATE    │     │   COMMIT    │
+//!   │   lsn=10    │◀────│   lsn=25    │◀────│   lsn=40    │◀────│   lsn=55    │
+//!   │   prev=∅    │     │   prev=10   │     │   prev=25   │     │   prev=40   │
+//!   └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+//!
+//!   Recovery: Follow prev_lsn chain backward to undo uncommitted operations
+//! ```
+//!
+//! ## Record Layout by Type
+//!
+//! ```text
+//!   Transaction Record (Begin/Commit/Abort):
+//!   ┌────────────────────────────────────────┐
+//!   │ Header: size | lsn | txn_id | prev_lsn │
+//!   │ Type: Begin/Commit/Abort               │
+//!   └────────────────────────────────────────┘
+//!
+//!   Insert/Delete Record:
+//!   ┌────────────────────────────────────────┐
+//!   │ Header: size | lsn | txn_id | prev_lsn │
+//!   │ Type: Insert/MarkDelete/ApplyDelete/...│
+//!   │ Payload: rid + tuple                   │
+//!   └────────────────────────────────────────┘
+//!
+//!   Update Record:
+//!   ┌────────────────────────────────────────┐
+//!   │ Header: size | lsn | txn_id | prev_lsn │
+//!   │ Type: Update                           │
+//!   │ Payload: rid + old_tuple + new_tuple   │
+//!   └────────────────────────────────────────┘
+//!
+//!   NewPage Record:
+//!   ┌────────────────────────────────────────┐
+//!   │ Header: size | lsn | txn_id | prev_lsn │
+//!   │ Type: NewPage                          │
+//!   │ Payload: prev_page_id + page_id        │
+//!   └────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `LogRecordType` | Enum identifying the operation type |
+//! | `LogRecord` | Complete log record with header and payload |
+//! | `lsn` | Log Sequence Number (unique, monotonically increasing) |
+//! | `prev_lsn` | Links to previous record in same transaction |
+//! | `size` | Total serialized size in bytes |
+//!
+//! ## Constructors
+//!
+//! | Constructor | For Types | Description |
+//! |-------------|-----------|-------------|
+//! | `new_transaction_record()` | Begin, Commit, Abort | Transaction control records |
+//! | `new_insert_delete_record()` | Insert, *Delete | Tuple insert/delete operations |
+//! | `new_update_record()` | Update | Tuple update with before/after images |
+//! | `new_page_record()` | NewPage | Page allocation tracking |
+//!
+//! ## Serialization
+//!
+//! Log records use `bincode` 2.0 for compact binary serialization:
+//!
+//! ```rust,ignore
+//! // Serialize to WAL
+//! let bytes = log_record.to_bytes()?;
+//!
+//! // Deserialize during recovery
+//! let record = LogRecord::from_bytes(&bytes)?;
+//! ```
+//!
+//! ## Recovery Usage
+//!
+//! During crash recovery, the recovery manager:
+//! 1. **Analysis Phase**: Scan log to identify active transactions
+//! 2. **Redo Phase**: Replay committed operations (use new_tuple for updates)
+//! 3. **Undo Phase**: Rollback uncommitted operations (use old_tuple for updates)
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::recovery::log_record::{LogRecord, LogRecordType};
+//!
+//! // Create a begin record
+//! let begin = LogRecord::new_transaction_record(txn_id, INVALID_LSN, LogRecordType::Begin);
+//!
+//! // Create an insert record
+//! let insert = LogRecord::new_insert_delete_record(
+//!     txn_id,
+//!     begin.get_lsn(),
+//!     LogRecordType::Insert,
+//!     rid,
+//!     Arc::new(tuple),
+//! );
+//!
+//! // Create a commit record
+//! let commit = LogRecord::new_transaction_record(
+//!     txn_id,
+//!     insert.get_lsn(),
+//!     LogRecordType::Commit,
+//! );
+//!
+//! // Serialize for WAL
+//! let bytes = commit.to_bytes()?;
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `lsn` uses `AtomicU64` for lock-free updates
+//! - Log records are immutable after creation (except LSN assignment)
+//! - Implements `Encode`/`Decode` for bincode serialization
+
 use std::fmt::Debug;
 use std::mem::size_of;
 use std::sync::Arc;
