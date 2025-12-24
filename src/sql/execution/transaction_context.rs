@@ -1,3 +1,103 @@
+//! # Transaction Context
+//!
+//! This module provides the [`TransactionContext`] struct, a convenience wrapper that bundles
+//! together all transaction-related components needed during query execution. It acts as a
+//! handle to the current transaction and its associated concurrency control infrastructure.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                           Transaction Context                                   │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                 │
+//! │   ┌─────────────────────────────────────────────────────────────────────────┐   │
+//! │   │                         TransactionContext                              │   │
+//! │   ├─────────────────────────────────────────────────────────────────────────┤   │
+//! │   │                                                                         │   │
+//! │   │  ┌─────────────────────┐  ┌────────────────────┐  ┌──────────────────┐  │   │
+//! │   │  │   Arc<Transaction>  │  │  Arc<LockManager>  │  │ Arc<TxnManager>  │  │   │
+//! │   │  │                     │  │                    │  │                  │  │   │
+//! │   │  │  - txn_id           │  │  - row locks       │  │  - begin()       │  │   │
+//! │   │  │  - state            │  │  - table locks     │  │  - commit()      │  │   │
+//! │   │  │  - isolation_level  │  │  - deadlock detect │  │  - abort()       │  │   │
+//! │   │  │  - write_set        │  │  - wait-for graph  │  │  - GC            │  │   │
+//! │   │  └─────────────────────┘  └────────────────────┘  └──────────────────┘  │   │
+//! │   │                                                                         │   │
+//! │   └─────────────────────────────────────────────────────────────────────────┘   │
+//! │                                                                                 │
+//! │   Used by:                                                                      │
+//! │   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐      │
+//! │   │  Executor Nodes  │  │  DML Operations  │  │  Constraint Validation   │      │
+//! │   │  (read/write)    │  │  (INSERT/UPDATE) │  │  (FK checks, etc.)       │      │
+//! │   └──────────────────┘  └──────────────────┘  └──────────────────────────┘      │
+//! │                                                                                 │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Type | Purpose |
+//! |-----------|------|---------|
+//! | `transaction` | `Arc<Transaction>` | Current transaction state, ID, isolation level, write set |
+//! | `lock_manager` | `Arc<LockManager>` | Row and table lock acquisition/release |
+//! | `transaction_manager` | `Arc<TransactionManager>` | Transaction lifecycle (begin, commit, abort) |
+//!
+//! ## Write Set Tracking
+//!
+//! The context provides thread-safe access to the transaction's **write set** — a record
+//! of all (table_oid, RID) pairs modified by the transaction. This is used for:
+//!
+//! - **Undo on abort**: Rollback all written tuples
+//! - **Visibility checks**: Determine what other transactions can see
+//! - **Lock escalation**: Track scope of modifications
+//!
+//! ```text
+//! Write Set Example:
+//!
+//!   Transaction T1:
+//!   ┌────────────┬──────────────┐
+//!   │ table_oid  │     RID      │
+//!   ├────────────┼──────────────┤
+//!   │     1      │ (page=5, 0)  │  ← INSERT into users
+//!   │     1      │ (page=5, 1)  │  ← INSERT into users
+//!   │     2      │ (page=3, 7)  │  ← UPDATE orders
+//!   └────────────┴──────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - All components are wrapped in `Arc` for shared ownership across threads
+//! - `append_write_set_atomic()` uses internal synchronization in `Transaction`
+//! - Multiple executor threads can safely share the same `TransactionContext`
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use tkdb::sql::execution::transaction_context::TransactionContext;
+//!
+//! // Create context during query execution setup
+//! let txn_context = TransactionContext::new(
+//!     transaction,
+//!     lock_manager,
+//!     transaction_manager,
+//! );
+//!
+//! // Access transaction ID
+//! let txn_id = txn_context.get_transaction_id();
+//!
+//! // Record a write operation
+//! txn_context.append_write_set_atomic(table_oid, rid);
+//!
+//! // Get all writes for undo/commit processing
+//! let writes = txn_context.get_write_set();
+//! ```
+//!
+//! ## Isolation Level Independence
+//!
+//! The `TransactionContext` works with any isolation level — the isolation semantics
+//! are enforced by the underlying `Transaction` and `LockManager`, not by this wrapper.
+
 use crate::common::config::{TableOidT, TxnId};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
