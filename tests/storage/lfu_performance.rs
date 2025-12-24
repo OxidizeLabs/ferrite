@@ -2,10 +2,10 @@
 // LFU PERFORMANCE TESTS (integration)
 // ==============================================
 use std::time::{Duration, Instant};
-use tkdb::storage::disk::async_disk::cache::cache_traits::{
+use ferrite::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LFUCacheTrait, MutableCache,
 };
-use tkdb::storage::disk::async_disk::cache::lfu::LFUCache;
+use ferrite::storage::disk::async_disk::cache::lfu::LFUCache;
 
 mod lookup_performance {
 

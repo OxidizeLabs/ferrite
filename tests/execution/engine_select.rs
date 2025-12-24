@@ -1,7 +1,7 @@
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
 use super::common::TestResultWriter;
-use tkdb::concurrency::transaction::IsolationLevel;
+use ferrite::concurrency::transaction::IsolationLevel;
 
 #[tokio::test]
 async fn select_basic_projection() {

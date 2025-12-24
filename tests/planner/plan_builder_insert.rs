@@ -2,12 +2,12 @@ use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::sql::planner::logical_plan::LogicalPlanType;
-use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::Catalog;
+use ferrite::sql::planner::logical_plan::LogicalPlanType;
+use ferrite::sql::planner::query_planner::QueryPlanner;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -44,7 +44,7 @@ impl TestContext {
             Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
         let transaction_manager =
-            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+            Arc::new(ferrite::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
@@ -57,7 +57,7 @@ impl TestContext {
 
     fn create_table(&mut self, name: &str, columns: &str) {
         let mut catalog = self.catalog.write();
-        let schema = tkdb::catalog::schema::Schema::new(
+        let schema = ferrite::catalog::schema::Schema::new(
             columns
                 .split(',')
                 .map(|c| c.trim())
@@ -66,13 +66,13 @@ impl TestContext {
                     let parts: Vec<&str> = c.split_whitespace().collect();
                     let (col_name, ty) = (parts[0], parts[1].to_uppercase());
                     let type_id = match ty.as_str() {
-                        "INTEGER" => tkdb::types_db::type_id::TypeId::Integer,
+                        "INTEGER" => ferrite::types_db::type_id::TypeId::Integer,
                         "VARCHAR(255)" | "VARCHAR(50)" | "TEXT" | "VARCHAR" => {
-                            tkdb::types_db::type_id::TypeId::VarChar
+                            ferrite::types_db::type_id::TypeId::VarChar
                         }
-                        _ => tkdb::types_db::type_id::TypeId::VarChar,
+                        _ => ferrite::types_db::type_id::TypeId::VarChar,
                     };
-                    tkdb::catalog::column::Column::new(col_name, type_id)
+                    ferrite::catalog::column::Column::new(col_name, type_id)
                 })
                 .collect(),
         );

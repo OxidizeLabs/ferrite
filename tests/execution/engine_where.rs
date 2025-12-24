@@ -2,12 +2,12 @@
 
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::common::result_writer::ResultWriter;
-use tkdb::concurrency::transaction::IsolationLevel;
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::Value;
+use ferrite::catalog::column::Column;
+use ferrite::catalog::schema::Schema;
+use ferrite::common::result_writer::ResultWriter;
+use ferrite::concurrency::transaction::IsolationLevel;
+use ferrite::types_db::type_id::TypeId;
+use ferrite::types_db::value::Value;
 
 /// Test-specific result writer that allows inspection of results
 struct TestResultWriter {

@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use tkdb::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait};
-use tkdb::storage::disk::async_disk::cache::lru_k::LRUKCache;
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait};
+use ferrite::storage::disk::async_disk::cache::lru_k::LRUKCache;
 
 // ==============================================
 // LRU-K CONCURRENCY TESTS (integration)

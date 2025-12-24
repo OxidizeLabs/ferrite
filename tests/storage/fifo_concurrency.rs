@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tkdb::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use tkdb::storage::disk::async_disk::cache::fifo::FIFOCache;
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 
 mod thread_safe_wrapper {
     use super::*;

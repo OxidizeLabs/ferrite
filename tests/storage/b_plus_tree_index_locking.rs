@@ -1,17 +1,17 @@
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::schema::Schema;
-use tkdb::common::logger::initialize_logger;
-use tkdb::common::rid::RID;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tkdb::storage::index::b_plus_tree_index::BPlusTreeIndex;
-use tkdb::storage::index::latch_crabbing::{HeldWriteLock, OperationType};
-use tkdb::storage::index::types::comparators::{i32_comparator, I32Comparator};
-use tkdb::storage::index::{IndexInfo, IndexType};
-use tkdb::storage::page::page_types::b_plus_tree_internal_page::BPlusTreeInternalPage;
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::schema::Schema;
+use ferrite::common::logger::initialize_logger;
+use ferrite::common::rid::RID;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::storage::index::b_plus_tree_index::BPlusTreeIndex;
+use ferrite::storage::index::latch_crabbing::{HeldWriteLock, OperationType};
+use ferrite::storage::index::types::comparators::{i32_comparator, I32Comparator};
+use ferrite::storage::index::{IndexInfo, IndexType};
+use ferrite::storage::page::page_types::b_plus_tree_internal_page::BPlusTreeInternalPage;
 
 struct TestContext {
     bpm: Arc<BufferPoolManager>,
@@ -103,7 +103,7 @@ async fn test_held_write_lock_actually_holds_lock() {
 
     // Create a HeldWriteLock - this should acquire and hold the write lock
     //
-    // IMPORTANT: This is an integration test, so `tkdb` is compiled without `cfg(test)`.
+    // IMPORTANT: This is an integration test, so `ferrite` is compiled without `cfg(test)`.
     // That means any "test-only" lock-acquisition timeout defaults inside the library
     // do NOT apply here. Using `HeldWriteLock::new()` (which can wait indefinitely)
     // can therefore hang this test if the lock can't be acquired.

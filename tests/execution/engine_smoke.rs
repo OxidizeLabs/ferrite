@@ -1,7 +1,7 @@
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::{cleanup_temp_artifacts, new_temp_db};
-use tkdb::common::result_writer::CliResultWriter;
-use tkdb::concurrency::transaction::IsolationLevel;
+use ferrite::common::result_writer::CliResultWriter;
+use ferrite::concurrency::transaction::IsolationLevel;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn engine_smoke_ddl_dml_select() {

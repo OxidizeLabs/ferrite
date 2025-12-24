@@ -8,13 +8,13 @@ use std::sync::Once;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tkdb::catalog::schema::Schema;
-use tkdb::common::db_instance::{DBConfig, DBInstance};
-use tkdb::common::exception::DBError;
-use tkdb::common::logger;
-use tkdb::common::result_writer::ResultWriter;
-use tkdb::concurrency::transaction::IsolationLevel;
-use tkdb::types_db::value::Value;
+use ferrite::catalog::schema::Schema;
+use ferrite::common::db_instance::{DBConfig, DBInstance};
+use ferrite::common::exception::DBError;
+use ferrite::common::logger;
+use ferrite::common::result_writer::ResultWriter;
+use ferrite::concurrency::transaction::IsolationLevel;
+use ferrite::types_db::value::Value;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -155,13 +155,13 @@ fn cleanup_temp_directory() {
     }
 }
 
-pub struct TKDBTest {
+pub struct FerriteTest {
     instance: DBInstance,
     config: DBConfig,             // Store config for cleanup
     stats: Arc<Mutex<TestStats>>, // Add shared statistics tracking
 }
 
-impl TKDBTest {
+impl FerriteTest {
     pub async fn new() -> Result<Self, Box<dyn Error>> {
         let config = generate_temp_db_config();
         Self::new_with_config(config).await
@@ -207,7 +207,7 @@ impl TKDBTest {
     }
 }
 
-impl Drop for TKDBTest {
+impl Drop for FerriteTest {
     fn drop(&mut self) {
         cleanup_temp_files(&self.config);
     }
@@ -248,7 +248,7 @@ impl ResultWriter for TestResultWriter {
     }
 }
 
-impl DB for TKDBTest {
+impl DB for FerriteTest {
     type Error = DBError;
     type ColumnType = DefaultColumnType;
 
@@ -362,14 +362,14 @@ mod tests {
     fn build_runner(
         shared_stats: Arc<Mutex<TestStats>>,
         config: DBConfig,
-    ) -> Runner<TKDBTest, impl MakeConnection<Conn = TKDBTest>> {
+    ) -> Runner<FerriteTest, impl MakeConnection<Conn = FerriteTest>> {
         Runner::new(move || {
             let shared_stats_clone = shared_stats.clone();
             let config = config.clone();
             async move {
                 let instance = DBInstance::new(config.clone()).await?;
 
-                let db = TKDBTest {
+                let db = FerriteTest {
                     instance,
                     config,
                     stats: shared_stats_clone,

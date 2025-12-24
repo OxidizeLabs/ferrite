@@ -111,7 +111,7 @@ Parameters per operation:
 Example skeleton:
 ```rust
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput, BatchSize};
-use tkdb::storage::disk::async_disk::cache::fifo::FIFOCache; // adjust path if needed
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache; // adjust path if needed
 
 fn bench_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("fifo_insert");

@@ -27,7 +27,7 @@ impl CLI {
     }
 
     pub async fn run(&mut self) -> Result<(), DBError> {
-        println!("Welcome to TKDB. Commands end with ;");
+        println!("Welcome to Ferrite. Commands end with ;");
         println!("Type 'help;' for help.");
 
         loop {
@@ -35,9 +35,9 @@ impl CLI {
 
             loop {
                 match self.rl.readline(if buffer.is_empty() {
-                    "tkdb> "
+                    "ferrite> "
                 } else {
-                    "    -> "
+                    "      -> "
                 }) {
                     Ok(line) => {
                         let _ = self.rl.add_history_entry(line.as_str());

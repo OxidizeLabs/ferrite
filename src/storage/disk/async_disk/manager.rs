@@ -1044,28 +1044,28 @@ impl AsyncDiskManager {
         let mut output = String::new();
 
         // Include configuration info in metrics
-        output.push_str("# HELP tkdb_config_io_threads Number of configured I/O threads\n");
-        output.push_str("# TYPE tkdb_config_io_threads gauge\n");
+        output.push_str("# HELP ferrite_config_io_threads Number of configured I/O threads\n");
+        output.push_str("# TYPE ferrite_config_io_threads gauge\n");
         output.push_str(&format!(
-            "tkdb_config_io_threads {}\n",
+            "ferrite_config_io_threads {}\n",
             self.config.io_threads
         ));
 
-        output.push_str("# HELP tkdb_config_cache_size_mb Cache size in MB\n");
-        output.push_str("# TYPE tkdb_config_cache_size_mb gauge\n");
+        output.push_str("# HELP ferrite_config_cache_size_mb Cache size in MB\n");
+        output.push_str("# TYPE ferrite_config_cache_size_mb gauge\n");
         output.push_str(&format!(
-            "tkdb_config_cache_size_mb {}\n",
+            "ferrite_config_cache_size_mb {}\n",
             self.config.cache_size_mb
         ));
 
         // Basic metrics
-        output.push_str("# HELP tkdb_read_operations Total number of read operations\n");
-        output.push_str("# TYPE tkdb_read_operations counter\n");
-        output.push_str(&format!("tkdb_read_operations {}\n", metrics.retry_count));
+        output.push_str("# HELP ferrite_read_operations Total number of read operations\n");
+        output.push_str("# TYPE ferrite_read_operations counter\n");
+        output.push_str(&format!("ferrite_read_operations {}\n", metrics.retry_count));
 
-        output.push_str("# HELP tkdb_write_operations Total number of write operations\n");
-        output.push_str("# TYPE tkdb_write_operations counter\n");
-        output.push_str(&format!("tkdb_write_operations {}\n", metrics.retry_count));
+        output.push_str("# HELP ferrite_write_operations Total number of write operations\n");
+        output.push_str("# TYPE ferrite_write_operations counter\n");
+        output.push_str(&format!("ferrite_write_operations {}\n", metrics.retry_count));
 
         // More metrics would be added here
         debug!("Prometheus metrics exported ({} bytes)", output.len());
@@ -1577,10 +1577,10 @@ mod tests {
         let metrics_str = manager.export_prometheus_metrics();
 
         // Should contain configuration metrics
-        assert!(metrics_str.contains("tkdb_config_io_threads"));
-        assert!(metrics_str.contains("tkdb_config_cache_size_mb"));
-        assert!(metrics_str.contains("tkdb_read_operations"));
-        assert!(metrics_str.contains("tkdb_write_operations"));
+        assert!(metrics_str.contains("ferrite_config_io_threads"));
+        assert!(metrics_str.contains("ferrite_config_cache_size_mb"));
+        assert!(metrics_str.contains("ferrite_read_operations"));
+        assert!(metrics_str.contains("ferrite_write_operations"));
     }
 
     #[tokio::test]

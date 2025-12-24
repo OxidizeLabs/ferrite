@@ -5,10 +5,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tkdb::storage::disk::async_disk::cache::cache_traits::CoreCache;
-use tkdb::storage::disk::async_disk::cache::cache_traits::LFUCacheTrait;
-use tkdb::storage::disk::async_disk::cache::cache_traits::MutableCache;
-use tkdb::storage::disk::async_disk::cache::lfu::LFUCache;
+use ferrite::storage::disk::async_disk::cache::cache_traits::CoreCache;
+use ferrite::storage::disk::async_disk::cache::cache_traits::LFUCacheTrait;
+use ferrite::storage::disk::async_disk::cache::cache_traits::MutableCache;
+use ferrite::storage::disk::async_disk::cache::lfu::LFUCache;
 
 type ThreadSafeLFUCache<K, V> = Arc<Mutex<LFUCache<K, V>>>;
 

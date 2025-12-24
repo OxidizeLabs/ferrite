@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tkdb::storage::disk::async_disk::cache::lru::ConcurrentLRUCache;
+use ferrite::storage::disk::async_disk::cache::lru::ConcurrentLRUCache;
 
 // ==============================================
 // LRU CONCURRENCY TESTS (integration)

@@ -5,14 +5,14 @@ use parking_lot::RwLock;
 use sqlparser::ast::JoinOperator;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
-use tkdb::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
-use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tkdb::types_db::type_id::TypeId;
-use tkdb::{
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::Catalog;
+use ferrite::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
+use ferrite::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
+use ferrite::sql::planner::query_planner::QueryPlanner;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::types_db::type_id::TypeId;
+use ferrite::{
     buffer::buffer_pool_manager_async::BufferPoolManager,
     sql::execution::expressions::abstract_expression::Expression,
 };
@@ -52,7 +52,7 @@ impl TestContext {
             Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
         let transaction_manager =
-            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+            Arc::new(ferrite::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
@@ -65,18 +65,18 @@ impl TestContext {
 
     fn create_basic(&mut self) {
         let mut catalog = self.catalog.write();
-        let users = tkdb::catalog::schema::Schema::new(vec![
-            tkdb::catalog::column::Column::new("id", tkdb::types_db::type_id::TypeId::Integer),
-            tkdb::catalog::column::Column::new("name", tkdb::types_db::type_id::TypeId::VarChar),
-            tkdb::catalog::column::Column::new("age", tkdb::types_db::type_id::TypeId::Integer),
+        let users = ferrite::catalog::schema::Schema::new(vec![
+            ferrite::catalog::column::Column::new("id", ferrite::types_db::type_id::TypeId::Integer),
+            ferrite::catalog::column::Column::new("name", ferrite::types_db::type_id::TypeId::VarChar),
+            ferrite::catalog::column::Column::new("age", ferrite::types_db::type_id::TypeId::Integer),
         ]);
-        let orders = tkdb::catalog::schema::Schema::new(vec![
-            tkdb::catalog::column::Column::new(
+        let orders = ferrite::catalog::schema::Schema::new(vec![
+            ferrite::catalog::column::Column::new(
                 "order_id",
-                tkdb::types_db::type_id::TypeId::Integer,
+                ferrite::types_db::type_id::TypeId::Integer,
             ),
-            tkdb::catalog::column::Column::new("user_id", tkdb::types_db::type_id::TypeId::Integer),
-            tkdb::catalog::column::Column::new("amount", tkdb::types_db::type_id::TypeId::Decimal),
+            ferrite::catalog::column::Column::new("user_id", ferrite::types_db::type_id::TypeId::Integer),
+            ferrite::catalog::column::Column::new("amount", ferrite::types_db::type_id::TypeId::Decimal),
         ]);
         let _ = catalog.create_table("users".to_string(), users);
         let _ = catalog.create_table("orders".to_string(), orders);

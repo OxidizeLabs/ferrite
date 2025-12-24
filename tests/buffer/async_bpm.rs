@@ -4,9 +4,9 @@ use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
 struct AsyncTestContext {
     bpm: Arc<BufferPoolManager>,

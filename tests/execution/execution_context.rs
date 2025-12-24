@@ -4,21 +4,21 @@ use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::concurrency::lock_manager::LockManager;
-use tkdb::concurrency::transaction::{IsolationLevel, Transaction};
-use tkdb::concurrency::transaction_manager::TransactionManager;
-use tkdb::sql::execution::check_option::CheckOption;
-use tkdb::sql::execution::execution_context::{ExecutionContext, ExecutorType};
-use tkdb::sql::execution::executors::create_table_executor::CreateTableExecutor;
-use tkdb::sql::execution::plans::create_table_plan::CreateTablePlanNode;
-use tkdb::sql::execution::transaction_context::TransactionContext;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tkdb::types_db::type_id::TypeId;
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::Catalog;
+use ferrite::catalog::column::Column;
+use ferrite::catalog::schema::Schema;
+use ferrite::concurrency::lock_manager::LockManager;
+use ferrite::concurrency::transaction::{IsolationLevel, Transaction};
+use ferrite::concurrency::transaction_manager::TransactionManager;
+use ferrite::sql::execution::check_option::CheckOption;
+use ferrite::sql::execution::execution_context::{ExecutionContext, ExecutorType};
+use ferrite::sql::execution::executors::create_table_executor::CreateTableExecutor;
+use ferrite::sql::execution::plans::create_table_plan::CreateTablePlanNode;
+use ferrite::sql::execution::transaction_context::TransactionContext;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::types_db::type_id::TypeId;
 
 struct TestContext {
     bpm: Arc<BufferPoolManager>,

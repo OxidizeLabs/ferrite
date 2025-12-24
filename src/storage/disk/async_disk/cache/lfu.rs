@@ -6,7 +6,7 @@ use std::hash::Hash;
 
 /// # LFU (Least Frequently Used) Cache Implementation
 ///
-/// This module provides a production-ready LFU cache implementation designed for TKDB's
+/// This module provides a production-ready LFU cache implementation designed for Ferrite's
 /// storage layer. The LFU cache evicts the least frequently accessed items when capacity
 /// is reached, making it ideal for workloads with stable access patterns.
 ///

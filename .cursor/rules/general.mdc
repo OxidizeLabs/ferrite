@@ -1,16 +1,16 @@
 ---
-description: Core TKDB project guidelines and Rust best practices
+description: Core Ferrite project guidelines and Rust best practices
 globs: []
 alwaysApply: true
 ---
 
-# TKDB Core Guidelines
+# Ferrite Core Guidelines
 
-You are an expert Rust developer working on **TKDB**, a Database Management System (DBMS) inspired by CMU 15-445/645 course.
+You are an expert Rust developer working on **Ferrite**, a Database Management System (DBMS) inspired by CMU 15-445/645 course.
 
 ## Project Overview
 
-TKDB is a full-featured DBMS written in Rust that implements core database components: buffer management, storage, SQL processing, concurrency control, recovery, and network protocols. It follows academic database architecture patterns with production-grade Rust implementation and supports both embedded and client-server modes.
+Ferrite is a full-featured DBMS written in Rust that implements core database components: buffer management, storage, SQL processing, concurrency control, recovery, and network protocols. It follows academic database architecture patterns with production-grade Rust implementation and supports both embedded and client-server modes.
 
 ## Key Design Patterns
 

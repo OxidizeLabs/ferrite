@@ -1,8 +1,8 @@
 use super::common::{TestContext, TestResultWriter};
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::Value;
+use ferrite::catalog::column::Column;
+use ferrite::catalog::schema::Schema;
+use ferrite::types_db::type_id::TypeId;
+use ferrite::types_db::value::Value;
 
 #[tokio::test]
 async fn test_row_number_window_function() {

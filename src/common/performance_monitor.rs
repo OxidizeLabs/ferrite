@@ -572,7 +572,7 @@ pub fn analyze_bottlenecks() -> BottleneckAnalysis {
 pub fn print_performance_summary() {
     let bottleneck_analysis = analyze_bottlenecks();
 
-    println!("=== COMPREHENSIVE TKDB PERFORMANCE ANALYSIS ===");
+    println!("=== COMPREHENSIVE FERRITE PERFORMANCE ANALYSIS ===");
 
     // === THROUGHPUT METRICS ===
     println!("📊 THROUGHPUT METRICS:");

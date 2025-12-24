@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use tkdb::storage::disk::async_disk::cache::lru::{LRUCore, ConcurrentLRUCache};
-use tkdb::storage::disk::async_disk::cache::cache_traits::{CoreCache, MutableCache, LRUCacheTrait};
+use ferrite::storage::disk::async_disk::cache::lru::{LRUCore, ConcurrentLRUCache};
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, MutableCache, LRUCacheTrait};
 
 #[cfg(test)]
 mod integration_tests {

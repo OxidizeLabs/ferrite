@@ -11,8 +11,8 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tkdb::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use tkdb::storage::disk::async_disk::cache::fifo::FIFOCache;
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 
 // =================================================================================
 // TIME COMPLEXITY BENCHMARKS

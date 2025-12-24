@@ -193,7 +193,7 @@ where
     }
 }
 
-// Implementation of CoreCache trait for compatibility with TKDB cache system
+// Implementation of CoreCache trait for compatibility with Ferrite cache system
 impl<K, V> CoreCache<K, V> for HeapLFUCache<K, V>
 where
     K: Eq + Hash + Clone + Ord,
