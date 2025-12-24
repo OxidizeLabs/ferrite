@@ -1,3 +1,173 @@
+//! # Transaction Management
+//!
+//! This module provides the core `Transaction` struct representing an active
+//! database transaction. Transactions track state, timestamps, undo logs, and
+//! write sets to support ACID properties and multi-version concurrency control.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                          ┌─────────────────────────────────────────────────┐
+//!                          │                 Transaction                     │
+//!                          │                                                 │
+//!                          │  ┌─────────────────────────────────────────┐    │
+//!                          │  │           Immutable Properties          │    │
+//!                          │  │  • txn_id: TxnId                        │    │
+//!                          │  │  • isolation_level: IsolationLevel      │    │
+//!                          │  │  • thread_id: ThreadId                  │    │
+//!                          │  └─────────────────────────────────────────┘    │
+//!                          │                                                 │
+//!                          │  ┌─────────────────────────────────────────┐    │
+//!                          │  │      Mutable State (Interior Mut.)      │    │
+//!                          │  │  • state: RwLock<TransactionState>      │    │
+//!                          │  │  • read_ts: RwLock<Timestamp>           │    │
+//!                          │  │  • commit_ts: RwLock<Timestamp>         │    │
+//!                          │  │  • prev_lsn: RwLock<Lsn>                │    │
+//!                          │  └─────────────────────────────────────────┘    │
+//!                          │                                                 │
+//!                          │  ┌─────────────────────────────────────────┐    │
+//!                          │  │           MVCC Support                  │    │
+//!                          │  │  • undo_logs: Mutex<Vec<Arc<UndoLog>>>  │    │
+//!                          │  │  • write_set: Mutex<HashMap<...>>       │    │
+//!                          │  │  • scan_predicates: Mutex<HashMap<...>> │    │
+//!                          │  └─────────────────────────────────────────┘    │
+//!                          └─────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Transaction States
+//!
+//! ```text
+//!                    ┌─────────┐
+//!                    │ Running │◄────── begin()
+//!                    └────┬────┘
+//!                         │
+//!           ┌─────────────┼─────────────┐
+//!           │             │             │
+//!           ▼             ▼             ▼
+//!     ┌──────────┐  ┌──────────┐  ┌──────────┐
+//!     │ Growing  │  │ Tainted  │  │ Shrinking│
+//!     │ (2PL)    │  │ (error)  │  │ (2PL)    │
+//!     └────┬─────┘  └────┬─────┘  └────┬─────┘
+//!          │             │             │
+//!          └─────────────┼─────────────┘
+//!                        │
+//!           ┌────────────┴────────────┐
+//!           ▼                         ▼
+//!     ┌───────────┐            ┌───────────┐
+//!     │ Committed │            │  Aborted  │
+//!     └───────────┘            └───────────┘
+//! ```
+//!
+//! ## Isolation Levels
+//!
+//! | Level            | Dirty Read | Non-Repeatable | Phantom | Implementation       |
+//! |------------------|------------|----------------|---------|----------------------|
+//! | ReadUncommitted  | ✓          | ✓              | ✓       | See uncommitted      |
+//! | ReadCommitted    | ✗          | ✓              | ✓       | See committed only   |
+//! | RepeatableRead   | ✗          | ✗              | ✓       | Snapshot at read_ts  |
+//! | Serializable     | ✗          | ✗              | ✗       | + predicate locks    |
+//! | Snapshot         | ✗          | ✗              | ✗       | MVCC snapshot        |
+//!
+//! ## Undo Log Chain
+//!
+//! ```text
+//!   Current Tuple                Undo Log Chain
+//!   ┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
+//!   │ tuple v3 │────►│ UndoLog  │────►│ UndoLog  │────►│ UndoLog  │
+//!   │ ts: 300  │     │ ts: 200  │     │ ts: 100  │     │ ts: 50   │
+//!   └──────────┘     │ tuple v2 │     │ tuple v1 │     │ tuple v0 │
+//!                    └──────────┘     └──────────┘     └──────────┘
+//!                          │                │                │
+//!                          ▼                ▼                ▼
+//!                       UndoLink         UndoLink      INVALID_TXN_ID
+//!                    (prev_txn,idx)   (prev_txn,idx)     (terminal)
+//! ```
+//!
+//! ## Transaction Lifecycle
+//!
+//! ```text
+//!   begin(&mut watermark)          commit(&mut watermark)
+//!         │                              │
+//!         ▼                              ▼
+//!   ┌─────────────────┐          ┌─────────────────┐
+//!   │ Get read_ts     │          │ Get commit_ts   │
+//!   │ Register with   │          │ Update watermark│
+//!   │ watermark       │          │ Unregister txn  │
+//!   │ Set Running     │          │ Set Committed   │
+//!   └─────────────────┘          └─────────────────┘
+//!
+//!   abort(&mut watermark)
+//!         │
+//!         ▼
+//!   ┌─────────────────┐
+//!   │ Unregister txn  │
+//!   │ Set Aborted     │
+//!   │ (undo logs used │
+//!   │  for rollback)  │
+//!   └─────────────────┘
+//! ```
+//!
+//! ## Write Set Tracking
+//!
+//! ```text
+//!   write_set: HashMap<TableOidT, HashSet<RID>>
+//!
+//!   Table 1 ────► { RID(1,0), RID(1,1), RID(1,5) }
+//!   Table 2 ────► { RID(2,3), RID(2,7) }
+//!   Table 5 ────► { RID(5,0) }
+//! ```
+//!
+//! Used for conflict detection and rollback identification.
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::concurrency::transaction::{Transaction, IsolationLevel};
+//! use crate::concurrency::watermark::Watermark;
+//!
+//! // Create and begin a transaction
+//! let mut txn = Transaction::new(txn_id, IsolationLevel::RepeatableRead);
+//! txn.begin(&mut watermark);
+//!
+//! // Perform operations
+//! txn.append_write_set(table_oid, rid);
+//! let undo_link = txn.append_undo_log(Arc::new(undo_log));
+//!
+//! // Check visibility
+//! if txn.is_tuple_visible(&tuple_meta) {
+//!     // Read the tuple
+//! }
+//!
+//! // Commit or abort
+//! let commit_ts = txn.commit(&mut watermark);
+//! // or: txn.abort(&mut watermark);
+//! ```
+//!
+//! ## Tuple Visibility Rules
+//!
+//! | Isolation Level  | Visibility Criteria                                    |
+//! |------------------|--------------------------------------------------------|
+//! | ReadUncommitted  | `!deleted`                                             |
+//! | ReadCommitted    | `(committed || own_txn) && !deleted`                   |
+//! | RepeatableRead   | `!deleted && (own_txn || (committed && ts ≤ read_ts))` |
+//! | Serializable     | Same as RepeatableRead + predicate locking             |
+//! | Snapshot         | `visible_to(txn_id, read_ts)`                          |
+//!
+//! ## Thread Safety
+//!
+//! - Immutable fields (`txn_id`, `isolation_level`) are safe to read concurrently
+//! - Mutable fields use `RwLock` or `Mutex` for interior mutability
+//! - `Transaction` is typically wrapped in `Arc` for shared ownership
+//! - `parking_lot::RwLock` used for performance-critical timestamp access
+//!
+//! ## Key Invariants
+//!
+//! 1. **Timestamp ordering**: `read_ts < commit_ts` for committed transactions
+//! 2. **State machine**: Transitions follow the state diagram above
+//! 3. **Undo chain**: Each `UndoLog.prev_version` points to a valid prior log
+//!    or terminates with `INVALID_TXN_ID`
+//! 4. **Write set completeness**: All modified RIDs must be in the write set
+
 use crate::common::config::{
     INVALID_LSN, INVALID_TXN_ID, Lsn, TXN_START_ID, TableOidT, TimeStampOidT, Timestamp, TxnId,
 };
