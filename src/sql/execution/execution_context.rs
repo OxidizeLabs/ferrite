@@ -1,90 +1,149 @@
-//! # Execution Context with Type-Safe Thread-Safe Executors
+//! # Execution Context
 //!
-//! This module implements **Option 1: ExecutorType Enum** for replacing dynamic dispatch
-//! with a type-safe, thread-safe alternative that supports ALL executor types in the system.
+//! This module provides the [`ExecutionContext`] and [`ExecutorType`], which together form
+//! the runtime environment for query execution. The context holds shared state (catalog,
+//! buffer pool, transaction) while the executor enum provides type-safe, zero-overhead
+//! dispatch to concrete executor implementations.
 //!
-//! ## Complete Implementation
+//! ## Architecture
 //!
-//! ### All Supported Executor Types:
-//! - `AggregationExecutor` - Handles GROUP BY and aggregate functions
-//! - `CommandExecutor` - Executes database commands
-//! - `CommitTransactionExecutor` - Commits transactions
-//! - `CreateIndexExecutor` - Creates database indexes
-//! - `CreateTableExecutor` - Creates new tables
-//! - `DeleteExecutor` - Deletes rows from tables
-//! - `FilterExecutor` - Applies WHERE clause filtering
-//! - `HashJoinExecutor` - Performs hash-based joins
-//! - `IndexScanExecutor` - Scans using indexes
-//! - `InsertExecutor` - Inserts new rows
-//! - `LimitExecutor` - Applies LIMIT clauses
-//! - `MockExecutor` - Testing mock executor
-//! - `MockScanExecutor` - Testing mock scan executor
-//! - `NestedIndexJoinExecutor` - Nested index join implementation
-//! - `NestedLoopJoinExecutor` - Nested loop join implementation
-//! - `ProjectionExecutor` - Handles SELECT column projections
-//! - `RollbackTransactionExecutor` - Rolls back transactions
-//! - `SeqScanExecutor` - Sequential table scans
-//! - `SortExecutor` - Sorts query results
-//! - `StartTransactionExecutor` - Starts new transactions
-//! - `TableScanExecutor` - Table scanning operations
-//! - `TopNExecutor` - Top-N query results
-//! - `TopNPerGroupExecutor` - Top-N per group results
-//! - `UpdateExecutor` - Updates existing rows
-//! - `ValuesExecutor` - Handles VALUES clauses
-//! - `WindowExecutor` - Window function execution
-//!
-//! ## Usage Examples
-//!
-//! ### Direct Construction
-//! ```rust
-//! // Direct enum construction
-//! let create_table_exec = ExecutorType::CreateTable(create_table_executor);
-//! let aggregation_exec = ExecutorType::Aggregation(aggregation_executor);
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────────┐
+//! │                              Execution Context                                      │
+//! ├─────────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                     │
+//! │  ┌───────────────────────────────────────────────────────────────────────────────┐  │
+//! │  │                         ExecutionContext                                      │  │
+//! │  ├───────────────────────────────────────────────────────────────────────────────┤  │
+//! │  │  buffer_pool_manager ──────▶ Arc<BufferPoolManager>                           │  │
+//! │  │  catalog ──────────────────▶ Arc<RwLock<Catalog>>                             │  │
+//! │  │  transaction_context ──────▶ Arc<TransactionContext>                          │  │
+//! │  │  check_options ────────────▶ Arc<CheckOptions>                                │  │
+//! │  │  nlj_check_exec_set ───────▶ VecDeque<(ExecutorPair)>                         │  │
+//! │  └───────────────────────────────────────────────────────────────────────────────┘  │
+//! │                             │                                                       │
+//! │                             ▼                                                       │
+//! │  ┌───────────────────────────────────────────────────────────────────────────────┐  │
+//! │  │                         ExecutorType (enum)                                   │  │
+//! │  ├───────────────────────────────────────────────────────────────────────────────┤  │
+//! │  │  SeqScan │ IndexScan │ Filter │ Projection │ Sort │ Limit │ ...               │  │
+//! │  │          │           │        │            │      │       │                   │  │
+//! │  │  All variants implement: init(), next(), get_output_schema()                  │  │
+//! │  └───────────────────────────────────────────────────────────────────────────────┘  │
+//! │                                                                                     │
+//! └─────────────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! ### Using Constructor Methods
-//! ```rust
-//! // More readable constructor methods
-//! let create_table_exec = ExecutorType::from_create_table(create_table_executor);
-//! let aggregation_exec = ExecutorType::from_aggregation(aggregation_executor);
-//! let filter_exec = ExecutorType::from_filter(filter_executor);
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | [`ExecutionContext`] | Shared state container for query execution |
+//! | [`ExecutorType`] | Type-safe enum wrapping all executor implementations |
+//! | `NLJCheckExecSet` | Queue of executor pairs for nested-loop join optimization |
+//! | `CheckOptions` | Runtime optimization flags |
+//!
+//! ## ExecutionContext Fields
+//!
+//! | Field | Type | Purpose |
+//! |-------|------|---------|
+//! | `buffer_pool_manager` | `Arc<BufferPoolManager>` | Page I/O for data access |
+//! | `catalog` | `Arc<RwLock<Catalog>>` | Schema and table metadata |
+//! | `transaction_context` | `Arc<TransactionContext>` | Current transaction state |
+//! | `check_options` | `Arc<CheckOptions>` | Optimization control flags |
+//! | `is_delete` | `bool` | Marks DELETE operations for special handling |
+//! | `chain_after_transaction` | `bool` | COMMIT AND CHAIN support |
+//!
+//! ## Supported Executor Types
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────────┐
+//! │                              Executor Categories                                    │
+//! ├─────────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                     │
+//! │   Scan Executors          Join Executors           DML Executors                   │
+//! │   ──────────────          ──────────────           ─────────────                   │
+//! │   SeqScan                 NestedLoopJoin           Insert                          │
+//! │   IndexScan               NestedIndexJoin          Update                          │
+//! │   TableScan               HashJoin                 Delete                          │
+//! │                                                                                     │
+//! │   Transform Executors     DDL Executors            Transaction Executors           │
+//! │   ───────────────────     ─────────────            ──────────────────────          │
+//! │   Filter                  CreateTable              StartTransaction                │
+//! │   Projection              CreateIndex              CommitTransaction               │
+//! │   Sort                                             RollbackTransaction             │
+//! │   Limit                                                                            │
+//! │   TopN                                                                             │
+//! │   TopNPerGroup                                                                     │
+//! │                                                                                     │
+//! │   Aggregate Executors     Utility Executors                                        │
+//! │   ───────────────────     ─────────────────                                        │
+//! │   Aggregation             Command                                                  │
+//! │   Window                  Values                                                   │
+//! │                           Mock / MockScan                                          │
+//! │                                                                                     │
+//! └─────────────────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! ### Adding to Execution Context
-//! ```rust
-//! context.add_check_option_from_executor_type(left_exec, right_exec);
+//! ## Example Usage
+//!
+//! ### Creating an Execution Context
+//!
+//! ```rust,ignore
+//! let ctx = ExecutionContext::new(
+//!     buffer_pool_manager.clone(),
+//!     catalog.clone(),
+//!     transaction_context.clone(),
+//! );
 //! ```
 //!
-//! ### Executor Operations
-//! ```rust
+//! ### Working with Executors
+//!
+//! ```rust,ignore
+//! // Create executor via enum
 //! let mut executor = ExecutorType::from_seq_scan(seq_scan_executor);
+//!
+//! // Initialize and iterate
 //! executor.init();
-//! while let Some((tuple, rid)) = executor.next() {
+//! while let Ok(Some((tuple, rid))) = executor.next() {
 //!     // Process tuple
 //! }
+//!
+//! // Access schema
 //! let schema = executor.get_output_schema();
 //! ```
 //!
-//! ## Benefits of This Implementation
+//! ### Adding NLJ Check Options
 //!
-//! 1. **Zero Runtime Overhead** - No dynamic dispatch, all calls are direct
-//! 2. **Compile-Time Type Safety** - Know exact executor types at compile time
-//! 3. **Thread Safety** - All executors implement `Send + Sync` automatically
-//! 4. **Pattern Matching** - Can use match statements for type-specific logic
-//! 5. **Memory Efficiency** - No heap allocations for dispatch
-//! 6. **Exhaustive Matching** - Compiler ensures all executor types are handled
-//! 7. **Easy Debugging** - Clear type information in error messages
+//! ```rust,ignore
+//! context.add_check_option_from_executor_type(left_exec, right_exec);
+//! ```
+//!
+//! ## Design: Enum vs Dynamic Dispatch
+//!
+//! This module uses an enum (`ExecutorType`) instead of `Box<dyn AbstractExecutor>`:
+//!
+//! | Aspect | Enum Approach | Dynamic Dispatch |
+//! |--------|---------------|------------------|
+//! | **Dispatch Cost** | Zero (direct calls) | vtable lookup |
+//! | **Memory** | Stack-allocated | Heap-allocated |
+//! | **Type Safety** | Compile-time | Runtime |
+//! | **Pattern Matching** | Native support | Requires downcasting |
+//! | **Binary Size** | Larger (monomorphization) | Smaller |
+//! | **Extensibility** | Requires enum modification | Just implement trait |
+//!
+//! ## Thread Safety
+//!
+//! - `ExecutorType` implements `Send + Sync` (all variants are thread-safe)
+//! - `ExecutionContext` uses `Arc`-wrapped shared state
+//! - `Mutex<ExecutorType>` used in `nlj_check_exec_set` for safe concurrent access
 //!
 //! ## Performance Characteristics
 //!
-//! - **Dispatch Cost**: Zero (direct function calls)
-//! - **Memory Overhead**: Minimal (enum tag size)
-//! - **Thread Safety**: Built-in without locks
+//! - **Dispatch**: Zero overhead (direct function calls via match)
+//! - **Memory**: Minimal overhead (enum tag + largest variant size)
+//! - **Thread Safety**: Lock-free for most operations
 //! - **Compile Time**: Slightly increased due to monomorphization
-//! - **Binary Size**: Larger due to code generation for each type
-//!
-//! This implementation completely replaces the need for `Box<dyn AbstractExecutor>`
-//! while providing better performance, safety, and maintainability.
 
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::Catalog;
