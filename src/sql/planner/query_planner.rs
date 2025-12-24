@@ -1,3 +1,114 @@
+//! # Query Planner
+//!
+//! This module provides the `QueryPlanner`, the entry point for transforming SQL text
+//! into executable logical plans. It orchestrates the parsing and planning phases,
+//! delegating the actual plan construction to the `LogicalPlanBuilder`.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                              Query Processing Pipeline                          │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                 │
+//! │   ┌───────────────┐     ┌───────────────┐     ┌───────────────────────────┐     │
+//! │   │   SQL Text    │ ──▶ │  sqlparser    │ ──▶ │       AST (Statement)     │     │
+//! │   │ "SELECT ..."  │     │  Parser       │     │  Query { body, order... } │     │
+//! │   └───────────────┘     └───────────────┘     └─────────────┬─────────────┘     │
+//! │                                                             │                   │
+//! │                                                             ▼                   │
+//! │                                           ┌─────────────────────────────────┐   │
+//! │                                           │         QueryPlanner            │   │
+//! │                                           │  ┌───────────────────────────┐  │   │
+//! │                                           │  │   LogicalPlanBuilder      │  │   │
+//! │                                           │  │   (plan construction)     │  │   │
+//! │                                           │  └───────────────────────────┘  │   │
+//! │                                           └─────────────────┬───────────────┘   │
+//! │                                                             │                   │
+//! │                                                             ▼                   │
+//! │                                           ┌─────────────────────────────────┐   │
+//! │                                           │        LogicalPlan              │   │
+//! │                                           │  (Scan, Filter, Project, ...)   │   │
+//! │                                           └─────────────────────────────────┘   │
+//! │                                                                                 │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Responsibilities
+//!
+//! 1. **SQL Parsing**: Uses `sqlparser` with `GenericDialect` to parse SQL strings into AST
+//! 2. **Statement Dispatch**: Routes parsed statements to appropriate plan builders
+//! 3. **Error Handling**: Validates single-statement input and propagates parsing errors
+//! 4. **Plan Explanation**: Provides `explain()` for query plan visualization
+//!
+//! ## Supported Statements
+//!
+//! | Category       | Statement Types                                              |
+//! |----------------|--------------------------------------------------------------|
+//! | **DML**        | `SELECT`, `INSERT`, `UPDATE`, `DELETE`                       |
+//! | **DDL**        | `CREATE TABLE`, `CREATE INDEX`, `CREATE VIEW`, `ALTER TABLE` |
+//! |                | `CREATE SCHEMA`, `CREATE DATABASE`, `ALTER VIEW`             |
+//! | **Transaction**| `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`        |
+//! | **Utility**    | `EXPLAIN`, `SHOW TABLES`, `SHOW DATABASES`, `SHOW COLUMNS`   |
+//! |                | `USE`                                                        |
+//!
+//! ## Statement Routing
+//!
+//! ```text
+//! Statement Type           LogicalPlanBuilder Method
+//! ──────────────────────────────────────────────────────
+//! Query (SELECT)      ──▶  build_query_plan()
+//! Insert              ──▶  build_insert_plan()
+//! CreateTable         ──▶  build_create_table_plan()
+//! CreateIndex         ──▶  build_create_index_plan()
+//! Update              ──▶  build_update_plan()
+//! Delete              ──▶  build_delete_plan()
+//! Explain             ──▶  build_explain_plan()
+//! StartTransaction    ──▶  build_start_transaction_plan()
+//! Commit              ──▶  build_commit_plan()
+//! Rollback            ──▶  build_rollback_plan()
+//! CreateSchema        ──▶  build_create_schema_plan()
+//! CreateDatabase      ──▶  build_create_database_plan()
+//! AlterTable          ──▶  build_alter_table_plan()
+//! CreateView          ──▶  build_create_view_plan()
+//! ShowTables          ──▶  build_show_tables_plan()
+//! ...
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,no_run
+//! use std::sync::Arc;
+//! use parking_lot::RwLock;
+//!
+//! // Create planner with catalog
+//! let catalog = Arc::new(RwLock::new(Catalog::new()));
+//! let mut planner = QueryPlanner::new(catalog);
+//!
+//! // Create logical plan from SQL
+//! let plan = planner.create_logical_plan("SELECT * FROM users WHERE id = 1")?;
+//!
+//! // Get query explanation
+//! let explanation = planner.explain("SELECT * FROM users")?;
+//! println!("{}", explanation);
+//! // Output:
+//! // Query Plan:
+//! // Project [*]
+//! //   TableScan: users
+//! ```
+//!
+//! ## Error Handling
+//!
+//! - **Parse errors**: Propagated from `sqlparser` with error message
+//! - **Multiple statements**: Rejected with "Only single SQL statement is supported"
+//! - **Unsupported statements**: Returns "Unsupported statement type: ..."
+//!
+//! ## Thread Safety
+//!
+//! The `QueryPlanner` holds an `Arc<RwLock<Catalog>>` for thread-safe catalog access
+//! during plan construction. The planner itself requires `&mut self` for planning
+//! operations due to internal state in the `LogicalPlanBuilder`.
+
 use super::logical_plan::LogicalPlan;
 use crate::catalog::Catalog;
 use crate::sql::planner::plan_builder::LogicalPlanBuilder;
