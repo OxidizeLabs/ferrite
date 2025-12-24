@@ -1,8 +1,227 @@
-//! Heap-based table storage implementation managing pages and physical tuple access.
+//! # Table Heap
 //!
-//! `TableHeap` organizes table data as a doubly linked list of pages. It handles
-//! low-level page management, tuple insertion/update/deletion, and interacts directly
-//! with the buffer pool manager.
+//! This module provides heap-based table storage, organizing table data as a doubly
+//! linked list of pages. `TableHeap` is the physical storage layer for tables, handling
+//! tuple insertion, updates, deletion, and MVCC version chain traversal.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   TableHeap: Doubly Linked List of TablePages
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                            TableHeap                                    │
+//!   │                                                                         │
+//!   │  first_page_id ────┐                               ┌──── last_page_id   │
+//!   │                    │                               │                    │
+//!   │                    ▼                               ▼                    │
+//!   │  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐   │
+//!   │  │   TablePage 0    │◀──▶│   TablePage 1    │◀──▶│   TablePage 2    │   │
+//!   │  │                  │    │                  │    │                  │   │
+//!   │  │ ┌──────────────┐ │    │ ┌──────────────┐ │    │ ┌──────────────┐ │   │
+//!   │  │ │ Slot 0       │ │    │ │ Slot 0       │ │    │ │ Slot 0       │ │   │
+//!   │  │ │ (meta,tuple) │ │    │ │ (meta,tuple) │ │    │ │ (meta,tuple) │ │   │
+//!   │  │ ├──────────────┤ │    │ ├──────────────┤ │    │ ├──────────────┤ │   │
+//!   │  │ │ Slot 1       │ │    │ │ Slot 1       │ │    │ │ ...          │ │   │
+//!   │  │ │ (meta,tuple) │ │    │ │ (meta,tuple) │ │    │ └──────────────┘ │   │
+//!   │  │ └──────────────┘ │    │ └──────────────┘ │    │                  │   │
+//!   │  └──────────────────┘    └──────────────────┘    └──────────────────┘   │
+//!   │         │                        │                        │             │
+//!   │         └────────────────────────┼────────────────────────┘             │
+//!   │                                  ▼                                      │
+//!   │                       BufferPoolManager                                 │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Tuple Insertion Flow
+//!
+//! ```text
+//!   insert_tuple(meta, tuple)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌──────────────────┐
+//!   │ Acquire latch    │
+//!   │ (table-level)    │
+//!   └────────┬─────────┘
+//!            │
+//!            ▼
+//!   ┌──────────────────┐     ┌──────────────────────────────────────┐
+//!   │ last_page_id ==  │─Yes─▶│ create_first_page_and_insert()      │
+//!   │ INVALID?         │     │ → allocate page, insert, return RID │
+//!   └────────┬─────────┘     └──────────────────────────────────────┘
+//!            │ No
+//!            ▼
+//!   ┌──────────────────┐
+//!   │ Fetch last page  │
+//!   └────────┬─────────┘
+//!            │
+//!            ▼
+//!   ┌──────────────────┐     ┌──────────────────────────────────────┐
+//!   │ Page has space?  │─Yes─▶│ page.insert_tuple(meta, tuple)      │
+//!   │                  │     │ → mark dirty, return RID             │
+//!   └────────┬─────────┘     └──────────────────────────────────────┘
+//!            │ No
+//!            ▼
+//!   ┌──────────────────────────────────────┐
+//!   │ create_new_page_and_insert()         │
+//!   │ → allocate new page                  │
+//!   │ → link prev ←→ next                  │
+//!   │ → insert tuple                       │
+//!   │ → update last_page_id                │
+//!   └──────────────────────────────────────┘
+//! ```
+//!
+//! ## MVCC Version Chain Traversal
+//!
+//! ```text
+//!   get_tuple_with_txn(rid, txn_ctx)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌────────────────────┐
+//!   │ Fetch page tuple   │
+//!   │ (latest version)   │
+//!   └─────────┬──────────┘
+//!             │
+//!             ▼
+//!   ┌────────────────────┐
+//!   │ Check isolation    │
+//!   │ level              │
+//!   └─────────┬──────────┘
+//!             │
+//!   ┌─────────┼─────────────────────────────────────────┐
+//!   │         │                                         │
+//!   ▼         ▼                                         ▼
+//! READ_UNCOMMITTED    READ_COMMITTED           REPEATABLE_READ/SERIALIZABLE
+//!   │                   │                               │
+//!   ▼                   ▼                               ▼
+//! Return latest      Is committed?                visibility_status()
+//!   │                   │                               │
+//!   │              ┌────┴────┐                    ┌─────┴─────┐
+//!   │              │Yes  │No │                    │Visible    │Invisible
+//!   │              ▼     ▼   │                    ▼           ▼
+//!   │           Return  Walk                   Return      Walk chain
+//!   │                   chain                              via undo_link
+//!   └───────────────────────────────────────────────────────────────────────
+//! ```
+//!
+//! ## Update with Undo Logging
+//!
+//! ```text
+//!   update_tuple(meta, tuple, rid, txn_ctx)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   1. Fetch current tuple version
+//!
+//!   2. Check visibility rules:
+//!      - Own transaction? → Allow
+//!      - Committed? → Allow
+//!      - Uncommitted by other txn? → DENY
+//!
+//!   3. Create undo log entry:
+//!      ┌────────────────────────────────────────────────────┐
+//!      │ UndoLog {                                          │
+//!      │   is_deleted: false,                               │
+//!      │   modified_fields: [true, true, ...],              │
+//!      │   tuple: Arc<current_tuple>,  // old version       │
+//!      │   ts: current_commit_ts,                           │
+//!      │   prev_version: existing_undo_link,                │
+//!      │ }                                                  │
+//!      └────────────────────────────────────────────────────┘
+//!
+//!   4. Append undo log to transaction
+//!
+//!   5. Update tuple meta with new undo_log_idx
+//!
+//!   6. Update version chain: txn_manager.update_undo_link(rid, new_link)
+//!
+//!   7. Apply update to page: page.update_tuple(new_meta, new_tuple)
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `TableHeap` | Physical table storage (linked list of pages) |
+//! | `TableInfo` | Table metadata (schema, name, OID, heap reference) |
+//! | `TablePageManager` | Helper for page allocation and linking |
+//! | `TupleStorage` | Low-level tuple storage operations |
+//! | `TableTransactionManager` | Transaction and lock management helpers |
+//!
+//! ## Core Operations
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `new(bpm, table_oid)` | Create new table with initial page |
+//! | `reopen(bpm, oid, first, last)` | Reopen existing table from page IDs |
+//! | `insert_tuple(meta, tuple)` | Insert tuple, return RID |
+//! | `update_tuple(meta, tuple, rid, txn_ctx)` | Update with MVCC undo logging |
+//! | `get_tuple(rid)` | Get tuple (no visibility check) |
+//! | `get_tuple_with_txn(rid, txn_ctx)` | Get tuple with isolation-aware visibility |
+//! | `get_first_page_id()` | First page with tuples |
+//! | `get_next_page_id(page_id)` | Next page in linked list |
+//!
+//! ## Isolation Level Behavior
+//!
+//! | Isolation Level | Visibility Rule |
+//! |-----------------|-----------------|
+//! | `ReadUncommitted` | Always return latest version |
+//! | `ReadCommitted` | Return latest committed version |
+//! | `RepeatableRead` | Return version visible at read_ts |
+//! | `Serializable` | Return version visible at read_ts |
+//! | `Snapshot` | Return version at snapshot time |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::table::table_heap::TableHeap;
+//!
+//! // Create new table
+//! let table = TableHeap::new(bpm.clone(), table_oid);
+//!
+//! // Insert tuple
+//! let meta = Arc::new(TupleMeta::new(txn_id));
+//! let rid = table.insert_tuple(meta, &tuple)?;
+//!
+//! // Read tuple with transaction visibility
+//! let (meta, tuple) = table.get_tuple_with_txn(rid, txn_ctx.clone())?;
+//!
+//! // Update tuple (creates undo log)
+//! let new_meta = Arc::new(TupleMeta::new(txn_id));
+//! table.update_tuple(new_meta, &new_tuple, rid, Some(txn_ctx))?;
+//!
+//! // Iterate through table
+//! let mut page_id = table.get_first_page_id();
+//! while page_id != INVALID_PAGE_ID {
+//!     let page_guard = table.get_page(page_id)?;
+//!     // Process tuples on page...
+//!     page_id = table.get_next_page_id(page_id);
+//! }
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - Table-level `latch` (`RwLock<()>`) protects structural modifications
+//! - Page-level locking via `PageGuard` for concurrent tuple access
+//! - `first_page_id` and `last_page_id` protected by individual `RwLock`
+//! - Buffer pool manager handles page pinning and eviction
+//!
+//! ## Page Linking
+//!
+//! ```text
+//!   Doubly Linked List Structure
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   Page 0                    Page 1                    Page 2
+//!   ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
+//!   │ prev: INVALID    │◀─────│ prev: 0          │◀─────│ prev: 1          │
+//!   │ next: 1          │─────▶│ next: 2          │─────▶│ next: INVALID    │
+//!   │ tuples...        │      │ tuples...        │      │ tuples...        │
+//!   └──────────────────┘      └──────────────────┘      └──────────────────┘
+//!         ▲                                                    ▲
+//!         │                                                    │
+//!   first_page_id                                        last_page_id
+//! ```
 
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
