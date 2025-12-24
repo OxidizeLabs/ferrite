@@ -1,189 +1,271 @@
+//! # LFU (Least Frequently Used) Cache Implementation
+//!
+//! This module provides a production-ready LFU cache implementation designed for Ferrite's
+//! storage layer. The LFU cache evicts the least frequently accessed items when capacity
+//! is reached, making it ideal for workloads with stable access patterns.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                          LFUCache<K, V>                                  │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  HashMap<K, (V, usize)>                                            │ │
+//!   │   │                                                                    │ │
+//!   │   │  ┌─────────┬───────────────────────────────────────────────────┐   │ │
+//!   │   │  │   Key   │  (Value, Frequency)                               │   │ │
+//!   │   │  ├─────────┼───────────────────────────────────────────────────┤   │ │
+//!   │   │  │ page_1  │  (data, 15)  ← Hot: accessed frequently           │   │ │
+//!   │   │  │ page_2  │  (data,  3)  ← Warm: moderate accesses            │   │ │
+//!   │   │  │ page_3  │  (data,  1)  ← Cold: single access (LFU victim)   │   │ │
+//!   │   │  │ page_4  │  (data,  7)  ← Warm: moderate accesses            │   │ │
+//!   │   │  └─────────┴───────────────────────────────────────────────────┘   │ │
+//!   │   │                                                                    │ │
+//!   │   │  Eviction: O(n) scan to find minimum frequency                     │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   capacity: usize  (maximum entries)                                     │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## LFU vs LRU Comparison
+//!
+//! ```text
+//!   Access pattern: A, B, A, C, A, D, A, E, A, F  (A accessed 5 times, others 1 each)
+//!   Cache capacity: 3
+//!
+//!   LRU (recency-based):
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!     After A,B,A,C: [A, C, B]  (most recent → least recent)
+//!     Insert D:      [D, A, C]  ← B evicted (least recent)
+//!     Insert E:      [E, D, A]  ← C evicted
+//!     Insert F:      [F, E, D]  ← A evicted! (even though accessed 5 times)
+//!
+//!   LFU (frequency-based):
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!     After A,B,A,C: {A:3, B:1, C:1}
+//!     Insert D:      {A:3, D:1, C:1}  ← B evicted (freq=1, arbitrary tie-break)
+//!     Insert E:      {A:5, E:1, D:1}  ← C evicted (freq=1)
+//!     Insert F:      {A:5, F:1, E:1}  ← D evicted (freq=1)
+//!
+//!   Result: A (hot item) survives in LFU, evicted in LRU!
+//! ```
+//!
+//! ## Eviction Flow
+//!
+//! ```text
+//!   insert(new_key, new_value)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Key already exists?                                                    │
+//!   │                                                                        │
+//!   │   YES → Update value, preserve frequency, return old value             │
+//!   │   NO  → Continue to capacity check                                     │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Cache at capacity?                                                     │
+//!   │                                                                        │
+//!   │   NO  → Insert new entry with frequency = 1                            │
+//!   │   YES → Find and evict LFU item (O(n) scan)                            │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼ (capacity reached)
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ LFU Eviction (O(n)):                                                   │
+//!   │                                                                        │
+//!   │   1. Scan all entries to find minimum frequency                        │
+//!   │   2. Remove first entry with minimum frequency                         │
+//!   │   3. Insert new entry with frequency = 1                               │
+//!   │                                                                        │
+//!   │   Tie-breaking: HashMap iteration order (non-deterministic)            │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Frequency Lifecycle
+//!
+//! ```text
+//!   insert(key, value)
+//!        │
+//!        ▼
+//!   ┌─────────────────┐
+//!   │ Frequency = 1   │  ← Initial state (cold item)
+//!   └─────────────────┘
+//!        │
+//!        │ get(&key), increment_frequency(&key)
+//!        ▼
+//!   ┌─────────────────┐
+//!   │ Frequency += 1  │  ← Each access increments
+//!   └─────────────────┘
+//!        │
+//!        │ reset_frequency(&key)
+//!        ▼
+//!   ┌─────────────────┐
+//!   │ Frequency = 1   │  ← Manual reset (for aging)
+//!   └─────────────────┘
+//!        │
+//!        │ remove(&key), pop_lfu(), clear()
+//!        ▼
+//!   ┌─────────────────┐
+//!   │ Entry removed   │  ← Frequency tracking gone
+//!   └─────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component        | Description                                        |
+//! |------------------|----------------------------------------------------|
+//! | `LFUCache<K, V>` | Main cache struct                                  |
+//! | `cache`          | `HashMap<K, (V, usize)>` storing (value, freq)     |
+//! | `capacity`       | Maximum number of entries                          |
+//!
+//! ## Core Operations (CoreCache + MutableCache)
+//!
+//! | Method           | Complexity | Description                              |
+//! |------------------|------------|------------------------------------------|
+//! | `new(capacity)`  | O(1)       | Create cache with given capacity         |
+//! | `insert(k, v)`   | O(n)*      | Insert/update, may trigger O(n) eviction |
+//! | `get(&k)`        | O(1)       | Get value, increments frequency          |
+//! | `contains(&k)`   | O(1)       | Check if key exists                      |
+//! | `remove(&k)`     | O(1)       | Remove entry by key                      |
+//! | `len()`          | O(1)       | Current number of entries                |
+//! | `capacity()`     | O(1)       | Maximum capacity                         |
+//! | `clear()`        | O(n)       | Remove all entries                       |
+//!
+//! ## LFU-Specific Operations (LFUCacheTrait)
+//!
+//! | Method                   | Complexity | Description                       |
+//! |--------------------------|------------|-----------------------------------|
+//! | `pop_lfu()`              | O(n)       | Remove and return LFU item        |
+//! | `peek_lfu()`             | O(n)       | Peek at LFU item without removing |
+//! | `frequency(&k)`          | O(1)       | Get frequency count for key       |
+//! | `reset_frequency(&k)`    | O(1)       | Reset frequency to 1              |
+//! | `increment_frequency(&k)`| O(1)       | Manually increment frequency      |
+//!
+//! ## Performance Characteristics
+//!
+//! | Operation              | Time       | Notes                              |
+//! |------------------------|------------|------------------------------------|
+//! | `get`                  | O(1)       | HashMap lookup + freq increment    |
+//! | `insert` (no eviction) | O(1)       | HashMap insert                     |
+//! | `insert` (eviction)    | O(n)       | Scans all entries for min freq     |
+//! | `pop_lfu`              | O(n)       | Scans all entries                  |
+//! | `peek_lfu`             | O(n)       | Scans all entries                  |
+//! | Per-entry overhead     | ~24 bytes  | Key + value + usize + HashMap      |
+//!
+//! ## Trade-offs
+//!
+//! | Aspect           | Pros                              | Cons                            |
+//! |------------------|-----------------------------------|---------------------------------|
+//! | Hot Item Retain  | Keeps frequently accessed items   | Cold start problem              |
+//! | Eviction Quality | Good for stable access patterns   | O(n) eviction scan              |
+//! | Memory           | Single HashMap, simple structure  | No frequency decay/aging        |
+//! | Simplicity       | Easy to understand and debug      | Non-deterministic tie-breaking  |
+//!
+//! ## Limitations
+//!
+//! 1. **O(n) LFU Operations**: `pop_lfu()` and `peek_lfu()` scan all entries
+//! 2. **Cold Start Problem**: New items have frequency 1, easily evicted
+//! 3. **No Aging**: Old frequent items stay forever unless manually reset
+//! 4. **Tie-Breaking**: Non-deterministic when multiple items have same frequency
+//! 5. **Not Thread-Safe**: Requires external synchronization
+//!
+//! ## When to Use
+//!
+//! **Use when:**
+//! - Database buffer pools with stable access patterns
+//! - Computational caches with expensive-to-recompute results
+//! - Reference data (lookup tables, dictionaries)
+//! - Analytical workloads identifying hot data
+//!
+//! **Avoid when:**
+//! - Temporal locality dominates (use LRU)
+//! - Frequent `pop_lfu()`/`peek_lfu()` calls needed (use heap-based LFU)
+//! - Access patterns shift rapidly (consider adaptive policies)
+//! - Real-time systems requiring bounded O(1) latency
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::cache::lfu::LFUCache;
+//! use crate::storage::disk::async_disk::cache::cache_traits::{
+//!     CoreCache, MutableCache, LFUCacheTrait,
+//! };
+//!
+//! // Create cache
+//! let mut cache: LFUCache<String, i32> = LFUCache::new(100);
+//!
+//! // Insert items (frequency starts at 1)
+//! cache.insert("key1".to_string(), 100);
+//! cache.insert("key2".to_string(), 200);
+//!
+//! // Access increments frequency
+//! cache.get(&"key1".to_string()); // freq: 1 → 2
+//! cache.get(&"key1".to_string()); // freq: 2 → 3
+//!
+//! assert_eq!(cache.frequency(&"key1".to_string()), Some(3));
+//! assert_eq!(cache.frequency(&"key2".to_string()), Some(1));
+//!
+//! // Manual frequency control
+//! cache.increment_frequency(&"key2".to_string()); // freq: 1 → 2
+//! cache.reset_frequency(&"key1".to_string());     // freq: 3 → 1
+//!
+//! // Peek at LFU candidate (O(n) scan)
+//! if let Some((key, value)) = cache.peek_lfu() {
+//!     println!("Next victim: {} = {}", key, value);
+//! }
+//!
+//! // Evict LFU item (O(n) scan)
+//! if let Some((key, value)) = cache.pop_lfu() {
+//!     println!("Evicted: {} = {}", key, value);
+//! }
+//!
+//! // Thread-safe usage
+//! use std::sync::{Arc, Mutex};
+//! let shared_cache = Arc::new(Mutex::new(LFUCache::<u64, Vec<u8>>::new(1000)));
+//!
+//! // In thread:
+//! {
+//!     let mut cache = shared_cache.lock().unwrap();
+//!     cache.insert(page_id, page_data);
+//! }
+//! ```
+//!
+//! ## Comparison with Other Policies
+//!
+//! | Policy   | Eviction Basis | Eviction Time | Best For                  |
+//! |----------|----------------|---------------|---------------------------|
+//! | LFU      | Frequency      | O(n)          | Stable access patterns    |
+//! | LRU      | Recency        | O(1)          | Temporal locality         |
+//! | LRU-K    | K-th access    | O(n)          | Scan resistance           |
+//! | FIFO     | Insertion time | O(1)          | Simple, predictable       |
+//!
+//! ## Thread Safety
+//!
+//! - `LFUCache` is **NOT thread-safe**
+//! - Wrap in `Arc<Mutex<LFUCache>>` or `Arc<RwLock<LFUCache>>` for concurrent access
+//! - Note: O(n) operations hold locks longer, may cause contention
+//!
+//! ## Implementation Notes
+//!
+//! - **No Clone Requirement**: Keys and values don't need `Clone`
+//! - **Zero Capacity**: Supported - rejects all insertions
+//! - **Frequency Overflow**: Theoretically possible at `usize::MAX` accesses
+//! - **Single HashMap**: Reduces allocations vs. separate frequency tracking
+
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LFUCacheTrait, MutableCache,
 };
 use std::collections::HashMap;
 use std::hash::Hash;
 
-/// # LFU (Least Frequently Used) Cache Implementation
+/// LFU (Least Frequently Used) Cache.
 ///
-/// This module provides a production-ready LFU cache implementation designed for Ferrite's
-/// storage layer. The LFU cache evicts the least frequently accessed items when capacity
-/// is reached, making it ideal for workloads with stable access patterns.
-///
-/// ## What It Does
-///
-/// The LFU cache maintains access frequency counters for each cached item and evicts
-/// the item with the lowest frequency when space is needed. This differs from LRU
-/// (Least Recently Used) caches which only consider recency, not frequency.
-///
-/// ## How It Works
-///
-/// - **Storage**: Uses a single `HashMap<K, (V, usize)>` where the tuple contains
-///   the value and its access frequency count
-/// - **Frequency Tracking**: Each `get()` operation increments the frequency counter
-/// - **Eviction**: When at capacity, finds the item with minimum frequency and removes it
-/// - **Tie Breaking**: When multiple items have the same minimum frequency,
-///   evicts an arbitrary one (implementation-dependent HashMap iteration order)
-///
-/// ## Performance Characteristics
-///
-/// Based on comprehensive testing with realistic workloads:
-///
-/// | Operation | Time Complexity | Measured Performance | Notes |
-/// |-----------|----------------|---------------------|-------|
-/// | `insert()` | O(1) amortized | ~3-10μs average | Includes potential O(n) eviction |
-/// | `get()` | O(1) | ~200-500ns | Fast HashMap lookup + counter increment |
-/// | `remove()` | O(1) | ~300-600ns | Standard HashMap removal |
-/// | `contains()` | O(1) | ~200-400ns | HashMap lookup only |
-/// | `pop_lfu()` | O(n) | ~65μs-5ms | Must scan all items to find minimum |
-/// | `peek_lfu()` | O(n) | ~36μs-1ms | Scan without removal |
-/// | `frequency()` | O(1) | ~530ns-3μs | Direct HashMap access |
-/// | `increment_frequency()` | O(1) | ~530ns | HashMap access + increment |
-/// | `reset_frequency()` | O(1) | ~530ns | HashMap access + reset |
-///
-/// **Memory Usage**: O(n) where n is the number of cached items. Each item stores
-/// the key, value, and a `usize` frequency counter.
-///
-/// ## Complexity Analysis
-///
-/// ### Time Complexity
-/// - **Best Case**: All operations except LFU scanning are O(1)
-/// - **Average Case**: Insert with eviction is O(n) due to LFU scanning
-/// - **Worst Case**: O(n) for any operation requiring LFU item identification
-///
-/// ### Space Complexity
-/// - **Memory**: O(capacity) - fixed upper bound
-/// - **Frequency Range**: Unbounded - frequencies can grow indefinitely
-/// - **Per-Item Overhead**: ~24-32 bytes (key + value + frequency + HashMap overhead)
-///
-/// ## Limitations
-///
-/// ### 1. **LFU Operations Are Expensive**
-/// - `pop_lfu()` and `peek_lfu()` require O(n) scans of all items
-/// - Not suitable for frequent LFU queries
-/// - Consider LRU if you need fast eviction candidate identification
-///
-/// ### 2. **Frequency Counter Issues**
-/// - **Unbounded Growth**: Frequencies can overflow `usize` (though unlikely)
-/// - **Cold Start Problem**: New items start with frequency 1, may be evicted immediately
-/// - **Temporal Locality**: Old frequent items may stay cached despite being stale
-///
-/// ### 3. **Memory Characteristics**
-/// - **No Automatic Aging**: Old high-frequency items never decay
-/// - **Fixed Capacity**: Cannot dynamically resize
-/// - **No Clone Requirement**: Keys and values don't need to be cloneable
-///
-/// ### 4. **Concurrency Limitations**
-/// - **Not Thread-Safe**: Requires external synchronization (e.g., `Arc<Mutex<LFUCache>>`)
-/// - **Lock Contention**: O(n) operations hold locks longer
-///
-/// ## When to Use LFU Cache
-///
-/// ### ✅ **Ideal Use Cases**
-/// - **Database Buffer Pools**: Page caching with stable access patterns
-/// - **Computational Caches**: Expensive-to-compute results with repeat access
-/// - **Static Content**: Configuration data, metadata with predictable access
-/// - **Analytical Workloads**: Hot data identification for data warehouses
-/// - **Reference Data**: Lookup tables, dictionaries with skewed access patterns
-///
-/// ### ❌ **Avoid LFU When**
-/// - **Temporal Locality Dominates**: Recent items more important than frequent ones (use LRU)
-/// - **Frequent LFU Queries**: If you need fast `pop_lfu()` or `peek_lfu()` (use heap-based LFU)
-/// - **Rapidly Changing Patterns**: Access patterns shift frequently (consider adaptive policies)
-/// - **Memory-Constrained**: Need minimal per-item overhead (consider simpler caches)
-/// - **Real-Time Systems**: Cannot tolerate O(n) operations (use O(1) alternatives)
-///
-/// ## Usage Examples
-///
-/// ### Basic Usage
-/// ```rust,no_run
-/// use crate::storage::disk::async_disk::cache::lfu::LFUCache;
-/// use crate::storage::disk::async_disk::cache::cache_traits::CoreCache;
-///
-/// // Create a cache with capacity for 100 items
-/// let mut cache = LFUCache::new(100);
-///
-/// // Insert items
-/// cache.insert("user:123", "John Doe");
-/// cache.insert("user:456", "Jane Smith");
-///
-/// // Access items (increases frequency)
-/// let user = cache.get(&"user:123"); // frequency: 1 → 2
-/// let user = cache.get(&"user:123"); // frequency: 2 → 3
-///
-/// // Check frequency
-/// assert_eq!(cache.frequency(&"user:123"), Some(3));
-/// ```
-///
-/// ### Database Buffer Pool Usage
-/// ```rust,no_run
-/// use std::sync::{Arc, Mutex};
-///
-/// // Thread-safe cache for database pages
-/// type PageId = u64;
-/// type PageData = Vec<u8>;
-/// type PageCache = Arc<Mutex<LFUCache<PageId, PageData>>>;
-///
-/// let page_cache: PageCache = Arc::new(Mutex::new(LFUCache::new(1000)));
-///
-/// // Simulate page access
-/// fn access_page(cache: &PageCache, page_id: PageId) -> Option<PageData> {
-///     let mut cache = cache.lock().unwrap();
-///     cache.get(&page_id).cloned()
-/// }
-///
-/// // Simulate page loading with eviction
-/// fn load_page(cache: &PageCache, page_id: PageId, data: PageData) {
-///     let mut cache = cache.lock().unwrap();
-///     if cache.len() >= cache.capacity() {
-///         // LFU eviction happens automatically on insert
-///         log::info!("Cache full, will evict LFU page");
-///     }
-///     cache.insert(page_id, data);
-/// }
-/// ```
-///
-/// ### Frequency Management
-/// ```rust,no_run
-/// // Manual frequency control for cache warming
-/// cache.insert("hot_key", "important_data");
-///
-/// // Artificially boost frequency for important items
-/// for _ in 0..10 {
-///     cache.increment_frequency(&"hot_key");
-/// }
-///
-/// // Reset frequency for aging
-/// cache.reset_frequency(&"old_key");
-///
-/// // Monitor LFU candidate
-/// if let Some((key, _value)) = cache.peek_lfu() {
-///     log::info!("Next item to be evicted: {:?}", key);
-/// }
-/// ```
-///
-/// ### Performance Monitoring
-/// ```rust,no_run
-/// use std::time::Instant;
-///
-/// // Measure operation performance
-/// let start = Instant::now();
-/// cache.insert("key", "value");
-/// log::info!("Insert took: {:?}", start.elapsed());
-///
-/// // Avoid frequent LFU operations in hot paths
-/// let start = Instant::now();
-/// let lfu_item = cache.pop_lfu(); // O(n) operation!
-/// log::info!("LFU scan took: {:?}", start.elapsed());
-/// ```
-///
-/// ## Implementation Notes
-///
-/// - **No Clone Requirement**: Designed to work without `Clone` bounds on K and V
-/// - **Frequency Overflow**: Extremely unlikely but possible with `usize::MAX` accesses
-/// - **Tie Breaking**: Non-deterministic when multiple items have minimum frequency
-/// - **Zero Capacity**: Supported - rejects all insertions
-/// - **Memory Efficiency**: Single HashMap reduces allocations vs. separate frequency tracking
+/// Evicts the item with the lowest access frequency when capacity is reached.
+/// See module-level documentation for details.
 #[derive(Debug)]
 pub struct LFUCache<K, V>
 where
