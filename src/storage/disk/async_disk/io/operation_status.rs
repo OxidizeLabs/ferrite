@@ -1,22 +1,204 @@
 //! # I/O Operation Status
 //!
 //! This module defines the state machine and result types for tracking individual I/O operations.
-//! It allows callers to query the state of an asynchronous request or await its result.
+//! It allows callers to query the state of an asynchronous request or await its result via
+//! oneshot channels.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   Caller                                     Worker
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ start_operation(timeout)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  CompletionTracker creates OperationStatus::Pending                     │
+//!   │                                                                         │
+//!   │  ┌───────────────────────────────────────────────────────────────────┐  │
+//!   │  │  OperationStatus::Pending                                         │  │
+//!   │  │                                                                   │  │
+//!   │  │  started_at: Instant::now()                                       │  │
+//!   │  │  timeout: Option<Duration>                                        │  │
+//!   │  │  notifier: oneshot::Sender<OperationResult> ──────────────────────┼──┼──┐
+//!   │  └───────────────────────────────────────────────────────────────────┘  │  │
+//!   └─────────────────────────────────────────────────────────────────────────┘  │
+//!          │                                                                     │
+//!          │ Returns (OperationId, Receiver)                                     │
+//!          ▼                                                                     │
+//!   ┌─────────────────────────────────────────────────────────────────────────┐  │
+//!   │  Caller holds oneshot::Receiver<OperationResult>                        │  │
+//!   │                                                                         │  │
+//!   │  receiver.await  ← blocks until notifier.send() is called               │  │
+//!   └─────────────────────────────────────────────────────────────────────────┘  │
+//!                                                                                │
+//!          ┌─────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ Worker executes I/O, calls complete(result)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  OperationStatus transitions:                                           │
+//!   │                                                                         │
+//!   │  Pending ──► complete(result) ──► Completed { result, timing }          │
+//!   │          └──► cancel(reason)  ──► Cancelled { reason, timing }          │
+//!   │                                                                         │
+//!   │  On complete(): notifier.send(result) wakes the caller's receiver       │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## State Machine
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                          OperationStatus                                 │
+//!   │                                                                          │
+//!   │                        ┌─────────────┐                                   │
+//!   │                        │   Pending   │                                   │
+//!   │                        │             │                                   │
+//!   │                        │ started_at  │                                   │
+//!   │                        │ timeout     │                                   │
+//!   │                        │ notifier    │                                   │
+//!   │                        └──────┬──────┘                                   │
+//!   │                               │                                          │
+//!   │              ┌────────────────┼────────────────┐                         │
+//!   │              │ complete()     │ cancel()       │                         │
+//!   │              ▼                ▼                │ (already final)         │
+//!   │       ┌─────────────┐  ┌─────────────┐         │                         │
+//!   │       │  Completed  │  │  Cancelled  │         │                         │
+//!   │       │             │  │             │         │                         │
+//!   │       │ started_at  │  │ started_at  │◄────────┘                         │
+//!   │       │ completed_at│  │ cancelled_at│                                   │
+//!   │       │ result      │  │ reason      │                                   │
+//!   │       └─────────────┘  └─────────────┘                                   │
+//!   │                                                                          │
+//!   │       [Terminal]       [Terminal]                                        │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
 //! ## Key Types
 //!
-//! - **`OperationStatus`**: An enum representing the lifecycle state of an operation:
-//!     - `Pending`: In queue or currently executing. Contains the `oneshot` sender for notification.
-//!     - `Completed`: Successfully finished or failed. Contains timing info and the result.
-//!     - `Cancelled`: Aborted before completion.
-//! - **`OperationResult`**: The outcome of an operation (`Success(Vec<u8>)` or `Error(String)`).
-//! - **`OperationId`**: Unique identifier alias (`u64`).
+//! | Type              | Description                                          |
+//! |-------------------|------------------------------------------------------|
+//! | `OperationId`     | Type alias for `u64`, unique operation identifier    |
+//! | `OperationResult` | Outcome: `Success(Vec<u8>)` or `Error(String)`       |
+//! | `OperationStatus` | State machine: Pending → Completed or Cancelled      |
 //!
-//! ## Features
+//! ## OperationStatus Variants
 //!
-//! - **Timeout Detection**: Helper methods to check if a pending operation has exceeded its TTL.
-//! - **In-Place Updates**: State transitions (e.g., Pending -> Completed) handle the logic of
-//!   notifying waiters via channels.
+//! | Variant     | Fields                                  | Description                    |
+//! |-------------|-----------------------------------------|--------------------------------|
+//! | `Pending`   | `started_at`, `timeout`, `notifier`     | In queue or executing          |
+//! | `Completed` | `started_at`, `completed_at`, `result`  | Finished (success or error)    |
+//! | `Cancelled` | `started_at`, `cancelled_at`, `reason`  | Aborted before completion      |
+//!
+//! ## OperationResult Variants
+//!
+//! | Variant   | Data           | Description                              |
+//! |-----------|----------------|------------------------------------------|
+//! | `Success` | `Vec<u8>`      | Operation succeeded, contains result data|
+//! | `Error`   | `String`       | Operation failed, contains error message |
+//!
+//! ## Core Operations
+//!
+//! | Method          | Description                                        |
+//! |-----------------|----------------------------------------------------|
+//! | `new_pending()` | Create Pending status with optional timeout        |
+//! | `complete()`    | Transition to Completed, notify waiters            |
+//! | `cancel()`      | Transition to Cancelled with reason                |
+//! | `is_pending()`  | Check if still in Pending state                    |
+//! | `is_completed()`| Check if in Completed state                        |
+//! | `elapsed()`     | Get duration since operation started               |
+//! | `is_timed_out()`| Check if pending and exceeded timeout              |
+//!
+//! ## Timeout Detection
+//!
+//! ```text
+//!   is_timed_out()
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ OperationStatus::Pending { timeout: Some(5s), started_at, ... }        │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!
+//!   Timeline:
+//!   ────────────────────────────────────────────────────────────────────────►
+//!   │                     │                                │
+//!   started_at            │                                now
+//!                         │
+//!                    started_at + 5s (timeout)
+//!
+//!   if now > started_at + timeout:
+//!       is_timed_out() = true
+//!   else:
+//!       is_timed_out() = false
+//!
+//!   Note: Returns false for Completed, Cancelled, or Pending without timeout
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::io::operation_status::{
+//!     OperationStatus, OperationResult,
+//! };
+//! use std::time::Duration;
+//!
+//! // Create a pending operation with 5-second timeout
+//! let (status, receiver) = OperationStatus::new_pending(Some(Duration::from_secs(5)));
+//!
+//! assert!(status.is_pending());
+//! assert!(!status.is_timed_out()); // Just started
+//!
+//! // In another task: await the result
+//! tokio::spawn(async move {
+//!     match receiver.await {
+//!         Ok(OperationResult::Success(data)) => {
+//!             println!("Read {} bytes", data.len());
+//!         }
+//!         Ok(OperationResult::Error(msg)) => {
+//!             eprintln!("I/O error: {}", msg);
+//!         }
+//!         Err(_) => {
+//!             eprintln!("Operation was cancelled (sender dropped)");
+//!         }
+//!     }
+//! });
+//!
+//! // Worker completes the operation
+//! let completed_status = status.complete(OperationResult::Success(vec![1, 2, 3, 4]));
+//! assert!(completed_status.is_completed());
+//!
+//! // Or cancel it
+//! let (status2, _rx) = OperationStatus::new_pending(None);
+//! let cancelled = status2.cancel("Shutdown requested".to_string());
+//! assert!(!cancelled.is_pending());
+//! ```
+//!
+//! ## Timing Information
+//!
+//! ```text
+//!   Completed Operation Timing
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ OperationStatus::Completed                                              │
+//!   │                                                                         │
+//!   │   started_at   ─────────────────────────► completed_at                  │
+//!   │        │                                        │                       │
+//!   │        └──────── operation_duration ────────────┘                       │
+//!   │                                                                         │
+//!   │   elapsed() returns: Instant::now() - started_at                        │
+//!   │   (useful for latency metrics)                                          │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `OperationStatus` is not `Sync` (contains `oneshot::Sender`)
+//! - `OperationStatus` is `Send` (can be moved between threads)
+//! - `OperationResult` is `Clone`, `Send`, and `Sync`
+//! - Oneshot channel provides safe single-value communication across tasks
+//! - State transitions consume `self`, preventing concurrent mutations
 
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
