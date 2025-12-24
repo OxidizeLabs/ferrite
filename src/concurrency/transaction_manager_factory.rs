@@ -1,3 +1,142 @@
+//! # Transaction Manager Factory
+//!
+//! This module provides a high-level coordinator that wraps `TransactionManager`
+//! state transitions with I/O side effects: WAL logging, buffer pool page flushing,
+//! and lock release. This separation keeps `TransactionManager` focused on pure
+//! state/MVCC logic while centralizing durability and synchronization concerns here.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                     ┌─────────────────────────────────────────────────────────┐
+//!                     │            TransactionManagerFactory                    │
+//!                     │                                                         │
+//!                     │  ┌─────────────────────────────────────────────────┐    │
+//!                     │  │  transaction_manager: Arc<TransactionManager>  │    │
+//!                     │  │  (State transitions, MVCC, undo logs)          │    │
+//!                     │  └─────────────────────────────────────────────────┘    │
+//!                     │                         │                               │
+//!                     │  ┌─────────────────────────────────────────────────┐    │
+//!                     │  │  lock_manager: Arc<LockManager>                │    │
+//!                     │  │  (2PL lock acquisition and release)            │    │
+//!                     │  └─────────────────────────────────────────────────┘    │
+//!                     │                         │                               │
+//!                     │  ┌─────────────────────────────────────────────────┐    │
+//!                     │  │  buffer_pool_manager: Arc<BufferPoolManager>   │    │
+//!                     │  │  (Page I/O, dirty page flushing)               │    │
+//!                     │  └─────────────────────────────────────────────────┘    │
+//!                     │                         │                               │
+//!                     │  ┌─────────────────────────────────────────────────┐    │
+//!                     │  │  wal_manager: Option<Arc<WALManager>>          │    │
+//!                     │  │  (Write-ahead logging for durability)          │    │
+//!                     │  └─────────────────────────────────────────────────┘    │
+//!                     └─────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `TransactionManagerFactory` | Coordinator for transaction side effects |
+//! | `TransactionManager` | Pure state/MVCC logic (no I/O) |
+//! | `LockManager` | 2PL lock acquisition and release |
+//! | `BufferPoolManager` | Page caching and flushing |
+//! | `WALManager` | Write-ahead logging for crash recovery |
+//!
+//! ## Commit Flow (WAL-First Protocol)
+//!
+//! ```text
+//!   commit_transaction(ctx)
+//!          │
+//!          ▼
+//!   ┌─────────────────────────────────────────┐
+//!   │  1. Write COMMIT record to WAL          │  ◄── WAL-first: log before data
+//!   │     (if wal_manager is Some)            │
+//!   └─────────────────────────────────────────┘
+//!          │
+//!          ▼
+//!   ┌─────────────────────────────────────────┐
+//!   │  2. TransactionManager.commit()         │  ◄── State transition
+//!   │     - Set commit_ts                     │      + tuple metadata update
+//!   │     - Update tuple commit timestamps    │
+//!   └─────────────────────────────────────────┘
+//!          │
+//!          ▼
+//!   ┌─────────────────────────────────────────┐
+//!   │  3. Flush dirty pages                   │  ◄── Persist changes
+//!   │     - Collect page IDs from write_set   │
+//!   │     - flush_page_async() for each       │
+//!   └─────────────────────────────────────────┘
+//!          │
+//!          ▼
+//!   ┌─────────────────────────────────────────┐
+//!   │  4. Release locks                       │  ◄── Strict 2PL: release at end
+//!   │     - force_release_txn(txn_id)         │
+//!   └─────────────────────────────────────────┘
+//!          │
+//!          ▼
+//!       return true
+//! ```
+//!
+//! ## Abort Flow
+//!
+//! ```text
+//!   abort_transaction(ctx)
+//!          │
+//!          ▼
+//!   ┌─────────────────────────────────────────┐
+//!   │  1. Write ABORT record to WAL           │
+//!   │     (if wal_manager is Some)            │
+//!   └─────────────────────────────────────────┘
+//!          │
+//!          ▼
+//!   ┌─────────────────────────────────────────┐
+//!   │  2. TransactionManager.abort()          │  ◄── Rollback via undo logs
+//!   │     - Restore tuples from undo logs     │
+//!   │     - Mark new inserts as deleted       │
+//!   └─────────────────────────────────────────┘
+//!          │
+//!          ▼
+//!   ┌─────────────────────────────────────────┐
+//!   │  3. Release locks                       │
+//!   │     - force_release_txn(txn_id)         │
+//!   └─────────────────────────────────────────┘
+//! ```
+//!
+//! ## Construction Options
+//!
+//! | Constructor | Description |
+//! |-------------|-------------|
+//! | `new(bpm)` | Basic factory without WAL (for testing) |
+//! | `with_wal_manager(bpm, wal)` | Factory with WAL, new TransactionManager |
+//! | `with_wal_manager_and_txn(bpm, wal, tm)` | Factory with external TransactionManager |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
+//! use crate::concurrency::transaction::IsolationLevel;
+//!
+//! // Create factory with WAL support
+//! let factory = TransactionManagerFactory::with_wal_manager(bpm, wal_manager);
+//!
+//! // Begin a transaction (writes BEGIN to WAL)
+//! let ctx = factory.begin_transaction(IsolationLevel::ReadCommitted);
+//!
+//! // Perform operations using ctx...
+//!
+//! // Commit (writes COMMIT to WAL, flushes pages, releases locks)
+//! factory.commit_transaction(ctx).await;
+//!
+//! // Or abort on error
+//! // factory.abort_transaction(ctx);
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! All internal components are wrapped in `Arc` for safe concurrent access.
+//! The factory itself is designed to be shared across multiple execution threads.
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::IsolationLevel;
