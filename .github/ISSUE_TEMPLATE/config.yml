@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/ferritedb/ferrite/tree/main/docs
+    about: Check our documentation before opening an issue
+  - name: Security Vulnerability
+    url: https://github.com/ferritedb/ferrite/security/policy
+    about: Report security vulnerabilities privately (do not open an issue)
+
