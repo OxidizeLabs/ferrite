@@ -1,3 +1,251 @@
+//! # Log Recovery Manager
+//!
+//! This module provides the `LogRecoveryManager` which implements the ARIES
+//! (Algorithms for Recovery and Isolation Exploiting Semantics) recovery protocol
+//! to restore the database to a consistent state after a crash.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                           ┌─────────────────────────────────────────────────┐
+//!                           │            LogRecoveryManager                   │
+//!                           │                                                 │
+//!                           │  ┌─────────────┐  ┌─────────────┐               │
+//!                           │  │DiskManager  │  │ LogManager  │               │
+//!                           │  │  (WAL I/O)  │  │ (LSN mgmt)  │               │
+//!                           │  └─────────────┘  └─────────────┘               │
+//!                           │         │                │                      │
+//!                           │         ▼                ▼                      │
+//!                           │  ┌─────────────────────────────┐                │
+//!                           │  │     BufferPoolManager       │                │
+//!                           │  │   (page read/write ops)     │                │
+//!                           │  └─────────────────────────────┘                │
+//!                           └─────────────────────────────────────────────────┘
+//!                                              │
+//!                                              ▼
+//!                           ┌─────────────────────────────────────────────────┐
+//!                           │              ARIES Recovery                     │
+//!                           │                                                 │
+//!                           │   Phase 1        Phase 2        Phase 3         │
+//!                           │  ┌────────┐    ┌────────┐    ┌────────┐         │
+//!                           │  │Analysis│───▶│  Redo  │───▶│  Undo  │         │
+//!                           │  └────────┘    └────────┘    └────────┘         │
+//!                           └─────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## ARIES Recovery Protocol
+//!
+//! ARIES provides atomicity and durability guarantees through a three-phase
+//! recovery algorithm:
+//!
+//! ```text
+//!   Recovery Timeline
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   WAL on disk:
+//!   ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+//!   │BEGIN│ UPD │ INS │BEGIN│ UPD │COMIT│ UPD │ INS │CRASH│
+//!   │ T1  │ T1  │ T1  │ T2  │ T2  │ T1  │ T2  │ T2  │     │
+//!   └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+//!     LSN:  0     1     2     3     4     5     6     7
+//!
+//!   ──────────────────────────────────────────────────────────────────────────
+//!   Phase 1: ANALYSIS (scan forward from start)
+//!   ──────────────────────────────────────────────────────────────────────────
+//!
+//!   Build transaction table:        Build dirty page table:
+//!   ┌──────┬──────────┬────────┐    ┌────────┬─────────┐
+//!   │TxnId │ Last LSN │ Status │    │ PageId │ RecLSN  │
+//!   ├──────┼──────────┼────────┤    ├────────┼─────────┤
+//!   │  T1  │    5     │COMMITTED│   │  P1    │    1    │
+//!   │  T2  │    7     │ ACTIVE │    │  P2    │    4    │
+//!   └──────┴──────────┴────────┘    │  P3    │    6    │
+//!                                   └────────┴─────────┘
+//!
+//!   Result: T2 is active (uncommitted) at crash
+//!
+//!   ──────────────────────────────────────────────────────────────────────────
+//!   Phase 2: REDO (scan forward, replay all logged actions)
+//!   ──────────────────────────────────────────────────────────────────────────
+//!
+//!   For each logged operation (even aborted txns):
+//!     if page in dirty_page_table AND lsn >= rec_lsn:
+//!       fetch page, apply operation
+//!
+//!   Purpose: Bring all pages to their crash-time state
+//!
+//!   ──────────────────────────────────────────────────────────────────────────
+//!   Phase 3: UNDO (walk backward via prev_lsn chains)
+//!   ──────────────────────────────────────────────────────────────────────────
+//!
+//!   For each active transaction (T2):
+//!     follow prev_lsn chain backward:
+//!       LSN 7 → LSN 6 → LSN 4 → LSN 3 (BEGIN)
+//!     undo each operation in reverse order
+//!     write ABORT record
+//!
+//!   Purpose: Rollback uncommitted transactions
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `LogRecoveryManager` | Orchestrates the ARIES recovery process |
+//! | `TxnTable` | Tracks active transactions and their last LSN |
+//! | `DirtyPageTable` | Tracks dirty pages and their recovery LSN |
+//! | `LogIterator` | Sequential traversal of WAL records |
+//!
+//! ## Transaction Table
+//!
+//! ```text
+//!   TxnTable: HashMap<TxnId, Lsn>
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   Tracks transactions that were active at crash time:
+//!
+//!   ┌─────────────────────────────────────────────────────────────┐
+//!   │                       TxnTable                              │
+//!   │                                                             │
+//!   │   TxnId: 1 ──────▶ LastLSN: 5  (T1 committed at LSN 5)      │
+//!   │   TxnId: 2 ──────▶ LastLSN: 7  (T2 active, needs undo)      │
+//!   │   TxnId: 3 ──────▶ LastLSN: 3  (T3 aborted at LSN 3)        │
+//!   └─────────────────────────────────────────────────────────────┘
+//!
+//!   Operations:
+//!   - add_txn(id, lsn)    : BEGIN record → add to table
+//!   - update_txn(id, lsn) : Data operation → update last LSN
+//!   - remove_txn(id)      : COMMIT/ABORT → remove from table
+//! ```
+//!
+//! ## Dirty Page Table
+//!
+//! ```text
+//!   DirtyPageTable: HashMap<PageId, Lsn>
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   Tracks pages that may need redo (RecLSN = first LSN that dirtied page):
+//!
+//!   ┌─────────────────────────────────────────────────────────────┐
+//!   │                    DirtyPageTable                           │
+//!   │                                                             │
+//!   │   PageId: 1 ──────▶ RecLSN: 2  (first dirtied at LSN 2)     │
+//!   │   PageId: 2 ──────▶ RecLSN: 4  (first dirtied at LSN 4)     │
+//!   │   PageId: 3 ──────▶ RecLSN: 6  (first dirtied at LSN 6)     │
+//!   └─────────────────────────────────────────────────────────────┘
+//!
+//!   Used during redo: skip operations where LSN < RecLSN for that page
+//! ```
+//!
+//! ## Core Operations
+//!
+//! | Method | Phase | Description |
+//! |--------|-------|-------------|
+//! | `start_recovery()` | All | Entry point for complete recovery |
+//! | `analyze_log()` | 1 | Scan WAL, build txn & dirty page tables |
+//! | `redo_log()` | 2 | Replay logged operations to restore pages |
+//! | `undo_log()` | 3 | Rollback uncommitted transactions |
+//! | `redo_record()` | 2 | Apply a single log record |
+//! | `undo_insert()` | 3 | Undo an INSERT (mark tuple deleted) |
+//! | `undo_update()` | 3 | Undo an UPDATE (restore old value) |
+//! | `undo_delete()` | 3 | Undo a DELETE (restore tuple) |
+//!
+//! ## Redo Logic
+//!
+//! ```text
+//!   Redo Decision Tree
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   For each log record:
+//!
+//!   ┌─────────────────────┐
+//!   │ Is it a data op?    │──── No ────▶ Skip (BEGIN, COMMIT, ABORT)
+//!   │ (INS/UPD/DEL/etc)   │
+//!   └──────────┬──────────┘
+//!              │ Yes
+//!              ▼
+//!   ┌─────────────────────┐
+//!   │ Page in dirty table?│──── No ────▶ Skip (page already flushed)
+//!   └──────────┬──────────┘
+//!              │ Yes
+//!              ▼
+//!   ┌─────────────────────┐
+//!   │ LSN >= RecLSN?      │──── No ────▶ Skip (already applied)
+//!   └──────────┬──────────┘
+//!              │ Yes
+//!              ▼
+//!        ┌───────────┐
+//!        │   REDO    │
+//!        │ (apply op)│
+//!        └───────────┘
+//! ```
+//!
+//! ## Undo Logic
+//!
+//! ```text
+//!   Undo Process (per active transaction)
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   1. Get last LSN for transaction from TxnTable
+//!   2. Build LSN → offset map (full log scan)
+//!   3. Walk backward via prev_lsn chain:
+//!
+//!       LSN: 7 ───────▶ LSN: 6 ───────▶ LSN: 4 ───────▶ LSN: 3
+//!        │               │               │               │
+//!        ▼               ▼               ▼               ▼
+//!      ┌─────┐         ┌─────┐         ┌─────┐         ┌─────┐
+//!      │ INS │undo     │ UPD │undo     │ UPD │undo     │BEGIN│
+//!      │     │────▶    │     │────▶    │     │────▶    │     │ STOP
+//!      └─────┘         └─────┘         └─────┘         └─────┘
+//!
+//!   4. Write ABORT record for transaction
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::recovery::log_recovery::LogRecoveryManager;
+//!
+//! // Create recovery manager
+//! let recovery_manager = LogRecoveryManager::new(
+//!     disk_manager.clone(),
+//!     log_manager.clone(),
+//!     buffer_pool_manager.clone(),
+//! );
+//!
+//! // Perform full ARIES recovery
+//! recovery_manager.start_recovery().await?;
+//!
+//! // Database is now in consistent state:
+//! // - All committed transactions are durable
+//! // - All uncommitted transactions are rolled back
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - Recovery runs single-threaded during startup (before normal operations)
+//! - `LogManager` access is protected by `RwLock`
+//! - `BufferPoolManager` handles page-level concurrency
+//!
+//! ## Idempotency
+//!
+//! ARIES redo/undo operations are idempotent:
+//! - If recovery crashes, running recovery again produces the same result
+//! - This is critical for reliability: recovery can be interrupted and restarted
+//!
+//! ## Supported Log Record Types
+//!
+//! | Type | Redo Action | Undo Action |
+//! |------|-------------|-------------|
+//! | `Begin` | (tracked only) | (stop point) |
+//! | `Commit` | (tracked only) | N/A |
+//! | `Abort` | (tracked only) | N/A |
+//! | `Insert` | Re-insert tuple | Mark deleted |
+//! | `Update` | Apply new value | Restore old value |
+//! | `MarkDelete` | Mark deleted | Unmark deleted |
+//! | `ApplyDelete` | Mark deleted | Restore tuple |
+//! | `NewPage` | Allocate page | (no undo) |
+
 use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::recovery::log_iterator::LogIterator;
