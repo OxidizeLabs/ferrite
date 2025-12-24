@@ -1,3 +1,80 @@
+//! # LRU-K Page Replacement Policy
+//!
+//! This module implements the **LRU-K replacement algorithm** for buffer pool management,
+//! a more sophisticated alternative to simple LRU that considers access frequency patterns.
+//!
+//! ## Algorithm Overview
+//!
+//! The LRU-K algorithm tracks the **K most recent accesses** to each frame and uses the
+//! timestamp of the K-th most recent access (backward K-distance) to make eviction decisions.
+//! This approach better distinguishes between frequently and infrequently accessed pages.
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                    LRU-K Replacer (K=2)                     │
+//! ├─────────────────────────────────────────────────────────────┤
+//! │  Frame Store (HashMap<FrameId, FrameEntry>)                 │
+//! │  ┌─────────┬──────────────────────┬───────────┐             │
+//! │  │FrameId  │  Access History      │ Evictable │             │
+//! │  ├─────────┼──────────────────────┼───────────┤             │
+//! │  │    1    │  [t₁, t₅]            │   true    │ ← 2 accesses│
+//! │  │    2    │  [t₂]                │   true    │ ← 1 access  │
+//! │  │    3    │  [t₃, t₄, t₆]  → [t₄, t₆] │ false │ ← pinned   │
+//! │  └─────────┴──────────────────────┴───────────┘             │
+//! │                                                             │
+//! │  Eviction Priority:                                         │
+//! │  1. Frames with < K accesses (by earliest first access)     │
+//! │  2. Frames with ≥ K accesses (by oldest K-th access)        │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! - **[`LRUKReplacer`]**: The main replacer managing frame eviction decisions
+//! - **[`FrameEntry`]**: Internal tracking of access history and evictability
+//! - **[`AccessType`]**: Classification of access patterns (Lookup, Scan, Index)
+//! - **[`Frame`]**: Representation of a buffer pool frame
+//!
+//! ## Eviction Strategy
+//!
+//! When evicting a frame, the algorithm follows this priority:
+//!
+//! 1. **Frames with fewer than K accesses** are evicted first, prioritizing those
+//!    with the fewest accesses and earliest first access timestamp
+//! 2. **Frames with K or more accesses** are compared by their K-th most recent
+//!    access timestamp; the oldest K-th access is evicted
+//!
+//! This strategy protects frequently-accessed ("hot") pages from eviction while
+//! quickly removing pages accessed only once or twice (e.g., sequential scan pages).
+//!
+//! ## Concurrency
+//!
+//! The replacer uses `parking_lot` synchronization primitives:
+//! - `RwLock<HashMap<FrameId, FrameEntry>>` for the frame store (read-heavy)
+//! - `Mutex<VecDeque<FrameId>>` for the evictable frames queue
+//!
+//! ## Example
+//!
+//! ```ignore
+//! let mut replacer = LRUKReplacer::new(100, 2); // 100 frames, K=2
+//!
+//! // Record accesses
+//! replacer.record_access(frame_id, AccessType::Lookup);
+//!
+//! // Mark frame as evictable when unpinned
+//! replacer.set_evictable(frame_id, true);
+//!
+//! // Evict a victim frame when buffer pool is full
+//! if let Some(victim) = replacer.evict() {
+//!     // Use the victim frame for a new page
+//! }
+//! ```
+//!
+//! ## References
+//!
+//! - O'Neil, E. J., O'Neil, P. E., & Weikum, G. (1993). "The LRU-K Page Replacement
+//!   Algorithm for Database Disk Buffering." ACM SIGMOD Record.
+
 use crate::common::config::FrameId;
 use log::{debug, error, trace};
 use parking_lot::{Mutex as ParkingMutex, RwLock};
