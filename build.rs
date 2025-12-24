@@ -154,6 +154,24 @@ fn collect_slt_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+/// Converts a file path to a valid Rust test function name.
+///
+/// # Arguments
+///
+/// * `root` - The root directory (stripped from the path)
+/// * `path` - The full path to the `.slt` file
+///
+/// # Returns
+///
+/// A valid Rust identifier suitable for use as a test function name.
+///
+/// # Examples
+///
+/// ```text
+/// root: tests/sqllogic/
+/// path: tests/sqllogic/basic/select.slt
+/// result: "slt_basic_select"
+/// ```
 fn make_test_name(root: &Path, path: &Path) -> String {
     let relative = path
         .strip_prefix(root)
