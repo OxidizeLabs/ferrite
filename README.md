@@ -30,7 +30,6 @@ Ferrite combines decades of database research with Rust's memory safety and perf
 - 🦀 **Memory-Safe by Design** — Pure Rust with no unsafe in critical paths
 - ⚡ **Async I/O** — Tokio-powered async execution with backpressure
 - 🔒 **Robust Concurrency** — `parking_lot` locks, MVCC-ready watermarks
-- 📊 **Deep Observability** — Structured logging, tracing-ready, metrics hooks
 - 🗄️ **Flexible Deployment** — Embedded library or client-server modes
 
 ### Supported SQL Features
