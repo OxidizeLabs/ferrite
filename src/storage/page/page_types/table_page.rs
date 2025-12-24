@@ -1,3 +1,55 @@
+//! Slotted page implementation for row-oriented tuple storage.
+//!
+//! This module provides [`TablePage`], a fixed-size page that stores variable-length
+//! tuples using the **slotted page** format. This design is widely used in database
+//! systems for efficient space utilization and stable tuple addressing.
+//!
+//! # Slotted Page Architecture
+//!
+//! The page is divided into three regions that grow toward each other:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │ Header (page_id, prev/next links, tuple counts)             │
+//! │ Start Magic (0xDEADBEEF)                                    │
+//! │ Slot Directory → [offset, size, meta] per tuple             │
+//! │ End Magic (0xCAFEBABE)                                      │
+//! │                    ↓ grows forward                          │
+//! ├─────────────────────────────────────────────────────────────┤
+//! │                    ↑ grows backward                         │
+//! │ Tuple Bodies (serialized tuple data)                        │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! - **Slot directory**: Grows forward from the header, containing (offset, size, metadata)
+//!   for each tuple. The offset points into the tuple body region.
+//! - **Tuple bodies**: Grow backward from the end of the page. New tuples are appended
+//!   at decreasing offsets.
+//! - **Free space**: The gap between the slot directory and tuple bodies.
+//!
+//! # Features
+//!
+//! - **Variable-length tuples**: Tuples can vary in size; the slot directory tracks
+//!   each tuple's location and length.
+//! - **Stable RIDs**: Tuple identifiers (page_id, slot_num) remain valid until the
+//!   tuple is physically removed or the page is compacted.
+//! - **In-place updates**: Tuples can be updated in place if the new size fits;
+//!   otherwise, they are relocated within the page.
+//! - **Soft deletes**: Tuples are marked as deleted via metadata without immediate
+//!   physical removal, supporting MVCC and recovery.
+//! - **Linked pages**: Pages form a doubly-linked list via `prev_page_id` and
+//!   `next_page_id` for sequential scans.
+//!
+//! # Serialization
+//!
+//! The page uses [`bincode`] for tuple and metadata serialization. Magic numbers
+//! at the start and end of the slot directory provide basic corruption detection.
+//!
+//! # Thread Safety
+//!
+//! `TablePage` itself is not thread-safe. Concurrent access should be coordinated
+//! through [`PageGuard`](crate::storage::page::PageGuard) and the buffer pool manager.
+
 use crate::common::config::{
     storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE,
 };
