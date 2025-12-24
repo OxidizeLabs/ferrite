@@ -1,3 +1,181 @@
+//! # Log Manager
+//!
+//! This module provides the `LogManager` which coordinates Write-Ahead Logging (WAL)
+//! for durability and crash recovery. It manages a background flush thread that
+//! periodically writes log records to disk, ensuring committed transactions are
+//! durable before returning control to the caller.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                          ┌───────────────────────────────────────────────────────┐
+//!                          │                    LogManager                         │
+//!                          │                                                       │
+//!                          │  ┌─────────────────────────────────────────────────┐  │
+//!                          │  │              LogManagerState                    │  │
+//!                          │  │                                                 │  │
+//!                          │  │  ┌───────────────────┐  ┌───────────────────┐   │  │
+//!                          │  │  │ next_lsn: Atomic  │  │persistent_lsn:    │   │  │
+//!                          │  │  │ (monotonic)       │  │Atomic (flushed)   │   │  │
+//!                          │  │  └───────────────────┘  └───────────────────┘   │  │
+//!                          │  │                                                 │  │
+//!                          │  │  ┌─────────────────────────────────────────┐    │  │
+//!                          │  │  │        mpsc::Sender<LogRecord>          │    │  │
+//!                          │  │  └─────────────────────────────────────────┘    │  │
+//!                          │  │                        │                        │  │
+//!                          │  │  ┌─────────────────────────────────────────┐    │  │
+//!                          │  │  │     disk_manager: AsyncDiskManager      │    │  │
+//!                          │  │  └─────────────────────────────────────────┘    │  │
+//!                          │  │                                                 │  │
+//!                          │  │  stop_flag: AtomicBool                          │  │
+//!                          │  └─────────────────────────────────────────────────┘  │
+//!                          │                                                       │
+//!                          │  receiver: mpsc::Receiver<LogRecord>                  │
+//!                          │  runtime_handle: tokio::Handle                        │
+//!                          └───────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Flush Thread Pipeline
+//!
+//! ```text
+//!   append_log_record()           mpsc Channel              Flush Thread
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌──────────────┐
+//!   │ Assign LSN   │
+//!   │ (atomic++)   │
+//!   └──────┬───────┘
+//!          │
+//!          ▼
+//!   ┌──────────────┐         ┌─────────────────┐
+//!   │ Send record  │────────▶│  Bounded Queue  │
+//!   │ to channel   │         │  (capacity 1000)│
+//!   └──────┬───────┘         └────────┬────────┘
+//!          │                          │
+//!          │ (if Commit)              ▼
+//!          │                 ┌─────────────────┐
+//!          │                 │ Wait for record │◀──── timeout(10ms)
+//!          │                 │ or timeout      │
+//!          │                 └────────┬────────┘
+//!          │                          │
+//!          │                          ▼
+//!          │                 ┌─────────────────┐
+//!          │                 │ Drain queue     │
+//!          │                 │ batch records   │
+//!          │                 └────────┬────────┘
+//!          │                          │
+//!          │                          ▼
+//!          │                 ┌─────────────────┐
+//!          │                 │ Write to disk   │
+//!          │                 │ + sync_log()    │
+//!          │                 └────────┬────────┘
+//!          │                          │
+//!          │                          ▼
+//!          │                 ┌─────────────────┐
+//!          ▼                 │ Update          │
+//!   ┌──────────────┐         │ persistent_lsn  │
+//!   │ Wait until   │◀────────└─────────────────┘
+//!   │ persistent ≥ │
+//!   │ commit LSN   │
+//!   └──────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `LogManager` | Main coordinator for WAL operations |
+//! | `LogManagerState` | Shared state for LSN tracking and I/O |
+//! | `next_lsn` | Monotonically increasing LSN counter |
+//! | `persistent_lsn` | Highest LSN confirmed durable on disk |
+//! | Flush Thread | Background tokio task for batched writes |
+//! | mpsc Channel | Bounded queue for log record delivery |
+//!
+//! ## LSN Lifecycle
+//!
+//! ```text
+//!   Timeline ═══════════════════════════════════════════════════════════▶
+//!
+//!              append         append         append         flush
+//!                │              │              │              │
+//!                ▼              ▼              ▼              ▼
+//!   next_lsn:    1              2              3              3
+//!   persistent:  0              0              0         ────▶3
+//!
+//!   Invariant: persistent_lsn ≤ next_lsn (always)
+//! ```
+//!
+//! ## Commit Durability
+//!
+//! When a commit record is appended, the caller blocks until the record
+//! is confirmed durable (persistent_lsn ≥ commit_lsn):
+//!
+//! ```text
+//!   Transaction Commit Flow
+//!   ────────────────────────────────────────────────────────
+//!
+//!   1. append_log_record(Commit) → assign LSN = 5
+//!   2. Send to channel
+//!   3. Block: while persistent_lsn < 5 { sleep(1ms) }
+//!   4. Flush thread writes & syncs → persistent_lsn = 5
+//!   5. Caller unblocks → return LSN 5
+//! ```
+//!
+//! ## Core Operations
+//!
+//! | Operation | Description |
+//! |-----------|-------------|
+//! | `new(disk_manager)` | Create log manager with async disk backend |
+//! | `run_flush_thread()` | Start background flush task |
+//! | `shut_down()` | Stop flush thread, drain remaining records |
+//! | `append_log_record(record)` | Assign LSN, queue for flush, return LSN |
+//! | `get_next_lsn()` | Get next available LSN |
+//! | `get_persistent_lsn()` | Get highest durable LSN |
+//! | `read_log_record(offset)` | Read record from disk at byte offset |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::recovery::log_manager::LogManager;
+//! use crate::recovery::log_record::{LogRecord, LogRecordType};
+//!
+//! // Create log manager
+//! let mut log_manager = LogManager::new(disk_manager);
+//! log_manager.run_flush_thread();
+//!
+//! // Begin transaction
+//! let begin = Arc::new(LogRecord::new_transaction_record(
+//!     txn_id, INVALID_LSN, LogRecordType::Begin
+//! ));
+//! let begin_lsn = log_manager.append_log_record(begin);
+//!
+//! // ... perform operations ...
+//!
+//! // Commit transaction (blocks until durable)
+//! let commit = Arc::new(LogRecord::new_transaction_record(
+//!     txn_id, prev_lsn, LogRecordType::Commit
+//! ));
+//! let commit_lsn = log_manager.append_log_record(commit);
+//! // At this point, commit is guaranteed durable on disk
+//!
+//! // Shutdown
+//! log_manager.shut_down();
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - LSN counters use `AtomicU64` for lock-free updates
+//! - Log records are sent via bounded `mpsc` channel (backpressure at 1000)
+//! - Flush thread runs as a tokio task, joined on shutdown
+//! - `block_in_place` used for sync/async boundary in tokio runtime
+//!
+//! ## Failure Handling
+//!
+//! If a disk write fails during flush:
+//! 1. Error is logged
+//! 2. `stop_flag` is set to prevent false durability signals
+//! 3. Callers waiting on commit will detect the flag and stop waiting
+
 use crate::common::config::{INVALID_LSN, Lsn};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::AsyncDiskManager;
