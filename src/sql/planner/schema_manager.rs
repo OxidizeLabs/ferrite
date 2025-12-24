@@ -1,3 +1,180 @@
+//! # Schema Manager
+//!
+//! This module provides the `SchemaManager`, a central component for handling schema-related
+//! operations in the SQL query planner and executor. It bridges the gap between SQL syntax
+//! (parsed by `sqlparser`) and the internal type system used by the database engine.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                              Schema Manager                                     │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                 │
+//! │   ┌────────────────────────────────────────────────────────────────────────┐    │
+//! │   │                      SQL Parsing (sqlparser)                           │    │
+//! │   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │    │
+//! │   │  │  ColumnDef   │  │   DataType   │  │ColumnOption  │                  │    │
+//! │   │  │ (name, type) │  │ (INT, VARCHAR│  │ (PK, NOT NULL│                  │    │
+//! │   │  │              │  │  DECIMAL...) │  │  UNIQUE, FK) │                  │    │
+//! │   │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                  │    │
+//! │   └─────────┼─────────────────┼─────────────────┼─────────────────────────-┘    │
+//! │             │                 │                 │                               │
+//! │             ▼                 ▼                 ▼                               │
+//! │   ┌─────────────────────────────────────────────────────────────────────────┐   │
+//! │   │                         SchemaManager                                   │   │
+//! │   │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │   │
+//! │   │  │ convert_sql_type│  │parse_column_opts│  │create_column_from_sql   │  │   │
+//! │   │  │ DataType→TypeId │  │ConstraintExtract│  │ Column with constraints │  │   │
+//! │   │  └────────┬────────┘  └────────┬────────┘  └────────────┬────────────┘  │   │
+//! │   │           │                    │                        │               │   │
+//! │   │           ▼                    ▼                        ▼               │   │
+//! │   │  ┌──────────────────────────────────────────────────────────────────┐   │   │
+//! │   │  │                    Schema Construction                           │   │   │
+//! │   │  │  create_join_schema() | create_aggregation_schema() | etc.       │   │   │
+//! │   │  └──────────────────────────────────────────────────────────────────┘   │   │
+//! │   └─────────────────────────────────────────────────────────────────────────┘   │
+//! │                                     │                                           │
+//! │                                     ▼                                           │
+//! │   ┌─────────────────────────────────────────────────────────────────────────┐   │
+//! │   │                      Catalog System (Output)                            │   │
+//! │   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────────┐   │   │
+//! │   │  │   Column     │  │    Schema    │  │  ForeignKeyConstraint        │   │   │
+//! │   │  │ (TypeId,     │  │ (Vec<Column>)│  │  (ref_table, ref_col, ...)   │   │   │
+//! │   │  │  constraints)│  │              │  │                              │   │   │
+//! │   │  └──────────────┘  └──────────────┘  └──────────────────────────────┘   │   │
+//! │   └─────────────────────────────────────────────────────────────────────────┘   │
+//! │                                                                                 │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Responsibilities
+//!
+//! | Category                | Methods                                                    |
+//! |-------------------------|-------------------------------------------------------------|
+//! | **Type Conversion**     | `convert_sql_type()`, `infer_expression_type()`            |
+//! | **Column Creation**     | `convert_column_defs()`, `create_column_from_sql_type...` |
+//! | **Constraint Parsing**  | `parse_column_options()`, `convert_referential_action()`  |
+//! | **Schema Construction** | `create_join_schema()`, `create_aggregation_output_schema()`|
+//! | **Value Mapping**       | `map_values_to_schema()`, `find_value_by_name()`           |
+//! | **Compatibility**       | `schemas_compatible()`, `types_compatible()`               |
+//!
+//! ## Type Conversion
+//!
+//! The `convert_sql_type()` method maps SQL data types to internal `TypeId` values:
+//!
+//! | SQL Type(s)                          | TypeId        |
+//! |--------------------------------------|---------------|
+//! | `BOOLEAN`, `BOOL`                    | `Boolean`     |
+//! | `TINYINT`                            | `TinyInt`     |
+//! | `SMALLINT`, `INT2`                   | `SmallInt`    |
+//! | `INT`, `INTEGER`, `INT4`             | `Integer`     |
+//! | `BIGINT`, `INT8`                     | `BigInt`      |
+//! | `DECIMAL`, `NUMERIC`                 | `Decimal`     |
+//! | `FLOAT`, `REAL`                      | `Float`       |
+//! | `VARCHAR`, `TEXT`, `STRING`          | `VarChar`     |
+//! | `CHAR`                               | `Char`        |
+//! | `BINARY`, `VARBINARY`, `BLOB`        | `Binary`      |
+//! | `DATE`                               | `Date`        |
+//! | `TIME`                               | `Time`        |
+//! | `TIMESTAMP`, `DATETIME`              | `Timestamp`   |
+//! | `INTERVAL`                           | `Interval`    |
+//! | `JSON`, `JSONB`                      | `JSON`        |
+//! | `UUID`                               | `UUID`        |
+//! | `ARRAY`, `VECTOR` (custom)           | `Vector`      |
+//!
+//! ## Constraint Handling
+//!
+//! The `parse_column_options()` method extracts column constraints:
+//!
+//! | SQL Constraint        | Extracted Information                              |
+//! |-----------------------|----------------------------------------------------|
+//! | `PRIMARY KEY`         | `is_primary_key=true`, `is_not_null=true`          |
+//! | `NOT NULL`            | `is_not_null=true`                                 |
+//! | `NULL`                | `is_not_null=false`                                |
+//! | `UNIQUE`              | `is_unique=true`                                   |
+//! | `REFERENCES ...`      | `ForeignKeyConstraint` with table, column, actions |
+//! | `CHECK (...)`         | Check expression as string                         |
+//! | `DEFAULT ...`         | Default value                                      |
+//!
+//! ## Schema Operations
+//!
+//! ### Join Schema Creation
+//!
+//! ```text
+//! Left Schema              Right Schema             Joined Schema
+//! ┌───────────────┐        ┌───────────────-┐        ┌───────────────-┐
+//! │ t1.id   (INT) │   +    │ t2.user_id(INT)│   =    │ t1.id   (INT)  │
+//! │ t1.name (STR) │        │ t2.email (STR) │        │ t1.name (STR)  │
+//! └───────────────┘        └───────────────=┘        │ t2.user_id(INT)│
+//!                                                    │ t2.email (STR) │
+//!                                                    └───────────────-┘
+//! ```
+//!
+//! ### Aggregation Schema Creation
+//!
+//! ```text
+//! GROUP BY: [category]     AGGREGATES: [SUM(sales), COUNT(*)]
+//!           ↓                          ↓
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │ Output Schema: [category (VARCHAR), SUM(sales), COUNT(*)]   │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ### Value-to-Schema Mapping
+//!
+//! The `map_values_to_schema()` method supports two mapping strategies:
+//!
+//! 1. **Name-based mapping**: When all source column names match target columns
+//! 2. **Positional mapping**: When column names don't match (fallback)
+//!
+//! ```text
+//! Source: [name="Bob", id=42]     Target: [id, name, email]
+//!         ↓ (name-based)                   ↓
+//! Result: [id=42, name="Bob", email=NULL]
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,no_run
+//! let manager = SchemaManager::new();
+//!
+//! // Convert SQL type to internal TypeId
+//! let type_id = manager.convert_sql_type(&DataType::Integer(None))?;
+//! assert_eq!(type_id, TypeId::Integer);
+//!
+//! // Convert column definitions from CREATE TABLE
+//! let columns = manager.convert_column_defs(&column_defs)?;
+//!
+//! // Create join schema
+//! let joined = manager.create_join_schema(&left_schema, &right_schema);
+//!
+//! // Check schema compatibility
+//! if manager.schemas_compatible(&source_schema, &target_schema) {
+//!     // Schemas have matching column types
+//! }
+//!
+//! // Map values from source to target schema
+//! let mapped = manager.map_values_to_schema(&values, &source_schema, &target_schema);
+//! ```
+//!
+//! ## Precision and Scale
+//!
+//! For `DECIMAL`/`NUMERIC` and `FLOAT` types, the manager extracts precision and scale:
+//!
+//! ```sql
+//! DECIMAL(10, 2)  → precision=10, scale=2
+//! NUMERIC(8)      → precision=8,  scale=None
+//! FLOAT(7)        → precision=7
+//! ```
+//!
+//! ## Limitations
+//!
+//! - **Multi-column foreign keys** are not currently supported
+//! - **Complex expressions** in `CHECK` constraints are stored as string representations
+//! - **Default values** are stored as `Value` (may need evaluation at insert time)
+//! - **Type compatibility** is strict (no implicit coercion rules)
+
 use crate::catalog::column::Column;
 use crate::catalog::column::ForeignKeyConstraint;
 use crate::catalog::schema::Schema;
