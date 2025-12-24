@@ -1,3 +1,157 @@
+//! # Constraint Validation
+//!
+//! This module provides runtime validation of SQL constraints during DML
+//! operations. The `ConstraintValidator` checks tuples against schema-defined
+//! constraints and reports detailed violations when constraints are not met.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                         ┌────────────────────────────────────────┐
+//!                         │         ConstraintValidator            │
+//!                         │                                        │
+//!                         │  ┌──────────────────────────────────┐  │
+//!                         │  │      unique_values Cache         │  │
+//!                         │  │  HashMap<"table:col", values>    │  │
+//!                         │  └──────────────────────────────────┘  │
+//!                         │                                        │
+//!                         │  ┌──────────────────────────────────┐  │
+//!                         │  │    primary_key_values Cache      │  │
+//!                         │  │  HashMap<"table:pk", value>      │  │
+//!                         │  └──────────────────────────────────┘  │
+//!                         └───────────────────┬────────────────────┘
+//!                                             │
+//!               ┌─────────────────────────────┼─────────────────────────────┐
+//!               │                             │                             │
+//!               ▼                             ▼                             ▼
+//!     ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
+//!     │ validate_tuple  │         │ validate_fk     │         │ apply_defaults  │
+//!     │  (full check)   │         │ (foreign key)   │         │ (fill nulls)    │
+//!     └────────┬────────┘         └─────────────────┘         └─────────────────┘
+//!              │
+//!    ┌─────────┼─────────┬─────────────┬─────────────┐
+//!    ▼         ▼         ▼             ▼             ▼
+//! NOT NULL  UNIQUE    CHECK      PRIMARY KEY   (per-column)
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component              | Description                                       |
+//! |------------------------|---------------------------------------------------|
+//! | `ConstraintViolation`  | Enum describing specific constraint failures      |
+//! | `ConstraintValidator`  | Stateful validator with uniqueness caches         |
+//!
+//! ## Supported Constraints
+//!
+//! | Constraint   | Validation Method            | Description                         |
+//! |--------------|------------------------------|-------------------------------------|
+//! | NOT NULL     | `validate_not_null`          | Rejects NULL values                 |
+//! | UNIQUE       | `validate_unique`            | Ensures column values are distinct  |
+//! | CHECK        | `validate_check_constraint`  | Evaluates expression constraints    |
+//! | PRIMARY KEY  | `validate_primary_key`       | Unique + NOT NULL for key columns   |
+//! | FOREIGN KEY  | `validate_foreign_key`       | References exist in parent table    |
+//!
+//! ## Validation Flow
+//!
+//! ```text
+//!   INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'a@b.com')
+//!                          │
+//!                          ▼
+//!                 ┌─────────────────┐
+//!                 │ validate_tuple  │
+//!                 └────────┬────────┘
+//!                          │
+//!        ┌─────────────────┼─────────────────┐
+//!        │                 │                 │
+//!        ▼                 ▼                 ▼
+//!   ┌─────────┐      ┌─────────┐      ┌─────────┐
+//!   │  id     │      │  name   │      │  email  │
+//!   │ NOT NULL│      │ NOT NULL│      │ UNIQUE  │
+//!   │ PK      │      │         │      │         │
+//!   └────┬────┘      └────┬────┘      └────┬────┘
+//!        │                │                │
+//!        └────────────────┼────────────────┘
+//!                         ▼
+//!               ┌─────────────────┐
+//!               │ Result:         │
+//!               │ Ok(()) or       │
+//!               │ Err(violations) │
+//!               └─────────────────┘
+//! ```
+//!
+//! ## Constraint Violation Types
+//!
+//! ```text
+//! ConstraintViolation
+//! ├── NotNull { column }
+//! │     └── "Column 'name' cannot be NULL"
+//! ├── PrimaryKey { columns }
+//! │     └── "Duplicate primary key on columns ['id']"
+//! ├── Unique { column, value }
+//! │     └── "Duplicate value 'a@b.com' in unique column 'email'"
+//! ├── Check { column, constraint }
+//! │     └── "Check constraint 'price > 0' violated on column 'price'"
+//! └── ForeignKey { column, referenced_table, referenced_column }
+//!       └── "Foreign key violation: dept_id references departments.id"
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::catalog::constraints::ConstraintValidator;
+//! use crate::catalog::schema::Schema;
+//! use crate::storage::table::tuple::Tuple;
+//!
+//! let mut validator = ConstraintValidator::new();
+//!
+//! // Validate a tuple against schema constraints
+//! match validator.validate_tuple(&tuple, &schema, "users") {
+//!     Ok(()) => {
+//!         // Tuple is valid, proceed with insert
+//!     }
+//!     Err(violations) => {
+//!         for violation in violations {
+//!             match violation {
+//!                 ConstraintViolation::NotNull { column } => {
+//!                     eprintln!("NULL value in NOT NULL column: {}", column);
+//!                 }
+//!                 ConstraintViolation::Unique { column, value } => {
+//!                     eprintln!("Duplicate value '{}' in column '{}'", value, column);
+//!                 }
+//!                 // ... handle other violations
+//!                 _ => {}
+//!             }
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! ## Caching Behavior
+//!
+//! The validator maintains caches for efficient uniqueness checking:
+//!
+//! | Cache                  | Key Format       | Purpose                          |
+//! |------------------------|------------------|----------------------------------|
+//! | `unique_values`        | `table:column`   | Tracks seen values per column    |
+//! | `primary_key_values`   | `table:pk`       | Tracks primary key values        |
+//!
+//! **Note**: Caches are not persistent—they must be warmed or cleared between
+//! sessions. For batch inserts, the validator accumulates values to detect
+//! duplicates within the batch.
+//!
+//! ## Limitations
+//!
+//! - CHECK constraints currently support only basic numeric comparisons
+//! - Composite primary key validation is simplified
+//! - Foreign key validation requires external table data to be provided
+//! - Caches do not reflect concurrent modifications from other validators
+//!
+//! ## Thread Safety
+//!
+//! `ConstraintValidator` is **not thread-safe**. Each thread or transaction
+//! should use its own validator instance. The caches use `HashMap` which
+//! requires exclusive (`&mut self`) access for validation.
+
 use crate::catalog::column::{Column, ForeignKeyConstraint, ReferentialAction};
 use crate::catalog::schema::Schema;
 use crate::storage::table::tuple::Tuple;
