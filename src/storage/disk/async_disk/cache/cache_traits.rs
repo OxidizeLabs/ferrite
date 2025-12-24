@@ -1,7 +1,279 @@
+//! # Cache Trait Hierarchy
+//!
+//! This module defines the trait hierarchy for the cache subsystem, providing a unified
+//! interface for different cache eviction policies (FIFO, LRU, LFU, LRU-K) while ensuring
+//! type safety and policy-appropriate operation sets.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                             ┌─────────────────────────────────────────┐
+//!                             │            CoreCache<K, V>              │
+//!                             │                                         │
+//!                             │  insert(&mut, K, V) → Option<V>         │
+//!                             │  get(&mut, &K) → Option<&V>             │
+//!                             │  contains(&, &K) → bool                 │
+//!                             │  len(&) → usize                         │
+//!                             │  is_empty(&) → bool                     │
+//!                             │  capacity(&) → usize                    │
+//!                             │  clear(&mut)                            │
+//!                             └──────────────────┬──────────────────────┘
+//!                                                │
+//!                    ┌───────────────────────────┼───────────────────────────┐
+//!                    │                           │                           │
+//!                    ▼                           ▼                           ▼
+//!   ┌────────────────────────────┐   ┌─────────────────────────┐   ┌───────────────────────┐
+//!   │   FIFOCacheTrait<K, V>     │   │   MutableCache<K, V>    │   │  DatabaseCache<K, V>  │
+//!   │                            │   │                         │   │                       │
+//!   │  pop_oldest() → (K, V)     │   │  remove(&K) → Option<V> │   │  evict_batch(n)       │
+//!   │  peek_oldest() → (&K, &V)  │   │  remove_batch(&[K])     │   │  is_under_pressure()  │
+//!   │  pop_oldest_batch(n)       │   │                         │   │  memory_usage_bytes() │
+//!   │  age_rank(&K) → usize      │   └───────────┬─────────────┘   │  prepare_shutdown()   │
+//!   │                            │               │                 └───────────────────────┘
+//!   │  No arbitrary removal!     │               │
+//!   └────────────────────────────┘               │
+//!                                    ┌───────────┴───────────┐
+//!                                    │                       │
+//!                                    ▼                       ▼
+//!                     ┌──────────────────────────┐  ┌────────────────────────┐
+//!                     │   LRUCacheTrait<K, V>    │  │   LFUCacheTrait<K, V>  │
+//!                     │                          │  │                        │
+//!                     │  pop_lru() → (K, V)      │  │  pop_lfu() → (K, V)    │
+//!                     │  peek_lru() → (&K, &V)   │  │  peek_lfu() → (&K, &V) │
+//!                     │  touch(&K) → bool        │  │  frequency(&K) → u64   │
+//!                     │  recency_rank(&K)        │  │  reset_frequency(&K)   │
+//!                     │                          │  │  increment_frequency() │
+//!                     └──────────────────────────┘  └────────────────────────┘
+//!                                    │
+//!                                    ▼
+//!                     ┌──────────────────────────┐
+//!                     │  LRUKCacheTrait<K, V>    │
+//!                     │                          │
+//!                     │  pop_lru_k() → (K, V)    │
+//!                     │  peek_lru_k() → (&K,&V)  │
+//!                     │  k_value() → usize       │
+//!                     │  access_history(&K)      │
+//!                     │  access_count(&K)        │
+//!                     │  k_distance(&K) → u64    │
+//!                     │  touch(&K) → bool        │
+//!                     │  k_distance_rank(&K)     │
+//!                     └──────────────────────────┘
+//! ```
+//!
+//! ## Trait Design Philosophy
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                         TRAIT HIERARCHY DESIGN                           │
+//!   │                                                                          │
+//!   │   1. CoreCache: Universal operations ALL caches must support             │
+//!   │      └── insert, get, contains, len, capacity, clear                     │
+//!   │                                                                          │
+//!   │   2. MutableCache: Adds arbitrary key-based removal                      │
+//!   │      └── remove(&K) - NOT suitable for FIFO (breaks insertion order)     │
+//!   │                                                                          │
+//!   │   3. Policy-Specific Traits: Add policy-appropriate eviction             │
+//!   │      ├── FIFO: pop_oldest (no arbitrary removal!)                        │
+//!   │      ├── LRU:  pop_lru + touch (recency-based)                           │
+//!   │      ├── LFU:  pop_lfu + frequency (frequency-based)                     │
+//!   │      └── LRU-K: pop_lru_k + k_distance (scan-resistant)                  │
+//!   │                                                                          │
+//!   │   Key Insight: FIFO extends CoreCache directly (NOT MutableCache)        │
+//!   │   because arbitrary removal would violate FIFO semantics.                │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Trait Summary
+//!
+//! | Trait                | Extends         | Purpose                              |
+//! |----------------------|-----------------|--------------------------------------|
+//! | `CoreCache`          | -               | Universal cache operations           |
+//! | `MutableCache`       | `CoreCache`     | Adds arbitrary key removal           |
+//! | `FIFOCacheTrait`     | `CoreCache`     | FIFO-specific (no remove!)           |
+//! | `LRUCacheTrait`      | `MutableCache`  | LRU-specific with recency tracking   |
+//! | `LFUCacheTrait`      | `MutableCache`  | LFU-specific with frequency tracking |
+//! | `LRUKCacheTrait`     | `MutableCache`  | LRU-K with K-distance tracking       |
+//! | `ConcurrentCache`    | `Send + Sync`   | Marker for thread-safe caches        |
+//! | `CacheStats`         | -               | Hit ratio and monitoring             |
+//! | `DatabaseCache`      | `CoreCache`     | Database-specific operations         |
+//! | `CacheTierManager`   | -               | Multi-tier cache management          |
+//! | `CacheFactory`       | -               | Cache instance creation              |
+//! | `AsyncCacheFuture`   | `Send + Sync`   | Future async operation support       |
+//!
+//! ## Why FIFO Doesn't Extend MutableCache
+//!
+//! ```text
+//!   FIFO Cache Semantics:
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!     VecDeque: [A] ─ [B] ─ [C] ─ [D]
+//!               ↑                 ↑
+//!             oldest           newest
+//!
+//!   If we allowed remove(&B):
+//!     VecDeque: [A] ─ [C] ─ [D]   ← Order still intact, but...
+//!
+//!   Problem: Now VecDeque doesn't track true insertion order!
+//!   - Stale entries accumulate
+//!   - age_rank() becomes O(n) scanning for valid entries
+//!   - FIFO semantics become muddled
+//!
+//!   Solution: FIFOCacheTrait extends CoreCache directly, ensuring
+//!   only FIFO-appropriate operations are available.
+//!
+//!   ═══════════════════════════════════════════════════════════════════════════
+//! ```
+//!
+//! ## Policy Comparison
+//!
+//! | Policy | Eviction Basis         | Supports Remove | Best For                 |
+//! |--------|------------------------|-----------------|--------------------------|
+//! | FIFO   | Insertion order        | ❌ No           | Predictable eviction     |
+//! | LRU    | Last access time       | ✅ Yes          | Temporal locality        |
+//! | LFU    | Access frequency       | ✅ Yes          | Stable hot spots         |
+//! | LRU-K  | K-th access time       | ✅ Yes          | Scan resistance          |
+//!
+//! ## Utility Traits
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ ConcurrentCache                                                         │
+//!   │                                                                         │
+//!   │   Marker trait: Send + Sync                                             │
+//!   │   Purpose: Guarantee thread-safe cache implementations                  │
+//!   │   Usage: fn use_cache<C: CoreCache<K, V> + ConcurrentCache>(c: &C)      │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ CacheStats                                                              │
+//!   │                                                                         │
+//!   │   hit_ratio()      → f64   (0.0 to 1.0)                                 │
+//!   │   total_gets()     → u64                                                │
+//!   │   total_hits()     → u64                                                │
+//!   │   total_misses()   → u64   (default: gets - hits)                       │
+//!   │   total_evictions()→ u64                                                │
+//!   │   reset_stats()                                                         │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ DatabaseCache                                                           │
+//!   │                                                                         │
+//!   │   evict_batch(target_size) → Vec<(K, V)>   Bulk eviction                │
+//!   │   is_under_pressure()      → bool          len/capacity > 0.9           │
+//!   │   memory_usage_bytes()     → usize         Approximate memory usage     │
+//!   │   prepare_shutdown()                       Flush pending operations     │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Cache Tier Management
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                         Three-Tier Cache Architecture                   │
+//!   │                                                                         │
+//!   │   ┌──────────────┐    promote()    ┌──────────────┐    promote()        │
+//!   │   │  Cold Tier   │ ───────────────►│  Warm Tier   │───────────────►     │
+//!   │   │              │                 │              │                     │
+//!   │   │  FIFOCache   │◄─────────────── │  LFUCache    │◄───────────────     │
+//!   │   │              │    demote()     │              │    demote()         │
+//!   │   └──────────────┘                 └──────────────┘                     │
+//!   │         │                                │                              │
+//!   │         │                                │          ┌──────────────┐    │
+//!   │         │                                │          │   Hot Tier   │    │
+//!   │         │                                └─────────►│              │    │
+//!   │         │                                           │  LRUCache    │    │
+//!   │         └──────────────────────────────────────────►│              │    │
+//!   │                                                     └──────────────┘    │
+//!   │                                                                         │
+//!   │   locate_key(&K)       → CacheTier   Which tier has this key?           │
+//!   │   evict_from_tier(T)   → (K, V)      Force eviction from tier           │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## CacheConfig
+//!
+//! | Field            | Type    | Default | Description                        |
+//! |------------------|---------|---------|------------------------------------|
+//! | `capacity`       | `usize` | 1000    | Maximum entries                    |
+//! | `enable_stats`   | `bool`  | false   | Enable hit/miss tracking           |
+//! | `prealloc_memory`| `bool`  | true    | Pre-allocate memory for capacity   |
+//! | `thread_safe`    | `bool`  | false   | Use internal synchronization       |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::cache::cache_traits::{
+//!     CoreCache, MutableCache, FIFOCacheTrait, LRUCacheTrait, LFUCacheTrait,
+//! };
+//!
+//! // Function accepting any cache
+//! fn warm_cache<C: CoreCache<u64, Vec<u8>>>(cache: &mut C, data: &[(u64, Vec<u8>)]) {
+//!     for (key, value) in data {
+//!         cache.insert(*key, value.clone());
+//!     }
+//! }
+//!
+//! // Function requiring removal capability (LRU, LFU - NOT FIFO)
+//! fn invalidate_keys<C: MutableCache<u64, Vec<u8>>>(cache: &mut C, keys: &[u64]) {
+//!     for key in keys {
+//!         cache.remove(key);
+//!     }
+//! }
+//!
+//! // FIFO-specific function
+//! fn evict_oldest_batch<C: FIFOCacheTrait<u64, Vec<u8>>>(
+//!     cache: &mut C,
+//!     count: usize,
+//! ) -> Vec<(u64, Vec<u8>)> {
+//!     cache.pop_oldest_batch(count)
+//! }
+//!
+//! // LRU-specific function
+//! fn touch_hot_keys<C: LRUCacheTrait<u64, Vec<u8>>>(cache: &mut C, keys: &[u64]) {
+//!     for key in keys {
+//!         cache.touch(key); // Mark as recently used without retrieving
+//!     }
+//! }
+//!
+//! // LFU-specific function with frequency-based prioritization
+//! fn boost_key_priority<C: LFUCacheTrait<u64, Vec<u8>>>(cache: &mut C, key: &u64) {
+//!     // Increment frequency without accessing value
+//!     cache.increment_frequency(key);
+//! }
+//!
+//! // Thread-safe cache usage
+//! use std::sync::{Arc, RwLock};
+//! use crate::storage::disk::async_disk::cache::lru::ConcurrentLRUCache;
+//!
+//! let shared_cache = Arc::new(ConcurrentLRUCache::<u64, Vec<u8>>::new(1000));
+//!
+//! // Safe to use from multiple threads
+//! let cache_clone = shared_cache.clone();
+//! std::thread::spawn(move || {
+//!     cache_clone.insert(42, vec![1, 2, 3]);
+//! });
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - Individual cache implementations are **NOT thread-safe** by default
+//! - Use `ConcurrentCache` marker trait to identify thread-safe implementations
+//! - Wrap non-concurrent caches in `Arc<RwLock<C>>` for shared access
+//! - Some implementations (e.g., `ConcurrentLRUCache`) provide built-in concurrency
+//!
+//! ## Implementation Notes
+//!
+//! - **Trait Bounds**: `CoreCache` has no bounds on K, V; implementations add as needed
+//! - **Default Implementations**: `is_empty()`, `total_misses()`, `is_under_pressure()`
+//! - **Batch Operations**: Default implementations loop over single operations
+//! - **Async Support**: `AsyncCacheFuture` prepared for Phase 2 async-trait integration
+
 use std::hash::Hash;
 
-/// Core cache operations that all caches support
-/// This trait focuses on the essential operations that make sense for any cache type
+/// Core cache operations that all caches support.
+///
+/// This trait focuses on the essential operations that make sense for any cache type,
+/// regardless of eviction policy. All policy-specific traits extend this.
 pub trait CoreCache<K, V> {
     /// Insert a key-value pair, returning the previous value if it existed
     fn insert(&mut self, key: K, value: V) -> Option<V>;
