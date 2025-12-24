@@ -1,6 +1,236 @@
-// ==============================================
-// HEAP-BASED LFU CACHE IMPLEMENTATION
-// ==============================================
+//! # Heap-Based LFU Cache Implementation
+//!
+//! This module provides an alternative LFU cache implementation that uses a binary heap for
+//! O(log n) eviction operations instead of the O(n) scanning approach used by the standard
+//! `LFUCache`.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                        HeapLFUCache<K, V>                                │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  data: HashMap<K, V>                                               │ │
+//!   │   │                                                                    │ │
+//!   │   │  ┌─────────┬────────────────────────────────────────────────────┐  │ │
+//!   │   │  │   Key   │  Value                                             │  │ │
+//!   │   │  ├─────────┼────────────────────────────────────────────────────┤  │ │
+//!   │   │  │ page_1  │  data_1                                            │  │ │
+//!   │   │  │ page_2  │  data_2                                            │  │ │
+//!   │   │  │ page_3  │  data_3                                            │  │ │
+//!   │   │  └─────────┴────────────────────────────────────────────────────┘  │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  frequencies: HashMap<K, u64>                                      │ │
+//!   │   │                                                                    │ │
+//!   │   │  ┌─────────┬──────────┐                                            │ │
+//!   │   │  │   Key   │  Freq    │                                            │ │
+//!   │   │  ├─────────┼──────────┤                                            │ │
+//!   │   │  │ page_1  │  15      │                                            │ │
+//!   │   │  │ page_2  │   3      │                                            │ │
+//!   │   │  │ page_3  │   7      │                                            │ │
+//!   │   │  └─────────┴──────────┘                                            │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │  freq_heap: BinaryHeap<Reverse<(u64, K)>>  (Min-Heap)              │ │
+//!   │   │                                                                    │ │
+//!   │   │  ┌─────────────────────────────────────────────────────────────┐   │ │
+//!   │   │  │                        (3, page_2)  ← top (min freq)        │   │ │
+//!   │   │  │                       /            \                        │   │ │
+//!   │   │  │               (7, page_3)      (15, page_1)                 │   │ │
+//!   │   │  │                                                             │   │ │
+//!   │   │  │  Note: May contain stale entries with outdated frequencies  │   │ │
+//!   │   │  └─────────────────────────────────────────────────────────────┘   │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   capacity: usize                                                        │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Stale Entry Handling
+//!
+//! ```text
+//!   Problem: BinaryHeap doesn't support efficient arbitrary element updates
+//!   Solution: Lazy invalidation with freshness check during eviction
+//!
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Initial state:
+//!     frequencies: { A: 1 }
+//!     heap: [ (1, A) ]
+//!
+//!   get(&A):  Increment frequency
+//!     frequencies: { A: 2 }           ← Updated to 2
+//!     heap: [ (1, A), (2, A) ]        ← New entry added, old becomes STALE
+//!                 ↑
+//!               stale
+//!
+//!   get(&A) again:
+//!     frequencies: { A: 3 }
+//!     heap: [ (1, A), (2, A), (3, A) ]
+//!                 ↑       ↑
+//!              stale   stale
+//!
+//!   pop_lfu():
+//!     1. Pop (1, A) from heap
+//!     2. Check: frequencies[A] == 1?  NO, it's 3
+//!     3. Entry is STALE → discard, try next
+//!     4. Pop (2, A) from heap
+//!     5. Check: frequencies[A] == 2?  NO, it's 3
+//!     6. Entry is STALE → discard, try next
+//!     7. Pop (3, A) from heap
+//!     8. Check: frequencies[A] == 3?  YES, valid!
+//!     9. Return (A, value)
+//!
+//!   ═══════════════════════════════════════════════════════════════════════════
+//! ```
+//!
+//! ## Comparison: Standard LFU vs Heap LFU
+//!
+//! ```text
+//!   Standard LFUCache:
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  HashMap<K, (V, usize)>                                                │
+//!   │                                                                        │
+//!   │  insert/get: O(1)                                                      │
+//!   │  pop_lfu:    O(n)  ← Must scan ALL entries to find minimum             │
+//!   │                                                                        │
+//!   │  Memory: 1 HashMap                                                     │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!
+//!   HeapLFUCache:
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  HashMap<K, V> + HashMap<K, u64> + BinaryHeap<(u64, K)>                │
+//!   │                                                                        │
+//!   │  insert/get: O(log n)  ← Heap operations                               │
+//!   │  pop_lfu:    O(log n)  ← Pop from heap (amortized, skipping stale)     │
+//!   │                                                                        │
+//!   │  Memory: 3 data structures + stale entries                             │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component      | Type                              | Purpose                    |
+//! |----------------|-----------------------------------|----------------------------|
+//! | `data`         | `HashMap<K, V>`                   | Value storage, O(1) lookup |
+//! | `frequencies`  | `HashMap<K, u64>`                 | Current frequency tracking |
+//! | `freq_heap`    | `BinaryHeap<Reverse<(u64, K)>>`   | Min-heap for LFU lookup    |
+//! | `capacity`     | `usize`                           | Maximum entries            |
+//!
+//! ## Core Operations
+//!
+//! | Method           | Complexity | Description                              |
+//! |------------------|------------|------------------------------------------|
+//! | `new(capacity)`  | O(1)       | Create cache with given capacity         |
+//! | `insert(k, v)`   | O(log n)   | Insert/update, may trigger eviction      |
+//! | `get(&k)`        | O(log n)   | Get value, increments frequency          |
+//! | `contains(&k)`   | O(1)       | Check if key exists                      |
+//! | `remove(&k)`     | O(1)       | Remove entry (lazy heap cleanup)         |
+//! | `len()`          | O(1)       | Current number of entries                |
+//! | `capacity()`     | O(1)       | Maximum capacity                         |
+//! | `clear()`        | O(n)       | Remove all entries                       |
+//!
+//! ## LFU-Specific Operations
+//!
+//! | Method                   | Complexity | Description                       |
+//! |--------------------------|------------|-----------------------------------|
+//! | `pop_lfu()`              | O(log n)*  | Remove and return LFU item        |
+//! | `peek_lfu()`             | O(n)       | Peek at LFU (falls back to scan)  |
+//! | `frequency(&k)`          | O(1)       | Get frequency count for key       |
+//! | `reset_frequency(&k)`    | O(log n)   | Reset frequency to 1              |
+//! | `increment_frequency(&k)`| O(log n)   | Manually increment frequency      |
+//!
+//! \* Amortized, may skip stale entries
+//!
+//! ## Performance Trade-offs
+//!
+//! | Aspect           | Standard LFU       | Heap LFU                    |
+//! |------------------|--------------------|-----------------------------|
+//! | `get/insert`     | O(1)               | O(log n)                    |
+//! | `pop_lfu`        | O(n)               | O(log n) amortized          |
+//! | Memory           | 1 HashMap          | 3 data structures + stale   |
+//! | Constant factors | Low                | Higher                      |
+//! | Predictability   | O(n) worst case    | Consistent O(log n)         |
+//! | Lock time        | Longer during evict| Shorter, more consistent    |
+//!
+//! ## When to Use
+//!
+//! **Use HeapLFUCache when:**
+//! - Eviction operations are frequent (>10% of operations)
+//! - Consistent, predictable latency is critical
+//! - Cache sizes are large (>1000 items)
+//! - High-throughput, low-latency workloads
+//!
+//! **Use standard LFUCache when:**
+//! - Memory usage is critical
+//! - Evictions are rare compared to gets
+//! - Cache sizes are small (<100 items)
+//! - Simple, minimal overhead is preferred
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::cache::heap_lfu::HeapLFUCache;
+//! use crate::storage::disk::async_disk::cache::cache_traits::{
+//!     CoreCache, MutableCache, LFUCacheTrait,
+//! };
+//!
+//! // Create cache
+//! let mut cache: HeapLFUCache<String, i32> = HeapLFUCache::new(100);
+//!
+//! // Insert items (frequency starts at 1)
+//! cache.insert("key1".to_string(), 100);
+//! cache.insert("key2".to_string(), 200);
+//!
+//! // Access increments frequency (O(log n) for heap update)
+//! cache.get(&"key1".to_string()); // freq: 1 → 2
+//! cache.get(&"key1".to_string()); // freq: 2 → 3
+//!
+//! assert_eq!(cache.frequency(&"key1".to_string()), Some(3));
+//! assert_eq!(cache.frequency(&"key2".to_string()), Some(1));
+//!
+//! // Evict LFU item (O(log n) amortized)
+//! if let Some((key, value)) = cache.pop_lfu() {
+//!     println!("Evicted: {} = {}", key, value);
+//! }
+//!
+//! // Manual frequency control
+//! cache.increment_frequency(&"key2".to_string());
+//! cache.reset_frequency(&"key1".to_string());
+//!
+//! // Remove (O(1), lazy heap cleanup)
+//! cache.remove(&"key1".to_string());
+//! ```
+//!
+//! ## Type Constraints
+//!
+//! ```text
+//!   K: Eq + Hash + Clone + Ord
+//!        │    │      │      │
+//!        │    │      │      └── Required for BinaryHeap ordering
+//!        │    │      └───────── Required for heap entry cloning
+//!        │    └──────────────── Required for HashMap
+//!        └───────────────────── Required for HashMap
+//!
+//!   V: (no constraints)
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `HeapLFUCache` is **NOT thread-safe**
+//! - Wrap in `Arc<Mutex<HeapLFUCache>>` for concurrent access
+//! - Shorter lock times than standard LFU due to O(log n) eviction
+//!
+//! ## Implementation Notes
+//!
+//! - **Stale entries**: Accumulate in heap, cleaned lazily during `pop_lfu()`
+//! - **peek_lfu()**: Falls back to O(n) scan (avoiding heap borrow issues)
+//! - **Memory overhead**: ~3x standard LFU due to three data structures
+//! - **Reverse wrapper**: Converts max-heap to min-heap for LFU semantics
 
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LFUCacheTrait, MutableCache,
@@ -8,71 +238,11 @@ use crate::storage::disk::async_disk::cache::cache_traits::{
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::hash::Hash;
-/// # Heap-Based LFU Cache Implementation
+
+/// Heap-based LFU Cache with O(log n) eviction.
 ///
-/// This is an alternative LFU cache implementation that uses a binary heap for O(log n) eviction
-/// operations instead of the O(n) scanning approach used by the standard LFUCache.
-///
-/// ## Design Rationale
-///
-/// The standard LFU cache (`LFUCache`) uses a single HashMap with frequency counters, which provides:
-/// - O(1) access operations
-/// - O(n) eviction operations (must scan all items to find minimum frequency)
-///
-/// This heap-based implementation uses three data structures:
-/// - `HashMap<K, V>` for O(1) value storage and lookup
-/// - `HashMap<K, usize>` for O(1) frequency tracking
-/// - `BinaryHeap<Reverse<(usize, K)>>` for O(log n) minimum frequency identification
-///
-/// ## Performance Characteristics
-///
-/// | Operation | Time Complexity | Space Complexity | Notes |
-/// |-----------|----------------|------------------|-------|
-/// | `get()` | O(log n) | O(1) | Includes heap update for frequency |
-/// | `insert()` | O(log n) | O(1) | Includes potential eviction |
-/// | `remove()` | O(1) | O(1) | Lazy removal from heap |
-/// | `pop_lfu()` | O(log n) | O(1) | May need to skip stale entries |
-/// | `contains()` | O(1) | O(1) | Direct HashMap lookup |
-///
-/// ## Trade-offs vs Standard LFU
-///
-/// **Advantages:**
-/// - **Predictable O(log n) eviction** - no worst-case O(n) spikes
-/// - **Better for high-throughput workloads** - consistent performance
-/// - **Shorter lock times** in concurrent scenarios
-///
-/// **Disadvantages:**
-/// - **Higher memory overhead** - 3 data structures vs 1
-/// - **More complex implementation** - heap maintenance, stale entry handling
-/// - **Higher constant factors** - more allocations and indirection
-///
-/// ## Stale Entry Handling
-///
-/// Since BinaryHeap doesn't support efficient arbitrary element updates, we handle frequency
-/// changes by adding new heap entries and lazily filtering stale entries during eviction.
-///
-/// **Example**: If key "A" has frequency 1 and we increment it to 2:
-/// 1. Update `frequencies` HashMap: "A" -> 2
-/// 2. Add new heap entry: (2, "A")
-/// 3. Old heap entry (1, "A") becomes stale
-/// 4. During `pop_lfu()`, skip stale entries by checking current frequency
-///
-/// This approach trades memory overhead for consistent O(log n) performance.
-///
-/// ## When to Use
-///
-/// **Use HeapLFUCache when:**
-/// - Eviction operations are frequent (>10% of total operations)
-/// - Consistent, predictable performance is critical
-/// - Cache sizes are large (>1000 items)
-/// - High-throughput, low-latency workloads
-///
-/// **Use standard LFUCache when:**
-/// - Memory usage is critical
-/// - Evictions are rare
-/// - Cache sizes are small (<100 items)
-/// - Simple, minimal overhead is preferred
-///
+/// Uses a binary min-heap for efficient LFU item identification.
+/// See module-level documentation for details.
 #[derive(Debug)]
 pub struct HeapLFUCache<K, V>
 where
