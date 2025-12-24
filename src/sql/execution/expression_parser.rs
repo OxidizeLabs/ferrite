@@ -1,3 +1,153 @@
+//! # SQL Expression Parser
+//!
+//! This module provides the [`ExpressionParser`], which transforms parsed SQL expressions
+//! (from `sqlparser`) into the internal [`Expression`] tree used by the query executor.
+//! It acts as a bridge between the SQL syntax layer and the typed expression system.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                          Expression Parsing Pipeline                            │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                 │
+//! │   SQL Text           sqlparser::ast::Expr            Expression Tree            │
+//! │  ┌─────────┐         ┌─────────────────┐            ┌─────────────────┐         │
+//! │  │ "age>25"│──parse─▶│ BinaryOp {      │─translate─▶│ Comparison {    │         │
+//! │  │         │         │   left: age,    │            │   left: ColRef, │         │
+//! │  │         │         │   op: Gt,       │            │   right: Const, │         │
+//! │  │         │         │   right: 25     │            │   type: Gt      │         │
+//! │  └─────────┘         └─────────────────┘            └─────────────────┘         │
+//! │                                                                                 │
+//! │   ┌───────────────────────────────────────────────────────────────────────┐     │
+//! │   │                     ExpressionParser                                  │     │
+//! │   ├───────────────────────────────────────────────────────────────────────┤     │
+//! │   │  • parse_expression()     - Main entry point                          │     │
+//! │   │  • parse_function()       - Scalar/Aggregate/Window functions         │     │
+//! │   │  • parse_join_condition() - JOIN predicates                           │     │
+//! │   │  • parse_subquery()       - Correlated/uncorrelated subqueries        │     │
+//! │   └───────────────────────────────────────────────────────────────────────┘     │
+//! │                                    │                                            │
+//! │                                    ▼                                            │
+//! │   ┌───────────────────────────────────────────────────────────────────────┐     │
+//! │   │                     Catalog (Schema Lookup)                           │     │
+//! │   │  • Column types, table schemas, qualified name resolution             │     │
+//! │   └───────────────────────────────────────────────────────────────────────┘     │
+//! │                                                                                 │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Responsibilities
+//!
+//! | Category | Description |
+//! |----------|-------------|
+//! | **Type Resolution** | Resolves column names to schema columns with types |
+//! | **Operator Mapping** | Maps SQL operators (`=`, `>`, `AND`) to internal types |
+//! | **Function Classification** | Categorizes functions as scalar, aggregate, or window |
+//! | **Type Coercion** | Inserts implicit casts for type-mismatched comparisons |
+//! | **Join Processing** | Handles `ON`, `USING`, and `NATURAL` join constraints |
+//! | **Subquery Handling** | Parses scalar and IN-list subqueries |
+//!
+//! ## Supported Expression Types
+//!
+//! ### Simple Expressions
+//! - **Identifiers**: `column_name`, `table.column`
+//! - **Literals**: `42`, `'hello'`, `3.14`, `TRUE`
+//! - **Binary Operations**: `+`, `-`, `*`, `/`, `AND`, `OR`
+//! - **Unary Operations**: `NOT`, `-expr`
+//! - **Comparisons**: `=`, `<>`, `<`, `<=`, `>`, `>=`
+//!
+//! ### Predicate Expressions
+//! - **IS NULL / IS NOT NULL**: `column IS NULL`
+//! - **IS TRUE / IS FALSE**: `expr IS TRUE`
+//! - **BETWEEN**: `age BETWEEN 18 AND 65`
+//! - **IN**: `status IN ('active', 'pending')`
+//! - **LIKE / ILIKE**: `name LIKE 'J%'`
+//! - **SIMILAR TO**: Regex-based pattern matching
+//!
+//! ### Function Expressions
+//!
+//! ```text
+//! ┌────────────────────────────────────────────────────────────────────────┐
+//! │                       Function Classification                          │
+//! ├────────────────────────────────────────────────────────────────────────┤
+//! │                                                                        │
+//! │   Scalar Functions          Aggregate Functions      Window Functions  │
+//! │   ─────────────────         ───────────────────      ────────────────  │
+//! │   UPPER(), LOWER()          COUNT(), SUM()           ROW_NUMBER()      │
+//! │   SUBSTRING()               AVG(), MIN(), MAX()      RANK()            │
+//! │   COALESCE()                STDDEV(), VARIANCE()     DENSE_RANK()      │
+//! │   CAST(), CONVERT()                                  LEAD(), LAG()     │
+//! │   ABS(), ROUND()                                     FIRST_VALUE()     │
+//! │                                                      LAST_VALUE()      │
+//! │                                                                        │
+//! └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ### Complex Expressions
+//! - **CASE WHEN**: Conditional logic
+//! - **CAST**: Type conversion
+//! - **EXTRACT**: Date/time component extraction
+//! - **Subqueries**: Scalar and IN-list subqueries
+//! - **Window Functions**: With OVER (PARTITION BY ... ORDER BY ...)
+//!
+//! ## Type Coercion
+//!
+//! The parser automatically handles type mismatches in comparisons:
+//!
+//! ```text
+//! SQL: WHERE integer_col = '123'
+//!
+//! Before coercion:             After coercion:
+//! ┌─────────────────┐          ┌─────────────────┐
+//! │   Comparison    │          │   Comparison    │
+//! │  left: ColRef   │          │  left: ColRef   │
+//! │  (Integer)      │    ──▶   │  (Integer)      │
+//! │  right: Literal │          │  right: Const   │
+//! │  (VarChar)      │          │  (Integer=123)  │
+//! └─────────────────┘          └─────────────────┘
+//! ```
+//!
+//! ## Join Constraint Processing
+//!
+//! | Constraint Type | Handling |
+//! |-----------------|----------|
+//! | `ON expr` | Parse expression with combined left+right schema |
+//! | `USING (cols)` | Generate equality predicates for named columns |
+//! | `NATURAL` | Find common columns and generate equality predicates |
+//! | No constraint | Generate TRUE constant (for CROSS JOIN) |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use std::sync::Arc;
+//! use parking_lot::RwLock;
+//!
+//! let catalog = Arc::new(RwLock::new(catalog));
+//! let parser = ExpressionParser::new(catalog);
+//!
+//! // Parse a WHERE clause expression
+//! let schema = table_info.get_table_schema();
+//! let expr = parser.parse_expression(&sql_expr, &schema)?;
+//!
+//! // The expression can now be used by executors for evaluation
+//! let result = executor.evaluate(&expr, &tuple)?;
+//! ```
+//!
+//! ## Error Handling
+//!
+//! The parser returns `Result<Expression, String>` with descriptive error messages:
+//! - `"Column X not found in schema"` - Unknown column reference
+//! - `"Type mismatch: Cannot compare..."` - Incompatible types in comparison
+//! - `"Unsupported expression type"` - Unimplemented SQL syntax
+//! - `"Nested aggregate functions are not allowed"` - Invalid aggregate nesting
+//!
+//! ## Thread Safety
+//!
+//! `ExpressionParser` holds an `Arc<RwLock<Catalog>>` for schema lookups,
+//! making it safe to use across threads. The parser itself is stateless and
+//! can be called concurrently for different expressions.
+
 use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
