@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document outlines a comprehensive refactoring plan for TKDB's LRU cache to achieve:
+This document outlines a comprehensive refactoring plan for Ferrite's LRU cache to achieve:
 - **Zero-copy semantics** for large values (4KB pages)
 - **Thread-safe concurrent access** optimized for database workloads
 - **O(1) performance** for all operations under concurrent load
@@ -371,5 +371,5 @@ assert!(Arc::ptr_eq(&reader1_page.unwrap(), &reader2_page.unwrap()));
 
 **Document Version**: 1.0
 **Last Updated**: Current
-**Author**: TKDB Development Team
+**Author**: Ferrite Development Team
 **Review Status**: Ready for Implementation

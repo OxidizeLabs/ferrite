@@ -8,16 +8,16 @@ use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::common::rid::RID;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tkdb::storage::table::table_heap::TableHeap;
-use tkdb::storage::table::tuple::{Tuple, TupleMeta};
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::Value;
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::column::Column;
+use ferrite::catalog::schema::Schema;
+use ferrite::common::rid::RID;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::storage::table::table_heap::TableHeap;
+use ferrite::storage::table::tuple::{Tuple, TupleMeta};
+use ferrite::types_db::type_id::TypeId;
+use ferrite::types_db::value::Value;
 
 struct StorageTestContext {
     bpm: Arc<BufferPoolManager>,
@@ -212,7 +212,7 @@ async fn page_iteration_counts_all() {
 
     let mut found_count = 0;
     let mut current_page_id = table_heap.get_first_page_id();
-    while current_page_id != tkdb::common::config::INVALID_PAGE_ID {
+    while current_page_id != ferrite::common::config::INVALID_PAGE_ID {
         let page_guard = table_heap.get_page(current_page_id).expect("page");
         let page = page_guard.read();
         found_count += page.get_num_tuples() as usize;

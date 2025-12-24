@@ -1,6 +1,6 @@
-# Pre-commit Hooks for TKDB
+# Pre-commit Hooks for Ferrite
 
-This document describes the pre-commit hooks set up for the TKDB project to maintain code quality and prevent broken commits. We use the [pre-commit framework](https://pre-commit.com/) for better maintainability and tooling support.
+This document describes the pre-commit hooks set up for the Ferrite project to maintain code quality and prevent broken commits. We use the [pre-commit framework](https://pre-commit.com/) for better maintainability and tooling support.
 
 ## Quick Setup
 

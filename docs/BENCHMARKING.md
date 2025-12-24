@@ -1,6 +1,6 @@
-# TKDB Benchmarking Guide
+# Ferrite Benchmarking Guide
 
-This guide shows how to use **Criterion.rs** for performance benchmarking in TKDB. Criterion provides sophisticated statistical analysis, automatic trend detection, and beautiful HTML reports.
+This guide shows how to use **Criterion.rs** for performance benchmarking in Ferrite. Criterion provides sophisticated statistical analysis, automatic trend detection, and beautiful HTML reports.
 
 ## Quick Start
 
@@ -305,7 +305,7 @@ cargo bench -- --baseline main
 ## File Organization
 
 ```
-tkdb/
+ferrite/
 ├── benches/
 │   ├── cache_benchmarks.rs      # Cache performance tests
 │   ├── sql_benchmarks.rs        # SQL execution benchmarks
@@ -320,7 +320,7 @@ tkdb/
 
 ## Performance Goals
 
-Based on complexity analysis, TKDB aims for:
+Based on complexity analysis, Ferrite aims for:
 
 | Operation | Target Complexity | Acceptable Range |
 |-----------|------------------|------------------|

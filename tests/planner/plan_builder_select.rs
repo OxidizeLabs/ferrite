@@ -4,14 +4,14 @@ use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::sql::execution::expressions::abstract_expression::Expression;
-use tkdb::sql::execution::expressions::comparison_expression::ComparisonType;
-use tkdb::sql::planner::logical_plan::LogicalPlanType;
-use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::Catalog;
+use ferrite::sql::execution::expressions::abstract_expression::Expression;
+use ferrite::sql::execution::expressions::comparison_expression::ComparisonType;
+use ferrite::sql::planner::logical_plan::LogicalPlanType;
+use ferrite::sql::planner::query_planner::QueryPlanner;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -48,7 +48,7 @@ impl TestContext {
             Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
         let transaction_manager =
-            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+            Arc::new(ferrite::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
@@ -61,10 +61,10 @@ impl TestContext {
 
     fn setup_users(&mut self) {
         let mut catalog = self.catalog.write();
-        let schema = tkdb::catalog::schema::Schema::new(vec![
-            tkdb::catalog::column::Column::new("id", tkdb::types_db::type_id::TypeId::Integer),
-            tkdb::catalog::column::Column::new("name", tkdb::types_db::type_id::TypeId::VarChar),
-            tkdb::catalog::column::Column::new("age", tkdb::types_db::type_id::TypeId::Integer),
+        let schema = ferrite::catalog::schema::Schema::new(vec![
+            ferrite::catalog::column::Column::new("id", ferrite::types_db::type_id::TypeId::Integer),
+            ferrite::catalog::column::Column::new("name", ferrite::types_db::type_id::TypeId::VarChar),
+            ferrite::catalog::column::Column::new("age", ferrite::types_db::type_id::TypeId::Integer),
         ]);
         let _ = catalog.create_table("users".to_string(), schema);
     }
@@ -122,7 +122,7 @@ async fn select_with_equality_filter() {
         .unwrap();
     match &plan.children[0].plan_type {
         LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
-            tkdb::sql::execution::expressions::abstract_expression::Expression::Comparison(
+            ferrite::sql::execution::expressions::abstract_expression::Expression::Comparison(
                 comp,
             ) => {
                 assert_eq!(comp.get_comp_type(), ComparisonType::Equal);

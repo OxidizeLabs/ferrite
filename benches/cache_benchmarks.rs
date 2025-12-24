@@ -3,8 +3,8 @@
 fn main() {}
 
 // use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-// use tkdb::storage::disk::async_disk::cache::fifo::FIFOCache;
-// use tkdb::storage::disk::async_disk::cache::cache_traits::CoreCache;
+// use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
+// use ferrite::storage::disk::async_disk::cache::cache_traits::CoreCache;
 //
 // fn benchmark_fifo_cache_operations(c: &mut Criterion) {
 //     let mut group = c.benchmark_group("fifo_cache_operations");

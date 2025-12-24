@@ -7,12 +7,12 @@ use log::info;
 use rustyline::DefaultEditor;
 use std::error;
 use std::sync::Arc;
-use tkdb::cli::CLI;
-use tkdb::client::DatabaseClient;
-use tkdb::common::db_instance::{DBConfig, DBInstance};
-use tkdb::common::exception::DBError;
-use tkdb::common::logger::initialize_logger;
-use tkdb::server::{ServerConfig, ServerHandle};
+use ferrite::cli::CLI;
+use ferrite::client::DatabaseClient;
+use ferrite::common::db_instance::{DBConfig, DBInstance};
+use ferrite::common::exception::DBError;
+use ferrite::common::logger::initialize_logger;
+use ferrite::server::{ServerConfig, ServerHandle};
 use tokio::signal;
 
 #[derive(Parser)]
@@ -82,7 +82,7 @@ async fn run_server(port: u16, config_path: Option<String>) -> Result<(), Box<dy
     db_config.server_enabled = true;
     db_config.server_port = server_config.port;
 
-    info!("Starting TKDB server on port {}", server_config.port);
+    info!("Starting Ferrite server on port {}", server_config.port);
 
     // Create database instance
     let db = Arc::new(DBInstance::new(db_config).await?);
@@ -125,7 +125,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
     let mut client = DatabaseClient::connect(addr).await?;
     let mut rl = DefaultEditor::new()?;
 
-    println!("\nConnected to TKDB at {}.", addr);
+    println!("\nConnected to Ferrite at {}.", addr);
     println!("Type your queries (end with ;)");
     println!("Type 'exit;' to quit\n");
 
@@ -134,9 +134,9 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
 
         loop {
             let prompt = if buffer.is_empty() {
-                "tkdb> "
+                "ferrite> "
             } else {
-                "   -> "
+                "      -> "
             };
             match rl.readline(prompt) {
                 Ok(line) => {

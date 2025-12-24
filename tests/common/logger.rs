@@ -1,5 +1,5 @@
 use std::sync::Once;
-use tkdb::common::logger as core_logger;
+use ferrite::common::logger as core_logger;
 
 static INIT: Once = Once::new();
 

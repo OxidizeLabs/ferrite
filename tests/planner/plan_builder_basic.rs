@@ -2,14 +2,14 @@ use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::buffer_pool_manager_async::BufferPoolManager;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tkdb::types_db::type_id::TypeId;
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::Catalog;
+use ferrite::catalog::column::Column;
+use ferrite::catalog::schema::Schema;
+use ferrite::sql::planner::query_planner::QueryPlanner;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::types_db::type_id::TypeId;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -46,7 +46,7 @@ impl TestContext {
             Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
         let transaction_manager =
-            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+            Arc::new(ferrite::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(
             bpm.clone(),
             transaction_manager.clone(),

@@ -1,8 +1,8 @@
 use crate::execution::common::{TestContext, TestResultWriter};
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::{Val, Value};
+use ferrite::catalog::column::Column;
+use ferrite::catalog::schema::Schema;
+use ferrite::types_db::type_id::TypeId;
+use ferrite::types_db::value::{Val, Value};
 
 #[tokio::test]
 async fn test_case_when_simple() {

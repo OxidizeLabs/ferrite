@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the redesign of TKDB's tuple, metadata, and page management system to achieve true zero-copy operations while maintaining memory safety and thread safety without garbage collection.
+This document outlines the redesign of Ferrite's tuple, metadata, and page management system to achieve true zero-copy operations while maintaining memory safety and thread safety without garbage collection.
 
 ## Current Problems
 

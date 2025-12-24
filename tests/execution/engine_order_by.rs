@@ -1,9 +1,9 @@
 use crate::execution::common::TestContext;
 use crate::execution::common::TestResultWriter;
-use tkdb::catalog::column::Column;
-use tkdb::catalog::schema::Schema;
-use tkdb::types_db::type_id::TypeId;
-use tkdb::types_db::value::Value;
+use ferrite::catalog::column::Column;
+use ferrite::catalog::schema::Schema;
+use ferrite::types_db::type_id::TypeId;
+use ferrite::types_db::value::Value;
 
 #[tokio::test]
 // #[ignore = "Causes stack overflow in the logical plan to physical plan conversion"]
@@ -205,13 +205,13 @@ async fn test_order_by_with_null_values() {
         vec![Value::new(1), Value::new(85), Value::new("Alice")],
         vec![
             Value::new(2),
-            Value::new_with_type(tkdb::types_db::value::Val::Null, TypeId::Integer),
+            Value::new_with_type(ferrite::types_db::value::Val::Null, TypeId::Integer),
             Value::new("Bob"),
         ],
         vec![Value::new(3), Value::new(92), Value::new("Charlie")],
         vec![
             Value::new(4),
-            Value::new_with_type(tkdb::types_db::value::Val::Null, TypeId::Integer),
+            Value::new_with_type(ferrite::types_db::value::Val::Null, TypeId::Integer),
             Value::new("Diana"),
         ],
     ];

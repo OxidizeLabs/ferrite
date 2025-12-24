@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# TKDB AsyncDiskManager Performance Test Runner
+# Ferrite AsyncDiskManager Performance Test Runner
 # This script runs all performance tests for the AsyncDiskManager and captures output
 
-echo "🚀 TKDB AsyncDiskManager Performance Test Suite"
+echo "🚀 Ferrite AsyncDiskManager Performance Test Suite"
 echo "=============================================="
 echo ""
 
@@ -25,28 +25,28 @@ echo "Running AsyncDiskManager performance tests..." | tee "${output_file}"
 
 # Run each test individually to get detailed output
 echo -e "\n=== Sequential Read/Write Performance ===" | tee -a "${output_file}"
-cargo test test_sequential_read_write_performance --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_sequential_read_write_performance --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo -e "\n=== Random Access Performance ===" | tee -a "${output_file}"
-cargo test test_random_access_performance --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_random_access_performance --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo -e "\n=== High Concurrency Performance ===" | tee -a "${output_file}"
-cargo test test_high_concurrency_performance --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_high_concurrency_performance --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo -e "\n=== Large Data Throughput ===" | tee -a "${output_file}"
-cargo test test_large_data_throughput --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_large_data_throughput --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo -e "\n=== Cache Performance ===" | tee -a "${output_file}"
-cargo test test_cache_performance --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_cache_performance --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo -e "\n=== Batch Operation Performance ===" | tee -a "${output_file}"
-cargo test test_batch_operation_performance --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_batch_operation_performance --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo -e "\n=== Mixed Workload Performance ===" | tee -a "${output_file}"
-cargo test test_mixed_workload_performance --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_mixed_workload_performance --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo -e "\n=== Stress Test Performance ===" | tee -a "${output_file}"
-cargo test test_stress_performance --package tkdb --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
+cargo test test_stress_performance --package ferrite --test "" -- --exact --nocapture 2>&1 | tee -a "${output_file}"
 
 echo ""
 echo "✅ Performance test suite completed!"

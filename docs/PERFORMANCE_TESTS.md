@@ -1,6 +1,6 @@
 # AsyncDiskManager Performance Tests
 
-This document describes the comprehensive performance test suite for TKDB's AsyncDiskManager.
+This document describes the comprehensive performance test suite for Ferrite's AsyncDiskManager.
 
 ## Overview
 

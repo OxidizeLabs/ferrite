@@ -4,16 +4,16 @@ use crate::common::logger::init_test_logger;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tempfile::TempDir;
-use tkdb::buffer::lru_k_replacer::LRUKReplacer;
-use tkdb::catalog::Catalog;
-use tkdb::sql::execution::expressions::abstract_expression::Expression;
-use tkdb::sql::execution::expressions::aggregate_expression::AggregationType;
-use tkdb::sql::execution::plans::abstract_plan::AbstractPlanNode;
-use tkdb::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
-use tkdb::sql::planner::query_planner::QueryPlanner;
-use tkdb::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use tkdb::types_db::type_id::TypeId;
-use tkdb::{
+use ferrite::buffer::lru_k_replacer::LRUKReplacer;
+use ferrite::catalog::Catalog;
+use ferrite::sql::execution::expressions::abstract_expression::Expression;
+use ferrite::sql::execution::expressions::aggregate_expression::AggregationType;
+use ferrite::sql::execution::plans::abstract_plan::AbstractPlanNode;
+use ferrite::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
+use ferrite::sql::planner::query_planner::QueryPlanner;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use ferrite::types_db::type_id::TypeId;
+use ferrite::{
     buffer::buffer_pool_manager_async::BufferPoolManager,
     sql::execution::plans::abstract_plan::PlanNode,
 };
@@ -53,7 +53,7 @@ impl TestContext {
             Arc::new(BufferPoolManager::new(BUFFER_POOL_SIZE, disk_manager_arc, replacer).unwrap());
 
         let transaction_manager =
-            Arc::new(tkdb::concurrency::transaction_manager::TransactionManager::new());
+            Arc::new(ferrite::concurrency::transaction_manager::TransactionManager::new());
         let catalog = Arc::new(RwLock::new(Catalog::new(bpm, transaction_manager.clone())));
         let planner = QueryPlanner::new(Arc::clone(&catalog));
 
@@ -95,23 +95,23 @@ impl TestContext {
 
     fn create_users(&mut self) {
         let mut catalog = self.catalog.write();
-        let schema = tkdb::catalog::schema::Schema::new(vec![
-            tkdb::catalog::column::Column::new("id", TypeId::Integer),
-            tkdb::catalog::column::Column::new("name", TypeId::VarChar),
-            tkdb::catalog::column::Column::new("age", TypeId::Integer),
+        let schema = ferrite::catalog::schema::Schema::new(vec![
+            ferrite::catalog::column::Column::new("id", TypeId::Integer),
+            ferrite::catalog::column::Column::new("name", TypeId::VarChar),
+            ferrite::catalog::column::Column::new("age", TypeId::Integer),
         ]);
         let _ = catalog.create_table("users".to_string(), schema);
     }
 
     fn create_sales_table(&mut self) {
         let mut catalog = self.catalog.write();
-        let schema = tkdb::catalog::schema::Schema::new(vec![
-            tkdb::catalog::column::Column::new("id", TypeId::Integer),
-            tkdb::catalog::column::Column::new("region", TypeId::VarChar),
-            tkdb::catalog::column::Column::new("product", TypeId::VarChar),
-            tkdb::catalog::column::Column::new("amount", TypeId::Decimal),
-            tkdb::catalog::column::Column::new("quantity", TypeId::Integer),
-            tkdb::catalog::column::Column::new("sale_date", TypeId::VarChar),
+        let schema = ferrite::catalog::schema::Schema::new(vec![
+            ferrite::catalog::column::Column::new("id", TypeId::Integer),
+            ferrite::catalog::column::Column::new("region", TypeId::VarChar),
+            ferrite::catalog::column::Column::new("product", TypeId::VarChar),
+            ferrite::catalog::column::Column::new("amount", TypeId::Decimal),
+            ferrite::catalog::column::Column::new("quantity", TypeId::Integer),
+            ferrite::catalog::column::Column::new("sale_date", TypeId::VarChar),
         ]);
         let _ = catalog.create_table("sales".to_string(), schema);
     }

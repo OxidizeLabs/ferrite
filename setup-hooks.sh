@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# TKDB Pre-commit Hooks Setup Script
+# Ferrite Pre-commit Hooks Setup Script
 # This script installs pre-commit hooks using the pre-commit framework
 
 set -e
@@ -28,19 +28,19 @@ print_error() {
     echo -e "${RED}❌ $1${NC}"
 }
 
-echo "🔧 Setting up pre-commit hooks for TKDB..."
+echo "🔧 Setting up pre-commit hooks for Ferrite..."
 
 # Check if we're in a Git repository
 if [ ! -d ".git" ]; then
     print_error "This doesn't appear to be a Git repository!"
-    echo "Please run this script from the root of your TKDB project."
+    echo "Please run this script from the root of your Ferrite project."
     exit 1
 fi
 
 # Check if Cargo.toml exists
 if [ ! -f "Cargo.toml" ]; then
     print_error "Cargo.toml not found!"
-    echo "Please run this script from the root of your TKDB project."
+    echo "Please run this script from the root of your Ferrite project."
     exit 1
 fi
 

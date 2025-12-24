@@ -11,11 +11,11 @@ pub fn initialize_logger() {
 
         builder
             .filter_level(LevelFilter::Debug)
-            .filter_module("tkdb", LevelFilter::Debug)
-            .filter_module("tkdb::buffer", LevelFilter::Debug)
-            .filter_module("tkdb::storage", LevelFilter::Debug)
-            .filter_module("tkdb::concurrency", LevelFilter::Debug)
-            .filter_module("tkdb::recovery", LevelFilter::Info)
+            .filter_module("ferrite", LevelFilter::Debug)
+            .filter_module("ferrite::buffer", LevelFilter::Debug)
+            .filter_module("ferrite::storage", LevelFilter::Debug)
+            .filter_module("ferrite::concurrency", LevelFilter::Debug)
+            .filter_module("ferrite::recovery", LevelFilter::Info)
             .filter_module("rustyline", LevelFilter::Info)
             .format_timestamp_millis()
             .parse_default_env();

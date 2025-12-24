@@ -2,8 +2,8 @@
 
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
-use tkdb::common::result_writer::CliResultWriter;
-use tkdb::concurrency::transaction::IsolationLevel;
+use ferrite::common::result_writer::CliResultWriter;
+use ferrite::concurrency::transaction::IsolationLevel;
 
 #[tokio::test]
 async fn create_table_basic_operations() {

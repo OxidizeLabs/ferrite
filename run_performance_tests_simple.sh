@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Simple TKDB AsyncDiskManager Performance Test Runner
+# Simple Ferrite AsyncDiskManager Performance Test Runner
 # Runs all performance tests in one go
 
-echo "🚀 TKDB AsyncDiskManager Performance Tests"
+echo "🚀 Ferrite AsyncDiskManager Performance Tests"
 echo "=========================================="
 
 # Set environment for better logging

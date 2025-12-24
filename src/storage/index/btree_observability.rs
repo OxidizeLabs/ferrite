@@ -26,15 +26,15 @@ pub struct LockObservabilityConfig {
 
 impl Default for LockObservabilityConfig {
     fn default() -> Self {
-        let warn_after_ms = env_u64("TKDB_BTREE_LOCK_WARN_AFTER_MS", 200);
-        let warn_every_ms = env_u64("TKDB_BTREE_LOCK_WARN_EVERY_MS", 1_000);
+        let warn_after_ms = env_u64("FERRITE_BTREE_LOCK_WARN_AFTER_MS", 200);
+        let warn_every_ms = env_u64("FERRITE_BTREE_LOCK_WARN_EVERY_MS", 1_000);
         // In tests we want to fail fast rather than hang forever.
         #[cfg(test)]
         let default_timeout_ms = 5_000;
         #[cfg(not(test))]
         let default_timeout_ms = 0;
-        let timeout_ms = env_u64("TKDB_BTREE_LOCK_TIMEOUT_MS", default_timeout_ms);
-        let poll_ms = env_u64("TKDB_BTREE_LOCK_POLL_MS", 25);
+        let timeout_ms = env_u64("FERRITE_BTREE_LOCK_TIMEOUT_MS", default_timeout_ms);
+        let poll_ms = env_u64("FERRITE_BTREE_LOCK_POLL_MS", 25);
 
         Self {
             warn_after: Duration::from_millis(warn_after_ms),
@@ -123,28 +123,28 @@ pub fn export_prometheus() -> String {
     // Note: no labels for now (simple counters only).
     format!(
         concat!(
-            "# TYPE tkdb_btree_internal_write_wait_ns_total counter\n",
-            "tkdb_btree_internal_write_wait_ns_total {}\n",
-            "# TYPE tkdb_btree_internal_write_wait_count counter\n",
-            "tkdb_btree_internal_write_wait_count {}\n",
-            "# TYPE tkdb_btree_internal_write_wait_warns counter\n",
-            "tkdb_btree_internal_write_wait_warns {}\n",
-            "# TYPE tkdb_btree_internal_write_timeouts counter\n",
-            "tkdb_btree_internal_write_timeouts {}\n",
-            "# TYPE tkdb_btree_internal_write_hold_ns_total counter\n",
-            "tkdb_btree_internal_write_hold_ns_total {}\n",
-            "# TYPE tkdb_btree_internal_write_hold_count counter\n",
-            "tkdb_btree_internal_write_hold_count {}\n",
-            "# TYPE tkdb_btree_internal_write_hold_max_ns gauge\n",
-            "tkdb_btree_internal_write_hold_max_ns {}\n",
-            "# TYPE tkdb_btree_leaf_write_wait_ns_total counter\n",
-            "tkdb_btree_leaf_write_wait_ns_total {}\n",
-            "# TYPE tkdb_btree_leaf_write_wait_count counter\n",
-            "tkdb_btree_leaf_write_wait_count {}\n",
-            "# TYPE tkdb_btree_leaf_write_wait_warns counter\n",
-            "tkdb_btree_leaf_write_wait_warns {}\n",
-            "# TYPE tkdb_btree_leaf_write_timeouts counter\n",
-            "tkdb_btree_leaf_write_timeouts {}\n",
+            "# TYPE ferrite_btree_internal_write_wait_ns_total counter\n",
+            "ferrite_btree_internal_write_wait_ns_total {}\n",
+            "# TYPE ferrite_btree_internal_write_wait_count counter\n",
+            "ferrite_btree_internal_write_wait_count {}\n",
+            "# TYPE ferrite_btree_internal_write_wait_warns counter\n",
+            "ferrite_btree_internal_write_wait_warns {}\n",
+            "# TYPE ferrite_btree_internal_write_timeouts counter\n",
+            "ferrite_btree_internal_write_timeouts {}\n",
+            "# TYPE ferrite_btree_internal_write_hold_ns_total counter\n",
+            "ferrite_btree_internal_write_hold_ns_total {}\n",
+            "# TYPE ferrite_btree_internal_write_hold_count counter\n",
+            "ferrite_btree_internal_write_hold_count {}\n",
+            "# TYPE ferrite_btree_internal_write_hold_max_ns gauge\n",
+            "ferrite_btree_internal_write_hold_max_ns {}\n",
+            "# TYPE ferrite_btree_leaf_write_wait_ns_total counter\n",
+            "ferrite_btree_leaf_write_wait_ns_total {}\n",
+            "# TYPE ferrite_btree_leaf_write_wait_count counter\n",
+            "ferrite_btree_leaf_write_wait_count {}\n",
+            "# TYPE ferrite_btree_leaf_write_wait_warns counter\n",
+            "ferrite_btree_leaf_write_wait_warns {}\n",
+            "# TYPE ferrite_btree_leaf_write_timeouts counter\n",
+            "ferrite_btree_leaf_write_timeouts {}\n",
         ),
         m.internal_write_wait_ns_total.load(Ordering::Relaxed),
         m.internal_write_wait_count.load(Ordering::Relaxed),
@@ -170,7 +170,7 @@ pub fn warn_slow_lock(
     held_write_locks: usize,
 ) {
     warn!(
-        target: "tkdb::storage::index::btree_lock",
+        target: "ferrite::storage::index::btree_lock",
         "Slow B+tree lock acquire: kind={}, mode={}, page_id={}, waited_ms={}, op={}, path={:?}, held_write_locks={}",
         lock_kind,
         lock_mode,

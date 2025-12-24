@@ -46,7 +46,7 @@ use std::sync::Arc;
 /// **⚠️ IMPORTANT: This cache is NOT thread-safe by design.**
 ///
 /// The FIFOCache is designed for single-threaded use within a thread-safe wrapper.
-/// In TKDB, it should be used as:
+/// In Ferrite, it should be used as:
 ///
 /// ```rust,no_run
 /// # use std::sync::{Arc, RwLock};
@@ -159,7 +159,7 @@ use std::sync::Arc;
 /// assert!(cache.contains(&"key4".to_string()));
 /// ```
 ///
-/// ### Thread-Safe Usage in TKDB
+/// ### Thread-Safe Usage in Ferrite
 ///
 /// ```rust,no_run
 /// use std::sync::{Arc, RwLock};
@@ -279,9 +279,9 @@ use std::sync::Arc;
 /// }
 /// ```
 ///
-/// ## Integration with TKDB Buffer Pool
+/// ## Integration with Ferrite Buffer Pool
 ///
-/// This cache is designed to be used within TKDB's buffer pool manager for page caching:
+/// This cache is designed to be used within Ferrite's buffer pool manager for page caching:
 ///
 /// ```rust,no_run
 /// use std::sync::{Arc, RwLock};

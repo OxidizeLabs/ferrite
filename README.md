@@ -1,11 +1,15 @@
-# TokamakDB (tkdb)
+# Ferrite
 
-A Rust-native OLTP database focused on memory safety, high-concurrency, and first-class observability. TokamakDB combines a NUMA-aware, async execution engine with rigorous transaction control to deliver predictable low-latency throughput under contention.
+A Rust-native database management system built on proven DBMS techniques. Ferrite combines decades of database research with Rust's memory safety and performance guarantees to deliver a reliable, high-performance storage engine.
+
+## Philosophy
+
+Databases are a solved problem at the architecture level. What wasn't solved was implementing them safely and efficiently. Rust changes that equation. Ferrite is built on proven database techniques—buffer management, B+ trees, write-ahead logging, MVCC—implemented with Rust's safety guarantees.
 
 ## Highlights
 
 - Memory-safe by design (Rust, no unsafe in critical paths)
-- NUMA-aware scheduling and data locality
+- Proven DBMS techniques with modern implementation
 - Async execution with backpressure
 - Robust concurrency control and crash recovery
 - Deep observability: structured logs, tracing-ready, metrics hooks
@@ -22,7 +26,7 @@ cargo test
 
 Run simple SQL script:
 ```bash
-cargo run --bin tkdb --features cli -- test.sql
+cargo run --bin ferrite --features cli -- test.sql
 ```
 
 ## Architecture (Overview)

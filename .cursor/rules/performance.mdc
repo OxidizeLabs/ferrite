@@ -6,7 +6,7 @@ alwaysApply: false
 
 # Performance Optimization Guidelines
 
-When optimizing TKDB performance, focus on identifying bottlenecks and applying targeted optimizations.
+When optimizing Ferrite performance, focus on identifying bottlenecks and applying targeted optimizations.
 
 ## Performance Analysis Methodology
 

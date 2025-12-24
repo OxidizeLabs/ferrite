@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tkdb::common::db_instance::{DBConfig, DBInstance};
+use ferrite::common::db_instance::{DBConfig, DBInstance};
 
 fn unique_suffix() -> String {
     let nanos = SystemTime::now()
@@ -15,8 +15,8 @@ pub fn temp_db_config() -> DBConfig {
     let temp_dir = PathBuf::from("tests/temp");
     let _ = std::fs::create_dir_all(&temp_dir);
     let suffix = unique_suffix();
-    let db_filename = temp_dir.join(format!("tkdb_{}.db", suffix));
-    let log_filename = temp_dir.join(format!("tkdb_{}.log", suffix));
+    let db_filename = temp_dir.join(format!("ferrite_{}.db", suffix));
+    let log_filename = temp_dir.join(format!("ferrite_{}.log", suffix));
     DBConfig {
         db_filename: db_filename.to_string_lossy().to_string(),
         db_log_filename: log_filename.to_string_lossy().to_string(),

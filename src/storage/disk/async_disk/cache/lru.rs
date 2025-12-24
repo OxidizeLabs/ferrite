@@ -1,7 +1,7 @@
 //! Least Recently Used (LRU) Cache Implementation.
 //!
 //! This module provides a high-performance, concurrent LRU cache implementation used primarily
-//! for the disk buffer pool and other caching needs in TKDB.
+//! for the disk buffer pool and other caching needs in Ferrite.
 //!
 //! # Architecture
 //!
@@ -6171,7 +6171,7 @@ mod tests {
         fn test_memory_leak_detection_valgrind() {
             // Placeholder: Run with valgrind
             // cargo build --tests
-            // valgrind ./target/debug/deps/tkdb-...
+            // valgrind ./target/debug/deps/ferrite-...
         }
 
         #[test]

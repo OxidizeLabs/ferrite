@@ -1,13 +1,13 @@
 [package]
-name = "tkdb"
-description = "TokamakDB: a Rust OLTP database with NUMA-aware async execution and first-class observability"
+name = "ferrite"
+description = "Ferrite: a Rust DBMS built on proven database techniques with memory safety and performance guarantees"
 version = "0.1.0"
 authors = ["Thomas Korrison <thomas_korrison@hotmail.com>"]
 edition = "2024"
 license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/tokamakdb/tokamakdb"
-keywords = ["database", "oltp", "rust", "concurrency", "numa"]
+repository = "https://github.com/ferritedb/ferrite"
+keywords = ["database", "dbms", "rust", "sql", "storage-engine"]
 categories = ["database-implementations", "asynchronous", "concurrency"]
 
 [dependencies]

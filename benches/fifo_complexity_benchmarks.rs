@@ -3,8 +3,8 @@
 fn main() {}
 
 // use criterion::{black_box, criterion_group, criterion_main, AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, SamplingMode, Throughput};
-// use tkdb::storage::disk::async_disk::cache::fifo::FIFOCache;
-// use tkdb::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+// use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
+// use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 //
 // /// Comprehensive FIFO Cache Complexity Benchmarks
 // ///
