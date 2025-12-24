@@ -1,27 +1,220 @@
 //! # Orchestrated Write Manager
 //!
-//! The `WriteManager` serves as the central nervous system for the memory-side write path. It strictly follows the
-//! Single Responsibility Principle by delegating specific tasks to specialized sub-components while orchestrating
-//! the overall flow of data from memory to disk.
+//! This module provides `WriteManager`, the central coordinator for the memory-side write path.
+//! It follows the Single Responsibility Principle by delegating specific tasks to specialized
+//! sub-components while orchestrating the overall flow of data from memory to disk.
 //!
 //! ## Architecture
 //!
-//! The `WriteManager` coordinates the following pipeline:
-//! 1. **Coalescing**: Incoming writes are first passed to the `CoalescingEngine` to check if they can be merged
-//!    with pending writes (optimizing I/O patterns).
-//! 2. **Buffering**: Data is then stored in the `WriteStagingBuffer`, which tracks memory usage and optionally
-//!    compresses pages.
-//! 3. **Flush Coordination**: The `FlushCoordinator` is consulted to determine if a flush is required based on
-//!    memory pressure or timing.
-//! 4. **Durability**: When flushing, the `DurabilityManager` ensures that data is persisted according to the
-//!    configured safety policies (e.g., WAL write-ahead, fsync).
+//! ```text
+//!   AsyncDiskManager
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ buffer_write(page_id, data)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                          WriteManager                                   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Sub-Components (Single Responsibility)                         │   │
+//!   │   │                                                                 │   │
+//!   │   │  ┌──────────────────┐  ┌──────────────────┐                     │   │
+//!   │   │  │ CoalescingEngine │  │ WriteStagingBuffer│                    │   │
+//!   │   │  │ (Arc<RwLock<>>)  │  │ (Arc<Mutex<>>)   │                     │   │
+//!   │   │  │                  │  │                  │                     │   │
+//!   │   │  │ • Merge writes   │  │ • Buffer pages   │                     │   │
+//!   │   │  │ • Batch adjacent │  │ • Compression    │                     │   │
+//!   │   │  │ • Time window    │  │ • Memory limits  │                     │   │
+//!   │   │  └──────────────────┘  └──────────────────┘                     │   │
+//!   │   │                                                                 │   │
+//!   │   │  ┌──────────────────┐  ┌──────────────────┐                     │   │
+//!   │   │  │ FlushCoordinator │  │ DurabilityManager│                     │   │
+//!   │   │  │ (Arc<>)          │  │ (Arc<>)          │                     │   │
+//!   │   │  │                  │  │                  │                     │   │
+//!   │   │  │ • When to flush  │  │ • fsync policy   │                     │   │
+//!   │   │  │ • Prevent storms │  │ • WAL ordering   │                     │   │
+//!   │   │  │ • Timing control │  │ • Durability lvl │                     │   │
+//!   │   │  └──────────────────┘  └──────────────────┘                     │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ flushed pages (Vec<(PageId, Vec<u8>)>)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │              Disk I/O (performed by caller)                             │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Key Features
+//! ## Write Pipeline Flow
 //!
-//! - **Unified Interface**: Provides a simple `buffer_write` API that abstracts away the complexity of the write pipeline.
-//! - **Concurrency Control**: Manages locks and state across multiple components to ensure thread safety.
-//! - **Observability**: Aggregates statistics from all sub-components into a comprehensive status report.
-//! - **Adaptive Behavior**: dynamically adjusts strategies (e.g., flushing aggressiveness) based on system state.
+//! ```text
+//!   buffer_write(page_id, data)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 1: COALESCING                                                     │
+//!   │                                                                        │
+//!   │   try_coalesce_write(page_id, data)                                    │
+//!   │        │                                                               │
+//!   │        ├── NoCoalesce: First write for this page                       │
+//!   │        ├── Coalesced:  Merged with pending write (same page)           │
+//!   │        └── Merged:     Combined with adjacent pages                    │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 2: BUFFERING                                                      │
+//!   │                                                                        │
+//!   │   buffer_manager.buffer_write(page_id, coalesced_data)                 │
+//!   │        │                                                               │
+//!   │        ├── Accepted: Page buffered (possibly compressed)               │
+//!   │        └── Rejected: Buffer full → force flush                         │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 3: FLUSH DECISION                                                 │
+//!   │                                                                        │
+//!   │   flush_coordinator.should_flush(dirty_pages, time_since_flush)        │
+//!   │        │                                                               │
+//!   │        ├── NoFlush:        Continue buffering                          │
+//!   │        ├── ThresholdFlush: Too many dirty pages                        │
+//!   │        └── IntervalFlush:  Data too stale                              │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        │ if flush needed
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 4: FLUSH with DURABILITY                                          │
+//!   │                                                                        │
+//!   │   flush_coordinator.try_start_flush()  ← Prevent concurrent flushes    │
+//!   │        │                                                               │
+//!   │   buffer_manager.drain_buffer()        ← Get all buffered pages        │
+//!   │        │                                                               │
+//!   │   durability_manager.apply_durability() ← WAL first, then fsync        │
+//!   │        │                                                               │
+//!   │   flush_coordinator.complete_flush()   ← Release lock, update time     │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   Return: Option<Vec<(PageId, Vec<u8>)>>
+//!           Some(pages) if flushed, None if buffered
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component           | Responsibility                                      |
+//! |---------------------|-----------------------------------------------------|
+//! | `CoalescingEngine`  | Merge writes to same page, batch adjacent pages     |
+//! | `WriteStagingBuffer`| Hold dirty pages in memory, optional compression    |
+//! | `FlushCoordinator`  | Decide when to flush, prevent concurrent flushes    |
+//! | `DurabilityManager` | Ensure WAL/fsync ordering for durability            |
+//!
+//! ## Core Operations
+//!
+//! | Method                     | Description                                    |
+//! |----------------------------|------------------------------------------------|
+//! | `new()`                    | Create from `DiskManagerConfig`                |
+//! | `buffer_write()`           | Main entry: coalesce → buffer → maybe flush    |
+//! | `flush()`                  | Drain buffer with durability guarantees        |
+//! | `force_flush()`            | Flush regardless of thresholds (with retry)   |
+//! | `should_flush()`           | Check if flush conditions are met              |
+//! | `get_buffer_stats()`       | Get buffer manager statistics                  |
+//! | `get_comprehensive_stats()`| Aggregate stats from all sub-components        |
+//! | `apply_durability()`       | Apply durability to external page set          |
+//! | `clear_all_pending()`      | Clear coalescing engine (for shutdown)         |
+//!
+//! ## Configuration (from `DiskManagerConfig`)
+//!
+//! | Field                  | Used For                                        |
+//! |------------------------|-------------------------------------------------|
+//! | `write_buffer_size_mb` | Max memory for `WriteStagingBuffer`             |
+//! | `compression_enabled`  | Enable page compression in buffer               |
+//! | `flush_threshold_pages`| Dirty page count trigger for `FlushCoordinator` |
+//! | `flush_interval_ms`    | Time-based flush trigger                        |
+//! | `fsync_policy`         | When to call fsync (`DurabilityManager`)        |
+//! | `durability_level`     | None/Buffer/Sync/Durable                        |
+//! | `wal_enabled`          | Use Write-Ahead Logging                         |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::memory::write_manager::WriteManager;
+//! use crate::storage::disk::async_disk::config::DiskManagerConfig;
+//!
+//! // Create write manager from configuration
+//! let config = DiskManagerConfig::default();
+//! let write_manager = WriteManager::new(&config);
+//!
+//! // Buffer a write (automatically coalesces, compresses, decides on flush)
+//! let page_id = 42;
+//! let data = vec![0u8; 4096];
+//! let flushed = write_manager.buffer_write(page_id, data, &disk_manager).await?;
+//!
+//! if let Some(pages) = flushed {
+//!     // Pages were flushed - caller should write them to disk
+//!     for (page_id, page_data) in pages {
+//!         disk_manager.write_page(page_id, &page_data).await?;
+//!     }
+//! }
+//!
+//! // Force flush all buffered pages (e.g., on checkpoint)
+//! let all_pages = write_manager.force_flush(&disk_manager).await?;
+//!
+//! // Get comprehensive statistics
+//! let stats = write_manager.get_comprehensive_stats().await;
+//! println!("Dirty pages: {}", stats.buffer_stats.dirty_pages);
+//! println!("Flush in progress: {}", stats.flush_in_progress);
+//! println!("WAL enabled: {}", stats.wal_enabled);
+//! ```
+//!
+//! ## Concurrent Flush Handling
+//!
+//! ```text
+//!   force_flush() with retry logic
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌────────────────┐
+//!   │ try_start_flush│
+//!   └───────┬────────┘
+//!           │
+//!           ├── Success: Acquired lock → proceed with flush
+//!           │
+//!           └── Failure: Lock held by another task
+//!                   │
+//!                   ▼
+//!              ┌────────────────────────────┐
+//!              │ Retry loop (up to 100x)    │
+//!              │ Sleep 10ms between retries │
+//!              │ Total timeout: ~1 second   │
+//!              └────────────────────────────┘
+//!                   │
+//!                   ├── Eventually succeeds → proceed with flush
+//!                   │
+//!                   └── Max retries exceeded → Error(WouldBlock)
+//!
+//!   Note: Regular flush() returns empty Vec if lock unavailable (no retry)
+//! ```
+//!
+//! ## ComprehensiveStats Fields
+//!
+//! | Field                 | Source                   | Description                 |
+//! |-----------------------|--------------------------|-----------------------------|
+//! | `buffer_stats`        | `WriteStagingBuffer`     | Dirty pages, buffer size    |
+//! | `coalescing_stats`    | `CoalescingEngine`       | Pending writes, merges      |
+//! | `flush_in_progress`   | `FlushCoordinator`       | Is flush currently running  |
+//! | `time_since_last_flush`| `FlushCoordinator`      | Staleness of buffered data  |
+//! | `durability_level`    | `DurabilityManager`      | Current durability setting  |
+//! | `wal_enabled`         | `DurabilityManager`      | Whether WAL is active       |
+//!
+//! ## Thread Safety
+//!
+//! - `buffer_manager`: `Arc<Mutex<>>` - exclusive access for buffer operations
+//! - `coalescing_engine`: `Arc<RwLock<>>` - read-heavy access pattern
+//! - `flush_coordinator`: `Arc<>` - internal atomics for lock-free flush gating
+//! - `durability_manager`: `Arc<>` - mostly immutable config with atomic counters
+//! - Safe for concurrent `buffer_write()` calls from multiple async tasks
+//! - Only one flush can proceed at a time (coordinated by `FlushCoordinator`)
 
 use super::{
     CoalesceResult, CoalescedSizeInfo, CoalescingEngine, DurabilityManager, DurabilityProvider,
