@@ -1,3 +1,59 @@
+//! Leaf node implementation for B+ tree indexes.
+//!
+//! This module provides [`BPlusTreeLeafPage`], which represents a leaf node in a
+//! B+ tree. Leaf nodes store the actual key-value pairs (e.g., index keys mapped
+//! to row identifiers) and form the bottom level of the tree.
+//!
+//! # Structure
+//!
+//! Unlike internal nodes, leaf nodes store key-value pairs directly:
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────────────────┐
+//! │ Key₀ │ Val₀ │ Key₁ │ Val₁ │ ... │ Keyₙ₋₁ │ Valₙ₋₁ │ → Next │
+//! └──────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! - Keys are stored in sorted order for efficient binary search
+//! - Each key has an associated value (typically a [`RID`](crate::common::rid::RID))
+//! - `next_page_id` links to the next leaf for sequential scans
+//!
+//! # Linked List of Leaves
+//!
+//! All leaf nodes are connected via `next_page_id` pointers, forming a singly-linked
+//! list at the bottom of the tree. This enables efficient range scans without
+//! traversing internal nodes:
+//!
+//! ```text
+//! [Leaf₀] → [Leaf₁] → [Leaf₂] → ... → [Leafₙ] → None
+//! ```
+//!
+//! # Key Operations
+//!
+//! - **Lookup**: [`find_key_index`](BPlusTreeLeafPage::find_key_index) uses binary
+//!   search to locate a key's position.
+//! - **Insert**: [`insert_key_value`](BPlusTreeLeafPage::insert_key_value) adds a
+//!   key-value pair in sorted order (or updates if key exists).
+//! - **Delete**: [`remove_key_value_at`](BPlusTreeLeafPage::remove_key_value_at)
+//!   removes an entry by index.
+//!
+//! # Generics
+//!
+//! The page is generic over:
+//! - `K`: Key type (must implement `KeyType`, `bincode::Encode/Decode`)
+//! - `V`: Value type (typically `RID`, must implement `bincode::Encode/Decode`)
+//! - `C`: Comparator function for key ordering
+//!
+//! # Size Constraints
+//!
+//! - `max_size`: Maximum number of key-value pairs the leaf can hold
+//! - `min_size`: Minimum occupancy (typically `⌈max_size / 2⌉`) for non-root leaves
+//! - Root leaves may have fewer entries than `min_size`
+//!
+//! # Serialization
+//!
+//! Leaf pages serialize their contents using [`bincode`] for persistence.
+
 use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
 use crate::storage::index::types::{KeyComparator, KeyType};

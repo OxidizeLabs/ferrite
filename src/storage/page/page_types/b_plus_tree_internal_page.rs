@@ -1,3 +1,61 @@
+//! Internal (non-leaf) node implementation for B+ tree indexes.
+//!
+//! This module provides [`BPlusTreeInternalPage`], which represents an internal node
+//! in a B+ tree. Internal nodes store keys and child pointers, guiding searches
+//! down to the leaf level where actual data resides.
+//!
+//! # Structure
+//!
+//! An internal node with `n` keys has `n+1` child pointers:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │ Ptr₀ │ Key₀ │ Ptr₁ │ Key₁ │ Ptr₂ │ ... │ Keyₙ₋₁ │ Ptrₙ    │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! - `Ptr₀` points to keys less than `Key₀`
+//! - `Ptrᵢ` (for i > 0) points to keys in range `[Keyᵢ₋₁, Keyᵢ)`
+//! - `Ptrₙ` points to keys greater than or equal to `Keyₙ₋₁`
+//!
+//! # Key Operations
+//!
+//! - **Search**: [`find_child_for_key`](BPlusTreeInternalPage::find_child_for_key) returns
+//!   the child page ID to descend into for a given search key.
+//! - **Insert**: [`insert_key_value`](BPlusTreeInternalPage::insert_key_value) adds a
+//!   separator key and child pointer, maintaining sorted order.
+//! - **Delete**: [`remove_key_value_at`](BPlusTreeInternalPage::remove_key_value_at) removes
+//!   a key and its associated child pointer.
+//!
+//! # Balancing Operations
+//!
+//! When nodes become underfull after deletions, the tree must be rebalanced:
+//!
+//! - **Redistribution**: Borrow a key from a sibling via
+//!   [`borrow_from_left`](BPlusTreeInternalPage::borrow_from_left) or
+//!   [`borrow_from_right`](BPlusTreeInternalPage::borrow_from_right).
+//! - **Merge**: Combine with a sibling using
+//!   [`merge_with_right_sibling`](BPlusTreeInternalPage::merge_with_right_sibling).
+//!
+//! # Root Node Handling
+//!
+//! Root nodes have special rules:
+//! - Can have fewer than `min_size` keys
+//! - When reduced to zero keys with one child, should be collapsed
+//!   (see [`should_collapse_root`](BPlusTreeInternalPage::should_collapse_root))
+//!
+//! # Generics
+//!
+//! The page is generic over:
+//! - `KeyType`: The type of keys stored (must be `Clone + Send + Sync + Debug`)
+//! - `KeyComparator`: A comparison function for key ordering
+//!
+//! # Invariant Checking
+//!
+//! Use [`check_invariants`](BPlusTreeInternalPage::check_invariants) to validate
+//! that the node maintains all B+ tree properties (sorted keys, correct pointer
+//! count, size constraints).
+
 use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
