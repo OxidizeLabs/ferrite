@@ -1,3 +1,148 @@
+//! # B+ Tree Index Implementation
+//!
+//! This module provides a disk-based **B+ tree index** for efficient key-value lookups,
+//! range scans, and ordered data access. It integrates with the buffer pool manager
+//! for page-level I/O and supports concurrent access through latch crabbing protocols.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────┐
+//! │                         B+ Tree Structure                               │
+//! ├─────────────────────────────────────────────────────────────────────────┤
+//! │                                                                         │
+//! │                        ┌──────────────────┐                             │
+//! │                        │   Header Page    │ ← Tree metadata             │
+//! │                        │  (root_id, h, n) │   (height, key count)       │
+//! │                        └────────┬─────────┘                             │
+//! │                                 │                                       │
+//! │                        ┌────────▼─────────┐                             │
+//! │                        │  Internal Page   │ ← Guide posts (keys only)   │
+//! │                        │   [5 | 10 | 15]  │                             │
+//! │                        └──┬────┬────┬──┬──┘                             │
+//! │                   ┌──────┘    │    │   └──────┐                         │
+//! │                   ▼           ▼    ▼          ▼                         │
+//! │              ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐            │
+//! │              │  Leaf   │→│  Leaf   │→│  Leaf   │→│  Leaf   │            │
+//! │              │ [1,2,3] │ │ [5,6,7] │ │[10,11]  │ │[15,16]  │            │
+//! │              └─────────┘ └─────────┘ └─────────┘ └─────────┘            │
+//! │                   ↑                                                     │
+//! │              Doubly-linked for range scans                              │
+//! └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! - **[`BPlusTreeIndex`]**: The main generic B+ tree index structure parameterized
+//!   by key type `K`, value type `V`, and comparator `C`
+//! - **[`TypedBPlusTreeIndex`]**: Type-erased wrapper supporting runtime type dispatch
+//! - **[`BPlusTreeError`]**: Comprehensive error type for tree operations
+//! - **[`ValidationStats`]**: Statistics collected during tree validation
+//!
+//! ## Features
+//!
+//! ### Core Operations
+//! - **Insert**: O(log n) insertion with automatic page splitting
+//! - **Search**: O(log n) point lookups
+//! - **Remove**: O(log n) deletion with automatic rebalancing (merge/redistribute)
+//! - **Range Scan**: Efficient range queries using leaf page linked list
+//!
+//! ### Concurrency Control (Latch Crabbing)
+//!
+//! Two protocols are implemented for concurrent tree access:
+//!
+//! 1. **Optimistic Protocol** (fast path):
+//!    - Acquire read latches traversing down
+//!    - Acquire write latch only on leaf
+//!    - Restart if leaf is unsafe (would split/merge)
+//!
+//! 2. **Pessimistic Protocol** (safe path):
+//!    - Acquire write latches traversing down
+//!    - Release ancestor latches when a "safe" node is found
+//!    - Safe = node won't split (insert) or underflow (delete)
+//!
+//! ```text
+//! Optimistic Insert (no split):     Pessimistic Insert (with split):
+//! ┌───────────────────────────┐     ┌───────────────────────────┐
+//! │ Read → Read → Read → Write│     │ Write → Write → Write     │
+//! │   ↓      ↓      ↓     ↓   │     │   ↓       ↓       ↓       │
+//! │ Root → Int → Int → Leaf   │     │ Root → Int → Leaf         │
+//! │ (release immediately)     │     │ (hold until safe)         │
+//! └───────────────────────────┘     └───────────────────────────┘
+//! ```
+//!
+//! ### Tree Maintenance
+//! - **Splitting**: When a node overflows, split into two and promote middle key
+//! - **Merging**: When a node underflows, merge with sibling
+//! - **Redistribution**: Borrow keys from sibling to avoid merge
+//! - **Root Collapse**: When root has single child, make child the new root
+//!
+//! ### Validation & Debugging
+//! - `validate_tree()`: Verify structural invariants (ordering, size, balance)
+//! - `validate_leaf_links()`: Check for cycles in leaf linked list
+//! - `health_check()`: Comprehensive tree validation
+//! - `print_tree()`: Level-order visualization
+//! - Traversal methods: in-order, pre-order, post-order
+//!
+//! ## Page Types Used
+//!
+//! | Page Type | Purpose |
+//! |-----------|---------|
+//! | `BPlusTreeHeaderPage` | Stores root page ID, tree height, key count, order |
+//! | `BPlusTreeInternalPage` | Guide posts with keys and child pointers |
+//! | `BPlusTreeLeafPage` | Actual key-value pairs, linked list pointers |
+//!
+//! ## Example Usage
+//!
+//! ```ignore
+//! // Create and initialize the index
+//! let mut tree = BPlusTreeIndex::<i32, RID, I32Comparator>::new(
+//!     i32_comparator,
+//!     metadata,
+//!     buffer_pool_manager,
+//! );
+//! tree.init_with_order(4)?;  // Order 4 B+ tree
+//!
+//! // Insert key-value pairs
+//! tree.insert(42, RID::new(1, 5))?;
+//! tree.insert(10, RID::new(1, 2))?;
+//!
+//! // Point lookup
+//! if let Some(rid) = tree.search(&42)? {
+//!     println!("Found: {:?}", rid);
+//! }
+//!
+//! // Range scan
+//! let results = tree.range_scan(&10, &50)?;
+//! for (key, value) in results {
+//!     println!("{}: {:?}", key, value);
+//! }
+//!
+//! // Remove
+//! tree.remove(&42)?;
+//!
+//! // Concurrent access with latch crabbing
+//! tree.insert_with_latch_crabbing(100, RID::new(2, 1))?;
+//! tree.remove_with_latch_crabbing(&10)?;
+//! ```
+//!
+//! ## Path-Based Parent Lookup
+//!
+//! Operations that may modify ancestors (split/merge) track the traversal path
+//! for O(1) parent lookup instead of O(n) BFS:
+//!
+//! ```text
+//! find_leaf_page_with_path(&key) → (LeafPage, [root_id, internal_id, ...])
+//!                                            └── Path from root to parent
+//! ```
+//!
+//! ## Generics
+//!
+//! The tree is generic over:
+//! - `K: KeyType` - Key type (must be `bincode` serializable)
+//! - `V: ValueType` - Value type (typically `RID`)
+//! - `C: KeyComparator<K>` - Comparison function for keys
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::{
     config::{INVALID_PAGE_ID, PageId},

@@ -1,30 +1,151 @@
-//! Latch Crabbing (Lock Coupling) Implementation for B+ Tree
+//! # Latch Crabbing (Lock Coupling) for B+ Tree Concurrency
 //!
-//! This module provides thread-safe traversal protocols for B+ tree operations:
+//! This module implements **latch crabbing** (also called lock coupling), a concurrency
+//! control protocol for safe multi-threaded B+ tree traversal. It ensures correctness
+//! while minimizing lock contention through careful latch acquisition and release.
+//!
+//! ## Overview
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────┐
+//! │                    Latch Crabbing Traversal                             │
+//! ├─────────────────────────────────────────────────────────────────────────┤
+//! │                                                                         │
+//! │  PESSIMISTIC MODE (Insert with potential split):                        │
+//! │                                                                         │
+//! │  Step 1: Acquire W on root     Step 2: Acquire W on child               │
+//! │  ┌─────────┐                   ┌─────────┐                              │
+//! │  │  Root   │ ← W               │  Root   │ ← W (held)                   │
+//! │  │ [5|10]  │                   │ [5|10]  │                              │
+//! │  └────┬────┘                   └────┬────┘                              │
+//! │       │                             │                                   │
+//! │       ▼                             ▼ W                                 │
+//! │  ┌─────────┐                   ┌─────────┐                              │
+//! │  │ Child A │                   │ Child A │ ← W (size<max-1 = SAFE)      │
+//! │  │  [7|8]  │                   │  [7|8]  │                              │
+//! │  └─────────┘                   └─────────┘                              │
+//! │                                                                         │
+//! │  Step 3: Child is SAFE → Release ancestors                              │
+//! │  ┌─────────┐                                                            │
+//! │  │  Root   │ ← (released!)                                              │
+//! │  │ [5|10]  │                                                            │
+//! │  └────┬────┘                                                            │
+//! │       │                                                                 │
+//! │       ▼                                                                 │
+//! │  ┌─────────┐                                                            │
+//! │  │ Child A │ ← W (still held, continue to leaf)                         │
+//! │  │  [7|8]  │                                                            │
+//! │  └─────────┘                                                            │
+//! │                                                                         │
+//! └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
 //! ## Protocols
 //!
 //! ### Read Operations (Search, Range Scan)
-//! - Acquire read latch on current node
-//! - Acquire read latch on child
-//! - Release parent read latch
-//! - Continue until reaching leaf
+//! 1. Acquire read latch on current node
+//! 2. Acquire read latch on child
+//! 3. Release parent read latch (hand-over-hand)
+//! 4. Continue until reaching leaf
 //!
 //! ### Write Operations - Optimistic Protocol
-//! - Traverse down with read latches (like reads)
-//! - Acquire write latch only on the leaf
-//! - If operation causes split/merge, restart with pessimistic protocol
+//! 1. Traverse down with **read latches** (like reads)
+//! 2. Acquire **write latch** only on the leaf
+//! 3. If leaf is "safe", perform operation
+//! 4. If leaf would split/merge, **restart** with pessimistic protocol
 //!
-//! ### Write Operations - Pessimistic Protocol  
-//! - Acquire write latches going down
-//! - Release ancestor write latches when current node is "safe"
-//! - A node is "safe" if the operation won't propagate changes to ancestors
+//! ### Write Operations - Pessimistic Protocol
+//! 1. Acquire **write latches** going down the tree
+//! 2. When a "safe" node is found, release all ancestor latches
+//! 3. A node is "safe" if the operation won't propagate changes upward
+//!
+//! ## Key Components
+//!
+//! - **[`HeldWriteLock`]**: RAII guard that holds a write latch on an internal page
+//! - **[`LatchContext`]**: Tracks held latches and traversal path during operations
+//! - **[`OperationType`]**: Distinguishes Search, Insert, Delete operations
+//! - **[`LockingProtocol`]**: Optimistic vs Pessimistic locking strategy
+//! - **[`NodeSafety`]**: Trait to check if a node is safe for an operation
+//! - **[`TraversalResult`]**: Result containing leaf page, context, and safety status
 //!
 //! ## Safety Criteria
 //!
-//! A node is considered "safe" when:
-//! - **For Insert**: `size < max_size - 1` (room for one more key without split)
-//! - **For Delete**: `size > min_size` OR node is root (can lose a key without underflow)
+//! A node is considered **"safe"** when an operation won't require ancestor modifications:
+//!
+//! | Operation | Safety Condition |
+//! |-----------|-----------------|
+//! | Search | Always safe (read-only) |
+//! | Insert | `size < max_size - 1` (room for one more key without split) |
+//! | Delete | `size > min_size` OR node is root (can lose a key without underflow) |
+//!
+//! ## Optimistic vs Pessimistic Trade-offs
+//!
+//! ```text
+//! ┌────────────────┬────────────────────────┬────────────────────────┐
+//! │                │      Optimistic        │      Pessimistic       │
+//! ├────────────────┼────────────────────────┼────────────────────────┤
+//! │ Latches Used   │ Read (down) + Write    │ Write (down)           │
+//! │                │ (leaf only)            │                        │
+//! ├────────────────┼────────────────────────┼────────────────────────┤
+//! │ Contention     │ Low (reads don't block)│ Higher (writes block)  │
+//! ├────────────────┼────────────────────────┼────────────────────────┤
+//! │ Restart Risk   │ Yes (if split/merge)   │ No                     │
+//! ├────────────────┼────────────────────────┼────────────────────────┤
+//! │ Best For       │ Sparse trees, few      │ Dense trees, frequent  │
+//! │                │ splits/merges          │ structural changes     │
+//! └────────────────┴────────────────────────┴────────────────────────┘
+//! ```
+//!
+//! ## HeldWriteLock Design
+//!
+//! The [`HeldWriteLock`] struct is crucial for correct latch holding. It uses
+//! `ArcRwLockWriteGuard` (from `parking_lot`) to **own** the write lock:
+//!
+//! ```text
+//! ┌───────────────────────────────────────┐
+//! │           HeldWriteLock               │
+//! ├───────────────────────────────────────┤
+//! │ _page_guard: PageGuard<InternalPage>  │ ← Keeps page pinned in buffer pool
+//! │ write_guard: ArcRwLockWriteGuard<...> │ ← Actually HOLDS the write lock
+//! │ page_id: PageId                       │ ← Cached for quick access
+//! │ acquired_at: Instant                  │ ← For hold-time metrics
+//! └───────────────────────────────────────┘
+//! ```
+//!
+//! Key insight: The `write_guard` owns a cloned `Arc<RwLock<T>>`, so the lock is
+//! genuinely held for the lifetime of `HeldWriteLock`, not just borrowed.
+//!
+//! ## Observability
+//!
+//! Integrates with [`btree_observability`](super::btree_observability) for:
+//! - Warning on slow lock acquisitions (potential deadlock detection)
+//! - Recording lock wait times and hold times
+//! - Optional timeout in tests to prevent infinite hangs
+//!
+//! ## Example Usage
+//!
+//! ```ignore
+//! // Create a context for an insert operation
+//! let mut context = LatchContext::new(OperationType::Insert, LockingProtocol::Pessimistic);
+//!
+//! // During traversal, hold write locks on unsafe nodes
+//! let held_lock = HeldWriteLock::new(internal_page_guard);
+//! if !held_lock.is_safe_for(OperationType::Insert) {
+//!     context.hold_existing_lock(held_lock);
+//! } else {
+//!     // Node is safe - release all ancestors
+//!     context.release_safe_ancestors();
+//!     drop(held_lock);
+//! }
+//!
+//! // At leaf, context.held_count() shows how many ancestors still need updates
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `HeldWriteLock` is `Send` (can be transferred between threads)
+//! - `LatchContext` is `Send` when its locks are
+//! - Locks are released in LIFO order when context drops (safe for deadlock prevention)
 
 use crate::common::config::PageId;
 use crate::storage::page::page_guard::PageGuard;
