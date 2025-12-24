@@ -1,3 +1,194 @@
+//! # Log Iterator
+//!
+//! This module provides the `LogIterator` which enables sequential traversal of
+//! Write-Ahead Log (WAL) records from disk. It handles EOF detection, record
+//! validation, corruption recovery (resync), and proper offset advancement.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   Log File (on disk)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Offset:   0              45             90            135           EOF
+//!             │               │              │              │             │
+//!             ▼               ▼              ▼              ▼             ▼
+//!            ┌───────────────┬──────────────┬──────────────┬─────────────┐
+//!            │  LogRecord 0  │ LogRecord 1  │ LogRecord 2  │ LogRecord 3 │
+//!            │  (size=45)    │ (size=45)    │ (size=45)    │ (size=40)   │
+//!            └───────────────┴──────────────┴──────────────┴─────────────┘
+//!                  │
+//!                  │  read header (4 bytes) → size
+//!                  │  read body (size bytes)
+//!                  │  deserialize → LogRecord
+//!                  ▼
+//!            ┌─────────────────────────────────────────────────────────────┐
+//!            │                      LogIterator                            │
+//!            │                                                             │
+//!            │  current_offset: 0 ──▶ 45 ──▶ 90 ──▶ 135 ──▶ EOF            │
+//!            │  reached_eof:   false                                       │
+//!            └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Iteration Flow
+//!
+//! ```text
+//!   next() Method
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   ┌─────────────────┐
+//!   │ Check EOF flag  │───▶ true ───▶ return None
+//!   └────────┬────────┘
+//!            │ false
+//!            ▼
+//!   ┌─────────────────┐
+//!   │ Read 4-byte     │───▶ EOF/Error ───▶ set reached_eof ───▶ return None
+//!   │ size header     │
+//!   └────────┬────────┘
+//!            │ ok
+//!            ▼
+//!   ┌─────────────────┐
+//!   │ Validate size   │───▶ invalid (≤0 or >1MB) ───▶ resync ───▶ retry
+//!   │ (0 < size ≤ 1M) │
+//!   └────────┬────────┘
+//!            │ valid
+//!            ▼
+//!   ┌─────────────────┐
+//!   │ Read full       │───▶ Error ───▶ resync ───▶ retry
+//!   │ record bytes    │
+//!   └────────┬────────┘
+//!            │ ok
+//!            ▼
+//!   ┌─────────────────┐
+//!   │ Deserialize     │───▶ Error ───▶ resync ───▶ retry
+//!   │ LogRecord       │
+//!   └────────┬────────┘
+//!            │ ok
+//!            ▼
+//!   ┌─────────────────┐
+//!   │ Validate type   │───▶ Invalid type ───▶ resync ───▶ retry
+//!   │ (!= Invalid)    │
+//!   └────────┬────────┘
+//!            │ valid
+//!            ▼
+//!   ┌─────────────────┐
+//!   │ Advance offset  │
+//!   │ += record_size  │
+//!   └────────┬────────┘
+//!            │
+//!            ▼
+//!       return Some(record)
+//! ```
+//!
+//! ## Resync Strategy
+//!
+//! When encountering corruption or invalid data, the iterator attempts to
+//! resync by advancing the offset:
+//!
+//! ```text
+//!   Corruption Handling
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   Case 1: Zero-padded header (all zeros)
+//!   ──────────────────────────────────────
+//!   │ This often indicates page boundary padding in older/alternative WAL
+//!   │ layouts. Skip to next page boundary for faster recovery.
+//!   │
+//!   │ current_offset = ((current_offset / PAGE_SIZE) + 1) * PAGE_SIZE
+//!
+//!   Case 2: Invalid size or parse error
+//!   ────────────────────────────────────
+//!   │ Advance by 1 byte and retry. This allows finding the next valid
+//!   │ record after partial corruption.
+//!   │
+//!   │ current_offset += 1
+//!
+//!   Maximum attempts: 100 before giving up
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `LogIterator` | Stateful cursor over WAL records |
+//! | `current_offset` | Current byte position in log file |
+//! | `reached_eof` | Flag indicating end-of-file reached |
+//! | `buffer_size` | Configurable read buffer size |
+//! | `is_eof_error()` | Helper to detect EOF from various error types |
+//!
+//! ## Core Operations
+//!
+//! | Method | Description |
+//! |--------|-------------|
+//! | `new(disk_manager)` | Create iterator starting at offset 0 |
+//! | `with_offset(dm, offset)` | Create iterator at specific offset |
+//! | `next()` | Async: get next record or None |
+//! | `reset()` | Reset to beginning (offset 0) |
+//! | `set_offset(offset)` | Jump to specific offset |
+//! | `get_offset()` | Get current offset |
+//! | `is_end()` | Check if EOF reached |
+//! | `collect()` | Async: drain all remaining records |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::recovery::log_iterator::LogIterator;
+//!
+//! // Create iterator from beginning
+//! let mut iter = LogIterator::new(disk_manager.clone());
+//!
+//! // Iterate through all records
+//! while let Some(record) = iter.next().await {
+//!     println!("LSN: {}, Type: {:?}, TxnId: {}",
+//!         record.get_lsn(),
+//!         record.get_log_record_type(),
+//!         record.get_txn_id()
+//!     );
+//! }
+//!
+//! // Or collect all at once
+//! let mut iter2 = LogIterator::new(disk_manager.clone());
+//! let all_records = iter2.collect().await;
+//!
+//! // Start from checkpoint offset
+//! let mut iter3 = LogIterator::with_offset(disk_manager.clone(), checkpoint_offset);
+//! while let Some(record) = iter3.next().await {
+//!     // Redo from checkpoint...
+//! }
+//! ```
+//!
+//! ## Recovery Integration
+//!
+//! ```text
+//!   ARIES-style Recovery
+//!   ─────────────────────────────────────────────────────────────────────────
+//!
+//!   1. Analysis Phase
+//!      └─ LogIterator::new() → scan from beginning
+//!         └─ Build active transaction table
+//!         └─ Build dirty page table
+//!
+//!   2. Redo Phase
+//!      └─ LogIterator::with_offset(redo_lsn) → start from redo point
+//!         └─ Redo all logged operations
+//!
+//!   3. Undo Phase
+//!      └─ Follow prev_lsn chains to undo uncommitted transactions
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `LogIterator` is **not** `Send` or `Sync` by default
+//! - Single-threaded async iteration via `.next().await`
+//! - For concurrent recovery, create separate iterators per task
+//!
+//! ## Offset Semantics
+//!
+//! - Offsets are **logical byte positions** (not page-aligned)
+//! - WAL uses OS-buffered I/O with variable-length records
+//! - After `next()` returns a record, `get_offset()` points to the **next** record
+//! - Direct I/O for database pages does not affect WAL offset layout
+
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::async_disk::AsyncDiskManager;
 use crate::common::config::DB_PAGE_SIZE;
