@@ -1,3 +1,160 @@
+//! # SQL Execution Engine
+//!
+//! This module provides the [`ExecutionEngine`], the top-level coordinator for SQL statement
+//! execution. It integrates parsing, planning, optimization, and execution into a unified
+//! interface for processing SQL queries and commands.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────────┐
+//! │                              ExecutionEngine Pipeline                               │
+//! ├─────────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                     │
+//! │   SQL Text                                                                          │
+//! │      │                                                                              │
+//! │      ▼                                                                              │
+//! │  ┌──────────────────┐                                                               │
+//! │  │   QueryPlanner   │  Parse SQL → Build LogicalPlan                                │
+//! │  └────────┬─────────┘                                                               │
+//! │           │                                                                         │
+//! │           ▼                                                                         │
+//! │  ┌──────────────────┐                                                               │
+//! │  │    Optimizer     │  Apply optimization rules → Produce optimized LogicalPlan     │
+//! │  └────────┬─────────┘                                                               │
+//! │           │                                                                         │
+//! │           ▼                                                                         │
+//! │  ┌──────────────────┐                                                               │
+//! │  │ LogicalToPhysical│  Convert LogicalPlan → PlanNode (physical plan)               │
+//! │  └────────┬─────────┘                                                               │
+//! │           │                                                                         │
+//! │           ▼                                                                         │
+//! │  ┌──────────────────┐                                                               │
+//! │  │ create_executor()│  PlanNode → Executor tree                                     │
+//! │  └────────┬─────────┘                                                               │
+//! │           │                                                                         │
+//! │           ▼                                                                         │
+//! │  ┌──────────────────┐                                                               │
+//! │  │  execute_plan()  │  Pull tuples from executor → Write to ResultWriter            │
+//! │  └────────┬─────────┘                                                               │
+//! │           │                                                                         │
+//! │           ▼                                                                         │
+//! │      Results / Side Effects                                                         │
+//! │                                                                                     │
+//! └─────────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | [`ExecutionEngine`] | Main coordinator for SQL execution |
+//! | `QueryPlanner` | Parses SQL and builds logical plans |
+//! | `Optimizer` | Applies optimization rules to logical plans |
+//! | `BufferPoolManager` | Manages page I/O for data access |
+//! | `TransactionManagerFactory` | Creates and manages transactions |
+//! | `WALManager` | Write-ahead logging for durability |
+//!
+//! ## Statement Execution Flow
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────────┐
+//! │                            Statement Type Dispatch                                  │
+//! ├─────────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                     │
+//! │   PlanNode Type                Handling                                             │
+//! │   ─────────────                ────────                                             │
+//! │   Insert/Update/Delete    →    Execute all tuples, return affected count            │
+//! │   CreateTable/CreateIndex →    Execute DDL, return success                          │
+//! │   StartTransaction        →    Begin new transaction                                │
+//! │   CommitTransaction       →    Write WAL commit, release locks                      │
+//! │   RollbackTransaction     →    Write WAL abort, undo changes                        │
+//! │   CommandResult           →    Execute utility command                              │
+//! │   Query (SELECT, etc.)    →    Stream tuples to ResultWriter                        │
+//! │                                                                                     │
+//! └─────────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Transaction Lifecycle
+//!
+//! ```text
+//!     BEGIN                           COMMIT                    ROLLBACK
+//!       │                               │                          │
+//!       ▼                               ▼                          ▼
+//! ┌─────────────┐               ┌─────────────┐            ┌─────────────┐
+//! │   Create    │               │  Write WAL  │            │  Write WAL  │
+//! │ Transaction │               │   Commit    │            │   Abort     │
+//! └──────┬──────┘               │   Record    │            │   Record    │
+//!        │                      └──────┬──────┘            └──────┬──────┘
+//!        ▼                             │                          │
+//! ┌─────────────┐                      ▼                          ▼
+//! │   Execute   │               ┌─────────────┐            ┌─────────────┐
+//! │  Statements │               │   txn_mgr   │            │   txn_mgr   │
+//! │   (DML)     │               │   .commit() │            │   .abort()  │
+//! └─────────────┘               └──────┬──────┘            └─────────────┘
+//!                                      │
+//!                                      ▼
+//!                               ┌─────────────┐
+//!                               │   Chain?    │──yes──▶ Start new transaction
+//!                               │(AND CHAIN)  │
+//!                               └─────────────┘
+//! ```
+//!
+//! ## Supported Statement Types
+//!
+//! | Category | Statements |
+//! |----------|------------|
+//! | **DML** | `SELECT`, `INSERT`, `UPDATE`, `DELETE` |
+//! | **DDL** | `CREATE TABLE`, `CREATE INDEX`, `DROP`, `ALTER TABLE` |
+//! | **Transaction** | `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` |
+//! | **Utility** | `EXPLAIN`, `SET`, `SHOW` |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! // Create execution engine
+//! let engine = ExecutionEngine::new(
+//!     catalog.clone(),
+//!     buffer_pool_manager.clone(),
+//!     transaction_factory.clone(),
+//!     wal_manager.clone(),
+//! );
+//!
+//! // Execute a query
+//! let mut result_writer = StringResultWriter::new();
+//! engine.execute_sql(
+//!     "SELECT * FROM users WHERE age > 21",
+//!     execution_context,
+//!     &mut result_writer,
+//! ).await?;
+//!
+//! // Execute DML in a transaction
+//! engine.execute_sql("BEGIN", ctx.clone(), &mut writer).await?;
+//! engine.execute_sql("INSERT INTO users VALUES (1, 'Alice')", ctx.clone(), &mut writer).await?;
+//! engine.execute_sql("COMMIT", ctx.clone(), &mut writer).await?;
+//! ```
+//!
+//! ## Error Handling
+//!
+//! The engine returns [`DBError`] for various failure conditions:
+//! - `DBError::SqlError` - Syntax or semantic errors in SQL
+//! - `DBError::PlanError` - Logical plan construction failures
+//! - `DBError::OptimizeError` - Optimization phase failures
+//! - `DBError::Execution` - Runtime execution failures
+//!
+//! ## Async Execution
+//!
+//! The [`execute_sql`] and [`execute_plan`] methods are async to support:
+//! - Non-blocking I/O through `BufferPoolManager`
+//! - Async transaction commits with WAL flushing
+//! - Concurrent query execution in multi-connection scenarios
+//!
+//! ## Thread Safety
+//!
+//! - `ExecutionEngine` itself requires `&mut self` for execution (single-threaded per engine)
+//! - Components like `BufferPoolManager` and `Catalog` are `Arc`-wrapped for sharing
+//! - Each connection typically owns its own `ExecutionEngine` instance
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::common::exception::DBError;
