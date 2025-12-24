@@ -1,3 +1,217 @@
+//! # Transaction Manager
+//!
+//! This module provides the central coordinator for transaction lifecycle
+//! management, MVCC version control, and undo log bookkeeping. The transaction
+//! manager owns transaction state and timestamps while deliberately avoiding
+//! side effects (WAL writes, buffer flushes, lock release) which are handled
+//! by higher-level coordinators.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                    ┌────────────────────────────────────────────────────────┐
+//!                    │                 TransactionManager                     │
+//!                    │                                                        │
+//!                    │  ┌────────────────────────────────────────────────┐    │
+//!                    │  │           TransactionManagerState              │    │
+//!                    │  │                                                │    │
+//!                    │  │  ┌──────────────────────────────────────────┐  │    │
+//!                    │  │  │  txn_map: HashMap<TxnId, Arc<Txn>>       │  │    │
+//!                    │  │  │  ┌─────┐ ┌─────┐ ┌─────┐                 │  │    │
+//!                    │  │  │  │Txn 0│ │Txn 1│ │Txn 2│ ...             │  │    │
+//!                    │  │  │  └─────┘ └─────┘ └─────┘                 │  │    │
+//!                    │  │  └──────────────────────────────────────────┘  │    │
+//!                    │  │                                                │    │
+//!                    │  │  ┌──────────────────────────────────────────┐  │    │
+//!                    │  │  │  running_txns: Watermark                 │  │    │
+//!                    │  │  │  ┌─────────────────────────────────────┐ │  │    │
+//!                    │  │  │  │ active_txns: {ts₁, ts₂, ts₃, ...}   │ │  │    │
+//!                    │  │  │  │ watermark = min(active_txns)        │ │  │    │
+//!                    │  │  │  └─────────────────────────────────────┘ │  │    │
+//!                    │  │  └──────────────────────────────────────────┘  │    │
+//!                    │  │                                                │    │
+//!                    │  │  ┌──────────────────────────────────────────┐  │    │
+//!                    │  │  │  version_info: HashMap<PageId, ...>     │  │    │
+//!                    │  │  │  ┌───────────────────────────────────┐  │  │    │
+//!                    │  │  │  │ Page 0 → PageVersionInfo          │  │  │    │
+//!                    │  │  │  │   RID → UndoLink (txn, idx)       │  │  │    │
+//!                    │  │  │  │ Page 1 → PageVersionInfo          │  │  │    │
+//!                    │  │  │  │   ...                             │  │  │    │
+//!                    │  │  │  └───────────────────────────────────┘  │  │    │
+//!                    │  │  └──────────────────────────────────────────┘  │    │
+//!                    │  │                                                │    │
+//!                    │  │  ┌──────────────────────────────────────────┐  │    │
+//!                    │  │  │  table_heaps: HashMap<TableOid, ...>    │  │    │
+//!                    │  │  │  (registered TransactionalTableHeaps)   │  │    │
+//!                    │  │  └──────────────────────────────────────────┘  │    │
+//!                    │  │                                                │    │
+//!                    │  │  is_shutdown: AtomicBool                       │    │
+//!                    │  └────────────────────────────────────────────────┘    │
+//!                    │                                                        │
+//!                    │  next_txn_id: AtomicU64                                │
+//!                    └────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `TransactionManager` | Main coordinator for transaction lifecycle |
+//! | `TransactionManagerState` | Internal state container with `RwLock` protection |
+//! | `PageVersionInfo` | Per-page mapping from RID to first undo link |
+//! | `txn_map` | Active and recently-completed transactions by ID |
+//! | `running_txns` | Watermark tracking active read timestamps |
+//! | `version_info` | Undo link registry for MVCC version chains |
+//! | `table_heaps` | Registered transactional table heaps |
+//!
+//! ## Transaction Lifecycle
+//!
+//! ```text
+//!  ┌─────────────────────────────────────────────────────────────────────────┐
+//!  │                         Transaction Lifecycle                          │
+//!  └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!       begin()                    Operations                   commit()/abort()
+//!          │                           │                              │
+//!          ▼                           ▼                              ▼
+//!   ┌─────────────┐            ┌─────────────────┐            ┌─────────────────┐
+//!   │   RUNNING   │───────────▶│  Read/Write    │───────────▶│   COMMITTED /   │
+//!   │             │            │  Operations     │            │    ABORTED      │
+//!   └─────────────┘            └─────────────────┘            └─────────────────┘
+//!          │                           │                              │
+//!          │ • Allocate TxnId          │ • Track write set            │ • Set commit_ts
+//!          │ • Get read_ts             │ • Create undo logs           │ • Update tuple meta
+//!          │ • Register in             │ • Update undo links          │ • (or) Rollback via
+//!          │   running_txns            │                              │   undo logs
+//!          │ • Add to txn_map          │                              │ • Unregister from
+//!          │                           │                              │   running_txns
+//!          │                           │                              │ • Prune if safe
+//!          ▼                           ▼                              ▼
+//! ```
+//!
+//! ## MVCC Version Chain
+//!
+//! ```text
+//!   Table Heap Tuple                    Undo Log Chain
+//!  ┌───────────────┐
+//!  │   TupleMeta   │───────┐
+//!  │  (current)    │       │
+//!  │  commit_ts=5  │       │ get_undo_link(RID)
+//!  ├───────────────┤       │
+//!  │  Tuple Data   │       │
+//!  │  [1, "Bob"]   │       ▼
+//!  └───────────────┘    ┌─────────────────┐     ┌─────────────────┐
+//!                       │   UndoLink      │     │   UndoLink      │
+//!                       │  txn=3, idx=0   │────▶│  txn=1, idx=0   │────▶ ∅
+//!                       └─────────────────┘     └─────────────────┘
+//!                              │                       │
+//!                              ▼                       ▼
+//!                       ┌─────────────────┐     ┌─────────────────┐
+//!                       │   UndoLog       │     │   UndoLog       │
+//!                       │  ts=3           │     │  ts=1           │
+//!                       │  [1, "Alice"]   │     │  [1, "Carol"]   │
+//!                       └─────────────────┘     └─────────────────┘
+//!
+//!   Timeline: ts=1 (Carol) → ts=3 (Alice) → ts=5 (Bob, current)
+//! ```
+//!
+//! ## Core Operations
+//!
+//! | Operation | Description |
+//! |-----------|-------------|
+//! | `begin(isolation)` | Start transaction, allocate ID, register read timestamp |
+//! | `commit(txn, bpm)` | Commit transaction, set commit_ts, update tuple metadata |
+//! | `abort(txn)` | Rollback changes using undo logs, mark as aborted |
+//! | `shutdown()` | Abort all active transactions, reject new ones |
+//! | `update_undo_link()` | Link RID to first undo log in chain |
+//! | `get_undo_link(rid)` | Retrieve undo link for version traversal |
+//! | `get_undo_log(link)` | Access undo log from transaction's buffer |
+//! | `garbage_collection()` | Remove old versions below watermark |
+//! | `register_table(heap)` | Register transactional table heap for rollback |
+//!
+//! ## Abort & Rollback Flow
+//!
+//! ```text
+//!   abort(txn)
+//!       │
+//!       ▼
+//!   ┌───────────────────────────────────────────┐
+//!   │  For each (table_oid, rid) in write_set   │
+//!   └───────────────────────────────────────────┘
+//!       │
+//!       ▼
+//!   ┌───────────────────────┐       ┌───────────────────────────────┐
+//!   │ get_undo_link(rid)    │──────▶│ Undo log exists?              │
+//!   └───────────────────────┘       └───────────────────────────────┘
+//!                                          │              │
+//!                                         Yes            No
+//!                                          │              │
+//!                                          ▼              ▼
+//!                           ┌─────────────────────┐ ┌─────────────────────┐
+//!                           │ Restore tuple from  │ │ Mark tuple as       │
+//!                           │ undo log            │ │ deleted (new insert)│
+//!                           │ - Set meta          │ └─────────────────────┘
+//!                           │ - Rollback data     │
+//!                           │ - Update undo link  │
+//!                           └─────────────────────┘
+//!       │
+//!       ▼
+//!   ┌───────────────────────────────────────────┐
+//!   │  Remove from running_txns                 │
+//!   │  Set state = Aborted                      │
+//!   │  Prune completed transactions             │
+//!   └───────────────────────────────────────────┘
+//! ```
+//!
+//! ## Garbage Collection
+//!
+//! The transaction manager uses watermark-based garbage collection to remove
+//! old tuple versions that are no longer visible to any active transaction:
+//!
+//! ```text
+//!   Timestamp Timeline
+//!   ═══════════════════════════════════════════════════════════════▶
+//!
+//!        ▲                    ▲                         ▲
+//!   Old versions         Watermark              Active transactions
+//!   (can be GC'd)     (min read_ts)            (need these versions)
+//!
+//!   garbage_collection():
+//!     1. Get current watermark
+//!     2. For each page in version_info:
+//!        - Remove undo links pointing to txns with ts < watermark
+//!     3. Prune completed transactions no longer visible
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - All state is protected by `RwLock` for concurrent access
+//! - Transaction ID allocation uses `AtomicU64` for lock-free increments
+//! - Shutdown flag uses `AtomicBool` for immediate visibility
+//! - Watermark operations are atomic within their lock scope
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::concurrency::transaction_manager::TransactionManager;
+//! use crate::concurrency::transaction::IsolationLevel;
+//!
+//! // Create transaction manager
+//! let tm = TransactionManager::new();
+//!
+//! // Begin a transaction
+//! let txn = tm.begin(IsolationLevel::ReadCommitted)?;
+//!
+//! // Perform operations...
+//! // (insert, update, delete via TransactionalTableHeap)
+//!
+//! // Commit the transaction
+//! tm.commit(txn, buffer_pool).await;
+//!
+//! // Or abort on error
+//! // tm.abort(txn);
+//! ```
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::config::TableOidT;
 use crate::common::config::{INVALID_TS, INVALID_TXN_ID, PageId, Timestamp, TxnId};
