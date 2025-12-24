@@ -1,34 +1,292 @@
 //! # I/O Completion Tracking
 //!
-//! The `CompletionTracker` provides a robust mechanism for tracking the lifecycle and status of
-//! asynchronous I/O operations in the Async Disk Manager. It bridges the gap between low-level
-//! asynchronous I/O execution and high-level request management.
+//! This module provides `CompletionTracker`, a robust mechanism for tracking the lifecycle and
+//! status of asynchronous I/O operations. It bridges low-level async I/O execution with high-level
+//! request management.
 //!
 //! ## Architecture
 //!
-//! The tracker maintains a registry of active and recently completed operations, allowing callers to:
-//! - Start new tracked operations and receive a unique `OperationId`.
-//! - Await completion via direct channels (`oneshot`) or broadcast events.
-//! - Query the status of ongoing or completed operations.
+//! ```text
+//!   Caller (AsyncIOEngine)                       Worker (IOWorkerManager)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │                                              │
+//!          │ start_operation(timeout)                     │
+//!          ▼                                              │
+//!   ┌─────────────────────────────────────────────────────┼─────────────────────┐
+//!   │                      CompletionTracker              │                     │
+//!   │                                                     │                     │
+//!   │   ┌─────────────────────────────────────────────────┼─────────────────┐   │
+//!   │   │  operations: Arc<RwLock<HashMap<OpId, Status>>> │                 │   │
+//!   │   │                                                 │                 │   │
+//!   │   │  ┌─────┬────────────────────────────────────────┼──────────────┐  │   │
+//!   │   │  │ ID  │ OperationStatus                        │              │  │   │
+//!   │   │  ├─────┼────────────────────────────────────────┼──────────────┤  │   │
+//!   │   │  │  1  │ Pending { notifier: tx1, timeout }     │◄─────────────┼──┼───┤
+//!   │   │  │  2  │ Completed { result, timing }           │              │  │   │
+//!   │   │  │  3  │ Cancelled { reason, timing }           │              │  │   │
+//!   │   │  └─────┴────────────────────────────────────────┼──────────────┘  │   │
+//!   │   └─────────────────────────────────────────────────┼─────────────────┘   │
+//!   │                                                     │                     │
+//!   │   ┌─────────────────────────────────────────────────┼─────────────────┐   │
+//!   │   │  Broadcast Channel (event_sender)               │                 │   │
+//!   │   │                                                 │                 │   │
+//!   │   │  For multi-listener notifications               │                 │   │
+//!   │   │  (monitoring, wait_for_operations, etc.)        │                 │   │
+//!   │   └─────────────────────────────────────────────────┼─────────────────┘   │
+//!   │                                                     │                     │
+//!   │   ┌─────────────────────────────────────────────────┼─────────────────┐   │
+//!   │   │  Background Cleanup Task                        │                 │   │
+//!   │   │                                                 │                 │   │
+//!   │   │  • Check timeouts periodically                  │                 │   │
+//!   │   │  • Purge old completed/cancelled operations     │                 │   │
+//!   │   └─────────────────────────────────────────────────┼─────────────────┘   │
+//!   └─────────────────────────────────────────────────────┼─────────────────────┘
+//!          │                                              │
+//!          │ Returns (OpId, oneshot::Receiver)            │ complete_operation_with_result()
+//!          ▼                                              │
+//!   ┌─────────────────────────────────────────────────────┴─────────────────────┐
+//!   │  Caller awaits receiver.await → OperationResult::Success/Error            │
+//!   └───────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Key Features
+//! ## Operation Lifecycle
 //!
-//! - **Lifecycle Management**: Tracks operations through `Pending`, `Completed`, and `Cancelled` states.
-//! - **Notification System**:
-//!     - **Direct**: Uses `oneshot` channels for efficient, single-consumer notification.
-//!     - **Broadcast**: Uses `broadcast` channels to notify multiple listeners (e.g., monitoring tools).
-//! - **Timeout Handling**: Automatically detects and fails operations that exceed their configured duration.
-//! - **Automatic Cleanup**: A background task periodically purges old operation records to prevent memory leaks.
-//! - **Metrics Integration**: Automatically records operation duration, data size, and success/failure rates.
-//! - **Batch Waiting**: Supports efficiently waiting for multiple operations to complete simultaneously.
+//! ```text
+//!   start_operation()
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │                         Pending                                        │
+//!   │                                                                        │
+//!   │  • Operation is registered in HashMap                                  │
+//!   │  • Oneshot sender stored for direct notification                       │
+//!   │  • Optional timeout configured                                         │
+//!   │  • Metrics: record_operation_start()                                   │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ├─────────────────┬─────────────────┬─────────────────┐
+//!        │                 │                 │                 │
+//!        │ complete_op()   │ fail_op()       │ cancel_op()     │ timeout
+//!        ▼                 ▼                 ▼                 ▼
+//!   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+//!   │  Completed  │  │  Completed  │  │  Cancelled  │  │  Completed  │
+//!   │  (Success)  │  │  (Error)    │  │             │  │  (Timeout)  │
+//!   │             │  │             │  │             │  │             │
+//!   │ notifier.   │  │ notifier.   │  │ (notifier   │  │ notifier.   │
+//!   │ send(data)  │  │ send(err)   │  │  dropped)   │  │ send(err)   │
+//!   └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
+//!        │                 │                 │                 │
+//!        └─────────────────┴─────────────────┴─────────────────┘
+//!                                   │
+//!                                   ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  Background Cleanup                                                    │
+//!   │                                                                        │
+//!   │  After completed_operation_ttl (default 5 min):                        │
+//!   │  • Remove from HashMap to free memory                                  │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Usage
+//! ## Notification System
 //!
-//! The `CompletionTracker` is typically used by the `AsyncDiskManager` to coordinate I/O requests.
-//! Callers start an operation, getting an ID and receiver, and then use the tracker to signal completion
-//! or failure from the I/O backend.
+//! ```text
+//!   Two notification mechanisms:
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! This module contains the `CompletionTracker`, `OperationStatus`, `OperationResult`, and configuration structures.
+//!   1. DIRECT (oneshot channel) - Primary mechanism
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │                                                                        │
+//!   │  start_operation() → (op_id, oneshot::Receiver)                        │
+//!   │                                                                        │
+//!   │  • Single consumer only                                                │
+//!   │  • Efficient: no cloning, no broadcast overhead                        │
+//!   │  • Typical usage: caller awaits specific operation result              │
+//!   │                                                                        │
+//!   │  Caller:  receiver.await → OperationResult                             │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!
+//!   2. BROADCAST (broadcast channel) - Secondary mechanism
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │                                                                        │
+//!   │  subscribe_to_events() → broadcast::Receiver<OperationEvent>           │
+//!   │                                                                        │
+//!   │  • Multiple consumers                                                  │
+//!   │  • Used by: wait_for_operations(), monitoring tools                    │
+//!   │  • OperationEvent { operation_id, result }                             │
+//!   │                                                                        │
+//!   │  Monitors:  event_rx.recv() → OperationEvent                           │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component                   | Description                                   |
+//! |-----------------------------|-----------------------------------------------|
+//! | `CompletionTracker`         | Main tracker managing operation lifecycle     |
+//! | `CompletionTrackerConfig`   | Configuration (TTL, cleanup interval, etc.)   |
+//! | `OperationEvent`            | Broadcast event with op_id and result         |
+//! | `OperationStats`            | Snapshot of pending/completed/cancelled counts|
+//!
+//! ## Configuration Options
+//!
+//! | Field                      | Default       | Description                        |
+//! |----------------------------|---------------|------------------------------------|
+//! | `completed_operation_ttl`  | 5 minutes     | How long to keep completed ops     |
+//! | `cleanup_interval`         | 1 minute      | How often to run cleanup task      |
+//! | `max_tracked_operations`   | 10,000        | Capacity before forced cleanup     |
+//! | `default_timeout`          | 30 seconds    | Default timeout for new operations |
+//!
+//! ## Core Operations
+//!
+//! | Method                           | Description                             |
+//! |----------------------------------|-----------------------------------------|
+//! | `new()`                          | Create with default configuration       |
+//! | `with_config()`                  | Create with custom configuration        |
+//! | `start_operation()`              | Register new op, get (id, receiver)     |
+//! | `complete_operation()`           | Complete with success data              |
+//! | `complete_operation_with_result()`| Complete with specific result          |
+//! | `fail_operation()`               | Complete with error message             |
+//! | `cancel_operation()`             | Cancel with reason                      |
+//! | `wait_for_operation()`           | Await single op with timeout            |
+//! | `wait_for_operations()`          | Await multiple ops with timeout         |
+//!
+//! ## Status & Metrics Methods
+//!
+//! | Method                       | Description                                |
+//! |------------------------------|--------------------------------------------|
+//! | `get_operation_status()`     | Check if operation is completed            |
+//! | `is_operation_pending()`     | Check if operation is still pending        |
+//! | `tracked_operations_count()` | Get total tracked operations               |
+//! | `pending_operations_count()` | Get pending operations only                |
+//! | `get_operation_stats()`      | Get detailed stats snapshot                |
+//! | `metrics()`                  | Get `Arc<IOMetrics>` for I/O statistics    |
+//!
+//! ## Administrative Methods
+//!
+//! | Method                 | Description                                     |
+//! |------------------------|-------------------------------------------------|
+//! | `cancel_all_pending()` | Cancel all pending ops with reason              |
+//! | `check_timeouts()`     | Manually check and fail timed-out ops           |
+//! | `subscribe_to_events()`| Get broadcast receiver for monitoring           |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::io::completion::{
+//!     CompletionTracker, CompletionTrackerConfig, OperationEvent,
+//! };
+//! use crate::storage::disk::async_disk::io::operation_status::OperationResult;
+//! use std::time::Duration;
+//! use std::sync::Arc;
+//!
+//! // Create with custom configuration
+//! let config = CompletionTrackerConfig {
+//!     completed_operation_ttl: Duration::from_secs(600),
+//!     cleanup_interval: Duration::from_secs(30),
+//!     max_tracked_operations: 50_000,
+//!     default_timeout: Some(Duration::from_secs(60)),
+//! };
+//! let tracker = Arc::new(CompletionTracker::with_config(config));
+//!
+//! // Start an operation
+//! let (op_id, receiver) = tracker.start_operation(None).await;
+//!
+//! // In worker: complete the operation
+//! let tracker_clone = Arc::clone(&tracker);
+//! tokio::spawn(async move {
+//!     // ... perform I/O ...
+//!     let data = vec![1, 2, 3, 4];
+//!     tracker_clone.complete_operation(op_id, data).await.unwrap();
+//! });
+//!
+//! // In caller: await the result
+//! match receiver.await {
+//!     Ok(OperationResult::Success(data)) => {
+//!         println!("Got {} bytes", data.len());
+//!     }
+//!     Ok(OperationResult::Error(msg)) => {
+//!         eprintln!("I/O error: {}", msg);
+//!     }
+//!     Err(_) => {
+//!         eprintln!("Operation cancelled");
+//!     }
+//! }
+//!
+//! // Wait for multiple operations
+//! let (op1, _) = tracker.start_operation(None).await;
+//! let (op2, _) = tracker.start_operation(None).await;
+//!
+//! // ... workers complete ops ...
+//!
+//! let results = tracker.wait_for_operations(
+//!     &[op1, op2],
+//!     Duration::from_secs(5),
+//! ).await?;
+//!
+//! for (id, result) in results {
+//!     println!("Op {}: {:?}", id, result);
+//! }
+//!
+//! // Monitor all completions
+//! let mut event_rx = tracker.subscribe_to_events();
+//! while let Ok(event) = event_rx.recv().await {
+//!     println!("Op {} completed: {:?}", event.operation_id, event.result);
+//! }
+//! ```
+//!
+//! ## Background Cleanup Task
+//!
+//! ```text
+//!   Runs every cleanup_interval (default 1 minute)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Phase 1: TIMEOUT DETECTION                                             │
+//!   │                                                                        │
+//!   │   For each Pending operation:                                          │
+//!   │     if started_at + timeout < now:                                     │
+//!   │       • Transition to Completed(Error("timed out"))                    │
+//!   │       • Send broadcast event                                           │
+//!   │       • Record timeout metric                                          │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Phase 2: OLD OPERATION CLEANUP                                         │
+//!   │                                                                        │
+//!   │   For each Completed/Cancelled operation:                              │
+//!   │     if completed_at/cancelled_at + TTL < now:                          │
+//!   │       • Remove from HashMap                                            │
+//!   │                                                                        │
+//!   │   Keeps HashMap size bounded                                           │
+//!   │   Prevents memory leaks from accumulating old operations               │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## OperationStats Fields
+//!
+//! | Field            | Description                                        |
+//! |------------------|----------------------------------------------------|
+//! | `total_count`    | Total operations in HashMap                        |
+//! | `pending_count`  | Operations still waiting                           |
+//! | `completed_count`| Successfully completed or failed operations        |
+//! | `cancelled_count`| Cancelled operations                               |
+//! | `timed_out_count`| Pending operations that exceeded timeout           |
+//!
+//! ## Thread Safety
+//!
+//! - `operations`: `Arc<RwLock<HashMap<...>>>` - concurrent read/write access
+//! - `metrics`: `Arc<IOMetrics>` - atomic counters for stats
+//! - `next_id`: `AtomicU64` - lock-free ID generation
+//! - `event_sender`: `broadcast::Sender` - multi-producer multi-consumer
+//! - `cleanup_task`: `Mutex<Option<JoinHandle>>` - single background task
+//! - All public methods take `&self`, safe for concurrent calls
+//!
+//! ## Drop Behavior
+//!
+//! When `CompletionTracker` is dropped:
+//! - Background cleanup task is aborted
+//! - Pending operations' receivers will receive `RecvError` (sender dropped)
 
 use super::metrics::IOMetrics;
 use super::operation_status::{OperationId, OperationResult, OperationStatus};
