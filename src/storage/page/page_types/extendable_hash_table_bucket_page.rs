@@ -1,3 +1,49 @@
+//! Bucket page implementation for extendable hash table indexes.
+//!
+//! This module provides [`ExtendableHTableBucketPage`], which stores the actual
+//! key-value entries in an extendable hash table. Each bucket holds entries that
+//! hash to the same bucket index based on the current directory configuration.
+//!
+//! # Extendable Hashing Overview
+//!
+//! In extendable hashing, the directory maps hash prefixes to bucket pages:
+//!
+//! ```text
+//! Directory (global_depth = 2)     Buckets
+//! ┌────────────────────────┐
+//! │ 00 → ──────────────────┼──→ [Bucket A, local_depth=2]
+//! │ 01 → ──────────────────┼──→ [Bucket B, local_depth=2]
+//! │ 10 → ──────────────────┼──→ [Bucket C, local_depth=1]
+//! │ 11 → ──────────────────┼──┘  (shared with 10)
+//! └────────────────────────┘
+//! ```
+//!
+//! # Bucket Structure
+//!
+//! Each bucket stores:
+//! - **Entries**: Key-value pairs as `(Value, RID)` tuples
+//! - **Local depth**: Number of hash bits used to distinguish this bucket
+//! - **Size/Max size**: Current and maximum entry counts
+//!
+//! # Local Depth
+//!
+//! The `local_depth` determines how many directory entries point to this bucket:
+//! - When `local_depth < global_depth`, multiple directory slots share this bucket
+//! - When a bucket overflows, it splits and `local_depth` increases
+//! - When buckets merge, `local_depth` decreases
+//!
+//! # Key Operations
+//!
+//! - [`insert`](ExtendableHTableBucketPage::insert): Add a key-value pair (fails if full)
+//! - [`remove`](ExtendableHTableBucketPage::remove): Delete an entry by key
+//! - [`lookup`](ExtendableHTableBucketPage::lookup): Find the RID for a given key
+//! - [`is_full`](ExtendableHTableBucketPage::is_full): Check if bucket needs splitting
+//!
+//! # Serialization
+//!
+//! Entries are serialized using [`bincode`] for persistence. The format stores
+//! the local depth, size, max size, followed by length-prefixed key-value pairs.
+
 use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;

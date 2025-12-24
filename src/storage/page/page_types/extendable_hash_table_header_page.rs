@@ -1,3 +1,55 @@
+//! Header page implementation for extendable hash table indexes.
+//!
+//! This module provides [`ExtendableHTableHeaderPage`], which serves as the
+//! top-level entry point for an extendable hash table. The header maps hash
+//! values to directory pages, which in turn map to bucket pages.
+//!
+//! # Two-Level Structure
+//!
+//! The extendable hash table uses a two-level directory structure:
+//!
+//! ```text
+//! ┌────────────────────┐
+//! │    Header Page     │  ← Uses upper bits of hash
+//! │  [Dir₀, Dir₁, ...] │
+//! └────────┬───────────┘
+//!          │
+//!    ┌─────┴─────┐
+//!    ▼           ▼
+//! ┌──────┐   ┌──────┐
+//! │ Dir₀ │   │ Dir₁ │    ← Directory pages (lower bits)
+//! └──┬───┘   └──┬───┘
+//!    │          │
+//!    ▼          ▼
+//! [Buckets]  [Buckets]   ← Actual key-value storage
+//! ```
+//!
+//! # Hash Routing
+//!
+//! The header uses the **upper bits** of the hash to select a directory page:
+//!
+//! ```text
+//! Hash: 0b11010110_00101001_...
+//!          ^^
+//!          └─ Upper `global_depth` bits → directory index
+//! ```
+//!
+//! This differs from directory pages which typically use lower bits.
+//!
+//! # Key Operations
+//!
+//! - [`hash_to_directory_index`](ExtendableHTableHeaderPage::hash_to_directory_index):
+//!   Routes a hash value to the appropriate directory page slot.
+//! - [`get_directory_page_id`](ExtendableHTableHeaderPage::get_directory_page_id):
+//!   Retrieves the directory page ID at a given index.
+//! - [`set_directory_page_id`](ExtendableHTableHeaderPage::set_directory_page_id):
+//!   Updates the directory page ID at an index.
+//!
+//! # Capacity
+//!
+//! The header can hold up to [`HTABLE_HEADER_ARRAY_SIZE`] (2^9 = 512) directory
+//! page references, controlled by [`HTABLE_HEADER_MAX_DEPTH`].
+
 use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
