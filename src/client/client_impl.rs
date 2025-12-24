@@ -1,3 +1,216 @@
+//! # Database Client
+//!
+//! This module provides the client-side implementation for connecting to and communicating
+//! with the Ferrite database server over TCP. It supports both direct query execution and
+//! prepared statements for parameterized queries.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                        Client Application                               │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │                     DatabaseClient                              │   │
+//!   │   │                                                                 │   │
+//!   │   │   stream: TcpStream ─────────────────────────────────────────┐  │   │
+//!   │   │                                                              │  │   │
+//!   │   │   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐  │  │   │
+//!   │   │   │ execute_query() │  │ prepare_stmt()  │  │ execute()   │  │  │   │
+//!   │   │   └────────┬────────┘  └────────┬────────┘  └──────┬──────┘  │  │   │
+//!   │   │            │                    │                  │         │  │   │
+//!   │   │            └────────────────────┴──────────────────┘         │  │   │
+//!   │   │                                 │                            │  │   │
+//!   │   │                    ┌────────────┴────────────┐               │  │   │
+//!   │   │                    │    send_request()       │               │  │   │
+//!   │   │                    │    receive_response()   │               │  │   │
+//!   │   │                    └────────────┬────────────┘               │  │   │
+//!   │   │                                 │                            │  │   │
+//!   │   └─────────────────────────────────┼────────────────────────────┘   │
+//!   │                                     │                                │
+//!   └─────────────────────────────────────┼────────────────────────────────┘
+//!                                         │
+//!                                         │ TCP (bincode serialization)
+//!                                         │
+//!                                         ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                        Database Server                                  │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Request Handler                                                │   │
+//!   │   │                                                                 │   │
+//!   │   │  DatabaseRequest ──► ExecutionEngine ──► DatabaseResponse       │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Request/Response Flow
+//!
+//! ```text
+//!   execute_query("SELECT * FROM users")
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  1. Create DatabaseRequest::Query("SELECT * FROM users")              │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  2. Serialize with bincode → Vec<u8>                                  │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  3. Send over TcpStream (async write_all)                             │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  4. Read response bytes (async, buffered reads)                       │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  5. Deserialize DatabaseResponse with bincode                         │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  6. Return QueryResults or DBError                                    │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Prepared Statement Workflow
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │  Prepared Statement Lifecycle                                            │
+//!   │                                                                          │
+//!   │   1. PREPARE                                                             │
+//!   │      ┌─────────────────────────────────────────────────────────────────┐ │
+//!   │      │ prepare_statement("SELECT * FROM users WHERE id = ?")          │ │
+//!   │      │                                                                 │ │
+//!   │      │   → DatabaseRequest::Prepare(sql)                               │ │
+//!   │      │   ← DatabaseResponse::PrepareOk { stmt_id: 1, param_types }     │ │
+//!   │      │                                                                 │ │
+//!   │      │ Returns: (stmt_id=1, param_types=[TypeId::Int])                 │ │
+//!   │      └─────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   2. EXECUTE (can be called multiple times with different params)       │
+//!   │      ┌─────────────────────────────────────────────────────────────────┐ │
+//!   │      │ execute_statement(1, vec![Value::Integer(42)])                  │ │
+//!   │      │                                                                 │ │
+//!   │      │   → DatabaseRequest::Execute { stmt_id: 1, params: [...] }      │ │
+//!   │      │   ← DatabaseResponse::Results(QueryResults)                     │ │
+//!   │      └─────────────────────────────────────────────────────────────────┘ │
+//!   │                                                                          │
+//!   │   3. CLOSE (release server-side resources)                              │
+//!   │      ┌─────────────────────────────────────────────────────────────────┐ │
+//!   │      │ close_statement(1)                                              │ │
+//!   │      │                                                                 │ │
+//!   │      │   → DatabaseRequest::Close(1)                                   │ │
+//!   │      │   ← DatabaseResponse::Results(_)                                │ │
+//!   │      └─────────────────────────────────────────────────────────────────┘ │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component         | Type                        | Purpose                     |
+//! |-------------------|-----------------------------|-----------------------------|
+//! | `DatabaseClient`  | struct                      | Main client interface       |
+//! | `ClientSession`   | struct                      | Session state (server-side) |
+//! | `TcpStream`       | `tokio::net::TcpStream`     | Async TCP connection        |
+//!
+//! ## Client Operations
+//!
+//! | Method               | Request Type           | Response Type               |
+//! |----------------------|------------------------|-----------------------------|
+//! | `connect(addr)`      | -                      | `DatabaseClient`            |
+//! | `execute_query(sql)` | `Query(String)`        | `Results(QueryResults)`     |
+//! | `prepare_statement`  | `Prepare(String)`      | `PrepareOk { stmt_id, .. }` |
+//! | `execute_statement`  | `Execute { id, params }`| `Results(QueryResults)`    |
+//! | `close_statement`    | `Close(stmt_id)`       | `Results(_)`                |
+//!
+//! ## ClientSession Fields
+//!
+//! | Field                 | Type                           | Description              |
+//! |-----------------------|--------------------------------|--------------------------|
+//! | `id`                  | `u64`                          | Unique session ID        |
+//! | `current_transaction` | `Option<Arc<TransactionContext>>`| Active transaction    |
+//! | `isolation_level`     | `IsolationLevel`               | Session isolation level  |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::client::client_impl::DatabaseClient;
+//! use crate::types_db::value::Value;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Connect to server
+//!     let mut client = DatabaseClient::connect("127.0.0.1:5432").await?;
+//!
+//!     // Direct query execution
+//!     let results = client.execute_query("SELECT * FROM users").await?;
+//!     for row in &results.rows {
+//!         println!("{:?}", row);
+//!     }
+//!
+//!     // Prepared statement (for parameterized queries)
+//!     let (stmt_id, param_types) = client
+//!         .prepare_statement("SELECT * FROM users WHERE id = ?")
+//!         .await?;
+//!
+//!     // Execute with parameters (prevents SQL injection)
+//!     let results = client
+//!         .execute_statement(stmt_id, vec![Value::Integer(42)])
+//!         .await?;
+//!
+//!     // Execute again with different parameters
+//!     let results = client
+//!         .execute_statement(stmt_id, vec![Value::Integer(100)])
+//!         .await?;
+//!
+//!     // Clean up
+//!     client.close_statement(stmt_id).await?;
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Error Handling
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  Error Sources                                                          │
+//!   │                                                                         │
+//!   │   DBError::Io          Network/connection failures                      │
+//!   │   DBError::Client      Server-reported errors (syntax, constraints)     │
+//!   │   DBError::Internal    Serialization failures, protocol errors          │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Wire Protocol
+//!
+//! - **Serialization**: bincode (compact binary format)
+//! - **Transport**: TCP with async I/O (tokio)
+//! - **Buffering**: 4KB read buffer, incremental parsing
+//! - **Message framing**: bincode self-describing length
+//!
+//! ## Thread Safety
+//!
+//! - `DatabaseClient` is **NOT thread-safe** (single `TcpStream`)
+//! - Use separate client instances per thread/task
+//! - `ClientSession` is used server-side to track per-connection state
+//!
+//! ## Implementation Notes
+//!
+//! - **Async/Await**: All I/O operations are async via tokio
+//! - **Buffered Reads**: Response may arrive in multiple TCP packets
+//! - **Error Recovery**: Connection errors require reconnection
+//! - **Logging**: Debug-level logging for request/response tracing
+
 use crate::common::exception::DBError;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
@@ -9,7 +222,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-/// Represents a client's session with the database
+/// Represents a client's session with the database (server-side state).
 #[derive(Debug)]
 pub struct ClientSession {
     pub id: u64,
