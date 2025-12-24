@@ -1,39 +1,289 @@
 //! # I/O Operation Executor
 //!
-//! The `IOOperationExecutor` is responsible for the low-level execution of asynchronous I/O operations
-//! against the database and log files. It serves as the "worker" component in the I/O pipeline,
-//! translating high-level operation types into concrete `tokio::fs` calls.
+//! This module provides `IOOperationExecutor`, responsible for low-level execution of asynchronous
+//! I/O operations against the database and log files. It translates high-level `IOOperationType`
+//! values into concrete `tokio::fs` calls.
 //!
 //! ## Architecture
 //!
-//! The executor manages access to shared file handles (`Arc<Mutex<File>>`) for the database file
-//! (fixed-size pages) and the Write-Ahead Log (WAL, variable-length records). It supports both
-//! buffered I/O and Direct I/O (O_DIRECT) modes.
+//! ```text
+//!   IOWorkerManager (workers)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ execute_operation_type(IOOperationType)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                      IOOperationExecutor                                │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  File Handles                                                   │   │
+//!   │   │                                                                 │   │
+//!   │   │  ┌─────────────────────────┐  ┌─────────────────────────┐       │   │
+//!   │   │  │ db_file                 │  │ log_file                │       │   │
+//!   │   │  │ Arc<Mutex<File>>        │  │ Arc<Mutex<File>>        │       │   │
+//!   │   │  │                         │  │                         │       │   │
+//!   │   │  │ • Fixed 4KB pages       │  │ • Variable-length       │       │   │
+//!   │   │  │ • Random access         │  │ • Sequential append     │       │   │
+//!   │   │  │ • Optional Direct I/O   │  │ • Always buffered       │       │   │
+//!   │   │  └─────────────────────────┘  └─────────────────────────┘       │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Configuration                                                  │   │
+//!   │   │                                                                 │   │
+//!   │   │  db_direct_io_config: DirectIOConfig                            │   │
+//!   │   │    • enabled: bool     ← Use O_DIRECT for DB file               │   │
+//!   │   │    • alignment: usize  ← Buffer alignment (512 or 4096)         │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ Returns IoResult<Vec<u8>>
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  Worker reports result to CompletionTracker                             │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Key Features
+//! ## Operation Dispatch
 //!
-//! - **Direct I/O Support**: When enabled, uses `AlignedBuffer` to ensure memory alignment requirements
-//!   are met for `O_DIRECT` operations (critical for bypassing OS page cache).
-//! - **Operation Dispatch**: Centralized `execute_operation_type` method dispatching specific logic for:
-//!     - `ReadPage` / `WritePage`: Fixed-size random access to database pages.
-//!     - `AppendLog` / `ReadLog`: Sequential access for WAL records.
-//!     - `Sync` / `SyncLog`: Durability primitives (fsync/fdatasync).
-//! - **Thread Safety**: Safely shares file handles across concurrent async tasks using Tokio mutexes.
-//! - **Metadata Logging**: Optional debug logging tracking file sizes and operation offsets for debugging.
+//! ```text
+//!   execute_operation_type(operation_type)
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! ## Usage
+//!   match operation_type {
+//!       ┌─────────────────────────────────────────────────────────────────────┐
+//!       │ ReadPage { page_id }                                                │
+//!       │   • Seek to page_id × 4096                                          │
+//!       │   • Read 4096 bytes (aligned if Direct I/O)                         │
+//!       │   • Return page data                                                │
+//!       └─────────────────────────────────────────────────────────────────────┘
 //!
-//! This component is typically wrapped by the `AsyncDiskManager` or a worker pool. It is stateless
-//! regarding the *content* of the I/O but stateful regarding the *configuration* (e.g., Direct I/O settings).
+//!       ┌─────────────────────────────────────────────────────────────────────┐
+//!       │ WritePage { page_id, data }                                         │
+//!       │   • Validate data.len() == 4096                                     │
+//!       │   • Seek to page_id × 4096                                          │
+//!       │   • Write 4096 bytes (aligned if Direct I/O)                        │
+//!       │   • Flush to OS cache                                               │
+//!       │   • Return data                                                     │
+//!       └─────────────────────────────────────────────────────────────────────┘
 //!
-//! ## Performance Considerations
+//!       ┌─────────────────────────────────────────────────────────────────────┐
+//!       │ ReadLog { offset, size }                                            │
+//!       │   • Seek to offset in log file                                      │
+//!       │   • Read size bytes (buffered, no alignment)                        │
+//!       │   • Return log data                                                 │
+//!       └─────────────────────────────────────────────────────────────────────┘
 //!
-//! - **Direct I/O**: For the database file, Direct I/O avoids double-buffering in the OS page cache
-//!   but requires strictly aligned memory buffers.
-//! - **Buffered WAL**: The WAL always uses buffered I/O because its write patterns (small, variable appends)
-//!   are poorly suited for the block-aligned restrictions of Direct I/O.
+//!       ┌─────────────────────────────────────────────────────────────────────┐
+//!       │ WriteLog { data, offset }                                           │
+//!       │   • Seek to offset in log file                                      │
+//!       │   • Write data (buffered)                                           │
+//!       │   • Flush to OS cache                                               │
+//!       │   • Return data                                                     │
+//!       └─────────────────────────────────────────────────────────────────────┘
 //!
-//! This module contains the `IOOperationExecutor` struct.
+//!       ┌─────────────────────────────────────────────────────────────────────┐
+//!       │ AppendLog { data }                                                  │
+//!       │   • Seek to end of log file                                         │
+//!       │   • Write data                                                      │
+//!       │   • Flush to OS cache                                               │
+//!       │   • Return offset as u64 le_bytes                                   │
+//!       └─────────────────────────────────────────────────────────────────────┘
+//!
+//!       ┌─────────────────────────────────────────────────────────────────────┐
+//!       │ Sync                                                                │
+//!       │   • Call db_file.sync_all() (fsync)                                 │
+//!       │   • Return empty Vec                                                │
+//!       └─────────────────────────────────────────────────────────────────────┘
+//!
+//!       ┌─────────────────────────────────────────────────────────────────────┐
+//!       │ SyncLog                                                             │
+//!       │   • Call log_file.sync_data() (fdatasync)                           │
+//!       │   • Return empty Vec                                                │
+//!       └─────────────────────────────────────────────────────────────────────┘
+//!   }
+//! ```
+//!
+//! ## Direct I/O vs Buffered I/O
+//!
+//! ```text
+//!   Database File (db_file)              Log File (log_file)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌───────────────────────────┐        ┌───────────────────────────┐
+//!   │ Optional Direct I/O       │        │ Always Buffered I/O       │
+//!   │                           │        │                           │
+//!   │ • O_DIRECT / F_NOCACHE    │        │ • Standard file I/O       │
+//!   │ • Bypasses OS page cache  │        │ • Uses OS page cache      │
+//!   │ • Requires aligned memory │        │ • No alignment needed     │
+//!   │ • AlignedBuffer used      │        │ • vec![0u8; size]         │
+//!   │                           │        │                           │
+//!   │ Good for:                 │        │ Good for:                 │
+//!   │ • DB manages own cache    │        │ • Variable-length records │
+//!   │ • Predictable latency     │        │ • Sequential appends      │
+//!   │ • No double-buffering     │        │ • Small writes            │
+//!   └───────────────────────────┘        └───────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component             | Description                                       |
+//! |-----------------------|---------------------------------------------------|
+//! | `IOOperationExecutor` | Main executor with file handles and config        |
+//! | `db_file`             | `Arc<Mutex<File>>` for database page I/O          |
+//! | `log_file`            | `Arc<Mutex<File>>` for WAL I/O                    |
+//! | `db_direct_io_config` | Direct I/O settings for database file             |
+//!
+//! ## Core Operations
+//!
+//! | Method                    | Description                                   |
+//! |---------------------------|-----------------------------------------------|
+//! | `new()`                   | Create with buffered I/O (default config)    |
+//! | `with_config()`           | Create with custom Direct I/O configuration  |
+//! | `execute_operation_type()`| Main dispatch: execute any `IOOperationType` |
+//! | `is_direct_io_enabled()`  | Check if Direct I/O is enabled               |
+//! | `alignment()`             | Get alignment requirement for Direct I/O     |
+//! | `get_db_file_size()`      | Get current database file size in bytes      |
+//! | `db_file()`               | Get `Arc` clone of database file handle      |
+//! | `log_file()`              | Get `Arc` clone of log file handle           |
+//!
+//! ## Internal Execute Methods
+//!
+//! | Method                | Operation       | File      | Description              |
+//! |-----------------------|-----------------|-----------|--------------------------|
+//! | `execute_read_page()` | ReadPage        | db_file   | Read 4KB at page offset  |
+//! | `execute_write_page()`| WritePage       | db_file   | Write 4KB at page offset |
+//! | `execute_read_log()`  | ReadLog         | log_file  | Read at offset           |
+//! | `execute_write_log()` | WriteLog        | log_file  | Write at offset          |
+//! | `execute_append_log()`| AppendLog       | log_file  | Append at end            |
+//! | `execute_sync()`      | Sync            | db_file   | fsync (sync_all)         |
+//! | `execute_sync_log()`  | SyncLog         | log_file  | fdatasync (sync_data)    |
+//!
+//! ## Direct I/O Read Flow
+//!
+//! ```text
+//!   execute_read_page(page_id) with Direct I/O enabled
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 1: Calculate offset                                               │
+//!   │                                                                        │
+//!   │   offset = page_id × DB_PAGE_SIZE (4096)                               │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 2: Acquire file lock                                              │
+//!   │                                                                        │
+//!   │   let mut file = db_file.lock().await;                                 │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 3: Seek to offset                                                 │
+//!   │                                                                        │
+//!   │   file.seek(SeekFrom::Start(offset)).await?;                           │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 4: Create aligned buffer                                          │
+//!   │                                                                        │
+//!   │   let mut aligned_buf = AlignedBuffer::new(4096, alignment);           │
+//!   │                                                                        │
+//!   │   AlignedBuffer ensures:                                               │
+//!   │   • Memory address is aligned to sector size (512 or 4096)             │
+//!   │   • Size is multiple of alignment                                      │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 5: Read into aligned buffer                                       │
+//!   │                                                                        │
+//!   │   file.read_exact(aligned_buf.as_mut_slice()).await?;                  │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 6: Convert to Vec<u8>                                             │
+//!   │                                                                        │
+//!   │   Ok(aligned_buf.to_vec())                                             │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::io::executor::IOOperationExecutor;
+//! use crate::storage::disk::async_disk::io::operations::IOOperationType;
+//! use crate::storage::disk::direct_io::DirectIOConfig;
+//! use std::sync::Arc;
+//! use tokio::sync::Mutex;
+//! use tokio::fs::File;
+//!
+//! // Create file handles
+//! let db_file = Arc::new(Mutex::new(File::create("database.dat").await?));
+//! let log_file = Arc::new(Mutex::new(File::create("log.dat").await?));
+//!
+//! // Create executor with Direct I/O for database file
+//! let config = DirectIOConfig {
+//!     enabled: true,
+//!     alignment: 4096,
+//! };
+//! let executor = IOOperationExecutor::with_config(db_file, log_file, config);
+//!
+//! // Check configuration
+//! assert!(executor.is_direct_io_enabled());
+//! assert_eq!(executor.alignment(), 4096);
+//!
+//! // Execute operations via the dispatch method
+//! let page_data = executor.execute_operation_type(
+//!     IOOperationType::ReadPage { page_id: 0 }
+//! ).await?;
+//!
+//! let write_result = executor.execute_operation_type(
+//!     IOOperationType::WritePage {
+//!         page_id: 1,
+//!         data: vec![42u8; 4096],
+//!     }
+//! ).await?;
+//!
+//! // Log append returns offset as le_bytes
+//! let offset_bytes = executor.execute_operation_type(
+//!     IOOperationType::AppendLog {
+//!         data: b"log record".to_vec(),
+//!     }
+//! ).await?;
+//! let offset = u64::from_le_bytes(offset_bytes[0..8].try_into().unwrap());
+//!
+//! // Sync for durability
+//! executor.execute_operation_type(IOOperationType::Sync).await?;
+//! executor.execute_operation_type(IOOperationType::SyncLog).await?;
+//! ```
+//!
+//! ## Page Size Validation
+//!
+//! ```text
+//!   execute_write_page(page_id, data)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   if data.len() != 4096 {
+//!       return Err(InvalidInput("expected 4096 bytes, got {}", data.len()))
+//!   }
+//!
+//!   Rationale:
+//!   • Prevents partial page writes which could corrupt data
+//!   • DB_PAGE_SIZE (4096) is the atomic unit for database pages
+//!   • Caller must ensure correct page size before calling
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `db_file`: `Arc<Mutex<File>>` - Tokio async mutex for concurrent access
+//! - `log_file`: `Arc<Mutex<File>>` - Tokio async mutex for concurrent access
+//! - File locks are held only during individual I/O operations
+//! - Multiple workers can safely share a single executor instance
+//! - All execute methods take `&self`, safe for concurrent calls
 
 use super::operations::IOOperationType;
 use crate::common::config::{DB_PAGE_SIZE, PageId};
