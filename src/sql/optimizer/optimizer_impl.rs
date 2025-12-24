@@ -1,3 +1,166 @@
+//! # Query Optimizer
+//!
+//! This module implements a **rule-based query optimizer** that transforms logical plans
+//! into more efficient forms before physical plan generation. The optimizer applies a
+//! sequence of optimization phases to reduce query execution cost.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                           Optimization Pipeline                                 │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                 │
+//! │   ┌─────────────────────┐                                                       │
+//! │   │   Input: LogicalPlan│                                                       │
+//! │   │   (from planner)    │                                                       │
+//! │   └──────────┬──────────┘                                                       │
+//! │              │                                                                  │
+//! │              ▼                                                                  │
+//! │   ┌──────────────────────────────────────────────────────────────────────┐      │
+//! │   │  Phase 0: Constraint Index Creation                                  │      │
+//! │   │  - Create PRIMARY KEY indexes                                        │      │
+//! │   │  - Create UNIQUE constraint indexes                                  │      │
+//! │   │  - Create FOREIGN KEY indexes                                        │      │
+//! │   │  - Create referenced column indexes                                  │      │
+//! │   └──────────────────────────────────────────────────────────────────────┘      │
+//! │              │                                                                  │
+//! │              ▼                                                                  │
+//! │   ┌──────────────────────────────────────────────────────────────────────┐      │
+//! │   │  Phase 1: Index Scan Optimization + Early Pruning                    │      │
+//! │   │  - Convert TableScan → IndexScan when beneficial                     │      │
+//! │   │  - Remove empty projections                                          │      │
+//! │   │  - Eliminate always-true filters                                     │      │
+//! │   └──────────────────────────────────────────────────────────────────────┘      │
+//! │              │                                                                  │
+//! │              ▼                                                                  │
+//! │   ┌──────────────────────────────────────────────────────────────────────┐      │
+//! │   │  Phase 2: Rewrite Rules                                              │      │
+//! │   │  - Predicate pushdown (push filters closer to data sources)          │      │
+//! │   │  - Projection merging (combine consecutive projections)              │      │
+//! │   └──────────────────────────────────────────────────────────────────────┘      │
+//! │              │                                                                  │
+//! │              ▼                                                                  │
+//! │   ┌──────────────────────────────────────────────────────────────────────┐      │
+//! │   │  Phase 3: Join Optimization (if EnableNljCheck)                      │      │
+//! │   │  - NestedLoopJoin → HashJoin for equi-joins                          │      │
+//! │   │  - Join reordering (TODO)                                            │      │
+//! │   └──────────────────────────────────────────────────────────────────────┘      │
+//! │              │                                                                  │
+//! │              ▼                                                                  │
+//! │   ┌──────────────────────────────────────────────────────────────────────┐      │
+//! │   │  Phase 4: Sort & Limit Optimization (if EnableTopnCheck)             │      │
+//! │   │  - Sort + Limit → TopN (heap-based selection)                        │      │
+//! │   └──────────────────────────────────────────────────────────────────────┘      │
+//! │              │                                                                  │
+//! │              ▼                                                                  │
+//! │   ┌──────────────────────────────────────────────────────────────────────┐      │
+//! │   │  Validation                                                          │      │
+//! │   │  - Verify table existence                                            │      │
+//! │   │  - Check join predicates                                             │      │
+//! │   │  - Validate TopN specifications                                      │      │
+//! │   └──────────────────────────────────────────────────────────────────────┘      │
+//! │              │                                                                  │
+//! │              ▼                                                                  │
+//! │   ┌─────────────────────┐                                                       │
+//! │   │  Output: LogicalPlan│                                                       │
+//! │   │  (optimized)        │                                                       │
+//! │   └─────────────────────┘                                                       │
+//! │                                                                                 │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Optimization Phases
+//!
+//! | Phase | Name | Description | Condition |
+//! |-------|------|-------------|-----------|
+//! | 0 | Constraint Indexes | Auto-create indexes for PK/UNIQUE/FK constraints | Always |
+//! | 1 | Index Scan + Pruning | Replace table scans with index scans; remove no-op nodes | Always |
+//! | 2 | Rewrite Rules | Predicate pushdown, projection merging | Always |
+//! | 3 | Join Optimization | Convert NLJ to HashJoin for equi-joins | `EnableNljCheck` |
+//! | 4 | Sort+Limit → TopN | Use heap-based TopN instead of full sort | `EnableTopnCheck` |
+//!
+//! ## Constraint Index Creation (Phase 0)
+//!
+//! Automatically creates B+ tree indexes for constraint validation, converting O(n)
+//! constraint checks to O(log n) index lookups:
+//!
+//! ```text
+//! CREATE TABLE orders (
+//!     id INT PRIMARY KEY,        ─────▶  orders_pk_idx (B+ tree, UNIQUE)
+//!     email VARCHAR UNIQUE,      ─────▶  orders_email_unique_idx (B+ tree, UNIQUE)
+//!     customer_id INT REFERENCES ─────▶  orders_customer_id_fk_idx (B+ tree)
+//!         customers(id)
+//! );
+//! ```
+//!
+//! ## Predicate Pushdown (Phase 2)
+//!
+//! Moves filter predicates as close to data sources as possible:
+//!
+//! ```text
+//! Before:                          After:
+//!
+//!     Filter(age > 21)                 Projection
+//!          │                                │
+//!     Projection                       Filter(age > 21)
+//!          │                                │
+//!     TableScan(users)                 TableScan(users)
+//! ```
+//!
+//! ## TopN Optimization (Phase 4)
+//!
+//! Replaces Sort + Limit with a more efficient heap-based TopN:
+//!
+//! ```text
+//! Before:                          After:
+//!
+//!     Limit(10)                        TopN(k=10, ORDER BY score DESC)
+//!         │                                     │
+//!     Sort(score DESC)                     TableScan
+//!         │
+//!     TableScan
+//!
+//! Complexity: O(n log n) → O(n log k)
+//! Memory:     O(n)       → O(k)
+//! ```
+//!
+//! ## Check Options
+//!
+//! Optimization behavior is controlled by [`CheckOptions`]:
+//!
+//! | Option | Effect |
+//! |--------|--------|
+//! | `is_modify()` | Master switch - if false, skip all optimizations |
+//! | `EnableNljCheck` | Enable join optimization (NLJ → HashJoin) |
+//! | `EnableTopnCheck` | Enable Sort+Limit → TopN optimization |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use tkdb::sql::optimizer::optimizer_impl::Optimizer;
+//! use tkdb::sql::execution::check_option::CheckOptions;
+//!
+//! let catalog = Arc::new(RwLock::new(Catalog::new()));
+//! let optimizer = Optimizer::new(catalog);
+//!
+//! let check_options = Arc::new(CheckOptions::default());
+//! let optimized_plan = optimizer.optimize(logical_plan, check_options)?;
+//! ```
+//!
+//! ## Validation
+//!
+//! After optimization, the plan is validated:
+//! - Tables referenced by `TableScan` must exist in the catalog
+//! - `NestedLoopJoin` must have a predicate (if NLJ check enabled)
+//! - `TopN` must have valid k and sort specifications
+//!
+//! ## Thread Safety
+//!
+//! - Uses `Arc<RwLock<Catalog>>` for safe concurrent catalog access
+//! - Read lock for index lookups, write lock for index creation
+//! - Optimization itself is single-threaded per query
+
 use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
