@@ -1,3 +1,194 @@
+//! # Logical Plan Builder
+//!
+//! This module provides `LogicalPlanBuilder`, the core component that transforms parsed SQL
+//! AST nodes (from `sqlparser`) into `LogicalPlan` trees. It handles the semantic analysis
+//! and plan construction for all supported SQL statement types.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                           Logical Plan Builder                                  │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                 │
+//! │   ┌───────────────────────────────────────────────────────────────────────┐     │
+//! │   │                    Input: SQL AST (sqlparser)                         │     │
+//! │   │  Statement::Query, Statement::Insert, Statement::CreateTable, ...     │     │
+//! │   └───────────────────────────────────────────────────────────────────────┘     │
+//! │                                     │                                           │
+//! │                                     ▼                                           │
+//! │   ┌─────────────────────────────────────────────────────────────────────────┐   │
+//! │   │                      LogicalPlanBuilder                                 │   │
+//! │   │  ┌─────────────────────────┐  ┌─────────────────────────────────────┐   │   │
+//! │   │  │   ExpressionParser      │  │        SchemaManager                │   │   │
+//! │   │  │  - parse expressions    │  │  - type conversion                  │   │   │
+//! │   │  │  - resolve columns      │  │  - schema construction              │   │   │
+//! │   │  │  - aggregate detection  │  │  - constraint handling              │   │   │
+//! │   │  │  - catalog access       │  │  - value mapping                    │   │   │
+//! │   │  └─────────────────────────┘  └─────────────────────────────────────┘   │   │
+//! │   └─────────────────────────────────────────────────────────────────────────┘   │
+//! │                                     │                                           │
+//! │                                     ▼                                           │
+//! │   ┌──────────────────────────────────────────────────────────────────────-─┐    │
+//! │   │                    Output: LogicalPlan Tree                            │    │
+//! │   │                                                                        │    │
+//! │   │          Project                    Insert                             │    │
+//! │   │            │                          │                                │    │
+//! │   │          Filter        OR          Values                              │    │
+//! │   │            │                          │                                │    │
+//! │   │        TableScan                  (rows)                               │    │
+//! │   └────────────────────────────────────────────────────────────────────-───┘    │
+//! │                                                                                 │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Plan Construction Flow
+//!
+//! For a typical SELECT query, the builder constructs plans in this order:
+//!
+//! ```text
+//! SELECT name, SUM(amount)      ┌─────────────┐
+//! FROM orders o                 │   Limit     │  ← 7. LIMIT/OFFSET
+//! JOIN users u ON ...           └──────┬──────┘
+//! WHERE status = 'active'              │
+//! GROUP BY name                 ┌──────▼──────┐
+//! HAVING SUM(amount) > 100      │    Sort     │  ← 6. ORDER BY
+//! ORDER BY name                 └──────┬──────┘
+//! LIMIT 10                             │
+//!                               ┌──────▼──────┐
+//!                               │  Distinct   │  ← 5. DISTINCT
+//!                               └──────┬──────┘
+//!                                      │
+//!                               ┌──────▼──────┐
+//!                               │   Project   │  ← 4. SELECT projection
+//!                               └──────┬──────┘
+//!                                      │
+//!                               ┌──────▼──────┐
+//!                               │   Filter    │  ← 3b. HAVING
+//!                               └──────┬──────┘
+//!                                      │
+//!                               ┌──────▼──────┐
+//!                               │  Aggregate  │  ← 3a. GROUP BY + aggregates
+//!                               └──────┬──────┘
+//!                                      │
+//!                               ┌──────▼──────┐
+//!                               │   Filter    │  ← 2. WHERE
+//!                               └──────┬──────┘
+//!                                      │
+//!                               ┌──────▼──────┐
+//!                               │NestedLoop   │  ← 1b. JOINs
+//!                               │   Join      │
+//!                               └──────┬──────┘
+//!                                      │
+//!                              ┌───────┴───────┐
+//!                              ▼               ▼
+//!                       ┌───────────┐   ┌───────────┐
+//!                       │ TableScan │   │ TableScan │  ← 1a. FROM
+//!                       │  orders   │   │   users   │
+//!                       └───────────┘   └───────────┘
+//! ```
+//!
+//! ## Supported Statement Types
+//!
+//! | Category        | Statements                                                   |
+//! |-----------------|--------------------------------------------------------------|
+//! | **DML**         | `SELECT`, `INSERT`, `UPDATE`, `DELETE`                       |
+//! | **DDL**         | `CREATE TABLE`, `CREATE INDEX`, `CREATE VIEW`, `DROP`        |
+//! |                 | `CREATE SCHEMA`, `CREATE DATABASE`, `ALTER TABLE/VIEW`       |
+//! | **Transaction** | `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`        |
+//! | **Utility**     | `EXPLAIN`, `SHOW TABLES/DATABASES/COLUMNS`, `USE`            |
+//!
+//! ## Key Build Methods
+//!
+//! | Method                         | Builds Plan For                              |
+//! |--------------------------------|----------------------------------------------|
+//! | `build_query_plan()`           | SELECT queries with all clauses              |
+//! | `build_select_plan()`          | SELECT without ORDER BY/LIMIT                |
+//! | `build_insert_plan()`          | INSERT with VALUES or SELECT                 |
+//! | `build_update_plan()`          | UPDATE with SET and WHERE                    |
+//! | `build_delete_plan()`          | DELETE with WHERE                            |
+//! | `build_create_table_plan()`    | CREATE TABLE with constraints                |
+//! | `build_create_index_plan()`    | CREATE INDEX on columns                      |
+//! | `build_projection_plan()`      | SELECT column list / expressions             |
+//! | `prepare_join_scan()`          | Multi-table FROM with JOINs                  |
+//!
+//! ## SELECT Clause Handling
+//!
+//! | Clause       | Method/Handler                      | LogicalPlan Node          |
+//! |--------------|-------------------------------------|---------------------------|
+//! | `FROM`       | `build_table_scan()`, `prepare_join_scan()` | `TableScan`, `NestedLoopJoin` |
+//! | `WHERE`      | Inline in `build_select_plan()`     | `Filter`                  |
+//! | `GROUP BY`   | `determine_group_by_expressions()`  | `Aggregate`               |
+//! | `HAVING`     | Inline after aggregation            | `Filter`                  |
+//! | `SELECT`     | `build_projection_plan()`           | `Projection`              |
+//! | `DISTINCT`   | Inline after projection             | `Distinct`                |
+//! | `ORDER BY`   | Inline with sort specs              | `Sort`                    |
+//! | `LIMIT`      | Inline at end                       | `Limit`                   |
+//! | `OFFSET`     | Inline at end                       | `Offset`                  |
+//!
+//! ## Join Processing
+//!
+//! The builder supports various join types through `process_table_with_joins()`:
+//!
+//! - `INNER JOIN` / `JOIN`
+//! - `LEFT OUTER JOIN` / `LEFT JOIN`
+//! - `RIGHT OUTER JOIN` / `RIGHT JOIN`
+//! - `FULL OUTER JOIN`
+//! - `CROSS JOIN`
+//! - `LEFT SEMI JOIN`, `RIGHT SEMI JOIN`
+//! - `LEFT ANTI JOIN`, `RIGHT ANTI JOIN`
+//!
+//! ## Aggregation Handling
+//!
+//! The builder detects aggregates in SELECT and handles them specially:
+//!
+//! 1. Parse all projection expressions to identify aggregate functions
+//! 2. Extract GROUP BY expressions
+//! 3. Validate that non-aggregate columns appear in GROUP BY
+//! 4. Create `Aggregate` plan node with group keys and aggregate expressions
+//! 5. Transform HAVING clause to reference aggregate output columns
+//! 6. Apply projection on top of aggregation
+//!
+//! ## Example Usage
+//!
+//! ```rust,no_run
+//! let catalog = Arc::new(RwLock::new(Catalog::new()));
+//! let builder = LogicalPlanBuilder::new(catalog);
+//!
+//! // Build a SELECT plan
+//! let query = sqlparser::parser::Parser::parse_sql(
+//!     &GenericDialect {},
+//!     "SELECT * FROM users WHERE id = 1"
+//! )?;
+//!
+//! if let Statement::Query(query) = &query[0] {
+//!     let plan = builder.build_query_plan(query)?;
+//!     println!("{}", plan.explain(0));
+//! }
+//! ```
+//!
+//! ## Constraint Handling (CREATE TABLE)
+//!
+//! The builder processes both column-level and table-level constraints:
+//!
+//! | Constraint Type    | Column-Level | Table-Level |
+//! |--------------------|--------------|-------------|
+//! | `PRIMARY KEY`      | ✅           | ✅          |
+//! | `NOT NULL`         | ✅           | ❌          |
+//! | `UNIQUE`           | ✅           | ✅          |
+//! | `FOREIGN KEY`      | ✅           | ✅          |
+//! | `CHECK`            | ✅           | ⚠️ (logged) |
+//! | `DEFAULT`          | ✅           | ❌          |
+//!
+//! ## Error Handling
+//!
+//! The builder returns `Result<Box<LogicalPlan>, String>` and validates:
+//! - Table/column existence in catalog
+//! - Schema compatibility for INSERT/UPDATE
+//! - GROUP BY clause correctness
+//! - Join constraint requirements
+//! - Expression type compatibility
+
 use super::logical_plan::{LogicalPlan, LogicalPlanType};
 use super::schema_manager::SchemaManager;
 use crate::catalog::Catalog;
