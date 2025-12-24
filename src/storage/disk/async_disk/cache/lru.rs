@@ -1,80 +1,306 @@
-//! Least Recently Used (LRU) Cache Implementation.
+//! # Least Recently Used (LRU) Cache Implementation
 //!
 //! This module provides a high-performance, concurrent LRU cache implementation used primarily
 //! for the disk buffer pool and other caching needs in Ferrite.
 //!
-//! # Architecture
+//! ## Architecture
 //!
-//! The implementation consists of two main components:
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                        ConcurrentLRUCache<K, V>                          │
+//!   │                                                                          │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │                    Arc<RwLock<LRUCore<K, V>>>                       │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   │                                  │                                       │
+//!   │                                  ▼                                       │
+//!   │   ┌────────────────────────────────────────────────────────────────────┐ │
+//!   │   │                         LRUCore<K, V>                              │ │
+//!   │   │                                                                    │ │
+//!   │   │   ┌──────────────────────────────────────────────────────────────┐ │ │
+//!   │   │   │  HashMap<K, NonNull<Node<K, V>>>                             │ │ │
+//!   │   │   │                                                              │ │ │
+//!   │   │   │  ┌─────────┬────────────────────────────────────────────┐    │ │ │
+//!   │   │   │  │   Key   │  NonNull<Node>                             │    │ │ │
+//!   │   │   │  ├─────────┼────────────────────────────────────────────┤    │ │ │
+//!   │   │   │  │  page_1 │  ────────────────────────────────────────┐ │    │ │ │
+//!   │   │   │  │  page_2 │  ──────────────────────────────────┐     │ │    │ │ │
+//!   │   │   │  │  page_3 │  ────────────────────────────┐     │     │ │    │ │ │
+//!   │   │   │  └─────────┴──────────────────────────────┼─────┼─────┼─┘    │ │ │
+//!   │   │   └───────────────────────────────────────────┼─────┼─────┼──────┘ │ │
+//!   │   │                                               │     │     │        │ │
+//!   │   │   ┌───────────────────────────────────────────┼─────┼─────┼──────┐ │ │
+//!   │   │   │  Doubly-Linked List (LRU Order)           │     │     │      │ │ │
+//!   │   │   │                                           ▼     ▼     ▼      │ │ │
+//!   │   │   │  head ──► ┌──────┐ ◄──► ┌──────┐ ◄──► ┌──────┐ ◄── tail      │ │ │
+//!   │   │   │    (MRU)  │ Node │      │ Node │      │ Node │   (LRU)       │ │ │
+//!   │   │   │           │page_1│      │page_2│      │page_3│               │ │ │
+//!   │   │   │           │Arc<V>│      │Arc<V>│      │Arc<V>│               │ │ │
+//!   │   │   │           └──────┘      └──────┘      └──────┘               │ │ │
+//!   │   │   │                                                              │ │ │
+//!   │   │   │  Most Recently Used ────────────────► Least Recently Used    │ │ │
+//!   │   │   └──────────────────────────────────────────────────────────────┘ │ │
+//!   │   └────────────────────────────────────────────────────────────────────┘ │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! 1. [`LRUCore`]: The foundational single-threaded implementation that maintains:
-//!    - A `HashMap` for O(1) key lookup.
-//!    - A doubly-linked list for O(1) updates to the eviction order.
-//!    - Internal usage of `unsafe` pointers (`NonNull`) for optimized list manipulation avoiding
-//!      Rust's ownership checks for the intrusive-like list structure.
+//! ## Key Components
 //!
-//! 2. [`ConcurrentLRUCache`]: A thread-safe wrapper around `LRUCore` protected by an `RwLock`.
-//!    This is the primary public interface used by the system.
+//! | Component              | Description                                        |
+//! |------------------------|----------------------------------------------------|
+//! | `LRUCore<K, V>`        | Single-threaded core with HashMap + linked list    |
+//! | `ConcurrentLRUCache`   | Thread-safe wrapper with `parking_lot::RwLock`     |
+//! | `Node<K, V>`           | Intrusive list node with key, Arc<V>, prev/next    |
+//! | `BufferPoolCache<V>`   | Type alias for `ConcurrentLRUCache<u32, V>`        |
+//! | `PageCache<K, V>`      | Type alias for generic page caching                |
+//! | `LRUCache<K, V>`       | Type alias for `LRUCore` (single-threaded usage)   |
 //!
-//! # Key Features
+//! ## LRU Operations Flow
 //!
-//! - **O(1) Operations**: All core operations (get, put, remove) are constant time.
-//! - **Zero-Copy**: Values are stored as `Arc<V>`, allowing efficient sharing without cloning.
-//! - **Concurrency**: Thread-safe access suitable for highly concurrent database workloads.
-//! - **Type Safety**: Generic implementation supporting any `Copy + Hash + Eq` key type.
+//! ```text
+//!   INSERT new item (cache full)
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! # Design Rationale
+//!   Before:
+//!     head ──► [A] ◄──► [B] ◄──► [C] ◄── tail    (capacity = 3)
+//!              MRU                LRU
 //!
-//! This custom implementation was chosen over standard crates (like `lru` or `cached`) to support specific
-//! database requirements:
-//! - **Arc-based Value Storage**: Database pages are heavy objects. Storing them as `Arc<V>` allows
-//!   consumers to hold references to pages even after they are evicted from the cache (e.g., during a writeback),
-//!   preventing use-after-free issues without requiring cloning.
-//! - **Internal Visibility**: Database buffer managers often need precise control over the eviction
-//!   policy (e.g., pinning pages, touching pages without retrieving).
-//! - **Pointer Stability**: Using `NonNull` nodes ensures that memory locations of nodes remain stable,
-//!   which is critical for the `unsafe` linked list manipulations.
+//!   insert(D):
+//!     1. Evict [C] from tail (pop_lru)
+//!     2. Add [D] at head
 //!
-//! # Performance Characteristics
+//!   After:
+//!     head ──► [D] ◄──► [A] ◄──► [B] ◄── tail
+//!              MRU                LRU
 //!
-//! - **Time Complexity**:
-//!   - `get`, `put`, `remove`, `peek`: **O(1)** average case (amortized by HashMap).
-//!   - `pop_lru`: **O(1)** (direct tail pointer access).
-//! - **Space Overhead**:
-//!   - Per entry: 2 pointers (`prev`, `next`) + 1 `Arc` overhead + HashMap entry overhead.
-//!   - This is relatively compact compared to `RefCell`/`Rc` based approaches.
-//! - **Concurrency**:
-//!   - Uses a coarse-grained `RwLock`.
-//!   - **Reads (`get`, `peek`)**: concurrent (acquire read lock).
-//!   - **Writes (`insert`, `remove`)**: exclusive (acquire write lock).
-//!   - **Updates (`touch` on `get`)**: requires write lock to update LRU order.
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! # Trade-offs
+//!   ACCESS existing item
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! - **Pros**:
-//!   - Predictable O(1) performance.
-//!   - Safe sharing of heavy values via `Arc`.
-//!   - No `Clone` requirement for values.
-//! - **Cons**:
-//!   - Global lock contention: In extremely high-throughput multi-threaded scenarios, the single `RwLock`
-//!     can become a bottleneck.
-//!   - Unsafe code complexity: Manual memory management requires rigorous testing.
+//!   Before:
+//!     head ──► [A] ◄──► [B] ◄──► [C] ◄── tail
 //!
-//! # When to Use
+//!   get(B):
+//!     1. Find [B] in HashMap: O(1)
+//!     2. Move [B] to head (move_to_head): O(1)
 //!
-//! - **Use when**:
-//!   - You need a general-purpose page cache or object cache.
-//!   - Read operations significantly outnumber write/eviction operations.
-//!   - The values are expensive to clone (use `Arc`).
-//! - **Avoid when**:
-//!   - You require strictly lock-free concurrency (consider a sharded map or clock sweep algorithm).
-//!   - You need complex eviction policies beyond simple LRU (e.g., LFU, LRU-K - see `lru_k.rs`).
+//!   After:
+//!     head ──► [B] ◄──► [A] ◄──► [C] ◄── tail
+//!              MRU                LRU
 //!
-//! # Safety
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! This module uses `unsafe` code to manage the doubly-linked list manually. Extensive
-//! testing (correctness, edge cases, memory safety) is included to verify the soundness
-//! of the pointer manipulations.
+//!   PEEK (no reordering)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   peek(C):
+//!     1. Find [C] in HashMap: O(1)
+//!     2. Return Arc::clone without modifying list
+//!
+//!   Order unchanged: head ──► [A] ◄──► [B] ◄──► [C] ◄── tail
+//! ```
+//!
+//! ## Node Structure
+//!
+//! ```text
+//!   ┌────────────────────────────────────────────┐
+//!   │                 Node<K, V>                 │
+//!   ├────────────────────────────────────────────┤
+//!   │  key: K (Copy)         │  Owned, cheap     │
+//!   ├────────────────────────┼───────────────────┤
+//!   │  value: Arc<V>         │  Zero-copy share  │
+//!   ├────────────────────────┼───────────────────┤
+//!   │  prev: Option<NonNull> │  Previous node    │
+//!   ├────────────────────────┼───────────────────┤
+//!   │  next: Option<NonNull> │  Next node        │
+//!   └────────────────────────┴───────────────────┘
+//!
+//!   Memory allocation:
+//!     • Nodes allocated via Box::leak() → raw pointer
+//!     • Deallocated via Box::from_raw() on removal
+//!     • NonNull ensures non-null invariant
+//! ```
+//!
+//! ## LRUCore Methods (CoreCache + MutableCache + LRUCacheTrait)
+//!
+//! | Method           | Complexity | Description                               |
+//! |------------------|------------|-------------------------------------------|
+//! | `new(capacity)`  | O(1)       | Create cache with given capacity          |
+//! | `insert(k, v)`   | O(1)*      | Insert or update, may evict LRU           |
+//! | `get(&k)`        | O(1)       | Get value, moves to MRU position          |
+//! | `peek(&k)`       | O(1)       | Get value without affecting LRU order     |
+//! | `contains(&k)`   | O(1)       | Check if key exists                       |
+//! | `remove(&k)`     | O(1)       | Remove entry by key                       |
+//! | `pop_lru()`      | O(1)       | Remove and return least recently used     |
+//! | `peek_lru()`     | O(1)       | Peek at LRU item without removing         |
+//! | `touch(&k)`      | O(1)       | Move to MRU without returning value       |
+//! | `recency_rank()` | O(n)       | Get position in recency order (0 = MRU)   |
+//! | `len()`          | O(1)       | Current number of entries                 |
+//! | `capacity()`     | O(1)       | Maximum capacity                          |
+//! | `clear()`        | O(n)       | Remove all entries                        |
+//!
+//! ## ConcurrentLRUCache Methods
+//!
+//! | Method               | Lock Type | Description                          |
+//! |----------------------|-----------|--------------------------------------|
+//! | `new(capacity)`      | None      | Create concurrent cache              |
+//! | `insert(k, v)`       | Write     | Insert value (wraps in Arc)          |
+//! | `insert_arc(k, arc)` | Write     | Insert pre-wrapped Arc<V>            |
+//! | `get(&k)`            | Write     | Get + move to MRU (returns Arc<V>)   |
+//! | `peek(&k)`           | Read      | Get without reordering               |
+//! | `remove(&k)`         | Write     | Remove entry                         |
+//! | `touch(&k)`          | Write     | Move to MRU                          |
+//! | `pop_lru()`          | Write     | Evict LRU entry                      |
+//! | `peek_lru()`         | Read      | Peek at LRU                          |
+//! | `len()`              | Read      | Current size                         |
+//! | `is_empty()`         | Read      | Check if empty                       |
+//! | `capacity()`         | Read      | Maximum capacity                     |
+//! | `contains(&k)`       | Read      | Check key existence                  |
+//! | `clear()`            | Write     | Remove all entries                   |
+//!
+//! ## Performance Characteristics
+//!
+//! | Operation        | Time       | Space       | Notes                        |
+//! |------------------|------------|-------------|------------------------------|
+//! | `insert`         | O(1) avg   | O(1)        | Amortized by HashMap         |
+//! | `get`            | O(1) avg   | O(1)        | HashMap lookup + list move   |
+//! | `peek`           | O(1) avg   | O(1)        | HashMap lookup only          |
+//! | `remove`         | O(1) avg   | O(1)        | HashMap remove + list unlink |
+//! | `pop_lru`        | O(1)       | O(1)        | Direct tail pointer access   |
+//! | Per-entry        | -          | ~56 bytes   | 2 ptrs + Arc + HashMap entry |
+//!
+//! ## Design Rationale
+//!
+//! This custom implementation was chosen over standard crates (like `lru` or `cached`) for:
+//!
+//! - **Arc-based Value Storage**: Database pages are heavy objects. `Arc<V>` allows
+//!   consumers to hold references even after eviction (e.g., during writeback).
+//! - **Internal Visibility**: Buffer managers need precise eviction control
+//!   (pinning, touching without retrieval).
+//! - **Pointer Stability**: `NonNull` nodes ensure stable memory locations for
+//!   the intrusive linked list.
+//!
+//! ## Concurrency Model
+//!
+//! ```text
+//!   Thread 1           Thread 2           Thread 3
+//!      │                  │                  │
+//!      │ get(page_1)      │ get(page_2)      │ insert(page_3)
+//!      ▼                  ▼                  ▼
+//!   ┌──────────────────────────────────────────────────────────┐
+//!   │                     RwLock                               │
+//!   │                                                          │
+//!   │  get() requires WRITE lock (moves node to head)          │
+//!   │  peek() requires READ lock (no reordering)               │
+//!   │  insert()/remove() require WRITE lock                    │
+//!   │                                                          │
+//!   │  Note: Even reads need write lock if they update LRU     │
+//!   └──────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌──────────────────────────────────────────────────────────┐
+//!   │  LRUCore (single-threaded operations)                    │
+//!   └──────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Trade-offs
+//!
+//! | Aspect           | Pros                              | Cons                          |
+//! |------------------|-----------------------------------|-------------------------------|
+//! | Performance      | Predictable O(1) operations       | Global lock can bottleneck    |
+//! | Memory           | Arc sharing, no Clone needed      | Per-node pointer overhead     |
+//! | Safety           | Arc prevents use-after-free       | Unsafe code complexity        |
+//! | Simplicity       | Simple recency-based policy       | No frequency tracking         |
+//!
+//! ## When to Use
+//!
+//! **Use when:**
+//! - You need a general-purpose page cache or object cache
+//! - Read operations significantly outnumber write/eviction operations
+//! - Values are expensive to clone (use Arc)
+//!
+//! **Avoid when:**
+//! - You require strictly lock-free concurrency (consider sharded map)
+//! - You need complex eviction policies (see `lru_k.rs`, `lfu.rs`)
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::cache::lru::{
+//!     ConcurrentLRUCache, LRUCore,
+//! };
+//! use std::sync::Arc;
+//!
+//! // Single-threaded usage
+//! let mut cache: LRUCore<u32, String> = LRUCore::new(100);
+//! cache.insert(1, Arc::new("page_data".to_string()));
+//!
+//! if let Some(value) = cache.get(&1) {
+//!     println!("Got: {}", value);  // value is &Arc<String>
+//! }
+//!
+//! // Peek without affecting LRU order
+//! if let Some(value) = cache.peek(&1) {
+//!     println!("Peeked: {}", value);  // returns Arc<String>
+//! }
+//!
+//! // Evict least recently used
+//! if let Some((key, value)) = cache.pop_lru() {
+//!     println!("Evicted key={}, value={}", key, value);
+//! }
+//!
+//! // Concurrent usage
+//! let concurrent_cache: ConcurrentLRUCache<u32, String> =
+//!     ConcurrentLRUCache::new(1000);
+//!
+//! // Insert (wraps in Arc internally)
+//! concurrent_cache.insert(1, "data".to_string());
+//!
+//! // Or insert pre-wrapped Arc
+//! let shared = Arc::new("shared_data".to_string());
+//! concurrent_cache.insert_arc(2, shared.clone());
+//!
+//! // Get returns Arc<V> for safe sharing
+//! if let Some(arc_value) = concurrent_cache.get(&1) {
+//!     // arc_value can be held across await points
+//!     println!("Value: {}", arc_value);
+//! }
+//!
+//! // Touch to mark as recently used without retrieving
+//! concurrent_cache.touch(&2);
+//!
+//! // Type aliases for common patterns
+//! use crate::storage::disk::async_disk::cache::lru::BufferPoolCache;
+//! let page_cache: BufferPoolCache<Vec<u8>> = BufferPoolCache::new(256);
+//! ```
+//!
+//! ## Comparison with Other Cache Policies
+//!
+//! | Policy   | File         | Best For                          | Weakness              |
+//! |----------|--------------|-----------------------------------|-----------------------|
+//! | LRU      | `lru.rs`     | Temporal locality                 | One-time scan floods  |
+//! | LRU-K    | `lru_k.rs`   | Frequency + recency (K accesses)  | More memory per entry |
+//! | LFU      | `lfu.rs`     | Frequency-biased workloads        | Cache pollution       |
+//! | FIFO     | `fifo.rs`    | Simple, predictable               | No adaptation         |
+//!
+//! ## Safety
+//!
+//! This module uses `unsafe` code to manage the doubly-linked list manually:
+//!
+//! - **Node allocation**: `Box::leak()` for stable addresses
+//! - **Node deallocation**: `Box::from_raw()` on removal/eviction
+//! - **Pointer manipulation**: `NonNull` ensures non-null invariant
+//! - **Send/Sync**: Manual impls require `K: Send + Sync`, `V: Send + Sync`
+//!
+//! Extensive testing (correctness, edge cases, memory safety) verifies soundness.
+//!
+//! ## Thread Safety
+//!
+//! - `LRUCore`: **NOT thread-safe** - single-threaded only
+//! - `ConcurrentLRUCache`: **Thread-safe** via `parking_lot::RwLock`
+//! - `Node`: Manually implements `Send + Sync` (protected by outer lock)
+//! - Values: `Arc<V>` enables safe sharing across threads
 
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LRUCacheTrait, MutableCache,
