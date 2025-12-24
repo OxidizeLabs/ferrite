@@ -1,3 +1,148 @@
+//! # Watermark Tracking
+//!
+//! This module provides the `Watermark` struct for tracking the low watermark
+//! of active transaction timestamps. The watermark is essential for MVCC
+//! (Multi-Version Concurrency Control) garbage collection, as it identifies
+//! the oldest timestamp that any active transaction might need to read.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                        ┌─────────────────────────────────────────┐
+//!                        │               Watermark                 │
+//!                        │                                         │
+//!                        │  ┌───────────────────────────────────┐  │
+//!                        │  │     active_txns: HashSet          │  │
+//!                        │  │  ┌─────┬─────┬─────┬─────┐        │  │
+//!                        │  │  │ ts3 │ ts5 │ ts7 │ ts9 │        │  │
+//!                        │  │  └─────┴─────┴─────┴─────┘        │  │
+//!                        │  │            ▲                      │  │
+//!                        │  │            │ min()                │  │
+//!                        │  │            ▼                      │  │
+//!                        │  │     watermark = ts3               │  │
+//!                        │  └───────────────────────────────────┘  │
+//!                        │                                         │
+//!                        │  ┌───────────────────────────────────┐  │
+//!                        │  │     next_ts: AtomicU64 = 10       │  │
+//!                        │  │     (monotonically increasing)    │  │
+//!                        │  └───────────────────────────────────┘  │
+//!                        └─────────────────────────────────────────┘
+//! ```
+//!
+//! ## Watermark Semantics
+//!
+//! The watermark has different meanings based on the state:
+//!
+//! | State                   | Watermark Value                          |
+//! |-------------------------|------------------------------------------|
+//! | Active transactions     | Minimum timestamp in `active_txns`       |
+//! | No active transactions  | `next_ts` (next assignable timestamp)    |
+//!
+//! ## Transaction Lifecycle
+//!
+//! ```text
+//!   Transaction Start                    Transaction End
+//!         │                                    │
+//!         ▼                                    ▼
+//!   get_next_ts_and_register()           unregister_txn(ts)
+//!         │                                    │
+//!         ├──► Allocate timestamp              ├──► Remove from active set
+//!         │    (atomic fetch_add)              │
+//!         ├──► Add to active_txns              └──► Update watermark
+//!         │                                         (may advance)
+//!         └──► Update watermark
+//!              (may lower)
+//! ```
+//!
+//! ## Garbage Collection
+//!
+//! The watermark enables safe garbage collection of old versions:
+//!
+//! ```text
+//!   Timeline:  1    2    3    4    5    6    7    8    9   10
+//!              │    │    │    │    │    │    │    │    │    │
+//!              ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼    ▼
+//!   Versions: [v1] [v2] [v3] [v4] [v5]  ─    ─    ─    ─    ─
+//!
+//!   Active transactions: {3, 5, 7}
+//!   Watermark: 3
+//!
+//!   ◄────────────────────►  ◄───────────────────────────────►
+//!     Can be garbage         Must be retained for
+//!     collected (< 3)        active transactions (≥ 3)
+//! ```
+//!
+//! ## Commit Timestamp Updates
+//!
+//! When a transaction commits with a timestamp, `update_commit_ts` ensures
+//! the allocator stays ahead:
+//!
+//! ```text
+//!   update_commit_ts(15)
+//!         │
+//!         ▼
+//!   ┌─────────────────────────────────────┐
+//!   │ Compare-and-swap loop:              │
+//!   │   if next_ts < commit_ts + 1:       │
+//!   │     next_ts = commit_ts + 1         │
+//!   │   (never moves backwards)           │
+//!   └─────────────────────────────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::concurrency::watermark::Watermark;
+//!
+//! let mut watermark = Watermark::new();
+//!
+//! // Start a transaction
+//! let ts1 = watermark.get_next_ts_and_register();
+//! assert_eq!(watermark.get_watermark(), ts1); // Watermark is this transaction
+//!
+//! // Start another transaction
+//! let ts2 = watermark.get_next_ts_and_register();
+//! assert_eq!(watermark.get_watermark(), ts1); // Still ts1 (minimum)
+//!
+//! // Complete first transaction
+//! watermark.unregister_txn(ts1);
+//! assert_eq!(watermark.get_watermark(), ts2); // Now ts2
+//!
+//! // Complete second transaction
+//! watermark.unregister_txn(ts2);
+//! // Watermark advances to next_ts (no active transactions)
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `next_ts` uses `AtomicU64` for lock-free timestamp allocation
+//! - `active_txns` and `watermark` require external synchronization
+//! - Typical usage wraps in `Mutex<Watermark>` or `RwLock<Watermark>`
+//!
+//! ```rust,ignore
+//! let watermark = Arc::new(Mutex::new(Watermark::new()));
+//!
+//! // Thread-safe timestamp allocation
+//! let ts = watermark.lock().get_next_ts_and_register();
+//! // ... do work ...
+//! watermark.lock().unregister_txn(ts);
+//! ```
+//!
+//! ## Key Invariants
+//!
+//! 1. **Monotonic timestamps**: `next_ts` never decreases
+//! 2. **Watermark bounds**: `watermark ≤ next_ts` always
+//! 3. **Minimum tracking**: Watermark equals min(active_txns) when non-empty
+//! 4. **Safe GC**: Data with timestamp < watermark is safe to collect
+//!
+//! ## Performance Considerations
+//!
+//! - `get_next_ts()`: O(1) atomic operation
+//! - `add_txn()` / `remove_txn()`: O(1) hash set operations
+//! - `update_watermark()`: O(n) scan for minimum when transactions exist
+//! - For high-throughput systems, consider periodic watermark updates
+//!   instead of per-operation updates
+
 use crate::common::config::Timestamp;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
