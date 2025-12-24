@@ -34,6 +34,7 @@
 use crate::storage::page::page_types::hash_table_block_page::HashTableBlockPage;
 use crate::storage::page::page_types::hash_table_bucket_page::HashTableBucketPage;
 use crate::common::config::DB_PAGE_SIZE;
+use std::mem::size_of;
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 
@@ -60,7 +61,7 @@ pub type HashTableBlockType<KeyType, ValueType, KeyComparator> =
  * to maintain the occupied and readable flags for a key value pair.
  */
 pub const fn block_array_size<KeyType, ValueType>() -> usize {
-    (4 * DB_PAGE_SIZE) / (4 * size_of::<MappingType<KeyType, ValueType>>() + 1)
+    ((4 * DB_PAGE_SIZE) as usize) / (4 * size_of::<MappingType<KeyType, ValueType>>() + 1)
 }
 
 /**
@@ -75,7 +76,7 @@ pub type HashTableBucketType<KeyType, ValueType, KeyComparator> =
  * of search, insertion, removal, and helper methods.
  */
 pub const fn bucket_array_size<KeyType, ValueType>() -> usize {
-    (4 * DB_PAGE_SIZE) / (4 * size_of::<MappingType<KeyType, ValueType>>() + 1)
+    ((4 * DB_PAGE_SIZE) as usize) / (4 * size_of::<MappingType<KeyType, ValueType>>() + 1)
 }
 
 /**
