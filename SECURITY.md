@@ -14,7 +14,7 @@ We take security vulnerabilities seriously. If you discover a security issue in 
 
 **Please do NOT report security vulnerabilities through public GitHub issues.**
 
-Instead, please report them via email to: **security@ferritedb.org** (or the maintainer's email if this isn't set up yet)
+Instead, please report them via email to: **ferrite.db@gmail.com**
 
 ### What to Include
 

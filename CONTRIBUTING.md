@@ -16,7 +16,7 @@ Thank you for your interest in contributing to Ferrite! This document provides g
 
 ## Code of Conduct
 
-This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to the maintainers.
+This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to ferrite.db@gmail.com.
 
 ## Getting Started
 
