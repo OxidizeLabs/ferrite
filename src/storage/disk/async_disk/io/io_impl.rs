@@ -1,29 +1,233 @@
 //! # Async I/O Engine
 //!
-//! The `AsyncIOEngine` is the central coordinator for the asynchronous I/O subsystem. It ties together
-//! all modular components (Queue, Workers, Executor, Completion Tracking) to provide a high-performance,
+//! This module provides `AsyncIOEngine`, the central coordinator for the asynchronous I/O subsystem.
+//! It ties together Queue, Workers, Executor, and Completion Tracking to provide a high-performance,
 //! non-blocking I/O interface for the database.
 //!
 //! ## Architecture
 //!
-//! The engine implements a producer-consumer architecture:
-//! - **Producers**: Database components call methods like `read_page` or `write_page`, which enqueue
-//!   operations into a priority queue.
-//! - **Consumers**: A pool of background worker threads (managed by `IOWorkerManager`) dequeue
-//!   operations and execute them using the `IOOperationExecutor`.
+//! ```text
+//!   Database Components (BufferPoolManager, WALManager, etc.)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ read_page(), write_page(), append_log(), sync(), ...
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                         AsyncIOEngine                                   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Components                                                     │   │
+//!   │   │                                                                 │   │
+//!   │   │  ┌──────────────────┐  ┌──────────────────┐                     │   │
+//!   │   │  │ IOQueueManager   │  │CompletionTracker │                     │   │
+//!   │   │  │ (Arc<>)          │  │ (Arc<>)          │                     │   │
+//!   │   │  │                  │  │                  │                     │   │
+//!   │   │  │ Priority queue   │  │ Track operations │                     │   │
+//!   │   │  │ BinaryHeap       │  │ Oneshot channels │                     │   │
+//!   │   │  └────────┬─────────┘  └──────────────────┘                     │   │
+//!   │   │           │                                                     │   │
+//!   │   │           │ dequeue                                             │   │
+//!   │   │           ▼                                                     │   │
+//!   │   │  ┌──────────────────┐  ┌──────────────────┐                     │   │
+//!   │   │  │IOWorkerManager   │  │IOOperationExecutor│                    │   │
+//!   │   │  │                  │  │ (Arc<>)          │                     │   │
+//!   │   │  │ Worker pool      │  │                  │                     │   │
+//!   │   │  │ Concurrency      │──►│ Execute I/O     │                     │   │
+//!   │   │  │ Semaphore        │  │ Direct I/O      │                     │   │
+//!   │   │  └──────────────────┘  └──────────────────┘                     │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ Returns oneshot::Receiver<OperationResult>
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  Caller awaits receiver.await for result                                │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Key Features
+//! ## Request Flow
 //!
-//! - **Priority Scheduling**: Operations are processed based on importance (e.g., WAL writes > Page writes > Prefetch reads).
-//! - **Concurrency Control**: Limits the number of in-flight I/O requests to prevent system overload.
-//! - **Direct I/O Support**: Configurable support for O_DIRECT to bypass OS page cache.
-//! - **Completion Tracking**: Callers receive `oneshot` channels to await results asynchronously.
-//! - **Graceful Shutdown**: Coordination for safe termination of worker threads and flushing of queues.
+//! ```text
+//!   read_page(page_id)
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! ## Usage
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 1: START TRACKING                                                 │
+//!   │                                                                        │
+//!   │   completion_tracker.start_operation(timeout)                          │
+//!   │        │                                                               │
+//!   │        └── Returns (operation_id, oneshot::Receiver)                   │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 2: ENQUEUE OPERATION                                              │
+//!   │                                                                        │
+//!   │   queue_manager.enqueue_operation(                                     │
+//!   │       IOOperationType::ReadPage { page_id },                           │
+//!   │       priority,                                                        │
+//!   │       operation_id,                                                    │
+//!   │   )                                                                    │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        │ (caller returns, operation in queue)
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 3: WORKER PROCESSES                                               │
+//!   │                                                                        │
+//!   │   Worker dequeues operation                                            │
+//!   │   Acquires semaphore permit                                            │
+//!   │   executor.execute_operation_type(ReadPage { page_id })                │
+//!   │   completion_tracker.complete_operation_with_result(id, result)        │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        │ (notifier.send(result) wakes caller)
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 4: AWAIT RESULT                                                   │
+//!   │                                                                        │
+//!   │   receiver.await → OperationResult::Success(data)                      │
+//!   │                  → OperationResult::Error(msg)                         │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! This struct is the main entry point for I/O in the `AsyncDiskManager`. It should be instantiated once
-//! and shared across the application.
+//! ## Key Components
+//!
+//! | Component            | Description                                       |
+//! |----------------------|---------------------------------------------------|
+//! | `IOQueueManager`     | Priority queue for pending operations             |
+//! | `IOOperationExecutor`| Performs actual I/O (with optional Direct I/O)    |
+//! | `IOWorkerManager`    | Manages worker tasks and concurrency              |
+//! | `CompletionTracker`  | Tracks operation state, notifies callers          |
+//!
+//! ## Public API - I/O Operations
+//!
+//! | Method               | Priority Default | Description                       |
+//! |----------------------|------------------|-----------------------------------|
+//! | `read_page()`        | PAGE_READ (5)    | Read 4KB page from database       |
+//! | `write_page()`       | PAGE_WRITE (7)   | Write 4KB page to database        |
+//! | `read_log()`         | LOG_READ (6)     | Read from WAL at offset           |
+//! | `write_log()`        | LOG_WRITE (8)    | Write to WAL at offset            |
+//! | `append_log()`       | LOG_APPEND (9)   | Append to WAL, returns offset     |
+//! | `sync()`             | SYNC (10)        | fsync database file               |
+//! | `sync_log()`         | SYNC (10)        | fsync WAL file                    |
+//!
+//! ## Priority Variants
+//!
+//! Each I/O method has a `_with_priority` variant:
+//!
+//! ```text
+//!   read_page(page_id)                    ← Uses default priority
+//!   read_page_with_priority(page_id, priority)  ← Custom priority
+//!
+//!   write_page(page_id, data)             ← Uses default priority
+//!   write_page_with_priority(page_id, data, priority)  ← Custom priority
+//! ```
+//!
+//! ## Direct Execution Methods
+//!
+//! | Method              | Description                                        |
+//! |---------------------|----------------------------------------------------|
+//! | `append_log_direct()`| Bypass queue, execute on caller task (for WAL)    |
+//! | `sync_log_direct()` | Bypass queue, execute on caller task               |
+//!
+//! These are used by components (like `LogManager`) that may call via
+//! `Handle::block_on()` and would risk deadlock if using the worker queue.
+//!
+//! ## Lifecycle Methods
+//!
+//! | Method             | Description                                         |
+//! |--------------------|-----------------------------------------------------|
+//! | `new()`            | Create with buffered I/O                            |
+//! | `with_config()`    | Create with Direct I/O configuration                |
+//! | `start()`          | Start worker threads                                |
+//! | `signal_shutdown()`| Signal workers to stop (`&self`)                    |
+//! | `stop()`           | Gracefully shutdown all workers (`&mut self`)       |
+//!
+//! ## Queue & Tracking Methods
+//!
+//! | Method                          | Description                            |
+//! |---------------------------------|----------------------------------------|
+//! | `queue_size()`                  | Get pending operations in queue        |
+//! | `clear_queue()`                 | Remove all queued ops, cancel them     |
+//! | `tracked_operations_count()`    | Get total tracked operations           |
+//! | `pending_operations_count()`    | Get pending (not completed) operations |
+//! | `cancel_all_pending_operations()`| Cancel all pending ops with reason    |
+//! | `check_and_handle_timeouts()`   | Cancel timed-out operations            |
+//!
+//! ## Metrics & Monitoring
+//!
+//! | Method             | Description                                         |
+//! |--------------------|-----------------------------------------------------|
+//! | `metrics()`        | Get `Arc<IOMetrics>` for statistics                 |
+//! | `completion_tracker()`| Get `Arc<CompletionTracker>` for direct access   |
+//! | `print_io_stats()` | Print comprehensive statistics to stdout            |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::io::io_impl::AsyncIOEngine;
+//! use std::sync::Arc;
+//! use tokio::sync::Mutex;
+//! use tokio::fs::File;
+//!
+//! // Create file handles
+//! let db_file = Arc::new(Mutex::new(File::create("database.dat").await?));
+//! let log_file = Arc::new(Mutex::new(File::create("log.dat").await?));
+//!
+//! // Create engine (with optional Direct I/O config)
+//! let mut engine = AsyncIOEngine::new(db_file, log_file)?;
+//!
+//! // Start 4 worker threads
+//! engine.start(4);
+//!
+//! // Perform I/O operations
+//! let data = vec![42u8; 4096];
+//! engine.write_page(0, &data).await?;
+//! let read_back = engine.read_page(0).await?;
+//! assert_eq!(data, read_back);
+//!
+//! // Log operations
+//! let offset = engine.append_log(b"commit record").await?;
+//! engine.sync_log().await?;
+//!
+//! // Check metrics
+//! let metrics = engine.metrics();
+//! println!("Completed: {}", metrics.completed_operations());
+//! println!("Success rate: {:.2}%", metrics.success_rate());
+//!
+//! // Shutdown
+//! engine.cancel_all_pending_operations("Shutting down").await;
+//! engine.stop().await;
+//! ```
+//!
+//! ## Direct I/O Configuration
+//!
+//! ```text
+//!   AsyncIOEngine::with_config(db_file, log_file, DirectIOConfig)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   DirectIOConfig:
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  enabled: bool    ← Use O_DIRECT for database file                      │
+//!   │  alignment: usize ← Sector alignment (typically 512 or 4096)            │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!   Benefits of Direct I/O:
+//!   • Bypasses OS page cache (database manages its own cache)
+//!   • Reduces double-buffering
+//!   • More predictable I/O latency
+//!
+//!   Note: WAL file always uses buffered I/O (no Direct I/O)
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `queue_manager`: `Arc<IOQueueManager>` - shared across workers
+//! - `executor`: `Arc<IOOperationExecutor>` - shared across workers
+//! - `completion_tracker`: `Arc<CompletionTracker>` - shared across callers/workers
+//! - `worker_manager`: Owned, requires `&mut self` for `start()` and `stop()`
+//! - All I/O methods take `&self`, safe for concurrent calls
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::io::completion::CompletionTracker;
