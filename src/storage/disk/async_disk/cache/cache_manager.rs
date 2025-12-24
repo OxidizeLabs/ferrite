@@ -4,50 +4,231 @@
 //! disk I/O performance for the Async Disk Manager. It employs a tiered architecture to
 //! handle different data access patterns efficiently, distinguishing between hot, warm, and cold data.
 //!
-//! ## Architecture Note: Two-Level Caching
+//! ## System-Level Architecture
 //!
-//! This component serves as the **Level 2 (Read)** cache in the system hierarchy, sitting below
-//! the `BufferPoolManager` (Level 1).
+//! ```text
+//!   Two-Level Caching in the Database Stack
+//!   ═══════════════════════════════════════════════════════════════════════════
 //!
-//! - **L1 (Buffer Pool)**: Semantic-aware caching of `Page` objects for the execution engine.
-//! - **L2 (This Cache)**: Block-aware caching of raw/compressed data to mask disk latency.
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                    Query Execution Engine                               │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  L1: BufferPoolManager                                                  │
+//!   │  • Semantic-aware caching of `Page` objects                             │
+//!   │  • LRU-K replacement policy                                             │
+//!   │  • Pin/unpin management                                                 │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │ eviction / miss
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │  L2: CacheManager (this module)                                         │
+//!   │  • Block-aware caching of raw/compressed bytes                          │
+//!   │  • Three-tier hot/warm/cold organization                                │
+//!   │  • Victim cache for L1 evictions                                        │
+//!   │  • Masks disk latency for L1 misses                                     │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │ miss
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                      AsyncDiskManager (Disk I/O)                        │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! It provides a "Victim Cache" or "Second Chance" mechanism for pages evicted from the L1 pool,
-//! and accelerates read misses from L1 by serving them from faster L2 memory instead of disk.
+//! ## Three-Tier Cache Architecture
 //!
-//! ## Architecture
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                        CacheManager                                     │
+//!   │                                                                         │
+//!   │  ┌───────────────────────────────────────────────────────────────────┐  │
+//!   │  │              L1 Hot Cache (LRU-K, K=2)                             │  │
+//!   │  │                                                                   │  │
+//!   │  │  • Frequently accessed pages (access_count > 10)                  │  │
+//!   │  │  • Resists scan pollution via backward K-distance                 │  │
+//!   │  │  • ~20% of total cache (configurable via hot_cache_ratio)         │  │
+//!   │  └───────────────────────────────────────────────────────────────────┘  │
+//!   │                              ▲                                          │
+//!   │                    promotion │ │ demotion (full)                        │
+//!   │                              │ ▼                                        │
+//!   │  ┌───────────────────────────────────────────────────────────────────┐  │
+//!   │  │              L2 Warm Cache (LFU)                                   │  │
+//!   │  │                                                                   │  │
+//!   │  │  • Moderately accessed pages (access_count > 5)                   │  │
+//!   │  │  • Retains pages with proven frequency                            │  │
+//!   │  │  • ~30% of total cache (configurable via warm_cache_ratio)        │  │
+//!   │  └───────────────────────────────────────────────────────────────────┘  │
+//!   │                              ▲                                          │
+//!   │                    promotion │ │ demotion (full)                        │
+//!   │                              │ ▼                                        │
+//!   │  ┌───────────────────────────────────────────────────────────────────┐  │
+//!   │  │              L3 Cold Cache (FIFO)                                  │  │
+//!   │  │                                                                   │  │
+//!   │  │  • Default entry point for new pages                              │  │
+//!   │  │  • Low-overhead FIFO for one-time scans                           │  │
+//!   │  │  • ~50% of total cache (remainder)                                │  │
+//!   │  └───────────────────────────────────────────────────────────────────┘  │
+//!   │                              ▲                                          │
+//!   │                    insert    │ │ eviction (full)                        │
+//!   │                              │ ▼                                        │
+//!   │                         [New Page Data]                                 │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! The cache is organized into three distinct levels (L1, L2, L3), each utilizing a specialized
-//! eviction policy tailored to specific data temperatures:
+//! ## Page Lookup Flow
 //!
-//! - **L1 Hot Cache (LRU-K)**: Stores frequently accessed "hot" pages. Uses the LRU-K (K=2) algorithm
-//!   to robustly identify popular pages and resist scan-pollution.
-//! - **L2 Warm Cache (LFU)**: Stores "warm" pages with moderate access frequency. Uses a Least
-//!   Frequently Used (LFU) policy to retain pages with a proven history of utility.
-//! - **L3 Cold Cache (FIFO)**: The default entry point for new pages. Uses First-In-First-Out (FIFO)
-//!   for low-overhead management of "cold" or newly read data, protecting higher tiers from one-time scans.
+//! ```text
+//!   get_page(page_id)
+//!        │
+//!        ├──► Check L1 Hot Cache (LRU-K)
+//!        │         │
+//!        │         ├─► Hit? → Return data, update K-distance
+//!        │         │
+//!        │         └─► Miss? → Continue...
+//!        │
+//!        ├──► Check L2 Warm Cache (LFU)
+//!        │         │
+//!        │         ├─► Hit? → Promote to Hot, return data
+//!        │         │
+//!        │         └─► Miss? → Continue...
+//!        │
+//!        ├──► Check L3 Cold Cache (FIFO)
+//!        │         │
+//!        │         ├─► Hit? → Promote to Warm, return data
+//!        │         │
+//!        │         └─► Miss? → Return None (disk read needed)
+//!        │
+//!        └──► Update access patterns for prefetching
+//! ```
 //!
-//! ## Key Features
+//! ## Temperature Classification
 //!
-//! - **Adaptive Tiered Caching**: Pages are promoted or demoted between cache levels based on their
-//!   access frequency and recency (Temperature Classification).
-//! - **Smart Admission Control**: Regulates entry into the cache based on current memory pressure and
-//!   predicted reuse probability to prevent cache thrashing under load.
-//! - **Intelligent Prefetching**:
-//!     - **Sequential**: Automatically detects sequential scans and prefetches upcoming pages.
-//!     - **ML-Based**: Learns and predicts complex, non-sequential access patterns.
-//! - **Deduplication**: Identifies and merges duplicate page content to maximize effective cache capacity.
-//! - **Comprehensive Metrics**: Tracks hit ratios per tier, promotion/demotion events, and prefetch accuracy
-//!   to support fine-grained performance monitoring and tuning.
+//! ```text
+//!   Access Count    Temperature    Cache Tier    Eviction Policy
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!        > 10          Hot            L1           LRU-K (K=2)
+//!       5 - 10         Warm           L2           LFU
+//!       2 - 5          Cold           L3           FIFO
+//!       < 2            Frozen         L3           FIFO (first evicted)
+//! ```
 //!
-//! ## Usage
+//! ## Key Components
 //!
-//! The `CacheManager` is initialized with a `DiskManagerConfig` and serves as the central caching
-//! component. It handles `get_page` requests by checking tiers in order (Hot -> Warm -> Cold) and
-//! manages the lifecycle of cached pages including eviction and write-back coordination.
+//! | Component             | Description                                          |
+//! |-----------------------|------------------------------------------------------|
+//! | `CacheManager`        | Central cache coordinator with three tiers           |
+//! | `LRUKCache`           | Hot cache with LRU-K (K=2) eviction                  |
+//! | `LFUCache`            | Warm cache with frequency-based eviction             |
+//! | `FIFOCache`           | Cold cache with FIFO eviction                        |
+//! | `AdmissionController` | Regulates cache entry based on memory pressure       |
+//! | `PrefetchEngine`      | Sequential and pattern-based prefetch prediction     |
+//! | `DeduplicationEngine` | Identifies duplicate page content                    |
+//! | `HotColdMetadata`     | Tracks access patterns per page                      |
 //!
-//! This module contains the `CacheManager` struct and related components like `AdmissionController`,
-//! `PrefetchEngine`, and statistical structures.
+//! ## Core Operations
+//!
+//! | Method                       | Description                                   |
+//! |------------------------------|-----------------------------------------------|
+//! | `get_page()`                 | Lookup page in all tiers                      |
+//! | `get_page_with_metrics()`    | Lookup with metrics recording                 |
+//! | `store_page()`               | Store page in appropriate tier                |
+//! | `trigger_prefetch()`         | Get prefetch predictions for current page     |
+//! | `perform_maintenance()`      | Update pressure & evict if needed             |
+//! | `get_cache_statistics()`     | Get hit ratios and tier usage                 |
+//! | `get_enhanced_cache_statistics()` | Get algorithm-specific details           |
+//! | `get_page_access_details()`  | Get LRU-K/LFU/FIFO specific info for a page   |
+//!
+//! ## Admission Control
+//!
+//! ```text
+//!   Memory Pressure    Admission Rate    Large Page Behavior
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!       0 - 50%           100%           Admit all
+//!      51 - 70%            80%           Admit most
+//!      71 - 85%            60%           Selective admission
+//!      86 - 95%            40%           Very selective
+//!       > 95%              20%           Emergency mode (reject large pages)
+//! ```
+//!
+//! ## Prefetching
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                       Prefetch Engine                                   │
+//!   │                                                                         │
+//!   │  Sequential Prefetch:                                                   │
+//!   │  • Detects sequential access (page N → N+1 → N+2...)                    │
+//!   │  • Prefetches next `prefetch_distance` pages                            │
+//!   │  • Distance adapts based on accuracy (0.7+ → more, <0.4 → less)         │
+//!   │                                                                         │
+//!   │  Pattern-Based Prefetch:                                                │
+//!   │  • Tracks page → next_page transitions                                  │
+//!   │  • Predicts likely next pages based on history                          │
+//!   │  • Only used when accuracy > 20%                                        │
+//!   │                                                                         │
+//!   │  Accuracy Tracking:                                                     │
+//!   │  • Records predictions                                                  │
+//!   │  • Counts hits (predicted page was actually accessed)                   │
+//!   │  • Cleans up old predictions (>60 seconds)                              │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::cache::cache_manager::CacheManager;
+//! use crate::storage::disk::async_disk::config::DiskManagerConfig;
+//!
+//! let config = DiskManagerConfig {
+//!     cache_size_mb: 128,
+//!     hot_cache_ratio: 0.2,   // 20% for hot
+//!     warm_cache_ratio: 0.3,  // 30% for warm
+//!     prefetch_distance: 4,
+//!     ..Default::default()
+//! };
+//!
+//! let cache = CacheManager::new(&config);
+//!
+//! // Store a page (enters cold cache)
+//! cache.store_page(42, vec![0u8; 4096]);
+//!
+//! // Retrieve (hit in cold → promotes to warm)
+//! if let Some(data) = cache.get_page(42) {
+//!     // Process data...
+//! }
+//!
+//! // Multiple accesses promote to hotter tiers
+//! for _ in 0..10 {
+//!     let _ = cache.get_page(42);
+//! }
+//!
+//! // Trigger prefetch predictions
+//! let prefetch_pages = cache.trigger_prefetch(42);
+//! for page_id in prefetch_pages {
+//!     // Load predicted pages in background...
+//! }
+//!
+//! // Check statistics
+//! let stats = cache.get_cache_statistics();
+//! println!("Hit ratio: {:.2}%", stats.overall_hit_ratio * 100.0);
+//! println!("Prefetch accuracy: {:.2}%", stats.prefetch_accuracy * 100.0);
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - Each cache tier uses `Arc<RwLock<T>>` for thread-safe access
+//! - Atomic counters for statistics (hit/miss counts, promotions, etc.)
+//! - `try_write()` / `try_read()` used to avoid blocking under contention
+//! - Safe for concurrent access from multiple tokio tasks
+//!
+//! ## Deduplication
+//!
+//! The `DeduplicationEngine` identifies pages with identical content:
+//! - Uses simple hash-based detection
+//! - Tracks savings (bytes avoided by not storing duplicates)
+//! - Useful for databases with repeated patterns (e.g., zero-filled pages)
 
 use super::fifo::FIFOCache;
 use super::lfu::LFUCache;
