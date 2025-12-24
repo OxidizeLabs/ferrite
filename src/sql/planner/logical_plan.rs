@@ -1,3 +1,221 @@
+//! # Logical Plan Representation
+//!
+//! This module defines the **logical plan** data structures, which serve as the intermediate
+//! representation (IR) between parsed SQL and physical execution plans. Logical plans describe
+//! *what* operations to perform without specifying *how* to execute them.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────────────────┐
+//! │                         Query Processing Pipeline                               │
+//! ├─────────────────────────────────────────────────────────────────────────────────┤
+//! │                                                                                 │
+//! │   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────┐     │
+//! │   │   SQL Text      │───▶│  sqlparser AST  │───▶│  LogicalPlanBuilder     │     │
+//! │   │ "SELECT ..."    │    │  Statement      │    │  (plan_builder.rs)      │     │
+//! │   └─────────────────┘    └─────────────────┘    └───────────┬─────────────┘     │
+//! │                                                             │                   │
+//! │                                                             ▼                   │
+//! │                          ┌──────────────────────────────────────────────┐       │
+//! │                          │            LogicalPlan (this module)         │       │
+//! │                          │  ┌────────────────────────────────────────┐  │       │
+//! │                          │  │         LogicalPlanType enum           │  │       │
+//! │                          │  │  - TableScan, Filter, Projection, ...  │  │       │
+//! │                          │  │  - Join, Aggregate, Sort, Limit, ...   │  │       │
+//! │                          │  │  - DDL: CreateTable, CreateIndex, ...  │  │       │
+//! │                          │  │  - Txn: StartTransaction, Commit, ...  │  │       │
+//! │                          │  └────────────────────────────────────────┘  │       │
+//! │                          │  ┌────────────────────────────────────────┐  │       │
+//! │                          │  │    children: Vec<Box<LogicalPlan>>     │  │       │
+//! │                          │  │       (tree structure for plans)       │  │       │
+//! │                          │  └────────────────────────────────────────┘  │       │
+//! │                          └───────────────────────┬──────────────────────┘       │
+//! │                                                  │                              │
+//! │                                                  ▼                              │
+//! │                          ┌──────────────────────────────────────────────┐       │
+//! │                          │   LogicalToPhysical::to_physical_plan()      │       │
+//! │                          │   (PlanConverter - iterative conversion)     │       │
+//! │                          └───────────────────────┬──────────────────────┘       │
+//! │                                                  │                              │
+//! │                                                  ▼                              │
+//! │                          ┌──────────────────────────────────────────────┐       │
+//! │                          │              PlanNode (Physical)             │       │
+//! │                          │   SeqScanPlanNode, FilterNode, HashJoin...   │       │
+//! │                          └──────────────────────────────────────────────┘       │
+//! │                                                                                 │
+//! └─────────────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | [`LogicalPlanType`] | Enum of all logical plan node types with their metadata |
+//! | [`LogicalPlan`] | Tree node containing plan type and child plans |
+//! | [`LogicalToPhysical`] | Trait for converting logical plans to physical plans |
+//! | `PlanConverter` | Internal struct for iterative (non-recursive) conversion |
+//!
+//! ## LogicalPlanType Categories
+//!
+//! ### Data Manipulation (DML)
+//! | Plan Type | Description |
+//! |-----------|-------------|
+//! | `TableScan` | Full sequential scan of a table |
+//! | `IndexScan` | Index-based lookup with predicate keys |
+//! | `Filter` | Row filtering with predicate expression |
+//! | `Projection` | Column selection and computed expressions |
+//! | `Insert` | Insert rows into a table |
+//! | `Update` | Update rows with assignment expressions |
+//! | `Delete` | Delete rows matching a predicate |
+//! | `Values` | Inline row data for INSERT |
+//!
+//! ### Aggregation & Grouping
+//! | Plan Type | Description |
+//! |-----------|-------------|
+//! | `Aggregate` | GROUP BY with aggregate functions (SUM, COUNT, AVG, ...) |
+//! | `Window` | Window functions with PARTITION BY and ORDER BY |
+//! | `Distinct` | Remove duplicate rows |
+//!
+//! ### Join Operations
+//! | Plan Type | Description |
+//! |-----------|-------------|
+//! | `NestedLoopJoin` | Basic nested loop join (O(n×m)) |
+//! | `NestedIndexJoin` | Index-assisted nested loop join |
+//! | `HashJoin` | Hash-based equi-join (build + probe) |
+//!
+//! ### Sorting & Limiting
+//! | Plan Type | Description |
+//! |-----------|-------------|
+//! | `Sort` | Sort by one or more columns (ASC/DESC) |
+//! | `Limit` | Limit output to N rows |
+//! | `Offset` | Skip first N rows |
+//! | `TopN` | Combined sort + limit (optimized) |
+//! | `TopNPerGroup` | Top N rows per group |
+//!
+//! ### Data Definition (DDL)
+//! | Plan Type | Description |
+//! |-----------|-------------|
+//! | `CreateTable` | Create new table with schema |
+//! | `CreateIndex` | Create index on table columns |
+//! | `Drop` | Drop table, index, or other objects |
+//! | `AlterTable` | Modify table structure |
+//! | `CreateView` | Create view definition |
+//!
+//! ### Transaction Control
+//! | Plan Type | Description |
+//! |-----------|-------------|
+//! | `StartTransaction` | Begin a new transaction |
+//! | `Commit` | Commit current transaction |
+//! | `Rollback` | Rollback current transaction |
+//! | `Savepoint` | Create a savepoint |
+//! | `ReleaseSavepoint` | Release a savepoint |
+//!
+//! ### Utility
+//! | Plan Type | Description |
+//! |-----------|-------------|
+//! | `MockScan` | Test/mock table scan |
+//! | `ShowTables` | List tables in database |
+//! | `ShowColumns` | List columns in table |
+//! | `ShowDatabases` | List available databases |
+//! | `Use` | Switch current database |
+//! | `Explain` | Show query plan (wraps inner plan) |
+//!
+//! ## Plan Tree Example
+//!
+//! ```text
+//! SELECT name, SUM(amount)
+//! FROM orders
+//! WHERE status = 'active'
+//! GROUP BY name
+//! ORDER BY SUM(amount) DESC
+//! LIMIT 10
+//!
+//!           LogicalPlan Tree:
+//!
+//!              ┌───────────┐
+//!              │   Limit   │ k=10
+//!              │   (10)    │
+//!              └─────┬─────┘
+//!                    │
+//!              ┌─────▼─────┐
+//!              │   Sort    │ ORDER BY sum DESC
+//!              └─────┬─────┘
+//!                    │
+//!              ┌─────▼─────┐
+//!              │ Aggregate │ GROUP BY name, SUM(amount)
+//!              └─────┬─────┘
+//!                    │
+//!              ┌─────▼─────┐
+//!              │  Filter   │ status = 'active'
+//!              └─────┬─────┘
+//!                    │
+//!              ┌─────▼─────┐
+//!              │ TableScan │ orders
+//!              └───────────┘
+//! ```
+//!
+//! ## Logical to Physical Conversion
+//!
+//! The [`LogicalToPhysical`] trait's `to_physical_plan()` method converts the logical plan
+//! tree into physical execution plan nodes. The conversion uses an **iterative** approach
+//! (via `PlanConverter`) to avoid stack overflow on deep plan trees.
+//!
+//! ```text
+//! Conversion Process (Iterative, Bottom-Up):
+//!
+//! 1. Push root onto stack
+//! 2. While stack not empty:
+//!    a. Pop node
+//!    b. If all children processed → convert node, store result
+//!    c. Else → push node back, push unprocessed children
+//! 3. Return result for root node
+//! ```
+//!
+//! ## Join Key Extraction
+//!
+//! For join operations, the `extract_join_keys` function parses the join predicate to:
+//! - Extract left and right key expressions
+//! - Fix tuple indices (left=0, right=1) for executor
+//! - Support compound predicates via AND
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use tkdb::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
+//!
+//! // Build a simple plan: SELECT * FROM users WHERE age > 21
+//! let schema = Schema::new(vec![
+//!     Column::new("id", TypeId::Integer),
+//!     Column::new("name", TypeId::VarChar),
+//!     Column::new("age", TypeId::Integer),
+//! ]);
+//!
+//! let scan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+//! let predicate = /* age > 21 expression */;
+//! let filter = LogicalPlan::filter(schema.clone(), "users".to_string(), 1, predicate, scan);
+//!
+//! // Explain the plan
+//! println!("{}", filter.explain(0));
+//!
+//! // Convert to physical plan
+//! let physical = filter.to_physical_plan()?;
+//! ```
+//!
+//! ## Schema Propagation
+//!
+//! Each plan node carries a `Schema` that describes its output columns. The `get_schema()`
+//! method returns the output schema, handling special cases like:
+//! - Join schemas (merged left + right columns)
+//! - Projection schemas (selected/computed columns)
+//! - Aggregate schemas (group-by + aggregate columns)
+//!
+//! ## Thread Safety
+//!
+//! - `LogicalPlan` is `Clone` and can be shared across threads
+//! - Expression references use `Arc<Expression>` for shared ownership
+//! - Recursion depth tracking uses `thread_local!` for safety
+
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::transaction::IsolationLevel;
