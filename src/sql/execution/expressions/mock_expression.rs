@@ -1,12 +1,10 @@
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
-use crate::sql::binder::bound_expression::{BoundExpression, ExpressionType};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -73,24 +71,6 @@ impl MockExpression {
 
     pub fn get_name(&self) -> &str {
         &self.name
-    }
-}
-
-impl BoundExpression for MockExpression {
-    fn expression_type(&self) -> ExpressionType {
-        ExpressionType::MockExpression
-    }
-
-    fn has_aggregation(&self) -> bool {
-        false
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn clone_box(&self) -> Box<dyn BoundExpression> {
-        Box::new(self.clone())
     }
 }
 

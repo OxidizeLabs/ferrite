@@ -1,6 +1,5 @@
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
-use crate::sql::binder::table_ref::bound_base_table_ref::BoundBaseTableRef;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -29,12 +28,6 @@ impl SeqScanPlanNode {
 
     pub fn get_table_name(&self) -> &str {
         &self.table_name
-    }
-
-    pub fn infer_scan_schema(table_ref: &BoundBaseTableRef) -> Result<Schema, String> {
-        // This is a placeholder implementation. You should replace this with actual schema inference logic.
-        let schema = table_ref.get_schema();
-        Ok(schema.clone())
     }
 }
 
@@ -171,16 +164,6 @@ mod tests {
 
     mod schema_handling {
         use super::*;
-
-        #[test]
-        fn test_schema_inference() {
-            let schema = create_test_schema();
-            let table_ref =
-                BoundBaseTableRef::new("test_table".to_string(), 1, None, schema.clone());
-
-            let inferred_schema = SeqScanPlanNode::infer_scan_schema(&table_ref).unwrap();
-            assert_eq!(inferred_schema, schema);
-        }
 
         #[test]
         fn test_schema_columns() {
