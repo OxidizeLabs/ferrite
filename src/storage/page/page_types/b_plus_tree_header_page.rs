@@ -1,3 +1,43 @@
+//! Header page for B+ tree index metadata.
+//!
+//! This module provides [`BPlusTreeHeaderPage`], which stores essential metadata
+//! about a B+ tree index structure. Each B+ tree has exactly one header page that
+//! serves as the entry point for tree operations.
+//!
+//! # Stored Metadata
+//!
+//! The header page maintains:
+//!
+//! - **Root page ID**: Points to the current root node of the tree. Set to
+//!   [`INVALID_PAGE_ID`] when the tree is empty.
+//! - **Tree height**: The number of levels in the tree (0 for an empty tree).
+//! - **Key count**: Total number of keys stored across all leaf nodes.
+//! - **Order**: The maximum number of children per internal node (fan-out).
+//!
+//! # Usage
+//!
+//! The header page is typically the first page allocated when creating a new
+//! B+ tree index. It must be updated whenever:
+//!
+//! - The root changes (due to splits or merges propagating to the root)
+//! - The tree height changes (root split increases height, root merge decreases it)
+//! - Keys are inserted or deleted (key count tracking)
+//!
+//! # Serialization
+//!
+//! Header data is serialized using [`bincode`] for compact binary representation.
+//! The [`HeaderData`] struct contains only the essential fields for persistence,
+//! excluding transient page metadata like pin count and dirty flag.
+//!
+//! # Example
+//!
+//! ```ignore
+//! let mut header = BPlusTreeHeaderPage::new(page_id);
+//! header.set_order(128);  // Set fan-out
+//! header.set_root_page_id(root_id);
+//! header.increment_tree_height();
+//! ```
+
 use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
 use crate::common::exception::PageError;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
