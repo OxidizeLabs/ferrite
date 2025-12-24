@@ -1,7 +1,39 @@
+//! Common type definitions and capacity calculations for hash table pages.
+//!
+//! This module provides shared types and constants used across different hash
+//! table implementations (linear probing and extendible hashing).
+//!
+//! # Type Aliases
+//!
+//! - [`MappingType`]: A `(Key, Value)` tuple stored in hash table pages
+//! - [`HashTableBlockType`]: Block page for linear probing hash tables
+//! - [`HashTableBucketType`]: Bucket page for extendible hash tables
+//!
+//! # Capacity Calculations
+//!
+//! Both block and bucket pages store key-value pairs along with two status bits
+//! per entry (occupied and readable). The capacity formulas account for this:
+//!
+//! ```text
+//! Bits per entry = 8 * sizeof(Key, Value) + 2
+//!
+//! Entries per page = (8 * PAGE_SIZE) / (8 * sizeof(Key, Value) + 2)
+//!                  ≈ PAGE_SIZE / (sizeof(Key, Value) + 0.25)
+//! ```
+//!
+//! The functions [`block_array_size`] and [`bucket_array_size`] compute this
+//! at compile time for any key/value type combination.
+//!
+//! # Directory Size
+//!
+//! The [`DIRECTORY_ARRAY_SIZE`] constant (512) defines the maximum number of
+//! bucket pointers in a single directory page. This is chosen as a power of 2
+//! while leaving room for directory metadata (page_id, lsn, global_depth,
+//! local_depths array).
+
 use crate::storage::page::page_types::hash_table_block_page::HashTableBlockPage;
 use crate::storage::page::page_types::hash_table_bucket_page::HashTableBucketPage;
-
-pub const DB_PAGE_SIZE: usize = 4096;
+use crate::common::config::DB_PAGE_SIZE;
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 

@@ -1,3 +1,62 @@
+//! Directory page implementation for extendible hash table indexes.
+//!
+//! This module provides [`HashTableDirectoryPage`], which maps hash bucket
+//! indices to bucket page IDs for an extendible hash table. The directory
+//! supports dynamic resizing through global/local depth tracking.
+//!
+//! # Page Layout
+//!
+//! The directory page has a fixed on-disk format:
+//!
+//! ```text
+//! ┌────────────────────────────────────────────────────────────────────────┐
+//! │ LSN (4) │ PageId (4) │ GlobalDepth (4) │ LocalDepths (512) │ ...      │
+//! ├────────────────────────────────────────────────────────────────────────┤
+//! │ BucketPageIds (2048) │ Free (1524)                                    │
+//! └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Directory Indexing
+//!
+//! The directory uses the lower `global_depth` bits of a hash to index:
+//!
+//! ```text
+//! Hash: 0b...11010110
+//!              ^^^
+//!              └─ Lower `global_depth` bits → bucket index
+//!
+//! Directory size = 2^global_depth
+//! ```
+//!
+//! # Global vs Local Depth
+//!
+//! - **Global depth**: Controls directory size; all indices use this many bits
+//! - **Local depth**: Per-bucket; determines how many directory slots share a bucket
+//!
+//! When `local_depth < global_depth`, multiple directory entries point to the
+//! same bucket (bucket sharing).
+//!
+//! # Split Image
+//!
+//! When splitting a bucket, its "split image" is the buddy bucket that will
+//! receive half the entries. Calculated by flipping the highest local depth bit:
+//!
+//! ```text
+//! split_image = bucket_idx XOR (1 << (local_depth - 1))
+//! ```
+//!
+//! # Key Operations
+//!
+//! - [`get_bucket_page_id`](HashTableDirectoryPage::get_bucket_page_id) /
+//!   [`set_bucket_page_id`](HashTableDirectoryPage::set_bucket_page_id): Access bucket mappings
+//! - [`incr_global_depth`](HashTableDirectoryPage::incr_global_depth): Double directory size
+//! - [`get_split_image_index`](HashTableDirectoryPage::get_split_image_index): Find buddy bucket
+//! - [`can_shrink`](HashTableDirectoryPage::can_shrink): Check if directory can be halved
+//!
+//! # Thread Safety
+//!
+//! Bucket page IDs are protected by a `Mutex` for concurrent access.
+
 use std::sync::Mutex;
 
 pub type LsnT = u32;
