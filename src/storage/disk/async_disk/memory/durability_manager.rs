@@ -1,20 +1,168 @@
 //! # Durability Manager
 //!
-//! The `DurabilityManager` is responsible for enforcing data persistence guarantees. It abstracts
-//! the complexities of `fsync`, `fdatasync`, and Write-Ahead Log (WAL) coordination.
+//! This module provides `DurabilityManager`, which enforces data persistence guarantees by
+//! coordinating `fsync` operations and Write-Ahead Log (WAL) synchronization. It translates
+//! high-level durability policies into concrete I/O actions.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   WriteManager / FlushCoordinator
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!                          │
+//!                          │ apply_durability(pages, provider)
+//!                          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                      DurabilityManager                                  │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Configuration                                                  │   │
+//!   │   │                                                                 │   │
+//!   │   │  fsync_policy: FsyncPolicy     ← When to sync                   │   │
+//!   │   │  durability_level: DurabilityLevel  ← What guarantees           │   │
+//!   │   │  wal_enabled: bool             ← Use Write-Ahead Logging?       │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  State Tracking                                                 │   │
+//!   │   │                                                                 │   │
+//!   │   │  pending_syncs: AtomicUsize    ← Pages awaiting confirmation    │   │
+//!   │   │  last_sync_time: Mutex<Instant> ← For periodic policy           │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!                          │
+//!                          │ calls sync_data() / sync_log()
+//!                          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │              DurabilityProvider (AsyncDiskManager)                      │
+//!   │                                                                         │
+//!   │   sync_data() ──► fsync(db_file)                                        │
+//!   │   sync_log()  ──► fsync(wal_file)                                       │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
 //! ## Durability Levels
 //!
-//! - **None**: No guarantees; high performance but risky (data lost on crash).
-//! - **Buffer**: Data is written to the OS page cache; survives process crash but not kernel panic/power loss.
-//! - **Sync**: Data is explicitly synced to disk (`fsync`); survives power loss.
-//! - **Durable**: Full ACID guarantee; coordinates with WAL to ensure log records persist before data pages.
+//! ```text
+//!   Level        Survives         Sync Behavior              Performance
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!   None         Nothing          No sync                    Fastest
+//!   Buffer       Process crash    OS buffers only            Fast
+//!   Sync         Power loss       fsync data file            Moderate
+//!   Durable      Power loss       fsync WAL first, then data Slowest (safest)
+//! ```
 //!
-//! ## Key Features
+//! ## Write-Ahead Logging Protocol
 //!
-//! - **Policy Enforcement**: Translates high-level configuration (`FsyncPolicy`) into concrete I/O actions.
-//! - **Overhead Estimation**: Provides heuristics to estimate the latency cost of sync operations.
-//! - **WAL Integration**: Ensures the "Write-Ahead" property by syncing the log before data pages when required.
+//! ```text
+//!   DurabilityLevel::Durable with wal_enabled=true
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Step 1: Write log records to WAL file
+//!           (already done by LogManager before flush)
+//!
+//!   Step 2: sync_log() ──► fsync(wal_file)
+//!           ↓
+//!           WAL is now durable on disk
+//!
+//!   Step 3: sync_data() ──► fsync(db_file)
+//!           ↓
+//!           Data pages are now durable on disk
+//!
+//!   Why this order?
+//!   • If crash after Step 2: WAL has redo info, recovery replays it
+//!   • If crash after Step 3: Both WAL and data are consistent
+//!   • Never sync data before WAL (would violate Write-Ahead property)
+//! ```
+//!
+//! ## Fsync Policies
+//!
+//! | Policy           | Behavior                                            |
+//! |------------------|-----------------------------------------------------|
+//! | `Never`          | Never call fsync (rely on OS crash recovery only)   |
+//! | `OnFlush`        | Sync when flush() is explicitly called              |
+//! | `PerWrite`       | Sync after every write (very slow, very safe)       |
+//! | `Periodic(dur)`  | Sync if `dur` has elapsed since last sync           |
+//!
+//! ## Key Components
+//!
+//! | Component             | Description                                       |
+//! |-----------------------|---------------------------------------------------|
+//! | `DurabilityManager`   | Coordinates sync operations based on policy       |
+//! | `DurabilityProvider`  | Trait for performing actual sync I/O              |
+//! | `DurabilityResult`    | Outcome of `apply_durability()` call              |
+//! | `DurabilityLevel`     | Enum: None, Buffer, Sync, Durable                 |
+//! | `FsyncPolicy`         | Enum: Never, OnFlush, PerWrite, Periodic          |
+//!
+//! ## Core Operations
+//!
+//! | Method                    | Description                                    |
+//! |---------------------------|------------------------------------------------|
+//! | `new()`                   | Create with policy, level, and WAL flag        |
+//! | `apply_durability()`      | Apply guarantees to flushed pages              |
+//! | `estimate_sync_overhead()`| Estimate latency cost of syncing pages         |
+//! | `fsync_policy()`          | Get current fsync policy                       |
+//! | `durability_level()`      | Get current durability level                   |
+//! | `pending_syncs()`         | Get count of pages synced since creation       |
+//! | `set_*()` methods         | Runtime configuration updates                  |
+//!
+//! ## DurabilityResult
+//!
+//! | Field              | Description                                        |
+//! |--------------------|----------------------------------------------------|
+//! | `sync_performed`   | Whether fsync was actually called                  |
+//! | `wal_written`      | Whether WAL was involved                           |
+//! | `pages_synced`     | Number of pages in the operation                   |
+//! | `durability_level` | The level that was applied                         |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::memory::durability_manager::{
+//!     DurabilityManager, DurabilityProvider,
+//! };
+//! use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
+//!
+//! // Create manager with full durability
+//! let manager = DurabilityManager::new(
+//!     FsyncPolicy::OnFlush,
+//!     DurabilityLevel::Durable,
+//!     true, // WAL enabled
+//! );
+//!
+//! // Apply durability after writing pages
+//! let pages = vec![(1, page_data1), (2, page_data2)];
+//! let result = manager.apply_durability(&pages, &disk_manager).await?;
+//!
+//! if result.sync_performed {
+//!     println!("Pages synced to disk");
+//! }
+//! if result.wal_written {
+//!     println!("WAL was synced first");
+//! }
+//!
+//! // Estimate overhead before deciding to sync
+//! let overhead = manager.estimate_sync_overhead(&pages)?;
+//! println!("Estimated sync time: {:?}", overhead);
+//! ```
+//!
+//! ## Overhead Estimation
+//!
+//! ```text
+//!   DurabilityLevel    Base Overhead    Size Factor         WAL Overhead
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!   None               0                0                   0
+//!   Buffer             10 µs            0                   0
+//!   Sync               1 ms             1 ns per KB         0
+//!   Durable            5 ms             2 ns per KB         +2 ms if WAL enabled
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `pending_syncs`: `AtomicUsize` for lock-free counting
+//! - `last_sync_time`: `Mutex<Instant>` for accurate timing (minimal contention)
+//! - Configuration fields are immutable after creation (use `set_*` for updates)
+//! - Safe for concurrent `apply_durability()` calls from multiple tasks
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
