@@ -1,9 +1,200 @@
+//! # Record ID (RID)
+//!
+//! This module provides the `RID` (Record ID) type, the fundamental identifier for locating
+//! individual records (tuples) within a table. Every record stored in the database has a
+//! unique RID that specifies its physical location.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                              RID                                         │
+//!   │                                                                          │
+//!   │   ┌─────────────────────────────┐  ┌─────────────────────────────┐       │
+//!   │   │        page_id: u64         │  │       slot_num: u32         │       │
+//!   │   │                             │  │                             │       │
+//!   │   │  Which page in the table    │  │  Which slot within the page │       │
+//!   │   │  heap contains this record  │  │  (index into slot directory)│       │
+//!   │   └─────────────────────────────┘  └─────────────────────────────┘       │
+//!   │                                                                          │
+//!   │   Total size: 12 bytes (8 + 4)                                           │
+//!   └──────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Physical Location Mapping
+//!
+//! ```text
+//!   RID { page_id: 42, slot_num: 3 }
+//!                │              │
+//!                │              │
+//!                ▼              │
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  Table Heap (doubly linked list of pages)                              │
+//!   │                                                                        │
+//!   │   Page 40 ──► Page 41 ──► Page 42 ──► Page 43 ──► ...                  │
+//!   │                              │                                         │
+//!   └──────────────────────────────┼─────────────────────────────────────────┘
+//!                                  │
+//!                                  ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  Page 42 (Slotted Page Format)                                         │
+//!   │                                                                        │
+//!   │  ┌──────────────────────────────────────────────────────────────────┐  │
+//!   │  │ Header │ Slot 0 │ Slot 1 │ Slot 2 │ Slot 3 │ ... │ Free │ Tuples │  │
+//!   │  └────────────────────────────────────┼────────────────────────────────┘  │
+//!   │                                       │                                │
+//!   │                                       ▼                                │
+//!   │                               slot_num = 3                             │
+//!   │                                       │                                │
+//!   │                                       ▼                                │
+//!   │                              ┌──────────────────┐                      │
+//!   │                              │  Tuple Data      │                      │
+//!   │                              │  (actual record) │                      │
+//!   │                              └──────────────────┘                      │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Serialization Formats
+//!
+//! ```text
+//!   Fixed-Width Little-Endian (12 bytes) - Preferred for storage
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Byte:   0    1    2    3    4    5    6    7    8    9   10   11
+//!         ┌────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────┐
+//!         │         page_id (u64 LE)             │  slot_num (u32 LE) │
+//!         └────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┘
+//!
+//!   Methods: to_bytes_le() / try_deserialize() / deserialize()
+//!
+//!
+//!   i64 Packed Format (8 bytes) - For compact in-memory representation
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │  High 32 bits: page_id (truncated!)  │  Low 32 bits: slot_num         │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!
+//!   ⚠️ Warning: page_id is truncated to 32 bits! Use only when page_id < 2^32.
+//!   Methods: to_i64() → Option<i64> / from_i64(i64)
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Field       | Type     | Size    | Description                          |
+//! |-------------|----------|---------|--------------------------------------|
+//! | `page_id`   | `PageId` | 8 bytes | Page identifier in table heap       |
+//! | `slot_num`  | `u32`    | 4 bytes | Slot index within the page           |
+//!
+//! ## Core Operations
+//!
+//! | Method              | Returns              | Description                      |
+//! |---------------------|----------------------|----------------------------------|
+//! | `new(page, slot)`   | `RID`                | Create new RID                   |
+//! | `get_page_id()`     | `PageId`             | Get page identifier              |
+//! | `get_slot_num()`    | `u32`                | Get slot number                  |
+//! | `to_bytes_le()`     | `[u8; 12]`           | Serialize to bytes (lossless)    |
+//! | `try_deserialize()` | `Option<RID>`        | Deserialize from bytes           |
+//! | `deserialize()`     | `RID`                | Deserialize (panics if invalid)  |
+//! | `to_i64()`          | `Option<i64>`        | Pack to i64 (may fail)           |
+//! | `from_i64(i64)`     | `RID`                | Unpack from i64                  |
+//!
+//! ## Trait Implementations
+//!
+//! | Trait           | Purpose                                         |
+//! |-----------------|-------------------------------------------------|
+//! | `Clone`, `Copy` | RID is small, cheap to copy                     |
+//! | `Eq`, `PartialEq`| Compare RIDs for equality                      |
+//! | `Ord`, `PartialOrd`| Order RIDs (page_id first, then slot_num)   |
+//! | `Hash`          | Use RIDs as HashMap/HashSet keys                |
+//! | `Encode`,`Decode`| Bincode serialization for persistence          |
+//! | `Display`       | Human-readable format                           |
+//! | `Default`       | Invalid RID (INVALID_PAGE_ID, slot 0)           |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::common::rid::RID;
+//!
+//! // Create a RID
+//! let rid = RID::new(42, 3);
+//! assert_eq!(rid.get_page_id(), 42);
+//! assert_eq!(rid.get_slot_num(), 3);
+//!
+//! // Serialize to bytes (lossless, 12 bytes)
+//! let bytes = rid.to_bytes_le();
+//! let restored = RID::deserialize(&bytes);
+//! assert_eq!(rid, restored);
+//!
+//! // Pack to i64 (compact but lossy for large page_ids)
+//! if let Some(packed) = rid.to_i64() {
+//!     let unpacked = RID::from_i64(packed);
+//!     assert_eq!(rid, unpacked);
+//! }
+//!
+//! // Use in collections
+//! use std::collections::HashMap;
+//! let mut index: HashMap<RID, String> = HashMap::new();
+//! index.insert(rid, "record data".to_string());
+//!
+//! // Display
+//! println!("{}", rid); // Output: "page_id: 42 slot_num: 3"
+//!
+//! // Default (invalid RID)
+//! let invalid = RID::default();
+//! assert_eq!(invalid.get_page_id(), crate::common::config::INVALID_PAGE_ID);
+//! ```
+//!
+//! ## Usage in Database Operations
+//!
+//! ```text
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ INSERT INTO users VALUES (1, 'Alice')                                   │
+//!   │                                                                         │
+//!   │   1. TableHeap allocates space on a page                                │
+//!   │   2. Returns RID { page_id: 5, slot_num: 12 }                           │
+//!   │   3. Index stores: key='Alice' → RID(5, 12)                             │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ SELECT * FROM users WHERE name = 'Alice'                                │
+//!   │                                                                         │
+//!   │   1. Index lookup: 'Alice' → RID(5, 12)                                 │
+//!   │   2. TableHeap.get_tuple(RID(5, 12))                                    │
+//!   │   3. BufferPool fetches page 5                                          │
+//!   │   4. Page returns tuple at slot 12                                      │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ UPDATE users SET age = 30 WHERE name = 'Alice'                          │
+//!   │                                                                         │
+//!   │   1. Index lookup: 'Alice' → RID(5, 12)                                 │
+//!   │   2. MVCC: Mark old version, create new version                         │
+//!   │   3. New RID (possibly same page) or version chain                      │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `RID` is `Copy` and immutable - inherently thread-safe
+//! - Can be freely shared across threads without synchronization
+//! - Commonly used as keys in concurrent data structures
+//!
+//! ## Implementation Notes
+//!
+//! - **ENCODED_LEN**: 12 bytes fixed-width for storage consistency
+//! - **i64 Packing**: Truncates page_id to 32 bits - use `to_bytes_le()` for full fidelity
+//! - **Ordering**: `Ord` compares page_id first, then slot_num (useful for sequential scans)
+//! - **Default**: Returns invalid RID using `INVALID_PAGE_ID` sentinel value
+
 use crate::common::config::{INVALID_PAGE_ID, PageId};
 use bincode::{Decode, Encode};
 use std::fmt;
 use std::hash::Hash;
 
-/// Represents a Record ID (RID) in the table.
+/// Record ID (RID) - identifies a record's physical location in a table.
+///
+/// See module-level documentation for details.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, Decode)]
 pub struct RID {
     page_id: PageId,
