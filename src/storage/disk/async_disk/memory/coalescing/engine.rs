@@ -1,21 +1,293 @@
 //! # Coalescing Engine
 //!
-//! The `CoalescingEngine` is the active component responsible for identifying and merging related write requests.
-//! It acts as a short-term holding area where adjacent page writes can be fused before being moved to the main buffer.
+//! This module provides `CoalescingEngine`, which identifies and merges related write requests
+//! before they are buffered. It acts as a short-term holding area where adjacent page writes
+//! can be fused, converting random I/O patterns into more sequential patterns.
 //!
-//! ## Features
+//! ## Architecture
 //!
-//! - **Adjacent Detection**: Identifies writes to physically adjacent page IDs.
-//! - **Merge Logic**: Combines data for the same page (overwrite) or adjacent pages.
-//! - **Cleanup Policies**: Periodically evicts pending writes based on:
-//!     - **Time**: Writes waiting longer than `coalesce_window`.
-//!     - **Memory**: Eviction under memory pressure.
-//!     - **Access Frequency**: Prioritizes keeping "hot" regions that are actively being accumulated.
+//! ```text
+//!   WriteManager
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ try_coalesce_write(page_id, data)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                       CoalescingEngine                                  │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  pending_writes: HashMap<PageId, Vec<u8>>                       │   │
+//!   │   │                                                                 │   │
+//!   │   │  ┌──────┬──────────────────┬───────────────┬──────────────────┐ │   │
+//!   │   │  │ PID  │ Data             │ Timestamp     │ Access Count     │ │   │
+//!   │   │  ├──────┼──────────────────┼───────────────┼──────────────────┤ │   │
+//!   │   │  │  1   │ [page bytes...]  │ 10:32:01.123  │ 3                │ │   │
+//!   │   │  │  2   │ [page bytes...]  │ 10:32:01.456  │ 1                │ │   │
+//!   │   │  │  5   │ [page bytes...]  │ 10:32:00.789  │ 2                │ │   │
+//!   │   │  └──────┴──────────────────┴───────────────┴──────────────────┘ │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Configuration                                                  │   │
+//!   │   │                                                                 │   │
+//!   │   │  coalesce_window:   Duration   ← Max time to hold pending write │   │
+//!   │   │  max_coalesce_size: usize      ← Max pending writes before evict│   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                                                                         │
+//!   │   ┌────────────────────────┐                                            │
+//!   │   │  SizeAnalyzer          │ ← Efficiency calculations                  │
+//!   │   └────────────────────────┘                                            │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!          │
+//!          │ CoalesceResult { NoCoalesce | Coalesced | Merged }
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │              WriteStagingBuffer                                         │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Usage
+//! ## Write Coalescing Flow
 //!
-//! Used by `WriteManager` as the first step in the write pipeline. It effectively converts a stream of random
-//! 4KB page writes into larger (e.g., 64KB) sequential chunks where possible.
+//! ```text
+//!   try_coalesce_write(page_id, data)
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 1: INPUT VALIDATION                                               │
+//!   │                                                                        │
+//!   │   data.is_empty()?                                                     │
+//!   │        │                                                               │
+//!   │        ├── Yes: Return Err(InvalidInput)                               │
+//!   │        └── No:  Continue                                               │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 2: CHECK FOR EXISTING WRITE                                       │
+//!   │                                                                        │
+//!   │   pending_writes.contains_key(page_id)?                                │
+//!   │        │                                                               │
+//!   │        ├── Yes: MERGE (newer data replaces older)                      │
+//!   │        │        • Update pending_writes[page_id] = data                │
+//!   │        │        • Update timestamp                                     │
+//!   │        │        • Increment access_frequency                           │
+//!   │        │        • Return Merged(data)                                  │
+//!   │        │                                                               │
+//!   │        └── No:  NEW WRITE                                              │
+//!   │                 • Insert into pending_writes                           │
+//!   │                 • Record timestamp                                     │
+//!   │                 • Set access_frequency = 1                             │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   ┌────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 3: CAPACITY CHECK & CLEANUP                                       │
+//!   │                                                                        │
+//!   │   pending_writes.len() > max_coalesce_size?                            │
+//!   │        │                                                               │
+//!   │        ├── Yes: simple_cleanup()                                       │
+//!   │        │        • Remove oldest entries until len <= max/2             │
+//!   │        │                                                               │
+//!   │        └── No:  Skip cleanup                                           │
+//!   └────────────────────────────────────────────────────────────────────────┘
+//!        │
+//!        ▼
+//!   Return NoCoalesce(data)  or  Coalesced(data)
+//! ```
+//!
+//! ## Cleanup Policies
+//!
+//! ```text
+//!   cleanup_expired_writes(now)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Phase 1: TIME-BASED EXPIRATION
+//!   ┌──────────────────────────────────────────────────────────────────────┐
+//!   │  For each pending write:                                             │
+//!   │     if now - timestamp > coalesce_window:                            │
+//!   │        mark for cleanup (TimeExpired)                                │
+//!   └──────────────────────────────────────────────────────────────────────┘
+//!                              │
+//!                              ▼
+//!   Phase 2: MEMORY PRESSURE
+//!   ┌──────────────────────────────────────────────────────────────────────┐
+//!   │  memory_pressure = current_usage / max_usage                         │
+//!   │                                                                      │
+//!   │  if memory_pressure > 80% OR len > max_pending:                      │
+//!   │     • Extreme (>90%): Remove 50% of writes                           │
+//!   │     • High (>80%):    Remove excess writes                           │
+//!   │                                                                      │
+//!   │  Priority: older + larger + lower access frequency                   │
+//!   └──────────────────────────────────────────────────────────────────────┘
+//!                              │
+//!                              ▼
+//!   Phase 3: ACCESS PATTERN
+//!   ┌──────────────────────────────────────────────────────────────────────┐
+//!   │  if not enough cleaned by time/memory:                               │
+//!   │     Select lowest access_frequency pages (up to 12.5%)               │
+//!   │     mark for cleanup (LowAccess)                                     │
+//!   └──────────────────────────────────────────────────────────────────────┘
+//!                              │
+//!                              ▼
+//!   Phase 4: EXECUTE CLEANUP
+//!   ┌──────────────────────────────────────────────────────────────────────┐
+//!   │  For each marked page:                                               │
+//!   │     • Remove from pending_writes                                     │
+//!   │     • Remove from write_timestamps                                   │
+//!   │     • Remove from access_frequencies                                 │
+//!   │     • Track bytes freed and reason                                   │
+//!   └──────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## CoalesceResult Variants
+//!
+//! | Variant       | Meaning                                             |
+//! |---------------|-----------------------------------------------------|
+//! | `NoCoalesce`  | First write for this page, stored as-is             |
+//! | `Coalesced`   | Combined with adjacent pending writes               |
+//! | `Merged`      | Replaced existing pending write for same page       |
+//!
+//! ## CleanupReason Variants
+//!
+//! | Reason           | Trigger Condition                                |
+//! |------------------|--------------------------------------------------|
+//! | `TimeExpired`    | Write exceeded `coalesce_window` duration        |
+//! | `MemoryPressure` | Total memory usage > 80% of max                  |
+//! | `LowAccess`      | Page has low access frequency relative to others |
+//!
+//! ## Key Components
+//!
+//! | Component          | Description                                        |
+//! |--------------------|----------------------------------------------------|
+//! | `CoalescingEngine` | Main engine with pending writes and tracking       |
+//! | `CoalesceResult`   | Outcome of `try_coalesce_write()` operation        |
+//! | `CleanupReason`    | Why a pending write was evicted                    |
+//! | `CleanupMetrics`   | Statistics from last cleanup operation             |
+//! | `CoalescingStats`  | Current engine state for monitoring                |
+//!
+//! ## Core Operations
+//!
+//! | Method                       | Description                                |
+//! |------------------------------|--------------------------------------------|
+//! | `new()`                      | Create with coalesce window and max size   |
+//! | `try_coalesce_write()`       | Add write, possibly merging with existing  |
+//! | `find_adjacent_pages()`      | Find pages within ±4 of given page ID      |
+//! | `cleanup_expired_writes()`   | Multi-phase cleanup of stale/excess writes |
+//! | `get_coalescing_size_analysis()` | Detailed size analysis via `SizeAnalyzer` |
+//! | `get_stats()`                | Get current engine statistics              |
+//! | `update_config()`            | Change window and max size at runtime      |
+//! | `clear_all()`                | Remove all pending writes (for shutdown)   |
+//!
+//! ## CoalescingStats Fields
+//!
+//! | Field                 | Description                                    |
+//! |-----------------------|------------------------------------------------|
+//! | `pending_writes`      | Number of pages currently pending              |
+//! | `total_data_size`     | Sum of all pending write data sizes            |
+//! | `oldest_write_age`    | Duration since oldest pending write            |
+//! | `memory_pressure`     | Current pressure ratio (0.0 to 1.0)            |
+//! | `last_cleanup_age`    | Duration since last cleanup operation          |
+//! | `last_cleanup_metrics`| Details from most recent cleanup               |
+//!
+//! ## CleanupMetrics Fields
+//!
+//! | Field                  | Description                                   |
+//! |------------------------|-----------------------------------------------|
+//! | `cleaned_by_time`      | Pages removed due to time expiration          |
+//! | `cleaned_by_memory`    | Pages removed due to memory pressure          |
+//! | `cleaned_by_access`    | Pages removed due to low access frequency     |
+//! | `total_data_size_freed`| Bytes freed by cleanup                        |
+//! | `cleanup_timestamp`    | When cleanup was performed                    |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::memory::coalescing::engine::{
+//!     CoalescingEngine, CoalesceResult,
+//! };
+//! use std::time::Duration;
+//!
+//! // Create engine: 10ms window, max 64 pending writes
+//! let mut engine = CoalescingEngine::new(
+//!     Duration::from_millis(10),
+//!     64,
+//! );
+//!
+//! // First write to page 1
+//! let data1 = vec![1u8; 4096];
+//! match engine.try_coalesce_write(1, data1)? {
+//!     CoalesceResult::NoCoalesce(data) => {
+//!         println!("First write for page 1, stored as pending");
+//!     }
+//!     _ => unreachable!(),
+//! }
+//!
+//! // Second write to same page (merge)
+//! let data2 = vec![2u8; 4096];
+//! match engine.try_coalesce_write(1, data2)? {
+//!     CoalesceResult::Merged(data) => {
+//!         println!("Merged with existing write for page 1");
+//!     }
+//!     _ => unreachable!(),
+//! }
+//!
+//! // Find adjacent pages
+//! let adjacent = engine.find_adjacent_pages(3);
+//! println!("Pages adjacent to 3: {:?}", adjacent);
+//!
+//! // Check statistics
+//! let stats = engine.get_stats();
+//! println!("Pending writes: {}", stats.pending_writes);
+//! println!("Memory pressure: {:.1}%", stats.memory_pressure * 100.0);
+//!
+//! // Manual cleanup (usually done automatically)
+//! engine.cleanup_expired_writes(std::time::Instant::now())?;
+//!
+//! // Shutdown
+//! engine.clear_all();
+//! ```
+//!
+//! ## Adjacent Page Detection
+//!
+//! ```text
+//!   find_adjacent_pages(page_id = 5)
+//!
+//!   Search range: page_id ± 4
+//!
+//!   ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+//!   │  1  │  2  │  3  │  4  │  5  │  6  │  7  │  8  │  9  │
+//!   └─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+//!         ◄───────────────────┼───────────────────►
+//!              -4 to -1       │      +1 to +4
+//!
+//!   Pending writes: [2, 4, 7, 10]
+//!
+//!   Result: [2, 4, 7]  (page 10 is outside ±4 range)
+//! ```
+//!
+//! ## Memory Pressure Priority Scoring
+//!
+//! ```text
+//!   priority_score = age × 0.4 + size × 0.4 + (1/access_freq) × 0.2
+//!
+//!   Higher score = higher priority for eviction
+//!
+//!   Example:
+//!   ┌────────┬────────┬────────┬──────────┬─────────────────┐
+//!   │ PageID │ Age(ms)│ Size   │ Accesses │ Priority Score  │
+//!   ├────────┼────────┼────────┼──────────┼─────────────────┤
+//!   │   1    │  100   │  4096  │    5     │ 40 + 1638 + 0.04│
+//!   │   3    │  500   │  4096  │    1     │ 200 + 1638 + 0.2│  ← Evict first
+//!   │   7    │   50   │  1024  │    3     │ 20 + 410 + 0.07 │
+//!   └────────┴────────┴────────┴──────────┴─────────────────┘
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `CoalescingEngine` is designed to be wrapped in `Arc<RwLock<>>`
+//! - Internal state uses `HashMap` for `O(1)` lookups
+//! - Cleanup is rate-limited (100ms minimum interval) to prevent thrashing
+//! - All state mutations are done through `&mut self` methods
 
 use super::size_analyzer::{CoalescedSizeInfo, SizeAnalyzer};
 use crate::common::config::PageId;
