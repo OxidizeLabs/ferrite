@@ -1,26 +1,252 @@
 //! # I/O Worker Management
 //!
-//! The `IOWorkerManager` handles the lifecycle of background worker threads that process I/O operations.
-//! It acts as the bridge between the priority queue and the execution logic.
+//! This module provides `IOWorkerManager`, which handles the lifecycle of background Tokio tasks
+//! that process I/O operations. It bridges the priority queue and execution logic, providing
+//! concurrency control and graceful shutdown.
 //!
 //! ## Architecture
 //!
-//! This manager spawns and supervises a pool of dedicated Tokio tasks ("workers"). Each worker runs a
-//! continuous loop that:
-//! 1. Dequeues the highest-priority operation from the `IOQueueManager`.
-//! 2. Acquires a permit from a concurrency semaphore (backpressure).
-//! 3. Executes the operation via the `IOOperationExecutor`.
-//! 4. Reports completion or failure to the `CompletionTracker`.
+//! ```text
+//!   AsyncDiskManager
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!          │
+//!          │ start_workers(num_workers, queue, executor, tracker)
+//!          ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                       IOWorkerManager                                   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  worker_tasks: JoinSet<()>                                      │   │
+//!   │   │                                                                 │   │
+//!   │   │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │   │
+//!   │   │  │Worker 0 │  │Worker 1 │  │Worker 2 │  │  ...    │            │   │
+//!   │   │  │ (task)  │  │ (task)  │  │ (task)  │  │         │            │   │
+//!   │   │  └────┬────┘  └────┬────┘  └────┬────┘  └─────────┘            │   │
+//!   │   │       │            │            │                              │   │
+//!   │   │       └────────────┼────────────┘                              │   │
+//!   │   │                    │                                           │   │
+//!   │   │                    ▼                                           │   │
+//!   │   │       ┌────────────────────────────┐                           │   │
+//!   │   │       │ concurrency_limiter        │                           │   │
+//!   │   │       │ (Semaphore, max_ops)       │                           │   │
+//!   │   │       └────────────────────────────┘                           │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Shutdown Coordination                                          │   │
+//!   │   │                                                                 │   │
+//!   │   │  shutdown_signal: Arc<Notify>   ← Wake waiting workers          │   │
+//!   │   │  shutdown_flag: Arc<AtomicBool> ← Reliable shutdown detection   │   │
+//!   │   └─────────────────────────────────────────────────────────────────┘   │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//! ```
 //!
-//! ## Key Features
+//! ## Worker Loop Flow
 //!
-//! - **Dynamic Scaling**: Supports starting a configurable number of worker threads.
-//! - **Concurrency Limiting**: Uses a `Semaphore` to globally limit the number of simultaneous disk I/O
-//!   operations, independent of the number of worker threads.
-//! - **Graceful Shutdown**: Implements a robust shutdown protocol using signals and atomic flags to
-//!   ensure workers complete in-flight requests before terminating.
-//! - **Fault Isolation**: Each worker runs independently; a panic in one (though unlikely) does not
-//!   crash the entire system (in a robust implementation, this would also include restart logic).
+//! ```text
+//!   worker_loop(worker_id)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ Loop Start                                                              │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ Check shutdown_flag                                                     │
+//!   │                                                                         │
+//!   │   shutdown_flag.load()?                                                 │
+//!   │        │                                                                │
+//!   │        ├── true:  Break loop (exit worker)                              │
+//!   │        └── false: Continue                                              │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ tokio::select! (race between shutdown and work)                         │
+//!   │                                                                         │
+//!   │   ┌─────────────────────────┐    ┌─────────────────────────┐            │
+//!   │   │ shutdown_signal.notified│ OR │ queue.dequeue_operation │            │
+//!   │   └───────────┬─────────────┘    └───────────┬─────────────┘            │
+//!   │               │                              │                          │
+//!   │               ▼                              ▼                          │
+//!   │         Break loop                    Got operation?                    │
+//!   │                                              │                          │
+//!   │                              ┌───────────────┼───────────────┐          │
+//!   │                              │ Some(op)      │ None          │          │
+//!   │                              ▼               ▼               │          │
+//!   │                        process_operation  sleep(1ms)        │          │
+//!   │                              │               │               │          │
+//!   │                              └───────────────┴───────────────┘          │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │
+//!                                   └──► Continue loop
+//! ```
+//!
+//! ## Operation Processing
+//!
+//! ```text
+//!   process_operation(operation, executor, tracker, semaphore)
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 1: CHECK IF STILL PENDING                                          │
+//!   │                                                                         │
+//!   │   tracker.is_operation_pending(op_id)?                                  │
+//!   │        │                                                                │
+//!   │        ├── false: Skip (already cancelled/timed out)                    │
+//!   │        └── true:  Continue                                              │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 2: ACQUIRE SEMAPHORE PERMIT                                        │
+//!   │                                                                         │
+//!   │   semaphore.acquire().await                                             │
+//!   │        │                                                                │
+//!   │        ├── Err: Semaphore closed → return (shutdown)                    │
+//!   │        └── Ok(permit): Hold permit for duration of operation            │
+//!   │                                                                         │
+//!   │   ⚠️ Backpressure: Only max_concurrent_operations can run at once       │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 3: EXECUTE OPERATION                                               │
+//!   │                                                                         │
+//!   │   executor.execute_operation_type(op.operation_type).await              │
+//!   │        │                                                                │
+//!   │        ├── Ok(data):  Complete with OperationResult::Success(data)      │
+//!   │        └── Err(err):  Complete with OperationResult::Error(msg)         │
+//!   └───────────────────────────────┬─────────────────────────────────────────┘
+//!                                   │
+//!                                   ▼
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │ Step 4: REPORT COMPLETION                                               │
+//!   │                                                                         │
+//!   │   tracker.complete_operation_with_result(op_id, result).await           │
+//!   │        │                                                                │
+//!   │        └── If Err: Operation was cancelled, just log and continue       │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!                                   │
+//!                                   ▼
+//!   permit dropped automatically (RAII) → releases semaphore slot
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component             | Description                                        |
+//! |-----------------------|----------------------------------------------------|
+//! | `IOWorkerManager`     | Manages worker lifecycle and shutdown coordination |
+//! | `worker_tasks`        | `JoinSet<()>` holding all spawned worker tasks     |
+//! | `shutdown_signal`     | `Arc<Notify>` to wake workers waiting on queue     |
+//! | `shutdown_flag`       | `Arc<AtomicBool>` for reliable shutdown detection  |
+//! | `concurrency_limiter` | `Arc<Semaphore>` limiting concurrent I/O operations|
+//!
+//! ## Core Operations
+//!
+//! | Method                        | Description                                 |
+//! |-------------------------------|---------------------------------------------|
+//! | `new()`                       | Create with specific concurrency limit      |
+//! | `new_with_default_concurrency()`| Create with default limit (32)            |
+//! | `start_workers()`             | Spawn worker tasks with shared components   |
+//! | `signal_shutdown()`           | Signal shutdown without waiting (`&self`)   |
+//! | `shutdown()`                  | Graceful shutdown, waits for completion     |
+//! | `force_shutdown()`            | Abort all workers immediately               |
+//! | `worker_count()`              | Get number of active workers                |
+//! | `has_active_workers()`        | Check if any workers are running            |
+//!
+//! ## Shutdown Strategies
+//!
+//! | Strategy           | Behavior                                            |
+//! |--------------------|-----------------------------------------------------|
+//! | `signal_shutdown()`| Sets flag + notifies, returns immediately (`&self`) |
+//! | `shutdown()`       | Sets flag + notifies, awaits all workers to finish  |
+//! | `force_shutdown()` | Aborts all tasks immediately (may drop in-flight)   |
+//! | Drop               | Logs warning, aborts remaining workers              |
+//!
+//! ## Concurrency Control
+//!
+//! ```text
+//!   Workers: 4              Semaphore permits: 2
+//!   ═══════════════════════════════════════════════════════════════════════════
+//!
+//!   Worker 0  ─────────────────────►  Acquire permit ✓
+//!                                     [Executing I/O...]
+//!
+//!   Worker 1  ─────────────────────►  Acquire permit ✓
+//!                                     [Executing I/O...]
+//!
+//!   Worker 2  ─────────────────────►  Waiting for permit...
+//!                                     (blocked until Worker 0 or 1 finishes)
+//!
+//!   Worker 3  ─────────────────────►  Waiting for permit...
+//!                                     (blocked until permit available)
+//!
+//!   Benefit: Prevents overwhelming disk subsystem even with many workers
+//! ```
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::storage::disk::async_disk::io::worker::IOWorkerManager;
+//! use std::sync::Arc;
+//!
+//! // Create worker manager with concurrency limit of 16
+//! let mut worker_manager = IOWorkerManager::new(16);
+//!
+//! // Start 4 worker tasks
+//! worker_manager.start_workers(
+//!     4,
+//!     Arc::clone(&queue_manager),
+//!     Arc::clone(&executor),
+//!     Arc::clone(&completion_tracker),
+//! );
+//!
+//! assert_eq!(worker_manager.worker_count(), 4);
+//! assert!(worker_manager.has_active_workers());
+//!
+//! // ... process operations ...
+//!
+//! // Graceful shutdown (waits for in-flight operations)
+//! worker_manager.shutdown().await;
+//!
+//! assert_eq!(worker_manager.worker_count(), 0);
+//!
+//! // Can restart workers after shutdown
+//! worker_manager.start_workers(2, queue, executor, tracker);
+//! ```
+//!
+//! ## Shared Components
+//!
+//! ```text
+//!   start_workers() receives:
+//!   ┌─────────────────────────────────────────────────────────────────────────┐
+//!   │                                                                         │
+//!   │   Arc<IOQueueManager>     ← Priority queue of pending operations        │
+//!   │   Arc<IOOperationExecutor>← Executes reads/writes on files              │
+//!   │   Arc<CompletionTracker>  ← Tracks operation state and metrics          │
+//!   │                                                                         │
+//!   └─────────────────────────────────────────────────────────────────────────┘
+//!
+//!   Each worker gets Arc::clone() of all components
+//!   → Safe concurrent access from multiple workers
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - `JoinSet`: Tokio's built-in task management (task-safe)
+//! - `shutdown_signal`: `Arc<Notify>` for async wake-up
+//! - `shutdown_flag`: `Arc<AtomicBool>` with `Ordering::Relaxed` (sufficient for flags)
+//! - `concurrency_limiter`: `Arc<Semaphore>` for fair permit distribution
+//! - All shared components (`queue`, `executor`, `tracker`) wrapped in `Arc`
+//!
+//! ## Drop Behavior
+//!
+//! If `IOWorkerManager` is dropped with active workers:
+//! - Logs a warning with the count of remaining workers
+//! - Calls `abort_all()` on the `JoinSet` to stop them immediately
+//! - Does NOT wait for graceful shutdown (use `shutdown()` before drop)
 
 use super::executor::IOOperationExecutor;
 use super::operations::IOOperation;
