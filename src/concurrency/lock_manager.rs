@@ -1,3 +1,163 @@
+//! # Lock Manager
+//!
+//! This module provides a strict two-phase locking (2PL) implementation with
+//! multi-level granularity (table and row locks), deadlock detection via a
+//! waits-for graph, and isolation level-aware lock validation.
+//!
+//! ## Architecture
+//!
+//! ```text
+//!                          ┌──────────────────────────────────────────────────┐
+//!                          │                  LockManager                     │
+//!                          │                                                  │
+//!                          │  ┌──────────────────────────────────────────┐    │
+//!                          │  │           DeadlockDetector               │    │
+//!                          │  │  ┌────────────────────────────────────┐  │    │
+//!                          │  │  │ waits_for: HashMap<TxnId, Vec>     │  │    │
+//!                          │  │  │   T1 ──▶ [T2, T3]                  │  │    │
+//!                          │  │  │   T2 ──▶ [T4]                      │  │    │
+//!                          │  │  │   ...                              │  │    │
+//!                          │  │  └────────────────────────────────────┘  │    │
+//!                          │  │  detection_thread (background DFS)       │    │
+//!                          │  └──────────────────────────────────────────┘    │
+//!                          │                                                  │
+//!                          │  ┌──────────────────────────────────────────┐    │
+//!                          │  │           LockStateManager               │    │
+//!                          │  │  ┌────────────────────────────────────┐  │    │
+//!                          │  │  │ table_lock_map: HashMap            │  │    │
+//!                          │  │  │   TableOid → LockRequestQueue      │  │    │
+//!                          │  │  └────────────────────────────────────┘  │    │
+//!                          │  │  ┌────────────────────────────────────┐  │    │
+//!                          │  │  │ row_locks: HashMap                 │  │    │
+//!                          │  │  │   RID → LockRequestQueue           │  │    │
+//!                          │  │  └────────────────────────────────────┘  │    │
+//!                          │  │  ┌────────────────────────────────────┐  │    │
+//!                          │  │  │ txn_lock_sets: HashMap             │  │    │
+//!                          │  │  │   TxnId → TxnLockState             │  │    │
+//!                          │  │  └────────────────────────────────────┘  │    │
+//!                          │  └──────────────────────────────────────────┘    │
+//!                          │                                                  │
+//!                          │  ┌──────────────────────────────────────────┐    │
+//!                          │  │           LockValidator                  │    │
+//!                          │  │  (isolation level & state validation)    │    │
+//!                          │  └──────────────────────────────────────────┘    │
+//!                          └──────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Lock Modes
+//!
+//! | Mode | Name | Description |
+//! |------|------|-------------|
+//! | `IS` | Intention Shared | Intent to acquire S lock on descendant |
+//! | `IX` | Intention Exclusive | Intent to acquire X lock on descendant |
+//! | `S`  | Shared | Read lock, compatible with other S locks |
+//! | `SIX`| Shared + Intention Exclusive | S on resource + IX for descendants |
+//! | `X`  | Exclusive | Write lock, incompatible with all others |
+//!
+//! ## Lock Compatibility Matrix
+//!
+//! ```text
+//!      │  IS  │  IX  │  S   │ SIX  │  X   │
+//!  ────┼──────┼──────┼──────┼──────┼──────┤
+//!   IS │  ✓   │  ✓   │  ✓   │  ✓   │  ✗   │
+//!   IX │  ✓   │  ✓   │  ✗   │  ✗   │  ✗   │
+//!   S  │  ✓   │  ✗   │  ✓   │  ✗   │  ✗   │
+//!  SIX │  ✓   │  ✗   │  ✗   │  ✗   │  ✗   │
+//!   X  │  ✗   │  ✗   │  ✗   │  ✗   │  ✗   │
+//! ```
+//!
+//! ## Lock Upgrade Paths
+//!
+//! ```text
+//!   IS ───▶ S, X, IX, SIX
+//!    S ───▶ X, SIX
+//!   IX ───▶ X, SIX
+//!  SIX ───▶ X
+//! ```
+//!
+//! ## Multi-Level Locking Protocol
+//!
+//! ```text
+//!   Row Lock Requirement          Table Lock Must Hold
+//!   ──────────────────────────────────────────────────
+//!   S (Shared) on row       ──▶   S, IS, or SIX on table
+//!   X (Exclusive) on row    ──▶   X, IX, or SIX on table
+//! ```
+//!
+//! ## Isolation Level Lock Rules
+//!
+//! | Isolation Level | Growing Phase | Shrinking Phase |
+//! |-----------------|---------------|-----------------|
+//! | READ UNCOMMITTED | X, IX only | X, IX only → SHRINKING |
+//! | READ COMMITTED | All locks | IS, S only |
+//! | REPEATABLE READ | All locks | No locks allowed |
+//! | SERIALIZABLE | All locks | S, X → SHRINKING |
+//!
+//! ## Deadlock Detection
+//!
+//! The lock manager uses a background thread that periodically checks for
+//! cycles in the waits-for graph using depth-first search (DFS):
+//!
+//! ```text
+//!   Waits-For Graph                 Cycle Detection
+//!   ────────────────                ────────────────
+//!   T1 ──▶ T2 ──▶ T3               DFS from each node
+//!          │      │                Track path + visited
+//!          └──────┘                Abort highest TxnId in cycle
+//!         (CYCLE!)
+//! ```
+//!
+//! ## Key Components
+//!
+//! | Component | Description |
+//! |-----------|-------------|
+//! | `LockManager` | Main coordinator for lock operations |
+//! | `LockRequest` | Single lock request (table or row) |
+//! | `LockRequestQueue` | FIFO queue per resource with upgrade support |
+//! | `DeadlockDetector` | Waits-for graph with background cycle detection |
+//! | `LockStateManager` | Tracks all lock state and transaction lock sets |
+//! | `LockValidator` | Enforces isolation level and state constraints |
+//! | `LockCompatibilityChecker` | Implements compatibility matrix |
+//!
+//! ## Core Operations
+//!
+//! | Operation | Description |
+//! |-----------|-------------|
+//! | `lock_table(txn, mode, oid)` | Acquire table lock (blocking) |
+//! | `unlock_table(txn, mode, oid)` | Release table lock |
+//! | `lock_row(txn, mode, oid, rid)` | Acquire row lock (requires table lock) |
+//! | `unlock_row(txn, mode, oid, rid)` | Release row lock |
+//! | `force_release_txn(txn_id)` | Release all locks for transaction |
+//! | `check_deadlock(txn)` | Check if transaction is victim of deadlock |
+//!
+//! ## Example Usage
+//!
+//! ```rust,ignore
+//! use crate::concurrency::lock_manager::{LockManager, LockMode};
+//! use crate::concurrency::transaction::{Transaction, IsolationLevel};
+//!
+//! let lock_manager = LockManager::new();
+//! let txn = Arc::new(Transaction::new(1, IsolationLevel::RepeatableRead));
+//! txn.set_state(TransactionState::Growing);
+//!
+//! // Acquire intention lock on table, then row lock
+//! lock_manager.lock_table(txn.clone(), LockMode::IntentionExclusive, table_oid)?;
+//! lock_manager.lock_row(txn.clone(), LockMode::Exclusive, table_oid, rid)?;
+//!
+//! // ... perform operations ...
+//!
+//! // Release locks (row first, then table)
+//! lock_manager.unlock_row(txn.clone(), LockMode::Exclusive, table_oid, rid)?;
+//! lock_manager.unlock_table(txn.clone(), LockMode::IntentionExclusive, table_oid)?;
+//! ```
+//!
+//! ## Thread Safety
+//!
+//! - All lock state is protected by `parking_lot::Mutex`
+//! - `Condvar` is used for blocking lock acquisition
+//! - Deadlock detection runs on a separate background thread
+//! - Lock manager implements `Send` and `Sync`
+
 use crate::common::config::{INVALID_TXN_ID, TableOidT, TxnId};
 use crate::common::exception::LockError;
 use crate::common::rid::RID;
