@@ -776,12 +776,12 @@ mod tests {
         // After reading the record, the iterator advances logically (by record size).
         assert_eq!(
             iter.get_offset(),
-            DB_PAGE_SIZE as u64 + record_bytes.len() as u64
+            DB_PAGE_SIZE + record_bytes.len() as u64
         );
 
         // The next call should treat the zero-filled padding as padding and jump to the next page.
         assert!(iter.next().await.is_none());
         assert!(iter.is_end());
-        assert_eq!(iter.get_offset(), DB_PAGE_SIZE as u64 * 2);
+        assert_eq!(iter.get_offset(), DB_PAGE_SIZE * 2);
     }
 }

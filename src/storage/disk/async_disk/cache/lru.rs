@@ -5743,7 +5743,7 @@ mod tests {
                 cache.insert(1, Arc::new(1));
 
                 // Capture state
-                let state: Vec<_> = cache.map.iter().map(|(k, _)| *k).collect();
+                let state: Vec<_> = cache.map.keys().copied().collect();
                 assert_eq!(state.len(), 1);
             }
 

@@ -1551,7 +1551,7 @@ mod tuple_operation_tests {
         // [PAGE_TYPE (1)] [header] [start magic (4)] [tuple offset+size (4)] [meta bytes] [end magic (4)]
         let header_start = PAGE_TYPE_OFFSET + 1;
         let header_size = TablePageHeader::size();
-        let meta_bytes = bincode::encode_to_vec(&meta, storage_bincode_config()).unwrap();
+        let meta_bytes = bincode::encode_to_vec(meta, storage_bincode_config()).unwrap();
 
         let meta_start = header_start + header_size + 4 + 4;
         let expected_end_magic_offset = meta_start + meta_bytes.len();

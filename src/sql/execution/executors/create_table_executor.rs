@@ -439,7 +439,7 @@ mod tests {
         let exec_context = setup_execution_context(&test_context, catalog.clone());
 
         let table_names = vec!["table1", "table2", "table3"];
-        let schemas = vec![
+        let schemas = [
             create_test_schema(),
             create_complex_schema(),
             create_single_column_schema(),

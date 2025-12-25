@@ -359,7 +359,7 @@ mod tests {
     fn create_test_tuple() -> Tuple {
         let schema = create_test_schema();
         Tuple::new(
-            &vec![
+            &[
                 Value::new(1),
                 Value::new("John".to_string()),
                 Value::new(25),
