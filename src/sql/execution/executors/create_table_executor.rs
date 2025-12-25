@@ -61,13 +61,13 @@ impl AbstractExecutor for CreateTableExecutor {
                 Some(guard) => {
                     debug!("Successfully acquired context read lock");
                     guard
-                }
+                },
                 None => {
                     return Err(DBError::Execution(
                         "Failed to acquire context read lock - lock contention detected"
                             .to_string(),
                     ));
-                }
+                },
             };
             context_guard.get_catalog().clone()
         };
@@ -79,13 +79,13 @@ impl AbstractExecutor for CreateTableExecutor {
                 Some(guard) => {
                     debug!("Successfully acquired catalog write lock");
                     guard
-                }
+                },
                 None => {
                     return Err(DBError::Execution(
                         "Failed to acquire catalog write lock - lock contention detected"
                             .to_string(),
                     ));
-                }
+                },
             };
 
             // Check existence first
@@ -108,14 +108,14 @@ impl AbstractExecutor for CreateTableExecutor {
                         table_name,
                         table_info.get_table_oidt()
                     );
-                }
+                },
                 None => {
                     // Return a proper error instead of panicking
                     return Err(DBError::Validation(format!(
                         "Failed to create table '{}' - constraints validation failed",
                         table_name
                     )));
-                }
+                },
             }
         }
         debug!("Released catalog write lock");

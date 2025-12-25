@@ -151,7 +151,7 @@ mod tests {
         match &**child {
             Expression::Constant(c) => {
                 assert_eq!(c.get_value(), &Value::new(1));
-            }
+            },
             _ => panic!("Expected Constant expression"),
         }
 

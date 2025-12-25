@@ -172,7 +172,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use log::error;
 
-use crate::common::config::{storage_bincode_config, INVALID_LSN, Lsn, PageId, TxnId};
+use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId, storage_bincode_config};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use bincode::{Decode, Encode};
@@ -237,7 +237,7 @@ impl LogRecord {
             Err(e) => {
                 // Encoding should be infallible for supported types; log and leave current size on error.
                 error!("Failed to encode log record for size calculation: {}", e);
-            }
+            },
         }
     }
 
@@ -313,7 +313,9 @@ impl LogRecord {
                 prev_page_id: None,
                 page_id: None,
             },
-            LogRecordType::MarkDelete | LogRecordType::ApplyDelete | LogRecordType::RollbackDelete => Self {
+            LogRecordType::MarkDelete
+            | LogRecordType::ApplyDelete
+            | LogRecordType::RollbackDelete => Self {
                 size: 0,
                 lsn: AtomicU64::new(INVALID_LSN),
                 txn_id,

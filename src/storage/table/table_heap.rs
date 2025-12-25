@@ -403,10 +403,10 @@ impl TableHeap {
                     Some(rid) => {
                         page.set_dirty(true);
                         Ok(rid)
-                    }
+                    },
                     None => {
                         Err("Failed to insert tuple into page despite having space".to_string())
-                    }
+                    },
                 };
             }
         }
@@ -599,7 +599,7 @@ impl TableHeap {
                 } else {
                     Ok((Arc::new(meta), Arc::new(tuple)))
                 }
-            }
+            },
 
             IsolationLevel::ReadCommitted => {
                 // For READ_COMMITTED, only return committed versions
@@ -648,14 +648,14 @@ impl TableHeap {
 
                     Err("No visible version found".to_string())
                 }
-            }
+            },
 
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
                 let read_ts = txn.read_ts();
                 match meta.visibility_status(txn_id, read_ts) {
                     TupleVisibility::Visible => return Ok((Arc::new(meta), Arc::new(tuple))),
                     TupleVisibility::Deleted => return Err("Tuple is deleted".to_string()),
-                    TupleVisibility::Invisible => { /* continue into version chain */ }
+                    TupleVisibility::Invisible => { /* continue into version chain */ },
                 }
 
                 // If the latest version isn't visible, check the version chain
@@ -687,10 +687,10 @@ impl TableHeap {
 
                     match prev_meta.visibility_status(txn_id, read_ts) {
                         TupleVisibility::Visible => {
-                            return Ok((Arc::new(prev_meta), undo_log.tuple.clone()))
-                        }
+                            return Ok((Arc::new(prev_meta), undo_log.tuple.clone()));
+                        },
                         TupleVisibility::Deleted => return Err("Tuple is deleted".to_string()),
-                        TupleVisibility::Invisible => { /* keep walking */ }
+                        TupleVisibility::Invisible => { /* keep walking */ },
                     }
 
                     current_link = if undo_log.prev_version.is_valid() {
@@ -701,7 +701,7 @@ impl TableHeap {
                 }
 
                 Err("No visible version found".to_string())
-            }
+            },
 
             IsolationLevel::Snapshot => {
                 // For SNAPSHOT, assume similar behavior to SERIALIZABLE for now
@@ -711,7 +711,7 @@ impl TableHeap {
                 } else {
                     Ok((Arc::new(meta), Arc::new(tuple)))
                 }
-            }
+            },
         }
     }
 
@@ -1003,7 +1003,7 @@ impl TableHeap {
                     new_page_id, rid
                 );
                 Ok(rid)
-            }
+            },
             None => {
                 debug!(
                     "Failed to insert tuple into new page {} despite having space",
@@ -1013,7 +1013,7 @@ impl TableHeap {
                     "Failed to insert tuple into new page {} despite space check passing",
                     new_page_id
                 ))
-            }
+            },
         }
     }
 
@@ -1064,11 +1064,11 @@ impl TableHeap {
                     first_page_id, rid
                 );
                 Ok(rid)
-            }
+            },
             None => {
                 debug!("Failed to insert tuple into first page despite having space");
                 Err("Failed to insert tuple into first page".to_string())
-            }
+            },
         }
     }
 
@@ -1185,11 +1185,10 @@ impl TableHeap {
         // If no pages exist yet, create the first page and insert.
         let last_page_id = *self.last_page_id.read();
         if last_page_id == INVALID_PAGE_ID {
-            return self.create_first_page_and_insert(&meta, &Tuple::new(
-                &expanded_values,
-                schema,
-                RID::default(),
-            ));
+            return self.create_first_page_and_insert(
+                &meta,
+                &Tuple::new(&expanded_values, schema, RID::default()),
+            );
         }
 
         let page_guard = self.get_page(last_page_id)?;
@@ -1213,11 +1212,11 @@ impl TableHeap {
                     Some(rid) => {
                         page.set_dirty(true);
                         return Ok(rid);
-                    }
+                    },
                     None => {
                         // Insertion failed despite having space
                         debug!("Page reported having space but insert failed, trying new page");
-                    }
+                    },
                 }
             }
         }
@@ -1394,7 +1393,7 @@ impl TableHeap {
                     new_page_id, rid
                 );
                 Ok(rid)
-            }
+            },
             None => {
                 debug!(
                     "Failed to insert tuple into new page {} despite having space",
@@ -1404,7 +1403,7 @@ impl TableHeap {
                     "Failed to insert tuple into new page {} despite space check passing",
                     new_page_id
                 ))
-            }
+            },
         }
     }
 }

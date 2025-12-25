@@ -94,10 +94,10 @@ impl AbstractExecutor for DeleteExecutor {
                         child_executor.init();
                         self.child_executor = Some(child_executor);
                         debug!("Child executor created and initialized");
-                    }
+                    },
                     Err(e) => {
                         error!("Failed to create child executor: {}", e);
-                    }
+                    },
                 }
             }
         } else if let Some(ref mut child) = self.child_executor {
@@ -154,11 +154,11 @@ impl AbstractExecutor for DeleteExecutor {
                             "Successfully deleted tuple #{} with RID {:?}",
                             delete_count, rid
                         );
-                    }
+                    },
                     Err(e) => {
                         error!("Failed to delete tuple with RID {:?}: {}", rid, e);
                         return Err(DBError::Execution(format!("Delete failed: {}", e)));
-                    }
+                    },
                 }
             }
         } else {

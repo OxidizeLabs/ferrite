@@ -1,13 +1,13 @@
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
 use ferrite::sql::planner::logical_plan::LogicalPlanType;
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -69,7 +69,7 @@ impl TestContext {
                         "INTEGER" => ferrite::types_db::type_id::TypeId::Integer,
                         "VARCHAR(255)" | "VARCHAR(50)" | "TEXT" | "VARCHAR" => {
                             ferrite::types_db::type_id::TypeId::VarChar
-                        }
+                        },
                         _ => ferrite::types_db::type_id::TypeId::VarChar,
                     };
                     ferrite::catalog::column::Column::new(col_name, type_id)
@@ -96,10 +96,10 @@ async fn insert_simple_row() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(rows.len(), 1);
-                }
+                },
                 _ => panic!("Expected Values child"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan"),
     }
 }
@@ -116,10 +116,10 @@ async fn insert_multiple_rows() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Values { rows, .. } => {
                     assert_eq!(rows.len(), 3);
-                }
+                },
                 _ => panic!("Expected Values child"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan"),
     }
 }
@@ -136,7 +136,7 @@ async fn insert_with_explicit_columns() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 2);
-        }
+        },
         _ => panic!("Expected Insert plan"),
     }
 }
@@ -165,10 +165,10 @@ async fn test_insert_different_data_types() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 5);
                     assert_eq!(rows.len(), 1);
-                }
+                },
                 _ => panic!("Expected Values node as child of Insert"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan node"),
     }
 }
@@ -192,10 +192,10 @@ async fn test_insert_null_values() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(rows.len(), 1);
-                }
+                },
                 _ => panic!("Expected Values node as child of Insert"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan node"),
     }
 }
@@ -247,10 +247,10 @@ async fn test_insert_single_column_table() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 1);
                     assert_eq!(rows.len(), 1);
-                }
+                },
                 _ => panic!("Expected Values node as child of Insert"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan node"),
     }
 }
@@ -274,10 +274,10 @@ async fn test_insert_with_expressions() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(rows.len(), 1);
-                }
+                },
                 _ => panic!("Expected Values node as child of Insert"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan node"),
     }
 }
@@ -307,10 +307,10 @@ async fn test_insert_many_columns() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 8);
                     assert_eq!(rows.len(), 1);
-                }
+                },
                 _ => panic!("Expected Values node as child of Insert"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan node"),
     }
 }
@@ -340,10 +340,10 @@ async fn test_insert_large_batch() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(rows.len(), 100);
-                }
+                },
                 _ => panic!("Expected Values node as child of Insert"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan node"),
     }
 }
@@ -367,10 +367,10 @@ async fn test_insert_string_with_quotes() {
                 LogicalPlanType::Values { rows, schema } => {
                     assert_eq!(schema.get_column_count(), 2);
                     assert_eq!(rows.len(), 1);
-                }
+                },
                 _ => panic!("Expected Values node as child of Insert"),
             }
-        }
+        },
         _ => panic!("Expected Insert plan node"),
     }
 }
@@ -397,7 +397,7 @@ async fn test_insert_with_default_values() {
         Ok(plan) => match &plan.plan_type {
             LogicalPlanType::Insert { table_name, .. } => {
                 assert_eq!(table_name, "users_with_defaults");
-            }
+            },
             _ => panic!("Expected Insert plan node"),
         },
         Err(e) => {
@@ -407,6 +407,6 @@ async fn test_insert_with_default_values() {
                 "Expected behavior - default values not yet supported: {}",
                 e
             );
-        }
+        },
     }
 }

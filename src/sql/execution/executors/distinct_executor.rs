@@ -40,7 +40,7 @@ impl DistinctExecutor {
                 Val::VarLen(s) => {
                     bytes.extend_from_slice(&(s.len() as u32).to_le_bytes());
                     bytes.extend_from_slice(s.as_bytes());
-                }
+                },
                 Val::Boolean(b) => bytes.push(if *b { 1 } else { 0 }),
                 Val::Decimal(d) => bytes.extend_from_slice(&d.to_le_bytes()),
                 Val::Null => bytes.push(0xFF), // Special marker for NULL
@@ -49,7 +49,7 @@ impl DistinctExecutor {
                     let s = format!("{:?}", value);
                     bytes.extend_from_slice(&(s.len() as u32).to_le_bytes());
                     bytes.extend_from_slice(s.as_bytes());
-                }
+                },
             }
         }
 
@@ -103,11 +103,11 @@ impl AbstractExecutor for DistinctExecutor {
                         );
                         // Continue to the next tuple if this one is a duplicate
                     }
-                }
+                },
                 None => {
                     trace!("DistinctExecutor reached end of child executor");
                     return Ok(None);
-                }
+                },
             }
         }
     }
@@ -347,7 +347,7 @@ mod tests {
                         },
                         25
                     );
-                }
+                },
                 "Bob" => {
                     assert!(!found_bob, "Bob should appear only once");
                     found_bob = true;
@@ -365,7 +365,7 @@ mod tests {
                         },
                         30
                     );
-                }
+                },
                 "Charlie" => {
                     assert!(!found_charlie, "Charlie should appear only once");
                     found_charlie = true;
@@ -383,7 +383,7 @@ mod tests {
                         },
                         35
                     );
-                }
+                },
                 "Diana" => {
                     assert!(!found_diana, "Diana should appear only once");
                     found_diana = true;
@@ -401,7 +401,7 @@ mod tests {
                         },
                         28
                     );
-                }
+                },
                 _ => panic!("Unexpected name: {}", name),
             }
         }

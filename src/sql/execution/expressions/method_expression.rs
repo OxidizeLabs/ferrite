@@ -64,7 +64,7 @@ impl ExpressionOps for MethodExpression {
                         obj
                     )))
                 }
-            }
+            },
 
             // XML/JSON methods
             "value" => {
@@ -82,7 +82,7 @@ impl ExpressionOps for MethodExpression {
                         return Err(ExpressionError::InvalidOperation(
                             "First argument to value() must be a string path".to_string(),
                         ));
-                    }
+                    },
                 };
 
                 let type_str = match arg_values[1].get_val() {
@@ -91,7 +91,7 @@ impl ExpressionOps for MethodExpression {
                         return Err(ExpressionError::InvalidOperation(
                             "Second argument to value() must be a string type".to_string(),
                         ));
-                    }
+                    },
                 };
 
                 // Extract value from XML/JSON using path
@@ -116,7 +116,7 @@ impl ExpressionOps for MethodExpression {
                                 content.clone()
                             };
                             Ok(Value::new(result))
-                        }
+                        },
                         "INT" | "INTEGER" => {
                             // Try to parse content as integer
                             match content.parse::<i32>() {
@@ -126,7 +126,7 @@ impl ExpressionOps for MethodExpression {
                                     content
                                 ))),
                             }
-                        }
+                        },
                         _ => Err(ExpressionError::InvalidOperation(format!(
                             "Unsupported type for value() method: {}",
                             type_str
@@ -137,7 +137,7 @@ impl ExpressionOps for MethodExpression {
                         "value() method can only be called on string/XML/JSON values".to_string(),
                     ))
                 }
-            }
+            },
 
             // Array/Vector methods
             "get" | "at" => {
@@ -157,7 +157,7 @@ impl ExpressionOps for MethodExpression {
                             return Err(ExpressionError::InvalidOperation(
                                 "Index for get() must be an integer".to_string(),
                             ));
-                        }
+                        },
                     };
 
                     if index < vec.len() {
@@ -174,7 +174,7 @@ impl ExpressionOps for MethodExpression {
                         "get() method can only be called on vector values".to_string(),
                     ))
                 }
-            }
+            },
 
             "size" | "count" => {
                 if !arg_values.is_empty() {
@@ -190,7 +190,7 @@ impl ExpressionOps for MethodExpression {
                         "size() method can only be called on vector values".to_string(),
                     ))
                 }
-            }
+            },
 
             // Default case for unsupported methods
             _ => Err(ExpressionError::InvalidOperation(format!(
@@ -321,7 +321,7 @@ impl ExpressionOps for MethodExpression {
                         "length() method does not take arguments".to_string(),
                     ));
                 }
-            }
+            },
 
             "value" => {
                 // Check that there are exactly 2 arguments
@@ -342,7 +342,7 @@ impl ExpressionOps for MethodExpression {
                         )));
                     }
                 }
-            }
+            },
 
             "get" | "at" => {
                 // Check that expr returns a vector type
@@ -373,7 +373,7 @@ impl ExpressionOps for MethodExpression {
                         arg_type
                     )));
                 }
-            }
+            },
 
             "size" | "count" => {
                 // Check that expr returns a vector type
@@ -391,7 +391,7 @@ impl ExpressionOps for MethodExpression {
                         "size() method does not take arguments".to_string(),
                     ));
                 }
-            }
+            },
 
             // Add validation for other methods as needed
             _ => {
@@ -402,7 +402,7 @@ impl ExpressionOps for MethodExpression {
 
                 // For now, we'll allow unknown methods but return a warning
                 eprintln!("Warning: Unknown method '{}' being used", self.method_name);
-            }
+            },
         }
 
         Ok(())

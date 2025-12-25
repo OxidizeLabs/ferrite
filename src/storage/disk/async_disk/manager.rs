@@ -236,13 +236,15 @@
 //! - Durability is ensured via explicit `sync_log()` calls
 
 use super::config::DiskManagerConfig;
-use crate::common::config::{PageId, DB_PAGE_SIZE};
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheManager;
 use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
 use crate::storage::disk::async_disk::config::{FsyncPolicy, IOPriority};
 use crate::storage::disk::async_disk::io::AsyncIOEngine;
-use crate::storage::disk::async_disk::memory::{DurabilityProvider, WriteBufferStats, WriteManager};
+use crate::storage::disk::async_disk::memory::{
+    DurabilityProvider, WriteBufferStats, WriteManager,
+};
 use crate::storage::disk::async_disk::metrics::alerts::AlertSummary;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
 use crate::storage::disk::async_disk::metrics::dashboard::{
@@ -356,8 +358,7 @@ impl AsyncDiskManager {
         // Create IO engine with direct I/O configuration
         debug!(
             "Initializing AsyncIOEngine with db_direct_io={}, db_alignment={}, wal_buffered=true",
-            db_direct_io_config.enabled,
-            db_direct_io_config.alignment
+            db_direct_io_config.enabled, db_direct_io_config.alignment
         );
         let mut io_engine_instance =
             AsyncIOEngine::with_config(db_file.clone(), log_file.clone(), db_direct_io_config)?;
@@ -507,15 +508,15 @@ impl AsyncDiskManager {
                 }
 
                 Ok(data)
-            }
+            },
             Ok(Err(e)) => {
                 error!("Scheduled read failed for page {}: {}", page_id, e);
                 Err(e)
-            }
+            },
             Err(_) => {
                 error!("Read task was cancelled for page {}", page_id);
                 Err(std::io::Error::other("Read task was cancelled"))
-            }
+            },
         }
     }
 
@@ -544,7 +545,7 @@ impl AsyncDiskManager {
             trace!("Storing page {} in cache", page_id);
             self.cache_manager.store_page(page_id, data.clone());
         }
-        
+
         Ok(data)
     }
 
@@ -669,10 +670,10 @@ impl AsyncDiskManager {
                     self.config.fsync_policy
                 );
                 self.sync().await?;
-            }
+            },
             FsyncPolicy::Never => {
                 debug!("Skipping sync due to fsync policy: Never");
-            }
+            },
         }
 
         // Record flush metrics
@@ -710,15 +711,15 @@ impl AsyncDiskManager {
             Ok(Ok(_)) => {
                 debug!("Scheduled batch write completed for {} pages", pages.len());
                 Ok(())
-            }
+            },
             Ok(Err(e)) => {
                 error!("Scheduled batch write failed: {}", e);
                 Err(e)
-            }
+            },
             Err(_) => {
                 error!("Batch write task was cancelled");
                 Err(std::io::Error::other("Batch write task was cancelled"))
-            }
+            },
         }
     }
 
@@ -849,15 +850,15 @@ impl AsyncDiskManager {
                 self.update_batch_read_metrics(results.len(), data.len() as u64, elapsed_ns);
 
                 Ok(results)
-            }
+            },
             Ok(Err(e)) => {
                 error!("Scheduled batch read failed: {}", e);
                 Err(e)
-            }
+            },
             Err(_) => {
                 error!("Batch read task was cancelled");
                 Err(std::io::Error::other("Batch read task was cancelled"))
-            }
+            },
         }
     }
 
@@ -1009,7 +1010,10 @@ impl AsyncDiskManager {
         if matches!(self.config.fsync_policy, FsyncPolicy::Never) {
             return Ok(());
         }
-        debug!("Syncing WAL/log file (direct path) per fsync policy: {:?}", self.config.fsync_policy);
+        debug!(
+            "Syncing WAL/log file (direct path) per fsync policy: {:?}",
+            self.config.fsync_policy
+        );
         let io_engine = self.io_engine.read().await;
         io_engine.sync_log_direct().await
     }
@@ -1281,11 +1285,17 @@ impl AsyncDiskManager {
         // Basic metrics
         output.push_str("# HELP ferrite_read_operations Total number of read operations\n");
         output.push_str("# TYPE ferrite_read_operations counter\n");
-        output.push_str(&format!("ferrite_read_operations {}\n", metrics.retry_count));
+        output.push_str(&format!(
+            "ferrite_read_operations {}\n",
+            metrics.retry_count
+        ));
 
         output.push_str("# HELP ferrite_write_operations Total number of write operations\n");
         output.push_str("# TYPE ferrite_write_operations counter\n");
-        output.push_str(&format!("ferrite_write_operations {}\n", metrics.retry_count));
+        output.push_str(&format!(
+            "ferrite_write_operations {}\n",
+            metrics.retry_count
+        ));
 
         // More metrics would be added here
         debug!("Prometheus metrics exported ({} bytes)", output.len());
@@ -1339,7 +1349,12 @@ impl AsyncDiskManager {
         // Note: when direct I/O is enabled, the I/O layer may pad the write to alignment.
         // Readers should use the record's own `size` (logical) and advance offsets with
         // the same alignment policy.
-        let offset = self.io_engine.read().await.append_log_direct(&bytes).await?;
+        let offset = self
+            .io_engine
+            .read()
+            .await
+            .append_log_direct(&bytes)
+            .await?;
         Ok(offset)
     }
 
@@ -1864,8 +1879,8 @@ mod tests {
     #[tokio::test]
     async fn test_batch_size_limits() {
         let config_small_batch = DiskManagerConfig {
-            batch_size: 2, // Small batch size
-            cache_size_mb: 64, // Enable cache so reads come from cache
+            batch_size: 2,                // Small batch size
+            cache_size_mb: 64,            // Enable cache so reads come from cache
             work_stealing_enabled: false, // Disable to avoid scheduler hanging
             ..Default::default()
         };

@@ -80,7 +80,7 @@ impl ExpressionOps for ColumnRefExpression {
             0 => {
                 // Left tuple - column_index should be within left schema bounds
                 (left_tuple, left_schema, self.column_index)
-            }
+            },
             1 => {
                 // Right tuple - need to map combined schema index to right tuple index
                 let left_column_count = left_schema.get_column_count() as usize;
@@ -92,7 +92,7 @@ impl ExpressionOps for ColumnRefExpression {
                     self.column_index
                 };
                 (right_tuple, right_schema, actual_index)
-            }
+            },
             idx => return Err(ExpressionError::InvalidTupleIndex(idx)),
         };
 

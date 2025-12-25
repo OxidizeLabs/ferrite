@@ -1,7 +1,4 @@
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -9,6 +6,9 @@ use ferrite::sql::planner::logical_plan::LogicalPlanType;
 use ferrite::sql::planner::plan_builder::LogicalPlanBuilder;
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -102,7 +102,7 @@ async fn drop_plan_building() {
             assert_eq!(if_exists, *ie);
             assert_eq!(names, n.clone());
             assert_eq!(cascade, *c);
-        }
+        },
         _ => panic!("Expected Drop plan"),
     }
 }

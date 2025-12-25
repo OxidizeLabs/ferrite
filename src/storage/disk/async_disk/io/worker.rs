@@ -454,7 +454,7 @@ impl IOWorkerManager {
                     "Failed to acquire concurrency permit for operation - semaphore closed"
                 );
                 return;
-            }
+            },
         };
 
         // Execute the operation and complete it via the tracker.
@@ -474,7 +474,7 @@ impl IOWorkerManager {
                         e
                     );
                 }
-            }
+            },
             Err(err) => {
                 let msg = format!("{:?}: {}", err.kind(), err);
                 if let Err(e) = completion_tracker
@@ -487,7 +487,7 @@ impl IOWorkerManager {
                         e
                     );
                 }
-            }
+            },
         }
     }
 
@@ -562,7 +562,7 @@ impl IOWorkerManager {
                 Ok(()) => log::debug!("Worker task completed during force shutdown"),
                 Err(e) if e.is_cancelled() => {
                     log::debug!("Worker task was cancelled during force shutdown")
-                }
+                },
                 Err(e) => log::warn!("Worker task failed during force shutdown: {}", e),
             }
         }
@@ -808,7 +808,7 @@ mod tests {
         for receiver in receivers {
             let result = receiver.await.unwrap();
             match result {
-                OperationResult::Success(_) => {}
+                OperationResult::Success(_) => {},
                 OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
             }
         }
@@ -931,7 +931,7 @@ mod tests {
         for receiver in receivers {
             let result = receiver.await.unwrap();
             match result {
-                OperationResult::Success(_) => {}
+                OperationResult::Success(_) => {},
                 OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
             }
         }
@@ -981,7 +981,7 @@ mod tests {
         for receiver in receivers {
             let result = receiver.await.unwrap();
             match result {
-                OperationResult::Success(_) => {}
+                OperationResult::Success(_) => {},
                 OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
             }
         }
@@ -1053,7 +1053,7 @@ mod tests {
         for receiver in receivers {
             let result = receiver.await.unwrap();
             match result {
-                OperationResult::Success(_) => {}
+                OperationResult::Success(_) => {},
                 OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
             }
         }
@@ -1354,7 +1354,7 @@ mod tests {
         for receiver in receivers {
             let result = receiver.await.unwrap();
             match result {
-                OperationResult::Success(_) => {}
+                OperationResult::Success(_) => {},
                 OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
             }
         }
@@ -1426,7 +1426,7 @@ mod tests {
         for receiver in receivers {
             let result = receiver.await.unwrap();
             match result {
-                OperationResult::Success(_) => {}
+                OperationResult::Success(_) => {},
                 OperationResult::Error(err) => panic!("Expected success, got error: {}", err),
             }
         }

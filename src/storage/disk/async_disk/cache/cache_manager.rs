@@ -695,7 +695,7 @@ impl CacheManager {
                         Arc::clone(&data_arc),
                     );
                 }
-            }
+            },
             DataTemperature::Warm => {
                 let page_data = PageData {
                     data: Arc::clone(&data_arc),
@@ -708,7 +708,7 @@ impl CacheManager {
                         &mut cache, page_id, page_data,
                     );
                 }
-            }
+            },
             _ => {
                 let page_data = PageData {
                     data: Arc::clone(&data_arc),
@@ -721,7 +721,7 @@ impl CacheManager {
                         &mut cache, page_id, page_data,
                     );
                 }
-            }
+            },
         }
 
         // Update access pattern for this page
@@ -1819,13 +1819,13 @@ mod tests {
                     assert!(details.k_value.is_some());
                     assert_eq!(details.k_value.unwrap(), 2); // Default K value
                     assert!(details.access_count.is_some());
-                }
+                },
                 "LFU" => {
                     assert!(details.access_count.is_some()); // Frequency information
-                }
+                },
                 "FIFO" => {
                     assert!(details.eviction_rank.is_some()); // Age rank information
-                }
+                },
                 _ => panic!("Unknown algorithm: {}", details.algorithm),
             }
         }

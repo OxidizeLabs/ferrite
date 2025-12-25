@@ -77,7 +77,7 @@ impl Type for BinaryType {
                 let mut result = Vec::new();
                 result.extend_from_slice(r);
                 Ok(Value::new(result))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-binary values to Binary".to_string()),
         }
@@ -107,7 +107,7 @@ impl Type for BinaryType {
                 } else {
                     Value::new(r.clone())
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -120,7 +120,7 @@ impl Type for BinaryType {
                 } else {
                     Value::new(r.clone())
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

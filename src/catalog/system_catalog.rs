@@ -164,7 +164,7 @@
 
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::common::config::{storage_bincode_config, IndexOidT, PageId, TableOidT};
+use crate::common::config::{IndexOidT, PageId, TableOidT, storage_bincode_config};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
@@ -289,10 +289,7 @@ impl IndexCatalogRow {
             Value::new(self.unique),
             Value::new(self.index_type),
             Value::new_with_type(Val::Binary(key_attrs_bin), TypeId::Binary),
-            Value::new_with_type(
-                Val::Binary(self.key_schema_bin.clone()),
-                TypeId::Binary,
-            ),
+            Value::new_with_type(Val::Binary(self.key_schema_bin.clone()), TypeId::Binary),
         ]
     }
 }
@@ -382,4 +379,3 @@ impl SystemCatalogTables {
         }
     }
 }
-

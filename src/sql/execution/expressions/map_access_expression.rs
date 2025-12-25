@@ -48,7 +48,7 @@ impl MapAccessExpression {
                         });
                     }
                     Ok(vec[idx].clone())
-                }
+                },
                 MapAccessKey::String(_) => Err(ExpressionError::InvalidOperation(
                     "Cannot access array with string key".to_string(),
                 )),
@@ -70,7 +70,7 @@ impl MapAccessExpression {
                                     "Cannot access non-object with string key".to_string(),
                                 ))
                             }
-                        }
+                        },
                         MapAccessKey::Number(idx) => {
                             if let Some(arr) = json_value.as_array() {
                                 let idx = *idx as usize;
@@ -86,13 +86,13 @@ impl MapAccessExpression {
                                     "Cannot access non-array with numeric key".to_string(),
                                 ))
                             }
-                        }
+                        },
                     },
                     Err(_) => Err(ExpressionError::InvalidOperation(
                         "Failed to parse string as JSON".to_string(),
                     )),
                 }
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Cannot access value of type {:?} with key",
                 value.get_type_id()
@@ -115,17 +115,17 @@ impl MapAccessExpression {
                         "Unsupported numeric value".to_string(),
                     ))
                 }
-            }
+            },
             serde_json::Value::String(s) => Ok(Value::new(s.clone())),
             serde_json::Value::Array(arr) => {
                 let values: Result<Vec<Value>, ExpressionError> =
                     arr.iter().map(|v| self.json_to_value(v)).collect();
                 Ok(Value::new_vector(values?))
-            }
+            },
             serde_json::Value::Object(obj) => {
                 // Convert JSON object to string representation
                 Ok(Value::new(serde_json::to_string(obj).unwrap_or_default()))
-            }
+            },
         }
     }
 }

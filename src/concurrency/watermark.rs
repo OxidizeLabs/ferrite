@@ -1155,7 +1155,7 @@ mod concurrency_tests {
                                 timestamps.push(ts);
                             }
                             timestamps
-                        }
+                        },
                         1 => {
                             // Thread registers and unregisters transactions
                             let mut w = watermark.lock();
@@ -1163,18 +1163,18 @@ mod concurrency_tests {
                             thread::sleep(std::time::Duration::from_millis(20));
                             w.unregister_txn(ts);
                             vec![ts]
-                        }
+                        },
                         2 => {
                             // Thread updates commit timestamp
                             let mut w = watermark.lock();
                             w.update_commit_ts(100 + i);
                             vec![100 + i]
-                        }
+                        },
                         3 => {
                             // Thread clones the watermark
                             let w = watermark.lock().clone_watermark();
                             vec![w.get_watermark()]
-                        }
+                        },
                         _ => unreachable!(),
                     }
                 })
@@ -1328,7 +1328,7 @@ mod concurrency_tests {
                                 // Get and register a new timestamp
                                 let ts = watermark.lock().get_next_ts_and_register();
                                 my_txns.push(ts);
-                            }
+                            },
                             1 => {
                                 // Remove one of our transactions if we have any
                                 if !my_txns.is_empty() && !my_txns.is_empty() {
@@ -1338,19 +1338,19 @@ mod concurrency_tests {
                                     // Remove it from our tracking too
                                     my_txns.swap_remove(idx);
                                 }
-                            }
+                            },
                             2 => {
                                 // Update commit timestamp
                                 watermark.lock().update_commit_ts(100 + i as u64);
-                            }
+                            },
                             3 => {
                                 // Just get a timestamp without registering
                                 let _ts = watermark.lock().get_next_ts();
-                            }
+                            },
                             4 => {
                                 // Clone the watermark (read intensive)
                                 let _w_clone = watermark.lock().clone_watermark();
-                            }
+                            },
                             _ => unreachable!(),
                         }
 
@@ -1440,7 +1440,7 @@ mod concurrency_tests {
 
                                 // Mark as processed by unregistering
                                 consumer_watermark.lock().remove_txn(ts);
-                            }
+                            },
                             None => break,
                         }
                     }

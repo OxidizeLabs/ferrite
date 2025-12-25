@@ -194,7 +194,7 @@ async fn create_table_duplicate_name_error() {
         .await;
     match res {
         Ok(success) => assert!(!success, "duplicate create should not succeed"),
-        Err(_) => {}
+        Err(_) => {},
     }
 }
 

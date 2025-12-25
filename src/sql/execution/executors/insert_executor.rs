@@ -70,11 +70,11 @@ impl InsertExecutor {
                     rids
                 );
                 Ok(rids)
-            }
+            },
             Err(e) => {
                 error!("✗ TRUE bulk insert failed: {}", e);
                 Err(DBError::Execution(format!("Bulk insert failed: {}", e)))
-            }
+            },
         }
     }
 
@@ -186,10 +186,10 @@ impl AbstractExecutor for InsertExecutor {
                         child_executor.init();
                         self.child_executor = Some(child_executor);
                         debug!("Child executor created and initialized");
-                    }
+                    },
                     Err(e) => {
                         error!("Failed to create child executor: {}", e);
-                    }
+                    },
                 }
             }
         } else if let Some(ref mut child) = self.child_executor {
@@ -287,11 +287,11 @@ impl AbstractExecutor for InsertExecutor {
                             Ok(_rid) => {
                                 insert_count += 1;
                                 trace!("Successfully inserted single tuple");
-                            }
+                            },
                             Err(e) => {
                                 error!("Failed to insert single tuple: {}", e);
                                 return Err(DBError::Execution(format!("Insert failed: {}", e)));
-                            }
+                            },
                         }
                     }
                 }
@@ -347,14 +347,14 @@ impl AbstractExecutor for InsertExecutor {
                                 "Successfully inserted tuple #{} from VALUES/SELECT",
                                 insert_count
                             );
-                        }
+                        },
                         Err(e) => {
                             error!("Failed to insert tuple from VALUES/SELECT: {}", e);
                             return Err(DBError::Execution(format!(
                                 "Insert from VALUES/SELECT failed: {}",
                                 e
                             )));
-                        }
+                        },
                     }
                 }
             } else {

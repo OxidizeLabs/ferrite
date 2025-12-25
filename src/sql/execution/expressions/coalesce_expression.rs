@@ -283,7 +283,7 @@ mod tests {
             Expression::Coalesce(coalesce) => {
                 assert_eq!(coalesce.get_children().len(), 2);
                 assert_eq!(coalesce.get_return_type().get_type(), TypeId::Integer);
-            }
+            },
             _ => panic!("Expected Coalesce expression"),
         }
     }

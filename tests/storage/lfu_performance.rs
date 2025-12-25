@@ -1,11 +1,11 @@
 // ==============================================
 // LFU PERFORMANCE TESTS (integration)
 // ==============================================
-use std::time::{Duration, Instant};
 use ferrite::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LFUCacheTrait, MutableCache,
 };
 use ferrite::storage::disk::async_disk::cache::lfu::LFUCache;
+use std::time::{Duration, Instant};
 
 mod lookup_performance {
 
@@ -2862,40 +2862,40 @@ mod complexity {
                 0 => {
                     // Insert new items (should evict LFU)
                     cache.insert(format!("temp_key_{}", i), i);
-                }
+                },
                 1 => {
                     // Access existing items (increments frequency)
                     cache.get(&format!("key_{:06}", i % cache_size));
-                }
+                },
                 2 => {
                     // Manual frequency increment
                     cache.increment_frequency(&format!("key_{:06}", i % (cache_size / 2)));
-                }
+                },
                 3 => {
                     // Pop LFU items (tests removal logic)
                     if let Some((_key, value)) = cache.pop_lfu() {
                         // Immediately re-insert to maintain cache size
                         cache.insert(format!("reinsert_{}", i), value);
                     }
-                }
+                },
                 4 => {
                     // Reset frequency (tests frequency management)
                     cache.reset_frequency(&format!("key_{:06}", i % cache_size));
-                }
+                },
                 5 => {
                     // Remove specific items
                     let key_to_remove = format!("temp_key_{}", i.saturating_sub(100));
                     cache.remove(&key_to_remove);
-                }
+                },
                 6 => {
                     // Peek operations (should not affect memory)
                     cache.peek_lfu();
                     cache.contains(&format!("key_{:06}", i % cache_size));
-                }
+                },
                 7 => {
                     // Check frequency (read-only operation)
                     cache.frequency(&format!("key_{:06}", i % cache_size));
-                }
+                },
                 _ => unreachable!(),
             }
 
@@ -3176,23 +3176,23 @@ mod complexity {
                         let key = format!("key_{}", i % cache_size);
                         cache.get(&key);
                         *results.entry("gets").or_insert(0) += 1;
-                    }
+                    },
                     6..=7 => {
                         // 20% inserts
                         cache.insert(format!("new_key_{}", i), i);
                         *results.entry("inserts").or_insert(0) += 1;
-                    }
+                    },
                     8 => {
                         // 10% frequency ops
                         let key = format!("key_{}", i % cache_size);
                         cache.increment_frequency(&key);
                         *results.entry("frequency_ops").or_insert(0) += 1;
-                    }
+                    },
                     9 => {
                         // 10% pop_lfu
                         cache.pop_lfu();
                         *results.entry("pop_lfu").or_insert(0) += 1;
-                    }
+                    },
                     _ => unreachable!(),
                 }
             }

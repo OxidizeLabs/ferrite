@@ -43,7 +43,7 @@ impl Type for CharType {
                 let normalized = self.normalize_string(r);
                 let empty_normalized = self.normalize_string("");
                 CmpBool::from(empty_normalized == normalized)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -63,7 +63,7 @@ impl Type for CharType {
                 let normalized = self.normalize_string(r);
                 let empty_normalized = self.normalize_string("");
                 CmpBool::from(empty_normalized < normalized)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -75,7 +75,7 @@ impl Type for CharType {
                 let normalized = self.normalize_string(r);
                 let empty_normalized = self.normalize_string("");
                 CmpBool::from(empty_normalized <= normalized)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -87,7 +87,7 @@ impl Type for CharType {
                 let normalized = self.normalize_string(r);
                 let empty_normalized = self.normalize_string("");
                 CmpBool::from(empty_normalized > normalized)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -99,7 +99,7 @@ impl Type for CharType {
                 let normalized = self.normalize_string(r);
                 let empty_normalized = self.normalize_string("");
                 CmpBool::from(empty_normalized >= normalized)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -110,7 +110,7 @@ impl Type for CharType {
             Val::VarLen(r) | Val::ConstLen(r) => {
                 let normalized = self.normalize_string(r);
                 Ok(Value::new(Val::ConstLen(normalized)))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-string types to CHAR".to_string()),
         }
@@ -148,7 +148,7 @@ impl Type for CharType {
                             .unwrap_or_else(|| self.normalize_string("")),
                     ))
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -169,7 +169,7 @@ impl Type for CharType {
                             .unwrap_or_else(|| self.normalize_string("")),
                     ))
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

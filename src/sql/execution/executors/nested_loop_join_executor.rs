@@ -123,18 +123,18 @@ impl JoinState {
                 // For right joins, first collect unmatched right tuples
                 self.collect_unmatched_right_tuples();
                 self.phase = JoinPhase::UnmatchedRight;
-            }
+            },
             (JoinPhase::MainJoin, JoinType::FullOuter(_)) => {
                 // For full outer joins, first collect unmatched right tuples
                 self.collect_unmatched_right_tuples();
                 self.phase = JoinPhase::UnmatchedRight;
-            }
+            },
             (JoinPhase::UnmatchedRight, JoinType::FullOuter(_)) => {
                 self.phase = JoinPhase::UnmatchedLeft;
-            }
+            },
             _ => {
                 self.phase = JoinPhase::Completed;
-            }
+            },
         }
     }
 
@@ -335,27 +335,27 @@ impl JoinPredicateEvaluator {
                     Val::Boolean(result) => {
                         debug!("Predicate evaluation result: {}", result);
                         Ok(*result)
-                    }
+                    },
                     Val::Null => {
                         debug!("Predicate evaluation returned null, treating as false");
                         Ok(false)
-                    } // Treat null as false
+                    }, // Treat null as false
                     other => {
                         debug!(
                             "Predicate evaluation returned non-boolean: {:?}, treating as false",
                             other
                         );
                         Ok(false)
-                    } // Treat non-boolean as false
+                    }, // Treat non-boolean as false
                 }
-            }
+            },
             Err(e) => {
                 debug!("Predicate evaluation error: {}", e);
                 Err(DBError::Execution(format!(
                     "Predicate evaluation error: {}",
                     e
                 )))
-            }
+            },
         }
     }
 }
@@ -398,20 +398,20 @@ impl JoinTypeHandler {
         match &self.join_type {
             JoinType::Inner(_) | JoinType::Join(_) => {
                 self.handle_inner_join(left_tuple, right_tuple, state)
-            }
+            },
             JoinType::Left(_) | JoinType::LeftOuter(_) => {
                 self.handle_left_outer_join(left_tuple, Some(right_tuple), state)
-            }
+            },
             JoinType::Right(_) | JoinType::RightOuter(_) => {
                 self.handle_right_outer_join(Some(left_tuple), right_tuple, state)
-            }
+            },
             JoinType::FullOuter(_) => {
                 self.handle_full_outer_join(Some(left_tuple), Some(right_tuple), state)
-            }
+            },
             JoinType::CrossJoin(_) => {
                 state.mark_left_matched();
                 Ok(Some(self.handle_cross_join(left_tuple, right_tuple)))
-            }
+            },
             _ => Err(DBError::Execution(format!(
                 "Unsupported join type: {:?}",
                 self.join_type
@@ -506,21 +506,21 @@ impl JoinTypeHandler {
                     // truly unmatched right tuples after processing all combinations
                     Ok(None)
                 }
-            }
+            },
             (Some(left_tuple), None) => {
                 // Unmatched left tuple
                 let padded_tuple = self
                     .tuple_combiner
                     .create_null_padded_tuple(Some(left_tuple), None);
                 Ok(Some((padded_tuple, RID::new(0, 0))))
-            }
+            },
             (None, Some(right_tuple)) => {
                 // Unmatched right tuple
                 let padded_tuple = self
                     .tuple_combiner
                     .create_null_padded_tuple(None, Some(right_tuple));
                 Ok(Some((padded_tuple, RID::new(0, 0))))
-            }
+            },
             (None, None) => Ok(None),
         }
     }
@@ -719,11 +719,11 @@ impl NestedLoopJoinExecutor {
                         info!("JOIN: Processing new left tuple");
                         self.join_state.reset_for_new_left_tuple(left_tuple);
                         self.executor_manager.reset_right_executor()?;
-                    }
+                    },
                     None => {
                         info!("JOIN: Left executor exhausted");
                         self.join_state.left_executor_exhausted = true;
-                    }
+                    },
                 }
             }
 
@@ -775,11 +775,11 @@ impl NestedLoopJoinExecutor {
                                 }
                                 return Ok(Some(result));
                             }
-                        }
+                        },
                         None => {
                             info!("JOIN: Right executor exhausted for current left tuple");
                             self.join_state.right_executor_exhausted = true;
-                        }
+                        },
                     }
                 } else {
                     // Handle unmatched left tuple based on join type
@@ -796,7 +796,7 @@ impl NestedLoopJoinExecutor {
                             } else {
                                 self.join_state.clear_current_left_tuple();
                             }
-                        }
+                        },
                         JoinType::FullOuter(_) => {
                             // For full outer joins, store unmatched left tuple for later processing
                             if !self.join_state.current_left_matched {
@@ -804,12 +804,12 @@ impl NestedLoopJoinExecutor {
                                     .add_unmatched_left_tuple((left_tuple.clone(), *left_rid));
                             }
                             self.join_state.clear_current_left_tuple();
-                        }
+                        },
                         _ => {
                             // For inner joins and cross joins, simply discard unmatched left tuples
                             debug!("JOIN: Discarding unmatched left tuple for inner/cross join");
                             self.join_state.clear_current_left_tuple();
-                        }
+                        },
                     }
                 }
             } else if self.join_state.left_executor_exhausted {
@@ -837,7 +837,7 @@ impl NestedLoopJoinExecutor {
                 } else {
                     self.join_state.advance_phase(&self.join_handler.join_type);
                 }
-            }
+            },
             JoinPhase::UnmatchedLeft => {
                 if let Some((left_tuple, _left_rid)) = self.join_state.next_unmatched_left_tuple() {
                     if let Some(result) = self.join_handler.handle_full_outer_join(
@@ -850,10 +850,10 @@ impl NestedLoopJoinExecutor {
                 } else {
                     self.join_state.advance_phase(&self.join_handler.join_type);
                 }
-            }
+            },
             _ => {
                 self.join_state.phase = JoinPhase::Completed;
-            }
+            },
         }
         Ok(None)
     }
@@ -890,16 +890,16 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
                         return Ok(Some(result));
                     }
                     // Continue to next phase
-                }
+                },
                 JoinPhase::UnmatchedRight | JoinPhase::UnmatchedLeft => {
                     if let Some(result) = self.process_unmatched_tuples()? {
                         return Ok(Some(result));
                     }
                     // Continue to next phase
-                }
+                },
                 JoinPhase::Completed => {
                     return Ok(None);
-                }
+                },
             }
         }
     }
@@ -978,8 +978,8 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use std::sync::Arc;
     use sqlparser::ast::JoinConstraint;
+    use std::sync::Arc;
     // =============================================================================
     // HELPER FUNCTIONS
     // =============================================================================
@@ -1314,8 +1314,11 @@ mod tests {
             TupleCombiner::new(left_schema.clone(), right_schema.clone(), output_schema);
         let predicate_evaluator =
             JoinPredicateEvaluator::new(create_boolean_predicate(true), left_schema, right_schema);
-        let handler =
-            JoinTypeHandler::new(JoinType::CrossJoin(JoinConstraint::Natural), tuple_combiner, predicate_evaluator);
+        let handler = JoinTypeHandler::new(
+            JoinType::CrossJoin(JoinConstraint::Natural),
+            tuple_combiner,
+            predicate_evaluator,
+        );
 
         let (left_tuple, right_tuple) = create_test_tuples();
         let mut state = JoinState::new();
@@ -1580,8 +1583,11 @@ mod tests {
             left_schema,
             right_schema,
         );
-        let handler =
-            JoinTypeHandler::new(JoinType::CrossJoin(JoinConstraint::Natural), tuple_combiner, predicate_evaluator);
+        let handler = JoinTypeHandler::new(
+            JoinType::CrossJoin(JoinConstraint::Natural),
+            tuple_combiner,
+            predicate_evaluator,
+        );
 
         let (left_tuple, right_tuple) = create_test_tuples();
         let mut state = JoinState::new();
@@ -1725,8 +1731,11 @@ mod tests {
         let predicate_evaluator =
             JoinPredicateEvaluator::new(create_boolean_predicate(false), left_schema, right_schema);
 
-        let handler =
-            JoinTypeHandler::new(JoinType::CrossJoin(JoinConstraint::Natural), tuple_combiner, predicate_evaluator);
+        let handler = JoinTypeHandler::new(
+            JoinType::CrossJoin(JoinConstraint::Natural),
+            tuple_combiner,
+            predicate_evaluator,
+        );
 
         let (left_tuple, right_tuple) = create_test_tuples();
         let mut state = JoinState::new();

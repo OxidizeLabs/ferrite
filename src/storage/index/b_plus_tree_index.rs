@@ -1066,7 +1066,10 @@ where
                     context.held_count()
                 );
                 context.release_safe_ancestors();
-                debug!("Released ancestors, about to drop held_lock for page {}", current_page_id);
+                debug!(
+                    "Released ancestors, about to drop held_lock for page {}",
+                    current_page_id
+                );
                 // Explicitly drop held_lock to release the write latch on current node immediately.
                 // Without this explicit drop, the lock would only be released at the end of the
                 // loop iteration, which could cause issues if we need to access this page again.
@@ -1102,7 +1105,10 @@ where
             .fetch_page::<BPlusTreeLeafPage<K, V, C>>(current_page_id)
             .ok_or(BPlusTreeError::PageNotFound(current_page_id))?;
 
-        debug!("Fetched leaf page {}, about to acquire write lock", current_page_id);
+        debug!(
+            "Fetched leaf page {}, about to acquire write lock",
+            current_page_id
+        );
 
         // Check if leaf is safe
         let is_safe = {
@@ -1177,7 +1183,7 @@ where
                 // Fall back to standard insert which handles splits correctly
                 debug!("Optimistic insert not safe, using standard insert path");
                 self.insert(key, value)
-            }
+            },
         }
     }
 
@@ -1212,11 +1218,12 @@ where
             let key_index = leaf.find_key_index(&key);
             if key_index < leaf.get_size()
                 && let Some(existing_key) = leaf.get_key_at(key_index)
-                    && (self.comparator)(&key, existing_key) == Ordering::Equal {
-                        // Update existing value
-                        leaf.set_value_at(key_index, value);
-                        return Ok(OptimisticResult::Success(()));
-                    }
+                && (self.comparator)(&key, existing_key) == Ordering::Equal
+            {
+                // Update existing value
+                leaf.set_value_at(key_index, value);
+                return Ok(OptimisticResult::Success(()));
+            }
 
             // Insert new key-value pair
             let inserted = leaf.insert_key_value(key, value);
@@ -1267,7 +1274,7 @@ where
                 // Fall back to standard remove which handles rebalancing correctly
                 debug!("Optimistic remove not safe, using standard remove path");
                 self.remove(key)
-            }
+            },
         }
     }
 
@@ -3471,7 +3478,7 @@ pub fn create_index(
                 "VarChar index type not yet implemented (key_type: {:?})",
                 key_type
             ))
-        }
+        },
         // Other types
         _ => Err(format!("Unsupported index key type: {:?}", key_type)),
     }
@@ -3978,7 +3985,10 @@ mod tests {
 
         // Insert keys
         for i in 1..=8 {
-            assert!(tree.insert_with_latch_crabbing(i, RID::new(1, i as u32)).is_ok());
+            assert!(
+                tree.insert_with_latch_crabbing(i, RID::new(1, i as u32))
+                    .is_ok()
+            );
         }
 
         // Remove keys using latch crabbing (optimistic path since leaf won't underflow)
@@ -3990,7 +4000,11 @@ mod tests {
 
         // Verify removed keys don't exist
         for i in [1, 3, 5] {
-            assert!(tree.search(&i).unwrap().is_none(), "Key {} should be gone", i);
+            assert!(
+                tree.search(&i).unwrap().is_none(),
+                "Key {} should be gone",
+                i
+            );
         }
 
         // Verify remaining keys exist

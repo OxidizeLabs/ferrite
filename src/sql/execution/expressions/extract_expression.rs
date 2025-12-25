@@ -68,7 +68,7 @@ impl ExtractExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "Timezone extraction not supported".to_string(),
                 ));
-            }
+            },
         };
 
         Ok(result)

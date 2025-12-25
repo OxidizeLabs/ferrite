@@ -258,7 +258,7 @@ impl ServerHandle {
                                         handle_connection(stream, db).await;
                                     });
                                 });
-                            }
+                            },
                             Err(e) => eprintln!("Error accepting connection: {}", e),
                         }
                     }

@@ -1,10 +1,6 @@
 #![allow(clippy::all, unused_must_use, unused_variables, dead_code)]
 
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use sqlparser::ast::JoinOperator;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
 use ferrite::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
@@ -16,6 +12,10 @@ use ferrite::{
     buffer::buffer_pool_manager_async::BufferPoolManager,
     sql::execution::expressions::abstract_expression::Expression,
 };
+use parking_lot::RwLock;
+use sqlparser::ast::JoinOperator;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -66,17 +66,32 @@ impl TestContext {
     fn create_basic(&mut self) {
         let mut catalog = self.catalog.write();
         let users = ferrite::catalog::schema::Schema::new(vec![
-            ferrite::catalog::column::Column::new("id", ferrite::types_db::type_id::TypeId::Integer),
-            ferrite::catalog::column::Column::new("name", ferrite::types_db::type_id::TypeId::VarChar),
-            ferrite::catalog::column::Column::new("age", ferrite::types_db::type_id::TypeId::Integer),
+            ferrite::catalog::column::Column::new(
+                "id",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
+            ferrite::catalog::column::Column::new(
+                "name",
+                ferrite::types_db::type_id::TypeId::VarChar,
+            ),
+            ferrite::catalog::column::Column::new(
+                "age",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
         ]);
         let orders = ferrite::catalog::schema::Schema::new(vec![
             ferrite::catalog::column::Column::new(
                 "order_id",
                 ferrite::types_db::type_id::TypeId::Integer,
             ),
-            ferrite::catalog::column::Column::new("user_id", ferrite::types_db::type_id::TypeId::Integer),
-            ferrite::catalog::column::Column::new("amount", ferrite::types_db::type_id::TypeId::Decimal),
+            ferrite::catalog::column::Column::new(
+                "user_id",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
+            ferrite::catalog::column::Column::new(
+                "amount",
+                ferrite::types_db::type_id::TypeId::Decimal,
+            ),
         ]);
         let _ = catalog.create_table("users".to_string(), users);
         let _ = catalog.create_table("orders".to_string(), orders);
@@ -106,7 +121,7 @@ impl TestContext {
                     create_table.get_output_schema().clone(),
                 );
                 Ok(())
-            }
+            },
             _ => Err("Expected CreateTable plan node".to_string()),
         }
     }
@@ -225,7 +240,7 @@ async fn test_left_outer_join() {
     match &plan.children[0].plan_type {
         LogicalPlanType::NestedLoopJoin { join_type, .. } => {
             assert!(matches!(join_type, JoinOperator::LeftOuter(_)));
-        }
+        },
         _ => panic!("Expected NestedLoopJoin node"),
     }
 }
@@ -244,7 +259,7 @@ async fn test_right_outer_join() {
     match &plan.children[0].plan_type {
         LogicalPlanType::NestedLoopJoin { join_type, .. } => {
             assert!(matches!(join_type, JoinOperator::RightOuter(_)));
-        }
+        },
         _ => panic!("Expected NestedLoopJoin node"),
     }
 }
@@ -263,7 +278,7 @@ async fn test_full_outer_join() {
     match &plan.children[0].plan_type {
         LogicalPlanType::NestedLoopJoin { join_type, .. } => {
             assert!(matches!(join_type, JoinOperator::FullOuter(_)));
-        }
+        },
         _ => panic!("Expected NestedLoopJoin node"),
     }
 }
@@ -282,7 +297,7 @@ async fn test_cross_join() {
     match &plan.children[0].plan_type {
         LogicalPlanType::NestedLoopJoin { join_type, .. } => {
             assert!(matches!(join_type, JoinOperator::CrossJoin(_)));
-        }
+        },
         _ => panic!("Expected NestedLoopJoin node"),
     }
 }
@@ -304,7 +319,7 @@ async fn test_multiple_joins() {
     match &plan.plan_type {
         LogicalPlanType::Projection { schema, .. } => {
             assert_eq!(schema.get_column_count(), 3);
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -329,7 +344,7 @@ async fn test_self_join() {
             // Both schemas should have aliased columns from employees table
             assert_eq!(left_schema.get_column_count(), 4); // e1 alias
             assert_eq!(right_schema.get_column_count(), 4); // e2 alias
-        }
+        },
         _ => panic!("Expected NestedLoopJoin node"),
     }
 }
@@ -352,7 +367,7 @@ async fn test_join_with_complex_conditions() {
                 Expression::Comparison(_) => (), // Could be compound comparison
                 _ => (), // Might be a different expression type for complex conditions
             }
-        }
+        },
         _ => panic!("Expected NestedLoopJoin node"),
     }
 }
@@ -402,7 +417,7 @@ async fn test_join_with_order_by() {
                 LogicalPlanType::Projection { .. } => (),
                 _ => panic!("Expected Projection under Sort"),
             }
-        }
+        },
         _ => panic!("Expected Sort as root node"),
     }
 }
@@ -423,7 +438,7 @@ async fn test_join_with_limit() {
     match &plan.plan_type {
         LogicalPlanType::Limit { limit, .. } => {
             assert_eq!(*limit, 10);
-        }
+        },
         _ => panic!("Expected Limit as root node"),
     }
 }
@@ -451,7 +466,7 @@ async fn test_join_with_subquery() {
         } => {
             assert_eq!(left_schema.get_column_count(), 3); // users
             assert_eq!(right_schema.get_column_count(), 2); // subquery result
-        }
+        },
         _ => panic!("Expected NestedLoopJoin node"),
     }
 }
@@ -474,7 +489,7 @@ async fn test_join_with_aliases() {
                 .collect();
             assert!(col_names.contains(&"user_name"));
             assert!(col_names.contains(&"order_amount"));
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -551,7 +566,7 @@ async fn test_join_with_null_handling() {
         LogicalPlanType::Filter { .. } => match &plan.children[0].children[0].plan_type {
             LogicalPlanType::NestedLoopJoin { join_type, .. } => {
                 assert!(matches!(join_type, JoinOperator::Left(_)));
-            }
+            },
             _ => panic!("Expected NestedLoopJoin under Filter"),
         },
         _ => panic!("Expected Filter node"),
@@ -637,7 +652,7 @@ async fn test_left_join_same_as_left_outer_join() {
                 left_join_plan.children[0].get_schema(),
                 left_outer_join_plan.children[0].get_schema()
             );
-        }
+        },
         _ => panic!("Expected NestedLoopJoin nodes for both LEFT JOIN and LEFT OUTER JOIN"),
     }
 }
@@ -688,9 +703,9 @@ async fn test_right_join_same_as_right_outer_join() {
                 right_join_plan.children[0].get_schema(),
                 right_outer_join_plan.children[0].get_schema()
             );
-        }
+        },
         _ => {
             panic!("Expected NestedLoopJoin nodes for both RIGHT JOIN and RIGHT OUTER JOIN")
-        }
+        },
     }
 }

@@ -1,9 +1,6 @@
 #![allow(clippy::all, unused_must_use, unused_variables, dead_code)]
 
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
 use ferrite::sql::execution::expressions::abstract_expression::Expression;
@@ -17,6 +14,9 @@ use ferrite::{
     buffer::buffer_pool_manager_async::BufferPoolManager,
     sql::execution::plans::abstract_plan::PlanNode,
 };
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -88,7 +88,7 @@ impl TestContext {
                     create_table.get_output_schema().clone(),
                 );
                 Ok(())
-            }
+            },
             _ => Err("Expected CreateTable plan node".to_string()),
         }
     }
@@ -197,7 +197,7 @@ async fn aggregate_count_star() {
         } => {
             assert_eq!(aggregates.len(), 1);
             assert_eq!(group_by.len(), 0);
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -217,7 +217,7 @@ async fn group_by_with_aggregates() {
             assert_eq!(group_by.len(), 1);
             assert_eq!(aggregates.len(), 1);
             assert_eq!(schema.get_column_count(), 2);
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -289,7 +289,7 @@ async fn test_plan_aggregate_column_names() {
                     "Column names don't match for query: {}",
                     sql
                 );
-            }
+            },
             _ => panic!("Expected Projection as root node for query: {}", sql),
         }
     }
@@ -333,7 +333,7 @@ async fn test_plan_aggregate_types() {
         match &plan.plan_type {
             LogicalPlanType::Projection { expressions, .. } => {
                 assert_eq!(expressions.len(), expected_types.len());
-            }
+            },
             _ => panic!("Expected Projection as root node for query: {}", sql),
         }
 
@@ -366,7 +366,7 @@ async fn test_plan_aggregate_types() {
                         panic!("Expected aggregate expression for query: {}", sql);
                     }
                 }
-            }
+            },
             _ => panic!("Expected Aggregate node for query: {}", sql),
         }
     }
@@ -388,7 +388,7 @@ async fn test_simple_count_column() {
             } else {
                 panic!("Expected aggregate expression");
             }
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -409,7 +409,7 @@ async fn test_sum_aggregate() {
             } else {
                 panic!("Expected aggregate expression");
             }
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -430,7 +430,7 @@ async fn test_avg_aggregate() {
             } else {
                 panic!("Expected aggregate expression");
             }
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -460,7 +460,7 @@ async fn test_min_max_aggregates() {
             } else {
                 panic!("Expected MAX aggregate expression");
             }
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -487,7 +487,7 @@ async fn test_multiple_aggregates_with_aliases() {
             assert!(col_names.contains(&"avg_age"));
             assert!(col_names.contains(&"min_age"));
             assert!(col_names.contains(&"max_age"));
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 
@@ -511,7 +511,7 @@ async fn test_multiple_aggregates_with_aliases() {
                     panic!("Expected aggregate expression at index {}", i);
                 }
             }
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -533,7 +533,7 @@ async fn test_group_by_single_column() {
             assert_eq!(group_by.len(), 1); // name column
             assert_eq!(aggregates.len(), 1); // COUNT(*)
             assert_eq!(schema.get_column_count(), 2); // name + count
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -555,7 +555,7 @@ async fn test_group_by_multiple_columns() {
             assert_eq!(group_by.len(), 2); // region, product
             assert_eq!(aggregates.len(), 2); // SUM, COUNT
             assert_eq!(schema.get_column_count(), 4); // region + product + sum + count
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -632,11 +632,11 @@ async fn test_aggregates_with_expressions() {
                             agg.get_agg_type(),
                             AggregationType::Sum | AggregationType::Avg
                         ));
-                    }
+                    },
                     _ => panic!("Expected aggregate expression"),
                 }
             }
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -657,7 +657,7 @@ async fn test_aggregate_without_group_by() {
         } => {
             assert_eq!(group_by.len(), 0); // No GROUP BY
             assert_eq!(aggregates.len(), 3); // COUNT, SUM, AVG
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -675,7 +675,7 @@ async fn test_count_distinct() {
         LogicalPlanType::Aggregate { aggregates, .. } => {
             assert_eq!(aggregates.len(), 1);
             // The exact handling of DISTINCT might vary
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -693,7 +693,7 @@ async fn test_aggregates_with_null_handling() {
         LogicalPlanType::Projection { .. } => match &plan.children[0].plan_type {
             LogicalPlanType::Aggregate { aggregates, .. } => {
                 assert_eq!(aggregates.len(), 2);
-            }
+            },
             _ => panic!("Expected Aggregate node"),
         },
         _ => panic!("Expected Projection as root node"),
@@ -746,7 +746,7 @@ async fn test_aggregate_functions_case_insensitive() {
         match &plan.children[0].plan_type {
             LogicalPlanType::Aggregate { aggregates, .. } => {
                 assert_eq!(aggregates.len(), 1);
-            }
+            },
             _ => panic!("Expected Aggregate node for SQL: {}", sql),
         }
     }
@@ -805,10 +805,10 @@ async fn test_aggregate_with_limit() {
                         LogicalPlanType::Aggregate { .. } => (),
                         _ => panic!("Expected Aggregate under Projection"),
                     }
-                }
+                },
                 _ => panic!("Expected Projection under Limit"),
             }
-        }
+        },
         _ => panic!("Expected Limit as root node"),
     }
 }
@@ -829,7 +829,7 @@ async fn test_complex_having_conditions() {
                 Expression::Logic(_) => (), // AND expression
                 _ => (),                    // Might be represented differently
             }
-        }
+        },
         _ => panic!("Expected Filter for HAVING clause"),
     }
 }
@@ -877,7 +877,7 @@ async fn test_aggregates_with_different_data_types() {
                     panic!("Expected aggregate expression at index {}", i);
                 }
             }
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }
@@ -898,7 +898,7 @@ async fn test_aggregate_with_table_alias() {
         } => {
             assert_eq!(group_by.len(), 1);
             assert_eq!(aggregates.len(), 1);
-        }
+        },
         _ => panic!("Expected Aggregate node"),
     }
 }

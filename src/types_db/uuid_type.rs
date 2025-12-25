@@ -99,7 +99,7 @@ impl Type for UUIDType {
                 } else {
                     Value::new(r.clone())
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -112,7 +112,7 @@ impl Type for UUIDType {
                 } else {
                     Value::new(r.clone())
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

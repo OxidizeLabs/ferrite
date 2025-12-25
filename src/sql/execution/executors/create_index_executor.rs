@@ -120,7 +120,7 @@ impl AbstractExecutor for CreateIndexExecutor {
                     );
                     self.executed = true;
                     Ok(None)
-                }
+                },
                 None => {
                     warn!(
                         "Failed to create index '{}' - catalog creation failed",
@@ -128,7 +128,7 @@ impl AbstractExecutor for CreateIndexExecutor {
                     );
                     // Don't mark as executed so we can retry
                     Ok(None)
-                }
+                },
             }
         }
     }

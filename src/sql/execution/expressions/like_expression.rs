@@ -80,14 +80,14 @@ impl LikeExpression {
                         }
                     }
                     return false;
-                }
+                },
                 Some(&'_') if !escaping => {
                     pattern_chars.next(); // Consume _
                     match value_chars.next() {
                         Some(_) => (),        // Match any single character
                         None => return false, // No character to match
                     }
-                }
+                },
                 Some(&pattern_ch) => {
                     pattern_chars.next(); // Consume pattern character
                     match value_chars.next() {
@@ -102,10 +102,10 @@ impl LikeExpression {
                             if !matches {
                                 return false;
                             }
-                        }
+                        },
                         None => return false,
                     }
-                }
+                },
             }
             escaping = false;
         }

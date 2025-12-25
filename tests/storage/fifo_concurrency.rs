@@ -1,12 +1,12 @@
 // ==============================================
 // FIFO CONCURRENCY TESTS (integration)
 // ==============================================
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 
 mod thread_safe_wrapper {
     use super::*;
@@ -41,7 +41,7 @@ mod thread_safe_wrapper {
                                     cache_guard.insert(key, value);
                                     thread_successes += 1;
                                 }
-                            }
+                            },
                             1 => {
                                 // Get operation
                                 let key = format!("thread_{}_0", thread_id);
@@ -50,7 +50,7 @@ mod thread_safe_wrapper {
                                     let _ = cache_guard.get(&key);
                                     thread_successes += 1;
                                 }
-                            }
+                            },
                             2 => {
                                 // Contains operation
                                 let key = format!("thread_{}_{}", thread_id, i / 2);
@@ -59,7 +59,7 @@ mod thread_safe_wrapper {
                                     let _ = cache_guard.contains(&key);
                                     thread_successes += 1;
                                 }
-                            }
+                            },
                             _ => {
                                 // FIFO-specific operations
                                 if let Ok(mut cache_guard) = cache.lock() {
@@ -69,7 +69,7 @@ mod thread_safe_wrapper {
                                     }
                                     thread_successes += 1;
                                 }
-                            }
+                            },
                         }
                     }
 
@@ -340,31 +340,31 @@ mod thread_safe_wrapper {
                                     let key = format!("mixed_{}_{}", thread_id, i);
                                     let value = format!("mixed_value_{}_{}", thread_id, i);
                                     cache_guard.insert(key, value);
-                                }
+                                },
                                 2 => {
                                     // Get
                                     let key = format!("base_{}", i % 50);
                                     let _ = cache_guard.get(&key);
-                                }
+                                },
                                 3 => {
                                     // Contains
                                     let key = format!("mixed_{}_{}", thread_id, i / 2);
                                     let _ = cache_guard.contains(&key);
-                                }
+                                },
                                 4 => {
                                     // FIFO peek
                                     let _ = cache_guard.peek_oldest();
-                                }
+                                },
                                 5 => {
                                     // FIFO pop
                                     let _ = cache_guard.pop_oldest();
-                                }
+                                },
                                 _ => {
                                     // FIFO batch operations
                                     let _ = cache_guard.pop_oldest_batch(2);
                                     let key = format!("base_{}", i % 30);
                                     let _ = cache_guard.age_rank(&key);
-                                }
+                                },
                             }
 
                             ops_completed += 1;
@@ -604,11 +604,11 @@ mod stress_testing {
                                 cache_guard.insert(hot_key.clone(), value);
                                 let _ = cache_guard.get(&hot_key);
                                 ops += 1;
-                            }
+                            },
                             Err(_) => {
                                 lock_failures += 1;
                                 thread::sleep(Duration::from_millis(1));
-                            }
+                            },
                         }
 
                         // Detect high contention
@@ -810,7 +810,7 @@ mod stress_testing {
                                     let key = format!("stable_{}_{}", thread_id, ops);
                                     let value = format!("stable_value_{}_{}", thread_id, ops);
                                     cache_guard.insert(key, value);
-                                }
+                                },
                                 1 => {
                                     // Mixed operations phase
                                     if ops % 3 == 0 {
@@ -819,14 +819,14 @@ mod stress_testing {
                                         let key = format!("stable_{}_{}", thread_id, ops / 2);
                                         let _ = cache_guard.get(&key);
                                     }
-                                }
+                                },
                                 _ => {
                                     // FIFO operations phase
                                     let _ = cache_guard.peek_oldest();
                                     if ops % 10 == 0 {
                                         let _ = cache_guard.pop_oldest_batch(3);
                                     }
-                                }
+                                },
                             }
 
                             ops += 1;

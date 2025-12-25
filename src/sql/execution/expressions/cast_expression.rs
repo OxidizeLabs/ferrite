@@ -52,10 +52,10 @@ impl CastExpression {
                             "Invalid timestamp value".to_string(),
                         ))
                     }
-                }
+                },
                 (TypeId::Integer | TypeId::Decimal | TypeId::BigInt, TypeId::VarChar) => {
                     Ok(Value::new(value.to_string()))
-                }
+                },
                 _ => Ok(value),
             }
         } else {
@@ -86,7 +86,7 @@ impl ExpressionOps for CastExpression {
                         "Invalid value for decimal to integer cast".to_string(),
                     ))
                 }
-            }
+            },
 
             // Integer to Decimal casting
             (TypeId::Integer, TypeId::Decimal) => {
@@ -100,7 +100,7 @@ impl ExpressionOps for CastExpression {
                         "Invalid value for integer to decimal cast".to_string(),
                     ))
                 }
-            }
+            },
 
             // Integer to BigInt casting
             (TypeId::Integer, TypeId::BigInt) => {
@@ -111,7 +111,7 @@ impl ExpressionOps for CastExpression {
                         "Invalid value for integer to bigint cast".to_string(),
                     ))
                 }
-            }
+            },
 
             // VarChar to Char casting
             (TypeId::VarChar, TypeId::Char) => {
@@ -122,7 +122,7 @@ impl ExpressionOps for CastExpression {
                         "Invalid value for varchar to char cast".to_string(),
                     ))
                 }
-            }
+            },
 
             // Char to VarChar casting
             (TypeId::Char, TypeId::VarChar) => {
@@ -136,7 +136,7 @@ impl ExpressionOps for CastExpression {
                         "Invalid value for char to varchar cast".to_string(),
                     ))
                 }
-            }
+            },
 
             // Same type - return as is
             (source, target) if source == target => Ok(value),

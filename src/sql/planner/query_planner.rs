@@ -185,11 +185,11 @@ impl QueryPlanner {
             } => self.plan_builder.build_commit_plan(chain, end, modifier),
             Statement::Rollback { chain, savepoint } => {
                 self.plan_builder.build_rollback_plan(chain, savepoint)
-            }
+            },
             Statement::Savepoint { name } => self.plan_builder.build_savepoint_plan(name),
             Statement::ReleaseSavepoint { name } => {
                 self.plan_builder.build_release_savepoint_plan(name)
-            }
+            },
             Statement::CreateSchema {
                 schema_name,
                 if_not_exists,
@@ -236,7 +236,7 @@ impl QueryPlanner {
                     &alter.location,
                     &alter.on_cluster,
                 )
-            }
+            },
             Statement::CreateView(view) => self.plan_builder.build_create_view_plan(
                 &view.or_alter,
                 &view.or_replace,

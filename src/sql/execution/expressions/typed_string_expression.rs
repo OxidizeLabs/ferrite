@@ -63,7 +63,7 @@ impl TypedStringExpression {
                     Val::Timestamp(timestamp),
                     TypeId::Timestamp,
                 ))
-            }
+            },
             Err(e) => Err(ExpressionError::InvalidOperation(format!(
                 "Invalid date format '{}': {}",
                 date_str, e
@@ -89,7 +89,7 @@ impl TypedStringExpression {
                     Val::Timestamp(seconds_since_midnight),
                     TypeId::Timestamp,
                 ))
-            }
+            },
             Err(e) => Err(ExpressionError::InvalidOperation(format!(
                 "Invalid time format '{}': {}",
                 time_str, e
@@ -142,7 +142,7 @@ impl TypedStringExpression {
                     Val::Timestamp(utc_dt.timestamp() as u64),
                     TypeId::Timestamp,
                 ))
-            }
+            },
             Err(e) => Err(ExpressionError::InvalidOperation(format!(
                 "Invalid timestamp format '{}': {}",
                 timestamp_str, e
@@ -174,7 +174,7 @@ impl ExpressionOps for TypedStringExpression {
                                     )
                                 })?;
                             Ok(Value::new(Val::VarLen(dt.to_rfc3339())))
-                        }
+                        },
                         _ => Err(ExpressionError::InvalidOperation(
                             "Expected timestamp value".to_string(),
                         )),
@@ -183,7 +183,7 @@ impl ExpressionOps for TypedStringExpression {
                     // Return the timestamp value directly
                     Ok(result)
                 }
-            }
+            },
             // For other data types, we'll return the string value and let the caller handle conversion
             _ => {
                 // Start as VarChar and cast to the target type to avoid mismatched Val/TypeId
@@ -199,7 +199,7 @@ impl ExpressionOps for TypedStringExpression {
                 } else {
                     Ok(value)
                 }
-            }
+            },
         }
     }
 
@@ -246,7 +246,7 @@ impl ExpressionOps for TypedStringExpression {
                         self.value
                     )));
                 }
-            }
+            },
             "TIME" => {
                 let format = if self.value.contains('.') {
                     "%H:%M:%S.%f"
@@ -259,7 +259,7 @@ impl ExpressionOps for TypedStringExpression {
                         self.value
                     )));
                 }
-            }
+            },
             "TIMESTAMP" => {
                 // Try Unix timestamp first
                 if self.value.parse::<u64>().is_ok() {
@@ -291,9 +291,9 @@ impl ExpressionOps for TypedStringExpression {
                         self.value
                     )));
                 }
-            }
+            },
             // For other types, we don't validate the format
-            _ => {}
+            _ => {},
         }
 
         Ok(())

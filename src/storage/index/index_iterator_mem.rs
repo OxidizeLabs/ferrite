@@ -204,7 +204,7 @@ impl IndexIterator {
                 }
                 debug!("Starting fresh full scan");
                 tree_guard.scan_full()
-            }
+            },
 
             // Range scan case
             (Some(start), Some(end)) => {
@@ -258,7 +258,7 @@ impl IndexIterator {
                 };
 
                 tree_guard.scan_range(&scan_start, end, self.last_key.is_none())
-            }
+            },
             _ => {
                 let msg =
                     "invalid scan range configuration: start_key/end_key must both be set or both be None"
@@ -267,7 +267,7 @@ impl IndexIterator {
                 self.exhausted = true;
                 self.last_error = Some(msg.clone());
                 Err(msg)
-            }
+            },
         };
 
         match result {
@@ -286,13 +286,13 @@ impl IndexIterator {
                 self.current_batch = new_results;
                 debug!("Fetched {} results", self.current_batch.len());
                 Ok(true)
-            }
+            },
             Err(e) => {
                 debug!("Error fetching batch: {:?}", e);
                 self.exhausted = true;
                 self.last_error = Some(e.clone());
                 Err(e)
-            }
+            },
         }
     }
 
@@ -345,7 +345,7 @@ impl Iterator for IndexIterator {
             Err(e) => {
                 debug!("IndexIterator error, ending iteration: {}", e);
                 None
-            }
+            },
         }
     }
 }

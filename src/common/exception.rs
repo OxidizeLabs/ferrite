@@ -293,7 +293,7 @@ impl Display for PageError {
                     "Attempt to write out of bounds data at offset {} with length {}",
                     offset, page_size
                 )
-            }
+            },
             PageError::DataTooLarge {
                 data_size,
                 remaining_space,
@@ -303,34 +303,34 @@ impl Display for PageError {
                     "Attempt to write out of bounds data at offset {} with length {}",
                     data_size, remaining_space
                 )
-            }
+            },
             PageError::NoPageReference => {
                 write!(f, "No Page Reference")
-            }
+            },
             PageError::LockError => {
                 write!(f, "Lock Error")
-            }
+            },
             PageError::TypeTooLarge => {
                 write!(f, "Type Too Large")
-            }
+            },
             PageError::InvalidCast => {
                 write!(f, "Invalid Cast")
-            }
+            },
             PageError::InvalidOperation => {
                 write!(f, "Invalid Operation")
-            }
+            },
             PageError::TupleInvalid => {
                 write!(f, "Invalid Tuple")
-            }
+            },
             PageError::SerializationError => {
                 write!(f, "Invalid Serialization")
-            }
+            },
             PageError::DeserializationError => {
                 write!(f, "Invalid Deserialization")
-            }
+            },
             PageError::OffsetOutOfBounds => {
                 write!(f, "OffsetOutOfBounds")
-            }
+            },
         }
     }
 }
@@ -347,10 +347,10 @@ impl Display for KeyConversionError {
             KeyConversionError::ColumnNotFound(msg) => write!(f, "Column not found: {}", msg),
             KeyConversionError::OffsetConversionError(msg) => {
                 write!(f, "Offset conversion error: {}", msg)
-            }
+            },
             KeyConversionError::DeserializationError(msg) => {
                 write!(f, "Deserialization error: {}", msg)
-            }
+            },
             &KeyConversionError::OffsetOutOfBounds | &KeyConversionError::InvalidOffset => todo!(),
         }
     }
@@ -361,7 +361,7 @@ impl Display for ComparisonError {
         match self {
             ComparisonError::ValueRetrievalError(msg) => {
                 write!(f, "Value retrieval error: {}", msg)
-            }
+            },
         }
     }
 }

@@ -60,7 +60,7 @@ impl ExpressionOps for StringExpression {
             Val::VarLen(s) | Val::ConstLen(s) => {
                 let computed = self.perform_computation(s);
                 Ok(Value::new(Val::VarLen(computed)))
-            }
+            },
             _ => Err(ExpressionError::InvalidStringExpressionType),
         }
     }
@@ -79,7 +79,7 @@ impl ExpressionOps for StringExpression {
             Val::VarLen(s) | Val::ConstLen(s) => {
                 let computed = self.perform_computation(s);
                 Ok(Value::new(Val::VarLen(computed)))
-            }
+            },
             _ => Err(ExpressionError::InvalidStringExpressionType),
         }
     }

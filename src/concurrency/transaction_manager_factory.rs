@@ -235,7 +235,10 @@ impl TransactionManagerFactory {
             .await
         {
             // Best-effort lock release even on failure.
-            if let Err(e) = self.lock_manager.force_release_txn(txn.get_transaction_id()) {
+            if let Err(e) = self
+                .lock_manager
+                .force_release_txn(txn.get_transaction_id())
+            {
                 warn!("Lock release failed after commit failure: {}", e);
             }
             return false;
@@ -252,7 +255,10 @@ impl TransactionManagerFactory {
                     "Failed to flush page {} during transaction commit: {}",
                     page_id, e
                 );
-                if let Err(e) = self.lock_manager.force_release_txn(txn.get_transaction_id()) {
+                if let Err(e) = self
+                    .lock_manager
+                    .force_release_txn(txn.get_transaction_id())
+                {
                     warn!("Lock release failed after flush error: {}", e);
                 }
                 return false;
@@ -260,7 +266,10 @@ impl TransactionManagerFactory {
         }
 
         // Release locks now that commit finished and pages are flushed.
-        if let Err(e) = self.lock_manager.force_release_txn(txn.get_transaction_id()) {
+        if let Err(e) = self
+            .lock_manager
+            .force_release_txn(txn.get_transaction_id())
+        {
             warn!("Lock release failed after commit: {}", e);
         }
 
@@ -279,7 +288,10 @@ impl TransactionManagerFactory {
         self.transaction_manager.abort(txn.clone());
 
         // Release locks after abort.
-        if let Err(e) = self.lock_manager.force_release_txn(txn.get_transaction_id()) {
+        if let Err(e) = self
+            .lock_manager
+            .force_release_txn(txn.get_transaction_id())
+        {
             warn!("Lock release failed after abort: {}", e);
         }
     }

@@ -301,18 +301,18 @@ impl<
                         return 0;
                     }
                     right = mid - 1;
-                }
+                },
                 std::cmp::Ordering::Greater => {
                     debug!("Key {:?} is greater than {:?}", key, self.keys[mid]);
                     left = mid + 1;
-                }
+                },
                 std::cmp::Ordering::Equal => {
                     debug!(
                         "Key {:?} is equal to {:?}, returning index {}",
                         key, self.keys[mid], mid
                     );
                     return mid;
-                }
+                },
             }
         }
 
@@ -333,7 +333,7 @@ impl<
                 std::cmp::Ordering::Less => {
                     // Key is less than K, go to the left pointer
                     Some(self.values[0])
-                }
+                },
                 _ => {
                     // Key is greater than or equal to K, go to the right pointer
                     if self.values.len() > 1 {
@@ -342,7 +342,7 @@ impl<
                         // If we only have one pointer, use it for all keys
                         Some(self.values[0])
                     }
-                }
+                },
             };
         }
 

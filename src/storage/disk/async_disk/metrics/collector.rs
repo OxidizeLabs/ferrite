@@ -267,20 +267,20 @@ impl MetricsCollector {
                         .hot_cache_hits
                         .fetch_add(1, Ordering::Relaxed);
                     self.live_metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                }
+                },
                 "warm" => {
                     self.live_metrics
                         .warm_cache_hits
                         .fetch_add(1, Ordering::Relaxed);
                     self.live_metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                }
+                },
                 "cold" => {
                     self.live_metrics
                         .cold_cache_hits
                         .fetch_add(1, Ordering::Relaxed);
                     self.live_metrics.cache_hits.fetch_add(1, Ordering::Relaxed);
-                }
-                _ => {}
+                },
+                _ => {},
             }
         } else {
             // Record cache miss
@@ -323,17 +323,17 @@ impl MetricsCollector {
 
         // Update buckets
         let bucket_idx = match latency_ns {
-            0..=10_000 => 0,              // < 10us
-            10_001..=100_000 => 1,        // < 100us
-            100_001..=500_000 => 2,       // < 500us
-            500_001..=1_000_000 => 3,     // < 1ms
-            1_000_001..=5_000_000 => 4,   // < 5ms
-            5_000_001..=10_000_000 => 5,  // < 10ms
-            10_000_001..=50_000_000 => 6, // < 50ms
-            50_000_001..=100_000_000 => 7,// < 100ms
-            100_000_001..=500_000_000 => 8,// < 500ms
-            500_000_001..=1_000_000_000 => 9,// < 1s
-            _ => 10,                      // > 1s
+            0..=10_000 => 0,                  // < 10us
+            10_001..=100_000 => 1,            // < 100us
+            100_001..=500_000 => 2,           // < 500us
+            500_001..=1_000_000 => 3,         // < 1ms
+            1_000_001..=5_000_000 => 4,       // < 5ms
+            5_000_001..=10_000_000 => 5,      // < 10ms
+            10_000_001..=50_000_000 => 6,     // < 50ms
+            50_000_001..=100_000_000 => 7,    // < 100ms
+            100_000_001..=500_000_000 => 8,   // < 500ms
+            500_000_001..=1_000_000_000 => 9, // < 1s
+            _ => 10,                          // > 1s
         };
 
         if bucket_idx < self.live_metrics.latency_buckets.len() {
@@ -405,8 +405,10 @@ impl MetricsCollector {
         self.live_metrics.error_count.store(0, Ordering::Relaxed);
         self.live_metrics.retry_count.store(0, Ordering::Relaxed);
         self.live_metrics.latency_max.store(0, Ordering::Relaxed);
-        self.live_metrics.latency_min.store(u64::MAX, Ordering::Relaxed);
-        
+        self.live_metrics
+            .latency_min
+            .store(u64::MAX, Ordering::Relaxed);
+
         for bucket in &self.live_metrics.latency_buckets {
             bucket.store(0, Ordering::Relaxed);
         }
@@ -482,10 +484,19 @@ impl MetricsCollector {
 
         let target_count = (total_samples as f64 * percentile).ceil() as u64;
         let mut current_count = 0;
-        
+
         let bucket_upper_bounds = [
-            10_000, 100_000, 500_000, 1_000_000, 5_000_000, 10_000_000,
-            50_000_000, 100_000_000, 500_000_000, 1_000_000_000, u64::MAX
+            10_000,
+            100_000,
+            500_000,
+            1_000_000,
+            5_000_000,
+            10_000_000,
+            50_000_000,
+            100_000_000,
+            500_000_000,
+            1_000_000_000,
+            u64::MAX,
         ];
 
         for (i, bucket) in live_metrics.latency_buckets.iter().enumerate() {
@@ -494,7 +505,7 @@ impl MetricsCollector {
                 return bucket_upper_bounds[i];
             }
         }
-        
+
         // If we fall through, return max recorded
         live_metrics.latency_max.load(Ordering::Relaxed)
     }
@@ -571,9 +582,7 @@ impl MetricsCollector {
         let elapsed_secs_f64 = elapsed_secs.max(1) as f64; // Avoid division by zero
 
         let io_throughput_mb_per_sec = if elapsed_secs > 0 {
-            live_metrics
-                .io_throughput_bytes
-                .load(Ordering::Relaxed) as f64
+            live_metrics.io_throughput_bytes.load(Ordering::Relaxed) as f64
                 / elapsed_secs_f64
                 / 1_000_000.0
         } else {
@@ -591,7 +600,7 @@ impl MetricsCollector {
         } else {
             0.0
         };
-        
+
         // Calculate percentiles
         let p50 = Self::get_percentile_latency(live_metrics, 0.50);
         let p90 = Self::get_percentile_latency(live_metrics, 0.90);
@@ -683,34 +692,46 @@ mod tests {
             "Write latency sum should be 5000+7000 = 12000"
         );
     }
-    
+
     #[test]
     fn test_latency_distribution() {
         let collector = create_test_collector();
-        
+
         // Record latencies in different buckets
         // Bucket 0: < 10us
-        collector.record_read(5_000, 4096, true); 
+        collector.record_read(5_000, 4096, true);
         // Bucket 1: < 100us
         collector.record_read(50_000, 4096, true);
         // Bucket 2: < 500us
         collector.record_read(200_000, 4096, true);
         // Bucket 3: < 1ms
         collector.record_read(600_000, 4096, true);
-        
+
         // Verify buckets populated
-        assert_eq!(collector.live_metrics.latency_buckets[0].load(Ordering::Relaxed), 1);
-        assert_eq!(collector.live_metrics.latency_buckets[1].load(Ordering::Relaxed), 1);
-        assert_eq!(collector.live_metrics.latency_buckets[2].load(Ordering::Relaxed), 1);
-        assert_eq!(collector.live_metrics.latency_buckets[3].load(Ordering::Relaxed), 1);
-        
+        assert_eq!(
+            collector.live_metrics.latency_buckets[0].load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            collector.live_metrics.latency_buckets[1].load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            collector.live_metrics.latency_buckets[2].load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            collector.live_metrics.latency_buckets[3].load(Ordering::Relaxed),
+            1
+        );
+
         // Create snapshot to check percentiles
         let snapshot = collector.create_metrics_snapshot();
-        
+
         // p50 should be around bucket 1 or 2 (4 items, index 2)
         // p50 latency < 500us
         assert!(snapshot.p50_latency_ns <= 500_000);
-        
+
         // p99 should cover all items, so it should be bucket 3
         // p99 latency <= 1ms
         assert!(snapshot.p99_latency_ns <= 1_000_000);

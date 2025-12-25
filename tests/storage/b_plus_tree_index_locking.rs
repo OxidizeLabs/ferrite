@@ -1,6 +1,3 @@
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::schema::Schema;
@@ -9,9 +6,12 @@ use ferrite::common::rid::RID;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use ferrite::storage::index::b_plus_tree_index::BPlusTreeIndex;
 use ferrite::storage::index::latch_crabbing::{HeldWriteLock, OperationType};
-use ferrite::storage::index::types::comparators::{i32_comparator, I32Comparator};
+use ferrite::storage::index::types::comparators::{I32Comparator, i32_comparator};
 use ferrite::storage::index::{IndexInfo, IndexType};
 use ferrite::storage::page::page_types::b_plus_tree_internal_page::BPlusTreeInternalPage;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     bpm: Arc<BufferPoolManager>,
@@ -182,7 +182,11 @@ async fn test_pessimistic_traversal_holds_unsafe_nodes() {
         );
     }
 
-    println!("Tree height: {}, size: {}", tree.get_height(), tree.get_size());
+    println!(
+        "Tree height: {}, size: {}",
+        tree.get_height(),
+        tree.get_size()
+    );
 
     // Perform a pessimistic traversal and check that context holds locks
     // when nodes are not safe
@@ -210,12 +214,11 @@ async fn test_pessimistic_traversal_holds_unsafe_nodes() {
 
             // Verify tree is still valid after traversal
             assert!(tree.validate_tree().is_ok());
-        }
+        },
         Err(e) => {
             panic!("Pessimistic traversal failed: {}", e);
-        }
+        },
     }
 
     println!("test_pessimistic_traversal_holds_unsafe_nodes PASSED!");
 }
-

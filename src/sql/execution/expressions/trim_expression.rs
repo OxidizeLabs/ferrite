@@ -45,13 +45,13 @@ impl ExpressionOps for TrimExpression {
         let string_to_trim = match string_value.get_val() {
             crate::types_db::value::Val::VarLen(s) | crate::types_db::value::Val::ConstLen(s) => {
                 s.clone()
-            }
+            },
             _ => {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "TRIM requires string input, got {:?}",
                     string_value.get_type_id()
                 )));
-            }
+            },
         };
 
         // Get the characters to trim (if specified)
@@ -71,7 +71,7 @@ impl ExpressionOps for TrimExpression {
                         "TRIM characters must be a string, got {:?}",
                         chars_value.get_type_id()
                     )));
-                }
+                },
             }
         } else {
             // Default is to trim whitespace
@@ -113,13 +113,13 @@ impl ExpressionOps for TrimExpression {
         let string_to_trim = match string_value.get_val() {
             crate::types_db::value::Val::VarLen(s) | crate::types_db::value::Val::ConstLen(s) => {
                 s.clone()
-            }
+            },
             _ => {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "TRIM requires string input, got {:?}",
                     string_value.get_type_id()
                 )));
-            }
+            },
         };
 
         // Get the characters to trim (if specified)
@@ -144,7 +144,7 @@ impl ExpressionOps for TrimExpression {
                         "TRIM characters must be a string, got {:?}",
                         chars_value.get_type_id()
                     )));
-                }
+                },
             }
         } else {
             // Default is to trim whitespace

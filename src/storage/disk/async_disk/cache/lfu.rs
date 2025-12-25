@@ -1715,16 +1715,16 @@ mod tests {
                 match i % 4 {
                     0 => {
                         cache.insert(format!("key{}", i % 10), i);
-                    }
+                    },
                     1 => {
                         cache.get(&format!("key{}", i % 10));
-                    }
+                    },
                     2 => {
                         cache.remove(&format!("key{}", i % 10));
-                    }
+                    },
                     3 => {
                         cache.pop_lfu();
-                    }
+                    },
                     _ => unreachable!(),
                 }
 
@@ -2169,19 +2169,19 @@ mod tests {
                 match i % 5 {
                     0 => {
                         cache.insert(format!("temp{}", i), i);
-                    }
+                    },
                     1 => {
                         cache.get(&"key1".to_string());
-                    }
+                    },
                     2 => {
                         cache.remove(&format!("temp{}", i - 1));
-                    }
+                    },
                     3 => {
                         cache.pop_lfu();
-                    }
+                    },
                     4 => {
                         cache.increment_frequency(&"key2".to_string());
-                    }
+                    },
                     _ => unreachable!(),
                 }
                 verify_invariants(&cache);

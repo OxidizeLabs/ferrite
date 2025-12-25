@@ -121,7 +121,7 @@ impl ExpressionOps for CaseExpression {
                             i, b, tuple_data
                         );
                         *b
-                    }
+                    },
                     _ => return Err(ExpressionError::InvalidType("Expected boolean".to_string())),
                 },
             };
@@ -151,7 +151,7 @@ impl ExpressionOps for CaseExpression {
                 let result = expr.evaluate(tuple, schema)?;
                 debug!("CASE ELSE result: {} for tuple {:?}", result, tuple_data);
                 Ok(result)
-            }
+            },
             None => Ok(Value::new(Val::Null)),
         }
     }
@@ -167,7 +167,7 @@ impl ExpressionOps for CaseExpression {
         let base_value = match &self.base_expr {
             Some(expr) => {
                 Some(expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?)
-            }
+            },
             None => None,
         };
 

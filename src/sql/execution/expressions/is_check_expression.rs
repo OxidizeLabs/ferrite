@@ -51,10 +51,10 @@ impl ExpressionOps for IsCheckExpression {
                         return Err(ExpressionError::InvalidOperation(
                             "IS TRUE can only be applied to boolean values".to_string(),
                         ));
-                    }
+                    },
                 };
                 if negated { !is_true } else { is_true }
-            }
+            },
             IsCheckType::False { negated } => {
                 let is_false = match value.get_val() {
                     Val::Boolean(b) => !*b,
@@ -63,18 +63,18 @@ impl ExpressionOps for IsCheckExpression {
                         return Err(ExpressionError::InvalidOperation(
                             "IS FALSE can only be applied to boolean values".to_string(),
                         ));
-                    }
+                    },
                 };
                 if negated { !is_false } else { is_false }
-            }
+            },
             IsCheckType::Unknown { negated } => {
                 let is_unknown = value.is_null();
                 if negated { !is_unknown } else { is_unknown }
-            }
+            },
             IsCheckType::Null { negated } => {
                 let is_null = value.is_null();
                 if negated { !is_null } else { is_null }
-            }
+            },
         };
         Ok(Value::new(result))
     }
@@ -98,10 +98,10 @@ impl ExpressionOps for IsCheckExpression {
                         return Err(ExpressionError::InvalidOperation(
                             "IS TRUE can only be applied to boolean values".to_string(),
                         ));
-                    }
+                    },
                 };
                 if negated { !is_true } else { is_true }
-            }
+            },
             IsCheckType::False { negated } => {
                 let is_false = match value.get_val() {
                     Val::Boolean(b) => !*b,
@@ -110,18 +110,18 @@ impl ExpressionOps for IsCheckExpression {
                         return Err(ExpressionError::InvalidOperation(
                             "IS FALSE can only be applied to boolean values".to_string(),
                         ));
-                    }
+                    },
                 };
                 if negated { !is_false } else { is_false }
-            }
+            },
             IsCheckType::Unknown { negated } => {
                 let is_unknown = value.is_null();
                 if negated { !is_unknown } else { is_unknown }
-            }
+            },
             IsCheckType::Null { negated } => {
                 let is_null = value.is_null();
                 if negated { !is_null } else { is_null }
-            }
+            },
         };
         Ok(Value::new(result))
     }
@@ -165,25 +165,25 @@ impl Display for IsCheckExpression {
                     write!(f, "NOT ")?
                 }
                 write!(f, "TRUE")
-            }
+            },
             IsCheckType::False { negated } => {
                 if negated {
                     write!(f, "NOT ")?
                 }
                 write!(f, "FALSE")
-            }
+            },
             IsCheckType::Unknown { negated } => {
                 if negated {
                     write!(f, "NOT ")?
                 }
                 write!(f, "UNKNOWN")
-            }
+            },
             IsCheckType::Null { negated } => {
                 if negated {
                     write!(f, "NOT ")?
                 }
                 write!(f, "NULL")
-            }
+            },
         }
     }
 }
@@ -472,7 +472,7 @@ mod tests {
             Expression::IsCheck(is_check) => {
                 assert_eq!(is_check.check_type, IsCheckType::True { negated: false });
                 assert_eq!(is_check.return_type.get_name(), "result");
-            }
+            },
             _ => panic!("Expected IsCheck expression"),
         }
     }

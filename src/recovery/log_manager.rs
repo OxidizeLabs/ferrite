@@ -180,6 +180,7 @@ use crate::common::config::{INVALID_LSN, Lsn};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::AsyncDiskManager;
 use log::{debug, error, trace, warn};
+use parking_lot::Mutex;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -187,9 +188,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Handle;
-use tokio::task::block_in_place;
-use parking_lot::Mutex;
 use tokio::sync::mpsc;
+use tokio::task::block_in_place;
 use tokio::time::timeout;
 
 /// LogManager maintains a separate thread awakened whenever the log buffer is full or whenever a timeout
@@ -278,13 +278,8 @@ impl LogManager {
                 }
 
                 if !records_to_flush.is_empty() {
-                    Self::perform_flush(
-                        &state,
-                        records_to_flush,
-                        max_lsn_in_batch,
-                        "periodic",
-                    )
-                    .await;
+                    Self::perform_flush(&state, records_to_flush, max_lsn_in_batch, "periodic")
+                        .await;
                 }
             }
 
@@ -340,7 +335,7 @@ impl LogManager {
                         flush_reason, max_lsn
                     );
                 }
-            }
+            },
             Err(e) => {
                 error!(
                     "Failed to write log record(s) to disk during {} flush: {}",
@@ -349,7 +344,7 @@ impl LogManager {
                 // Fail closed: stop the flush thread to avoid giving a false durability signal.
                 // Callers waiting on commit will notice stop_flag and stop waiting.
                 state.stop_flag.store(true, Ordering::SeqCst);
-            }
+            },
         }
     }
 
@@ -464,7 +459,7 @@ impl LogManager {
                 // Log the error but don't fail the recovery process
                 warn!("Failed to parse log record: {}", e);
                 None
-            }
+            },
         }
     }
 
@@ -489,19 +484,19 @@ impl LogManager {
                         record.get_size()
                     );
                     Some(record)
-                }
+                },
                 Err(e) => {
                     warn!(
                         "Failed to deserialize log record at offset {}: {}",
                         offset, e
                     );
                     None
-                }
+                },
             },
             Err(e) => {
                 warn!("Failed to read log from disk at offset {}: {}", offset, e);
                 None
-            }
+            },
         }
     }
 
@@ -556,7 +551,8 @@ mod tests {
                 db_path.clone(),
                 log_path.clone(),
                 DiskManagerConfig::default(),
-            ).await;
+            )
+            .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
             let mut log_manager = LogManager::new(disk_manager_arc.clone());
             // Most tests append commit records; commit durability waiting requires the flush

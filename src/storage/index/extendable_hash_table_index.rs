@@ -106,9 +106,9 @@
 
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::rid::RID;
+use crate::concurrency::transaction::Transaction;
 use crate::container::disk_extendable_hash_table::DiskExtendableHashTable;
 use crate::container::hash_function::HashFunction;
-use crate::concurrency::transaction::Transaction;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::index::{Index, IndexInfo};
@@ -192,7 +192,7 @@ impl Index for ExtendableHashTableIndex {
             Err(e) => {
                 warn!("hash index insert skipped: {e}");
                 return false;
-            }
+            },
         };
         self.container.lock().insert(key, rid)
     }
@@ -203,7 +203,7 @@ impl Index for ExtendableHashTableIndex {
             Err(e) => {
                 warn!("hash index delete skipped: {e}");
                 return false;
-            }
+            },
         };
         self.container.lock().remove(&key)
     }
@@ -279,10 +279,9 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let disk_manager =
-            AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
-                .await
-                .unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path, DiskManagerConfig::default())
+            .await
+            .unwrap();
         let replacer = Arc::new(RwLock::new(LRUKReplacer::new(BUFFER_POOL_SIZE, K)));
         let bpm = Arc::new(
             BufferPoolManager::new(BUFFER_POOL_SIZE, Arc::new(disk_manager), replacer).unwrap(),
@@ -333,5 +332,3 @@ mod tests {
         assert!(result2.is_empty());
     }
 }
-
-

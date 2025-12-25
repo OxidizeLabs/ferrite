@@ -54,7 +54,7 @@ impl ExpressionOps for AllExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "ALL operation requires array/vector right operand".to_string(),
                 ));
-            }
+            },
         };
 
         if right_values.is_empty() {
@@ -76,7 +76,7 @@ impl ExpressionOps for AllExpression {
                         "Unsupported operator for ALL: {:?}",
                         self.compare_op
                     )));
-                }
+                },
             };
 
             // If any comparison is false, the ALL operation is false
@@ -118,7 +118,7 @@ impl ExpressionOps for AllExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "ALL operation requires array/vector right operand".to_string(),
                 ));
-            }
+            },
         };
 
         if right_values.is_empty() {
@@ -140,7 +140,7 @@ impl ExpressionOps for AllExpression {
                         "Unsupported operator for ALL: {:?}",
                         self.compare_op
                     )));
-                }
+                },
             };
 
             // If any comparison is false, the ALL operation is false

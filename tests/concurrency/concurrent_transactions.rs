@@ -1,7 +1,3 @@
-use futures::future;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use std::time::Duration;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -14,6 +10,10 @@ use ferrite::recovery::wal_manager::WALManager;
 use ferrite::sql::execution::execution_context::ExecutionContext;
 use ferrite::sql::execution::execution_engine::ExecutionEngine;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use futures::future;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
 
 pub struct ConcurrentTestContext {
@@ -139,11 +139,11 @@ async fn test_concurrent_inserts() {
                         .transaction_factory
                         .commit_transaction(txn_ctx)
                         .await
-                }
+                },
                 Err(_) => {
                     ctx_clone.transaction_factory.abort_transaction(txn_ctx);
                     false
-                }
+                },
             }
         });
         handles.push(handle);
@@ -235,11 +235,11 @@ async fn test_concurrent_updates() {
                         .transaction_factory
                         .commit_transaction(txn_ctx)
                         .await
-                }
+                },
                 Err(_) => {
                     ctx_clone.transaction_factory.abort_transaction(txn_ctx);
                     false
-                }
+                },
             }
         });
         handles.push(handle);
@@ -322,11 +322,11 @@ async fn test_deadlock_detection() {
                     .transaction_factory
                     .commit_transaction(txn_ctx)
                     .await
-            }
+            },
             _ => {
                 ctx_clone1.transaction_factory.abort_transaction(txn_ctx);
                 false
-            }
+            },
         }
     });
 
@@ -367,11 +367,11 @@ async fn test_deadlock_detection() {
                     .transaction_factory
                     .commit_transaction(txn_ctx)
                     .await
-            }
+            },
             _ => {
                 ctx_clone2.transaction_factory.abort_transaction(txn_ctx);
                 false
-            }
+            },
         }
     });
 

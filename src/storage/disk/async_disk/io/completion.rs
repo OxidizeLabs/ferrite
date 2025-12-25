@@ -534,7 +534,10 @@ impl CompletionTracker {
     /// Returns true if the operation exists and is still pending.
     pub async fn is_operation_pending(&self, op_id: OperationId) -> bool {
         let operations = self.operations.read().await;
-        matches!(operations.get(&op_id), Some(OperationStatus::Pending { .. }))
+        matches!(
+            operations.get(&op_id),
+            Some(OperationStatus::Pending { .. })
+        )
     }
 
     /// Waits for an operation to complete with a timeout
@@ -549,16 +552,16 @@ impl CompletionTracker {
             match operations.get(&op_id) {
                 Some(OperationStatus::Completed { result, .. }) => {
                     return Ok(result.clone());
-                }
+                },
                 Some(OperationStatus::Cancelled { reason, .. }) => {
                     return Err(format!("Operation was cancelled: {}", reason));
-                }
+                },
                 Some(OperationStatus::Pending { .. }) => {
                     // Continue to wait
-                }
+                },
                 None => {
                     return Err(format!("Operation {} not found", op_id));
-                }
+                },
             }
         }
 
@@ -755,10 +758,10 @@ impl CompletionTracker {
                     match status {
                         OperationStatus::Completed { completed_at, .. } => {
                             *completed_at > cutoff_time
-                        }
+                        },
                         OperationStatus::Cancelled { cancelled_at, .. } => {
                             *cancelled_at > cutoff_time
-                        }
+                        },
                         OperationStatus::Pending { .. } => true, // Keep pending operations
                     }
                 });
@@ -812,20 +815,20 @@ impl CompletionTracker {
                     Some(OperationStatus::Completed { result, .. }) => {
                         results.push((op_id, result.clone()));
                         remaining_ids.remove(&op_id);
-                    }
+                    },
                     Some(OperationStatus::Cancelled { reason, .. }) => {
                         results.push((
                             op_id,
                             OperationResult::Error(format!("Operation was cancelled: {}", reason)),
                         ));
                         remaining_ids.remove(&op_id);
-                    }
+                    },
                     Some(OperationStatus::Pending { .. }) => {
                         // Will wait for this one
-                    }
+                    },
                     None => {
                         return Err(format!("Operation {} not found", op_id));
-                    }
+                    },
                 }
             }
         }
@@ -874,13 +877,13 @@ impl CompletionTracker {
                     if status.is_timed_out() {
                         stats.timed_out_count += 1;
                     }
-                }
+                },
                 OperationStatus::Completed { .. } => {
                     stats.completed_count += 1;
-                }
+                },
                 OperationStatus::Cancelled { .. } => {
                     stats.cancelled_count += 1;
-                }
+                },
             }
         }
 
@@ -1066,7 +1069,7 @@ mod tests {
                 OperationResult::Success(data) => {
                     assert_eq!(data.len(), i + 1);
                     assert_eq!(data[0], i as u8);
-                }
+                },
                 OperationResult::Error(_) => panic!("Expected success result"),
             }
         }

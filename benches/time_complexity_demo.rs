@@ -1,8 +1,8 @@
 #![allow(clippy::all)]
 #![allow(unused_parens)]
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use criterion::BatchSize;
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::collections::HashMap;
 use std::hint::black_box;
 // =================================================================================
@@ -84,15 +84,11 @@ fn benchmark_constant_time(c: &mut Criterion) {
         let key = size / 2;
 
         group.bench_with_input(BenchmarkId::new("array_access", size), &size, |b, _| {
-            b.iter(|| {
-                black_box(constant_time_access(&data, index as usize))
-            })
+            b.iter(|| black_box(constant_time_access(&data, index as usize)))
         });
 
         group.bench_with_input(BenchmarkId::new("hash_lookup", size), &size, |b, _| {
-            b.iter(|| {
-                black_box(hash_lookup(&map, key))
-            })
+            b.iter(|| black_box(hash_lookup(&map, key)))
         });
     }
 
@@ -109,9 +105,7 @@ fn benchmark_linear_time(c: &mut Criterion) {
         let target = size + 1;
 
         group.bench_with_input(BenchmarkId::new("linear_search", size), &size, |b, _| {
-            b.iter(|| {
-                black_box(linear_search(&data, target))
-            })
+            b.iter(|| black_box(linear_search(&data, target)))
         });
 
         group.bench_with_input(BenchmarkId::new("sum_array", size), &size, |b, _| {
@@ -139,9 +133,7 @@ fn benchmark_quadratic_time(c: &mut Criterion) {
         });
 
         group.bench_with_input(BenchmarkId::new("find_pairs", size), &size, |b, _| {
-            b.iter(|| {
-                black_box(find_pairs_naive(&data, target))
-            })
+            b.iter(|| black_box(find_pairs_naive(&data, target)))
         });
     }
 

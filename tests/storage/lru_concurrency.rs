@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -158,35 +158,35 @@ mod thread_safety {
                                 // Insert new item
                                 let key = 1_000 + (thread_id * operations_per_thread + i) as u64;
                                 cache.insert(key, key);
-                            }
+                            },
                             1 => {
                                 // Read hot keys
                                 let key = (i % 120) as u64;
                                 let _ = cache.get(&key);
-                            }
+                            },
                             2 => {
                                 // Touch recently used keys
                                 let key = (i % 80) as u64;
                                 let _ = cache.touch(&key);
-                            }
+                            },
                             3 => {
                                 // Occasional removals
                                 if i % 10 == 0 {
                                     let key = (i % 100) as u64;
                                     let _ = cache.remove(&key);
                                 }
-                            }
+                            },
                             4 => {
                                 // Peek without updating LRU
                                 let key = (i % 150) as u64;
                                 let _ = cache.peek(&key);
-                            }
+                            },
                             _ => {
                                 // Evict oldest occasionally
                                 if i % 20 == 0 {
                                     let _ = cache.pop_lru();
                                 }
-                            }
+                            },
                         }
 
                         op_count.fetch_add(1, Ordering::SeqCst);

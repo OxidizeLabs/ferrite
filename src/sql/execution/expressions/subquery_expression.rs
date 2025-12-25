@@ -114,14 +114,14 @@ impl SubqueryExpression {
                     "Scalar subquery with {} aggregate must be handled at query planning level, not expression evaluation level",
                     agg.get_function_name()
                 )))
-            }
+            },
             _ => {
                 // For non-aggregate subqueries, try to evaluate directly
                 // This is a fallback for simple scalar subqueries
                 Err(ExpressionError::InvalidOperation(
                     "Scalar subqueries must be handled at query planning level".to_string(),
                 ))
-            }
+            },
         }
     }
 }
@@ -145,7 +145,7 @@ impl ExpressionOps for SubqueryExpression {
                     let result = self.subquery.evaluate(tuple, schema)?;
                     self.extract_scalar_value(result)
                 }
-            }
+            },
             SubqueryType::Exists => {
                 // First check if we have a cached result
                 if let Some(cached_result) = &self.cached_result {
@@ -155,7 +155,7 @@ impl ExpressionOps for SubqueryExpression {
                 // Check if subquery returns any rows
                 let result = self.subquery.evaluate(tuple, schema)?;
                 Ok(Value::new(!result.is_null()))
-            }
+            },
             SubqueryType::InList => {
                 // First check if we have a cached result
                 if let Some(cached_result) = &self.cached_result {
@@ -172,7 +172,7 @@ impl ExpressionOps for SubqueryExpression {
                     // For a scalar result, wrap it in a vector
                     _ => Ok(Value::new_vector(vec![result])),
                 }
-            }
+            },
             SubqueryType::Quantified => {
                 // First check if we have a cached result
                 if let Some(cached_result) = &self.cached_result {
@@ -181,7 +181,7 @@ impl ExpressionOps for SubqueryExpression {
 
                 // Handle ANY/ALL comparison
                 self.subquery.evaluate(tuple, schema)
-            }
+            },
         }
     }
 
@@ -214,7 +214,7 @@ impl ExpressionOps for SubqueryExpression {
                     )?;
                     self.extract_scalar_value(result)
                 }
-            }
+            },
             SubqueryType::Exists => {
                 // First check if we have a cached result
                 if let Some(cached_result) = &self.cached_result {
@@ -228,7 +228,7 @@ impl ExpressionOps for SubqueryExpression {
                     right_schema,
                 )?;
                 Ok(Value::new(!result.is_null()))
-            }
+            },
             SubqueryType::InList => {
                 // First check if we have a cached result
                 if let Some(cached_result) = &self.cached_result {
@@ -250,7 +250,7 @@ impl ExpressionOps for SubqueryExpression {
                     // For a scalar result, wrap it in a vector
                     _ => Ok(Value::new_vector(vec![result])),
                 }
-            }
+            },
             SubqueryType::Quantified => {
                 // First check if we have a cached result
                 if let Some(cached_result) = &self.cached_result {
@@ -259,7 +259,7 @@ impl ExpressionOps for SubqueryExpression {
 
                 self.subquery
                     .evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
         }
     }
 
@@ -313,7 +313,7 @@ impl ExpressionOps for SubqueryExpression {
                         "Scalar subquery return type does not match expected type".to_string(),
                     ))
                 }
-            }
+            },
             SubqueryType::Exists => {
                 // EXISTS subquery should return a boolean
                 if self.return_type.get_type() == TypeId::Boolean {
@@ -323,11 +323,11 @@ impl ExpressionOps for SubqueryExpression {
                         "EXISTS subquery must return a boolean value".to_string(),
                     ))
                 }
-            }
+            },
             SubqueryType::InList | SubqueryType::Quantified => {
                 // IN/ANY/ALL subqueries should return a list of values
                 Ok(())
-            }
+            },
         }
     }
 }

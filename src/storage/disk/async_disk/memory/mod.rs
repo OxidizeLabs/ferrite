@@ -13,16 +13,16 @@
 //! - **`durability_manager`**: Enforces persistence guarantees (fsync policies, WAL integration).
 //! - **`coalescing`**: A subsystem for merging adjacent writes into larger, contiguous I/O operations to improve throughput.
 
-pub mod write_staging_buffer;
 pub mod coalescing;
 pub mod durability_manager;
 pub mod flush_coordinator;
 pub mod write_manager;
+pub mod write_staging_buffer;
 
-pub use write_staging_buffer::{WriteBufferStats, WriteStagingBuffer};
 pub use coalescing::{
     CleanupReason, CoalesceResult, CoalescedSizeInfo, CoalescingEngine, PageRange, SizeAnalyzer,
 };
 pub use durability_manager::{DurabilityManager, DurabilityProvider, DurabilityResult};
 pub use flush_coordinator::{FlushCoordinator, FlushDecision};
 pub use write_manager::WriteManager;
+pub use write_staging_buffer::{WriteBufferStats, WriteStagingBuffer};

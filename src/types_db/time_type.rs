@@ -96,20 +96,20 @@ impl Type for TimeType {
                 // Ensure the result is within 24 hours
                 let normalized = total_seconds % (24 * 60 * 60);
                 Ok(Value::new_with_type(Val::Time(normalized), TypeId::Time))
-            }
+            },
             Val::Integer(r) => {
                 let total_seconds = *r;
                 // Ensure the result is within 24 hours
                 let normalized = total_seconds % (24 * 60 * 60);
                 Ok(Value::new_with_type(Val::Time(normalized), TypeId::Time))
-            }
+            },
             Val::Interval(seconds) => {
                 // Adding seconds to a time
                 let total_seconds = *seconds as i32;
                 // Ensure the result is within 24 hours
                 let normalized = total_seconds % (24 * 60 * 60);
                 Ok(Value::new_with_type(Val::Time(normalized), TypeId::Time))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-time/interval types to Time".to_string()),
         }
@@ -124,7 +124,7 @@ impl Type for TimeType {
                     Val::Interval(diff as i64),
                     TypeId::Interval,
                 ))
-            }
+            },
             Val::Integer(r) => {
                 // Subtracting seconds from a time
                 let total_seconds = -*r;
@@ -132,7 +132,7 @@ impl Type for TimeType {
                 let day_seconds = 24 * 60 * 60;
                 let normalized = ((total_seconds % day_seconds) + day_seconds) % day_seconds;
                 Ok(Value::new_with_type(Val::Time(normalized), TypeId::Time))
-            }
+            },
             Val::Interval(seconds) => {
                 // Subtracting an interval from a time
                 let total_seconds = -(*seconds as i32);
@@ -140,7 +140,7 @@ impl Type for TimeType {
                 let day_seconds = 24 * 60 * 60;
                 let normalized = ((total_seconds % day_seconds) + day_seconds) % day_seconds;
                 Ok(Value::new_with_type(Val::Time(normalized), TypeId::Time))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-time/interval types from Time".to_string()),
         }
@@ -189,7 +189,7 @@ impl Type for TimeType {
                 } else {
                     format!("INVALID_TIME({})", seconds)
                 }
-            }
+            },
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
         }

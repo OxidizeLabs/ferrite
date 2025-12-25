@@ -1,9 +1,6 @@
 #![allow(clippy::single_match)]
 
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -12,6 +9,9 @@ use ferrite::sql::execution::expressions::comparison_expression::ComparisonType;
 use ferrite::sql::planner::logical_plan::LogicalPlanType;
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -62,9 +62,18 @@ impl TestContext {
     fn setup_users(&mut self) {
         let mut catalog = self.catalog.write();
         let schema = ferrite::catalog::schema::Schema::new(vec![
-            ferrite::catalog::column::Column::new("id", ferrite::types_db::type_id::TypeId::Integer),
-            ferrite::catalog::column::Column::new("name", ferrite::types_db::type_id::TypeId::VarChar),
-            ferrite::catalog::column::Column::new("age", ferrite::types_db::type_id::TypeId::Integer),
+            ferrite::catalog::column::Column::new(
+                "id",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
+            ferrite::catalog::column::Column::new(
+                "name",
+                ferrite::types_db::type_id::TypeId::VarChar,
+            ),
+            ferrite::catalog::column::Column::new(
+                "age",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
         ]);
         let _ = catalog.create_table("users".to_string(), schema);
     }
@@ -126,7 +135,7 @@ async fn select_with_equality_filter() {
                 comp,
             ) => {
                 assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
-            }
+            },
             _ => panic!("Expected Comparison"),
         },
         _ => panic!("Expected Filter"),
@@ -166,7 +175,7 @@ async fn test_select_with_column_aliases() {
             assert!(col_names.contains(&"user_id"));
             assert!(col_names.contains(&"full_name"));
             assert!(col_names.contains(&"years_old"));
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -182,7 +191,7 @@ async fn test_select_with_multiple_conditions() {
     match &plan.plan_type {
         LogicalPlanType::Projection { schema, .. } => {
             assert_eq!(schema.get_column_count(), 1);
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 
@@ -193,7 +202,7 @@ async fn test_select_with_multiple_conditions() {
                 Expression::Logic(_) => (), // AND expression
                 _ => (),                    // Might be optimized differently
             }
-        }
+        },
         _ => panic!("Expected Filter node"),
     }
 }
@@ -210,7 +219,7 @@ async fn test_select_with_string_comparison() {
         LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
             Expression::Comparison(comp) => {
                 assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
-            }
+            },
             _ => panic!("Expected Comparison expression"),
         },
         _ => panic!("Expected Filter node"),
@@ -229,7 +238,7 @@ async fn test_select_with_not_equal() {
         LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
             Expression::Comparison(comp) => {
                 assert_eq!(comp.get_comp_type(), ComparisonType::NotEqual);
-            }
+            },
             _ => panic!("Expected Comparison expression"),
         },
         _ => panic!("Expected Filter node"),
@@ -248,7 +257,7 @@ async fn test_select_with_less_than_equal() {
         LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
             Expression::Comparison(comp) => {
                 assert_eq!(comp.get_comp_type(), ComparisonType::LessThanOrEqual);
-            }
+            },
             _ => panic!("Expected Comparison expression"),
         },
         _ => panic!("Expected Filter node"),
@@ -267,7 +276,7 @@ async fn test_select_with_greater_than_equal() {
         LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
             Expression::Comparison(comp) => {
                 assert_eq!(comp.get_comp_type(), ComparisonType::GreaterThanOrEqual);
-            }
+            },
             _ => panic!("Expected Comparison expression"),
         },
         _ => panic!("Expected Filter node"),
@@ -289,10 +298,10 @@ async fn test_select_with_is_null() {
                 Expression::Comparison(comp) => {
                     // IS NULL might be represented as a special comparison
                     assert_eq!(comp.get_comp_type(), ComparisonType::Equal);
-                }
+                },
                 _ => (), // Might be a different expression type for IS NULL
             }
-        }
+        },
         _ => panic!("Expected Filter node"),
     }
 }
@@ -312,10 +321,10 @@ async fn test_select_with_is_not_null() {
                 Expression::Comparison(comp) => {
                     // IS NOT NULL might be represented as a special comparison
                     assert_eq!(comp.get_comp_type(), ComparisonType::NotEqual);
-                }
+                },
                 _ => (), // Might be a different expression type for IS NOT NULL
             }
-        }
+        },
         _ => panic!("Expected Filter node"),
     }
 }
@@ -335,7 +344,7 @@ async fn test_select_with_or_condition() {
                 Expression::Logic(_) => (), // OR expression
                 _ => (),                    // Might be represented differently
             }
-        }
+        },
         _ => panic!("Expected Filter node"),
     }
 }
@@ -355,7 +364,7 @@ async fn test_select_with_parentheses() {
                 Expression::Logic(_) => (), // Complex logical expression
                 _ => (),                    // Might be optimized or represented differently
             }
-        }
+        },
         _ => panic!("Expected Filter node"),
     }
 }
@@ -379,7 +388,7 @@ async fn test_select_with_table_alias() {
 
             // The column names might include the table alias
             // This depends on the implementation
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 
@@ -390,7 +399,7 @@ async fn test_select_with_table_alias() {
             // Schema should have aliased column names
             let col = schema.get_column(0).unwrap();
             assert!(col.get_name().contains("u.") || col.get_name() == "id");
-        }
+        },
         _ => panic!("Expected TableScan node"),
     }
 }
@@ -406,7 +415,7 @@ async fn test_select_mixed_qualified_unqualified() {
     match &plan.plan_type {
         LogicalPlanType::Projection { schema, .. } => {
             assert_eq!(schema.get_column_count(), 2);
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -433,7 +442,7 @@ async fn test_select_arithmetic_expression() {
                 .map(|i| schema.get_column(i as usize).unwrap().get_name())
                 .collect();
             assert!(col_names.contains(&"next_age"));
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -461,7 +470,7 @@ async fn test_select_constant_expressions() {
                 .collect();
             assert!(col_names.contains(&"const_str"));
             assert!(col_names.contains(&"const_num"));
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -487,7 +496,7 @@ async fn test_select_complex_expressions() {
                 .map(|i| schema.get_column(i as usize).unwrap().get_name())
                 .collect();
             assert!(col_names.contains(&"formula"));
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 
@@ -553,7 +562,7 @@ async fn test_select_with_case_expression() {
                 .map(|i| schema.get_column(i as usize).unwrap().get_name())
                 .collect();
             assert!(col_names.contains(&"age_group"));
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -577,7 +586,7 @@ async fn test_select_single_column() {
 
             let col = schema.get_column(0).unwrap();
             assert_eq!(col.get_name(), "name");
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -604,7 +613,7 @@ async fn test_select_duplicate_columns() {
                 let col = schema.get_column(i).unwrap();
                 assert_eq!(col.get_name(), "name");
             }
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
@@ -649,7 +658,7 @@ async fn test_select_all_comparison_operators() {
             LogicalPlanType::Filter { predicate, .. } => match predicate.as_ref() {
                 Expression::Comparison(comp) => {
                     assert_eq!(comp.get_comp_type(), expected_op, "Failed for SQL: {}", sql);
-                }
+                },
                 _ => panic!("Expected Comparison expression for SQL: {}", sql),
             },
             _ => panic!("Expected Filter node for SQL: {}", sql),
@@ -684,11 +693,11 @@ async fn test_select_with_complex_where_conditions() {
                     },
                     _ => panic!("Expected Projection as root for SQL: {}", sql),
                 }
-            }
+            },
             Err(_) => {
                 // Some complex expressions might not be implemented yet
                 // That's acceptable for this test
-            }
+            },
         }
     }
 }
@@ -712,12 +721,12 @@ async fn test_select_with_string_operations() {
             } => {
                 assert_eq!(schema.get_column_count(), 3);
                 assert_eq!(expressions.len(), 3);
-            }
+            },
             _ => panic!("Expected Projection as root node"),
         },
         Err(_) => {
             // String functions might not be implemented, which is acceptable
-        }
+        },
     }
 }
 
@@ -755,10 +764,12 @@ async fn test_select_very_long_query() {
         } => {
             assert_eq!(schema.get_column_count(), 50);
             assert_eq!(expressions.len(), 50);
-        }
+        },
         _ => panic!("Expected Projection as root node"),
     }
 }
 
 #[tokio::test]
-async fn test_select_with_nested_expressions() { todo!() }
+async fn test_select_with_nested_expressions() {
+    todo!()
+}

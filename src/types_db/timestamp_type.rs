@@ -111,7 +111,7 @@ impl Type for TimestampType {
                     .unwrap()
                     .as_secs();
                 Ok(Value::new(current.saturating_add(*r as u64)))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-numeric types to Timestamp".to_string()),
         }
@@ -126,7 +126,7 @@ impl Type for TimestampType {
                     .unwrap()
                     .as_secs();
                 Ok(Value::new(current.saturating_sub(*r as u64)))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-numeric types from Timestamp".to_string()),
         }
@@ -152,7 +152,7 @@ impl Type for TimestampType {
                     .unwrap()
                     .as_secs();
                 Value::new(current.min(*r))
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -165,7 +165,7 @@ impl Type for TimestampType {
                     .unwrap()
                     .as_secs();
                 Value::new(current.max(*r))
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -175,7 +175,7 @@ impl Type for TimestampType {
             Val::Timestamp(ts) => {
                 // Display as Unix timestamp (seconds since epoch)
                 ts.to_string()
-            }
+            },
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
         }

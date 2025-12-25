@@ -71,14 +71,14 @@ impl AbstractExecutor for ValuesExecutor {
                     self.current_row - 1
                 );
                 Ok(Some((tuple, RID::default())))
-            }
+            },
             Err(e) => {
                 error!("Failed to evaluate values: {}", e);
                 Err(DBError::Execution(format!(
                     "Failed to evaluate values: {}",
                     e
                 )))
-            }
+            },
         }
     }
 

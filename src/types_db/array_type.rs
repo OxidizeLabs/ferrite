@@ -48,7 +48,7 @@ impl Type for ArrayType {
                 } else {
                     CmpBool::CmpTrue
                 }
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -59,7 +59,7 @@ impl Type for ArrayType {
             Val::Array(r) => {
                 let _ = r; // length doesn't affect result here
                 CmpBool::CmpTrue
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -70,7 +70,7 @@ impl Type for ArrayType {
             Val::Array(r) => {
                 let _ = r; // length doesn't affect result here
                 CmpBool::CmpFalse
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -84,7 +84,7 @@ impl Type for ArrayType {
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -96,7 +96,7 @@ impl Type for ArrayType {
                 let mut result = Vec::new();
                 result.extend_from_slice(r);
                 Ok(Value::new(result))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-array values to Array".to_string()),
         }
@@ -131,7 +131,7 @@ impl Type for ArrayType {
             Val::Array(a) => {
                 let elements: Vec<String> = a.iter().map(|v| ToString::to_string(&v)).collect();
                 format!("[{}]", elements.join(", "))
-            }
+            },
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
         }

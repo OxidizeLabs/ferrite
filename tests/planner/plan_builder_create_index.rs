@@ -1,7 +1,4 @@
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -9,6 +6,9 @@ use ferrite::sql::planner::logical_plan::LogicalPlanType;
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use ferrite::types_db::type_id::TypeId;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -96,7 +96,7 @@ async fn create_simple_index() {
             let col = schema.get_column(0).unwrap();
             assert_eq!(col.get_name(), "name");
             assert_eq!(col.get_type(), TypeId::VarChar);
-        }
+        },
         _ => panic!("Expected CreateIndex plan node"),
     }
 }
@@ -120,7 +120,7 @@ async fn create_composite_index() {
             assert_eq!(key_attrs.as_slice(), [1, 2]);
             assert_eq!(schema.get_column_count(), 2);
             assert!(!if_not_exists);
-        }
+        },
         _ => panic!("Expected CreateIndex plan node"),
     }
 }
@@ -144,7 +144,7 @@ async fn create_index_if_not_exists() {
             assert_eq!(key_attrs.as_slice(), [3]);
             assert_eq!(schema.get_column_count(), 1);
             assert!(if_not_exists);
-        }
+        },
         _ => panic!("Expected CreateIndex plan node"),
     }
 }
@@ -168,7 +168,7 @@ async fn create_index_all_columns() {
             assert_eq!(key_attrs.as_slice(), [0, 1, 2, 3]);
             assert_eq!(schema.get_column_count(), 4);
             assert!(!if_not_exists);
-        }
+        },
         _ => panic!("Expected CreateIndex plan node"),
     }
 }
@@ -226,7 +226,7 @@ async fn create_index_on_primary_key() {
             assert_eq!(col.get_name(), "id");
             assert_eq!(col.get_type(), TypeId::Integer);
             assert!(!if_not_exists);
-        }
+        },
         _ => panic!("Expected CreateIndex plan node"),
     }
 }
@@ -253,7 +253,7 @@ async fn create_unique_index() {
             assert_eq!(key_attrs.as_slice(), [3]);
             assert_eq!(schema.get_column_count(), 1);
             assert!(!if_not_exists);
-        }
+        },
         _ => panic!("Expected CreateIndex plan node"),
     }
 }

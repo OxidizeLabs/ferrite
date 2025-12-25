@@ -114,7 +114,7 @@ impl Type for EnumType {
                 } else {
                     Value::new(Val::Enum(*val, name.clone()))
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -127,7 +127,7 @@ impl Type for EnumType {
                 } else {
                     Value::new(Val::Enum(*val, name.clone()))
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

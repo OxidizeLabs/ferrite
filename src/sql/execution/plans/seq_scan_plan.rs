@@ -115,7 +115,7 @@ mod tests {
             match plan_node {
                 PlanNode::SeqScan(converted_node) => {
                     assert_eq!(converted_node, node);
-                }
+                },
                 _ => panic!("Expected PlanNode::SeqScan"),
             }
         }

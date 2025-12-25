@@ -153,7 +153,7 @@ impl Type for BigIntType {
             Val::TinyInt(r) if *r == 0 => Value::new(Val::Null),
             Val::BigInt(_) | Val::Integer(_) | Val::SmallInt(_) | Val::TinyInt(_) => {
                 Value::new(0i64)
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

@@ -86,7 +86,7 @@ pub trait Type {
                 type_id == TypeId::VarChar
                     || type_id == TypeId::Date
                     || type_id == TypeId::Timestamp
-            }
+            },
             TypeId::Time => type_id == TypeId::VarChar || type_id == TypeId::Time,
             TypeId::Interval => type_id == TypeId::VarChar || type_id == TypeId::Interval,
             TypeId::VarChar => matches!(
@@ -130,7 +130,7 @@ pub trait Type {
             TypeId::Array => type_id == TypeId::Array,
             TypeId::Enum => {
                 type_id == TypeId::Enum || type_id == TypeId::Integer || type_id == TypeId::VarChar
-            }
+            },
             TypeId::Point => type_id == TypeId::Point,
             TypeId::Struct => type_id == TypeId::Struct,
         }
@@ -232,11 +232,11 @@ pub trait Type {
             Val::Vector(v) => {
                 let type_name = type_id_to_string(self.get_type_id());
                 format!("{}[{} items]", type_name, v.len())
-            }
+            },
             Val::Array(a) => {
                 let type_name = type_id_to_string(self.get_type_id());
                 format!("{}[{} items]", type_name, a.len())
-            }
+            },
             Val::Enum(id, name) => format!("ENUM({}: {})", id, name),
             Val::Point(x, y) => format!("POINT({}, {})", x, y),
             Val::Null => "NULL".to_string(),

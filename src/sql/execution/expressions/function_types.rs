@@ -48,7 +48,7 @@ pub fn get_function_type(name: &str) -> FunctionType {
         // Scalar String Functions
         "UPPER" | "LOWER" | "CONCAT" | "SUBSTRING" => {
             FunctionType::Scalar(ScalarFunctionType::String)
-        }
+        },
 
         // Scalar Numeric Functions
         "ABS" | "ROUND" | "CEIL" | "FLOOR" => FunctionType::Scalar(ScalarFunctionType::Numeric),
@@ -71,7 +71,7 @@ pub fn get_function_type(name: &str) -> FunctionType {
         "ROW_NUMBER" | "RANK" | "DENSE_RANK" => FunctionType::Window(WindowFunctionType::Ranking),
         "LEAD" | "LAG" | "FIRST_VALUE" | "LAST_VALUE" => {
             FunctionType::Window(WindowFunctionType::Analytic)
-        }
+        },
 
         // Default to Other Scalar Function
         _ => FunctionType::Scalar(ScalarFunctionType::Other),

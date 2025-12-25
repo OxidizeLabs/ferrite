@@ -54,7 +54,7 @@
 //!
 //! Leaf pages serialize their contents using [`bincode`] for persistence.
 
-use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, PageId};
+use crate::common::config::{DB_PAGE_SIZE, PageId, storage_bincode_config};
 use crate::common::exception::PageError;
 use crate::storage::index::types::{KeyComparator, KeyType};
 use crate::storage::page::{Page, PageTrait, PageType, PageTypeId};

@@ -116,7 +116,7 @@ impl ComparisonExpression {
                     ComparisonType::GreaterThan => lhs.compare_greater_than(&cast_rhs),
                     ComparisonType::GreaterThanOrEqual => {
                         lhs.compare_greater_than_equals(&cast_rhs)
-                    }
+                    },
                     ComparisonType::IsNotNull => unreachable!(),
                 };
                 return Ok(cast_result);

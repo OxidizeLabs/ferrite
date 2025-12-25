@@ -1,5 +1,12 @@
 #![allow(dead_code, clippy::unnecessary_map_or, clippy::collapsible_if)]
 
+use ferrite::catalog::schema::Schema;
+use ferrite::common::db_instance::{DBConfig, DBInstance};
+use ferrite::common::exception::DBError;
+use ferrite::common::logger;
+use ferrite::common::result_writer::ResultWriter;
+use ferrite::concurrency::transaction::IsolationLevel;
+use ferrite::types_db::value::Value;
 use sqllogictest::{DB, DBOutput, DefaultColumnType};
 use std::error::Error;
 use std::fs;
@@ -8,13 +15,6 @@ use std::sync::Once;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
-use ferrite::catalog::schema::Schema;
-use ferrite::common::db_instance::{DBConfig, DBInstance};
-use ferrite::common::exception::DBError;
-use ferrite::common::logger;
-use ferrite::common::result_writer::ResultWriter;
-use ferrite::concurrency::transaction::IsolationLevel;
-use ferrite::types_db::value::Value;
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -187,7 +187,7 @@ impl FerriteTest {
                 } else {
                     stats.failed_statements += 1;
                 }
-            }
+            },
             DBOutput::Rows { .. } => {
                 stats.queries_run += 1;
                 if success {
@@ -195,10 +195,10 @@ impl FerriteTest {
                 } else {
                     stats.failed_queries += 1;
                 }
-            }
+            },
             _ => {
                 // For any other output type, we don't track statistics
-            }
+            },
         }
     }
 
@@ -307,12 +307,12 @@ impl DB for FerriteTest {
                     self.update_stats(&output, false);
                     Ok(output)
                 }
-            }
+            },
             Err(e) => {
                 // Note: Error counting is not currently tracked in this simplified approach
                 self.update_stats(&DBOutput::StatementComplete(0), false);
                 Err(e)
-            }
+            },
         }
     }
 }
@@ -418,12 +418,12 @@ mod tests {
             Ok(_) => {
                 // Test file ran successfully (all tests passed)
                 Ok(stats)
-            }
+            },
             Err(e) => {
                 // Test file ran but some tests failed - this is still a "file execution"
                 // but we need to propagate the error for reporting
                 Err(e.into())
-            }
+            },
         }
     }
 
@@ -452,7 +452,7 @@ mod tests {
                         suite_stats.stats.successful_queries += file_stats.successful_queries;
                         suite_stats.stats.failed_queries += file_stats.failed_queries;
                         suite_stats.stats.duration += file_stats.duration;
-                    }
+                    },
                     Err(e) => {
                         // Test file failed, but we still count it as executed
                         // We create a basic stats entry with files_run = 1
@@ -465,7 +465,7 @@ mod tests {
                         if first_error.is_none() {
                             first_error = Some(e);
                         }
-                    }
+                    },
                 }
             } else if path.is_dir() {
                 if let Err(e) = Box::pin(run_test_directory(&path, suite_stats)).await {

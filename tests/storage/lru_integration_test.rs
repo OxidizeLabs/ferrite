@@ -1,6 +1,8 @@
+use ferrite::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LRUCacheTrait, MutableCache,
+};
+use ferrite::storage::disk::async_disk::cache::lru::{ConcurrentLRUCache, LRUCore};
 use std::sync::Arc;
-use ferrite::storage::disk::async_disk::cache::lru::{LRUCore, ConcurrentLRUCache};
-use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, MutableCache, LRUCacheTrait};
 
 #[cfg(test)]
 mod integration_tests {
@@ -39,7 +41,7 @@ mod integration_tests {
         // - Key 4 was just inserted (most recent)
         // Remaining keys: 1 and 4, with 1 being the LRU (older access than 4)
         let (key, value) = cache.pop_lru().unwrap();
-        assert_eq!(key, 1);  // Key 1 should now be the LRU
+        assert_eq!(key, 1); // Key 1 should now be the LRU
         assert_eq!(*value, "one");
 
         println!("✅ Zero-copy LRU core test passed!");
@@ -118,6 +120,9 @@ mod integration_tests {
         assert!(!cache.contains(&10)); // Old page should be evicted
 
         println!("✅ Database workload simulation passed!");
-        println!("   Cache handled {} page insertions with zero-copy semantics", 150);
+        println!(
+            "   Cache handled {} page insertions with zero-copy semantics",
+            150
+        );
     }
 }

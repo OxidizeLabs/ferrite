@@ -493,7 +493,7 @@ impl LogicalPlan {
                     result.push_str(&format!("{}   IF NOT EXISTS\n", indent_str));
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::CreateIndex {
                 schema,
                 table_name,
@@ -510,19 +510,19 @@ impl LogicalPlan {
                     result.push_str(&format!("{}   IF NOT EXISTS\n", indent_str));
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::MockScan {
                 table_name, schema, ..
             } => {
                 result.push_str(&format!("{}→ MockScan: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::TableScan {
                 table_name, schema, ..
             } => {
                 result.push_str(&format!("{}→ TableScan: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::IndexScan {
                 table_name,
                 table_oid: _,
@@ -544,7 +544,7 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Filter {
                 schema,
 
@@ -556,7 +556,7 @@ impl LogicalPlan {
                 result.push_str(&format!("{}   Predicate: {}\n", indent_str, predicate));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Projection {
                 expressions,
                 schema,
@@ -572,33 +572,33 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Limit { limit, schema } => {
                 result.push_str(&format!("{}→ Limit: {}\n", indent_str, limit));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Offset { offset, schema } => {
                 result.push_str(&format!("{}→ Offset: {}\n", indent_str, offset));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Distinct { schema } => {
                 result.push_str(&format!("{}→ Distinct\n", indent_str));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Insert {
                 table_name, schema, ..
             } => {
                 result.push_str(&format!("{}→ Insert\n", indent_str));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Delete {
                 table_name, schema, ..
             } => {
                 result.push_str(&format!("{}→ Delete\n", indent_str));
                 result.push_str(&format!("{}   Table: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Update {
                 table_name,
                 schema,
@@ -616,11 +616,11 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Values { rows, schema } => {
                 result.push_str(&format!("{}→ Values: {} rows\n", indent_str, rows.len()));
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Aggregate {
                 group_by,
                 aggregates,
@@ -646,7 +646,7 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::NestedLoopJoin {
                 left_schema,
                 right_schema,
@@ -661,7 +661,7 @@ impl LogicalPlan {
                     "{}   Right Schema: {}\n",
                     indent_str, right_schema
                 ));
-            }
+            },
             LogicalPlanType::NestedIndexJoin {
                 left_schema,
                 right_schema,
@@ -673,7 +673,7 @@ impl LogicalPlan {
                     "{}   Right Schema: {}\n",
                     indent_str, right_schema
                 ));
-            }
+            },
             LogicalPlanType::HashJoin {
                 left_schema,
                 right_schema,
@@ -685,7 +685,7 @@ impl LogicalPlan {
                     "{}   Right Schema: {}\n",
                     indent_str, right_schema
                 ));
-            }
+            },
             LogicalPlanType::Sort {
                 sort_specifications,
                 schema,
@@ -700,7 +700,7 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::TopN {
                 k,
                 sort_specifications,
@@ -716,7 +716,7 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::TopNPerGroup {
                 k,
                 sort_specifications,
@@ -741,7 +741,7 @@ impl LogicalPlan {
                 }
                 result.push_str("]\n");
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::Window {
                 group_by,
                 aggregates,
@@ -778,7 +778,7 @@ impl LogicalPlan {
                     result.push_str("]\n");
                 }
                 result.push_str(&format!("{}   Schema: {}\n", indent_str, schema));
-            }
+            },
             LogicalPlanType::StartTransaction {
                 isolation_level,
                 read_only,
@@ -810,7 +810,7 @@ impl LogicalPlan {
                 if *has_end_keyword {
                     result.push_str(&format!("{}   Has End Keyword: true\n", indent_str));
                 }
-            }
+            },
             LogicalPlanType::Commit {
                 chain,
                 end,
@@ -826,7 +826,7 @@ impl LogicalPlan {
                 if let Some(m) = modifier {
                     result.push_str(&format!("{}   Modifier: {:?}\n", indent_str, m));
                 }
-            }
+            },
             LogicalPlanType::Rollback { chain, savepoint } => {
                 result.push_str(&format!("{}→ Rollback\n", indent_str));
                 if *chain {
@@ -835,15 +835,15 @@ impl LogicalPlan {
                 if let Some(s) = savepoint {
                     result.push_str(&format!("{}   Savepoint: {}\n", indent_str, s.value));
                 }
-            }
+            },
             LogicalPlanType::Savepoint { name } => {
                 result.push_str(&format!("{}→ Savepoint\n", indent_str));
                 result.push_str(&format!("{}   Name: {}\n", indent_str, name));
-            }
+            },
             LogicalPlanType::ReleaseSavepoint { name } => {
                 result.push_str(&format!("{}→ ReleaseSavepoint\n", indent_str));
                 result.push_str(&format!("{}   Name: {}\n", indent_str, name));
-            }
+            },
             LogicalPlanType::Drop {
                 object_type,
                 if_exists,
@@ -862,7 +862,7 @@ impl LogicalPlan {
                 if *cascade {
                     result.push_str(&format!("{}   CASCADE: true\n", indent_str));
                 }
-            }
+            },
             LogicalPlanType::CreateSchema {
                 schema_name,
                 if_not_exists,
@@ -872,7 +872,7 @@ impl LogicalPlan {
                 if *if_not_exists {
                     result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
                 }
-            }
+            },
             LogicalPlanType::CreateDatabase {
                 db_name,
                 if_not_exists,
@@ -882,7 +882,7 @@ impl LogicalPlan {
                 if *if_not_exists {
                     result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
                 }
-            }
+            },
             LogicalPlanType::AlterTable {
                 table_name,
                 operation,
@@ -890,7 +890,7 @@ impl LogicalPlan {
                 result.push_str(&format!("{}→ AlterTable\n", indent_str));
                 result.push_str(&format!("{}   Table Name: {}\n", indent_str, table_name));
                 result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
-            }
+            },
             LogicalPlanType::CreateView {
                 view_name,
                 schema,
@@ -902,7 +902,7 @@ impl LogicalPlan {
                 if *if_not_exists {
                     result.push_str(&format!("{}   IF NOT EXISTS: true\n", indent_str));
                 }
-            }
+            },
             LogicalPlanType::AlterView {
                 view_name,
                 operation,
@@ -910,7 +910,7 @@ impl LogicalPlan {
                 result.push_str(&format!("{}→ AlterView\n", indent_str));
                 result.push_str(&format!("{}   View Name: {}\n", indent_str, view_name));
                 result.push_str(&format!("{}   Operation: {}\n", indent_str, operation));
-            }
+            },
             LogicalPlanType::ShowTables {
                 schema_name,
                 terse,
@@ -928,12 +928,12 @@ impl LogicalPlan {
                 result.push_str(&format!("{}   Extended: {}\n", indent_str, *extended));
                 result.push_str(&format!("{}   Full: {}\n", indent_str, *full));
                 result.push_str(&format!("{}   External: {}\n", indent_str, *external));
-            }
+            },
             LogicalPlanType::ShowDatabases { terse, history } => {
                 result.push_str(&format!("{}→ ShowDatabases\n", indent_str));
                 result.push_str(&format!("{}   Terse: {}\n", indent_str, terse));
                 result.push_str(&format!("{}   History: {}\n", indent_str, history));
-            }
+            },
             LogicalPlanType::ShowColumns {
                 table_name,
                 schema_name,
@@ -947,16 +947,16 @@ impl LogicalPlan {
                 }
                 result.push_str(&format!("{}   Extended: {}\n", indent_str, extended));
                 result.push_str(&format!("{}   Full: {}\n", indent_str, full));
-            }
+            },
             LogicalPlanType::Use { db_name } => {
                 result.push_str(&format!("{}→ Use\n", indent_str));
                 result.push_str(&format!("{}   Database: {}\n", indent_str, db_name));
-            }
+            },
             LogicalPlanType::Explain { plan } => {
                 result.push_str(&format!("{}→ Explain\n", indent_str));
                 // Add the inner plan with increased indentation
                 result.push_str(&plan.explain(depth + 1));
-            }
+            },
         }
 
         // Add children recursively
@@ -1442,7 +1442,7 @@ impl LogicalPlan {
                 }
 
                 Some(Schema::new(merged_columns))
-            }
+            },
             LogicalPlanType::NestedIndexJoin {
                 left_schema,
                 right_schema,
@@ -1489,7 +1489,7 @@ impl LogicalPlan {
                 }
 
                 Some(Schema::new(merged_columns))
-            }
+            },
             LogicalPlanType::HashJoin {
                 left_schema,
                 right_schema,
@@ -1536,7 +1536,7 @@ impl LogicalPlan {
                 }
 
                 Some(Schema::new(merged_columns))
-            }
+            },
             LogicalPlanType::Filter { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Sort { schema, .. } => Some(schema.clone()),
             LogicalPlanType::Limit { schema, .. } => Some(schema.clone()),
@@ -1999,7 +1999,7 @@ impl<'a> PlanConverter<'a> {
                     )
                     .with_children(child_plans),
                 ))
-            }
+            },
 
             LogicalPlanType::Insert {
                 table_name,
@@ -2066,10 +2066,10 @@ impl<'a> PlanConverter<'a> {
                             !group_by.iter().any(|g| match g.as_ref() {
                                 Expression::ColumnRef(g_ref) => {
                                     g_ref.get_column_index() == col_ref.get_column_index()
-                                }
+                                },
                                 _ => false,
                             })
-                        }
+                        },
                         _ => true,
                     })
                     .cloned()
@@ -2080,7 +2080,7 @@ impl<'a> PlanConverter<'a> {
                     group_by.clone(),
                     agg_exprs,
                 )))
-            }
+            },
 
             LogicalPlanType::NestedLoopJoin {
                 left_schema,
@@ -2108,7 +2108,7 @@ impl<'a> PlanConverter<'a> {
                         vec![child_plans[0].clone(), child_plans[1].clone()],
                     )))
                 }
-            }
+            },
 
             LogicalPlanType::NestedIndexJoin {
                 left_schema,
@@ -2136,7 +2136,7 @@ impl<'a> PlanConverter<'a> {
                         vec![child_plans[0].clone(), child_plans[1].clone()],
                     )))
                 }
-            }
+            },
 
             LogicalPlanType::HashJoin {
                 left_schema,
@@ -2164,7 +2164,7 @@ impl<'a> PlanConverter<'a> {
                         vec![child_plans[0].clone(), child_plans[1].clone()],
                     )))
                 }
-            }
+            },
 
             LogicalPlanType::Sort {
                 sort_specifications,
@@ -2204,7 +2204,7 @@ impl<'a> PlanConverter<'a> {
                     *k,
                     child_plans,
                 )))
-            }
+            },
 
             LogicalPlanType::TopNPerGroup {
                 k,
@@ -2225,7 +2225,7 @@ impl<'a> PlanConverter<'a> {
                     schema.clone(),
                     child_plans,
                 )))
-            }
+            },
 
             LogicalPlanType::Window {
                 group_by,
@@ -2250,7 +2250,7 @@ impl<'a> PlanConverter<'a> {
                         Expression::Window(window_func) => {
                             // If it's already a window function, use its type directly
                             window_func.get_window_type()
-                        }
+                        },
                         _ => return Err("Invalid window function expression".to_string()),
                     };
 
@@ -2276,7 +2276,7 @@ impl<'a> PlanConverter<'a> {
                     window_functions,
                     child_plans,
                 )))
-            }
+            },
 
             LogicalPlanType::StartTransaction {
                 isolation_level,
@@ -2293,7 +2293,7 @@ impl<'a> PlanConverter<'a> {
                         *read_only,
                     )
                 ))
-            }
+            },
 
             LogicalPlanType::Commit {
                 chain,
@@ -2307,7 +2307,7 @@ impl<'a> PlanConverter<'a> {
                         *end,
                     )
                 ))
-            }
+            },
 
             LogicalPlanType::Rollback { chain, savepoint } => {
                 // Create a RollbackTransaction plan node
@@ -2318,12 +2318,12 @@ impl<'a> PlanConverter<'a> {
                         savepoint_str,
                     )
                 ))
-            }
+            },
 
             LogicalPlanType::Savepoint { name } => {
                 // Create a dummy plan that will create savepoint
                 Ok(PlanNode::CommandResult(format!("SAVEPOINT {}", name)))
-            }
+            },
 
             LogicalPlanType::ReleaseSavepoint { name } => {
                 // Create a dummy plan that will release savepoint
@@ -2331,7 +2331,7 @@ impl<'a> PlanConverter<'a> {
                     "RELEASE SAVEPOINT {}",
                     name
                 )))
-            }
+            },
 
             LogicalPlanType::Drop {
                 object_type,
@@ -2347,7 +2347,7 @@ impl<'a> PlanConverter<'a> {
                     names.join(", "),
                     if *cascade { " CASCADE" } else { "" }
                 )))
-            }
+            },
 
             LogicalPlanType::CreateSchema {
                 schema_name,
@@ -2359,7 +2359,7 @@ impl<'a> PlanConverter<'a> {
                     if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     schema_name
                 )))
-            }
+            },
 
             LogicalPlanType::CreateDatabase {
                 db_name,
@@ -2371,7 +2371,7 @@ impl<'a> PlanConverter<'a> {
                     if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     db_name
                 )))
-            }
+            },
 
             LogicalPlanType::AlterTable {
                 table_name,
@@ -2382,7 +2382,7 @@ impl<'a> PlanConverter<'a> {
                     "ALTER TABLE {} {}",
                     table_name, operation
                 )))
-            }
+            },
 
             LogicalPlanType::CreateView {
                 view_name,
@@ -2395,7 +2395,7 @@ impl<'a> PlanConverter<'a> {
                     if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     view_name
                 )))
-            }
+            },
 
             LogicalPlanType::AlterView {
                 view_name,
@@ -2406,7 +2406,7 @@ impl<'a> PlanConverter<'a> {
                     "ALTER VIEW {} {}",
                     view_name, operation
                 )))
-            }
+            },
 
             LogicalPlanType::ShowTables {
                 schema_name,
@@ -2430,7 +2430,7 @@ impl<'a> PlanConverter<'a> {
                         String::new()
                     }
                 )))
-            }
+            },
 
             LogicalPlanType::ShowDatabases { terse, history } => {
                 // Create a dummy plan that will show databases
@@ -2439,7 +2439,7 @@ impl<'a> PlanConverter<'a> {
                     if *terse { " TERSE" } else { "" },
                     if *history { " HISTORY" } else { "" }
                 )))
-            }
+            },
 
             LogicalPlanType::ShowColumns {
                 table_name,
@@ -2459,12 +2459,12 @@ impl<'a> PlanConverter<'a> {
                         String::new()
                     }
                 )))
-            }
+            },
 
             LogicalPlanType::Use { db_name } => {
                 // Create a dummy plan that will use database
                 Ok(PlanNode::CommandResult(format!("USE {}", db_name)))
-            }
+            },
 
             LogicalPlanType::Distinct { schema } => Ok(PlanNode::Distinct(
                 DistinctNode::new(schema.clone()).with_children(child_plans),
@@ -2474,7 +2474,7 @@ impl<'a> PlanConverter<'a> {
                 // Create a recursive explain plan
                 let inner_plan = plan.to_physical_plan()?;
                 Ok(PlanNode::Explain(Box::new(inner_plan)))
-            }
+            },
         }
     }
 }
@@ -2612,7 +2612,7 @@ fn extract_join_keys(
             } else {
                 Err("Join predicate must use equality comparison".to_string())
             }
-        }
+        },
 
         // Step 2.2: Handle Logic expressions (like AND between multiple conditions)
         Expression::Logic(logic_expr) => {
@@ -2648,7 +2648,7 @@ fn extract_join_keys(
             } else {
                 Err("Only AND is supported for combining join conditions".to_string())
             }
-        }
+        },
 
         // Step 2.3: Error for unsupported expression types
         _ => Err(format!(
@@ -2716,7 +2716,7 @@ mod tests {
                 assert_eq!(schema, s);
                 assert_eq!(table_name, "users");
                 assert!(!if_not_exists);
-            }
+            },
             _ => panic!("Expected CreateTable plan"),
         }
     }
@@ -2738,7 +2738,7 @@ mod tests {
                 assert_eq!(table_name, "users");
                 assert_eq!(schema, s);
                 assert_eq!(table_oid, 1);
-            }
+            },
             _ => panic!("Expected TableScan plan"),
         }
     }
@@ -2789,7 +2789,7 @@ mod tests {
                 assert_eq!(schema, s);
                 assert_eq!(table_oid, 1);
                 assert_eq!(p, predicate);
-            }
+            },
             _ => panic!("Expected Filter plan"),
         }
     }
@@ -2832,7 +2832,7 @@ mod tests {
                 assert_eq!(output_schema, s);
                 // The column mappings should map to the correct input columns
                 assert_eq!(column_mappings, vec![0, 1]);
-            }
+            },
             _ => panic!("Expected Projection plan"),
         }
     }
@@ -2881,7 +2881,7 @@ mod tests {
                 assert_eq!(group_by, g);
                 assert_eq!(aggregates, a);
                 assert_eq!(schema, s);
-            }
+            },
             _ => panic!("Expected Aggregate plan"),
         }
     }
@@ -2977,7 +2977,7 @@ mod tests {
                 assert_eq!(index_name, "users_id_idx");
                 assert_eq!(key_attrs, k);
                 assert!(!if_not_exists);
-            }
+            },
             _ => panic!("Expected CreateIndex plan"),
         }
     }
@@ -2999,7 +2999,7 @@ mod tests {
                 assert_eq!(table_name, "users");
                 assert_eq!(schema, s);
                 assert_eq!(table_oid, 1);
-            }
+            },
             _ => panic!("Expected MockScan plan"),
         }
     }
@@ -3043,7 +3043,7 @@ mod tests {
                 assert_eq!(index_oid, 2);
                 assert_eq!(schema, s);
                 assert_eq!(predicate_keys, p);
-            }
+            },
             _ => panic!("Expected IndexScan plan"),
         }
     }
@@ -3081,7 +3081,7 @@ mod tests {
                 assert_eq!(table_name, "users");
                 assert_eq!(schema, s);
                 assert_eq!(table_oid, 1);
-            }
+            },
             _ => panic!("Expected Insert plan"),
         }
     }
@@ -3105,7 +3105,7 @@ mod tests {
                 assert_eq!(table_name, "users");
                 assert_eq!(schema, s);
                 assert_eq!(table_oid, 1);
-            }
+            },
             _ => panic!("Expected Delete plan"),
         }
     }
@@ -3147,7 +3147,7 @@ mod tests {
                 assert_eq!(schema, s);
                 assert_eq!(table_oid, 1);
                 assert_eq!(update_expressions, u);
-            }
+            },
             _ => panic!("Expected Update plan"),
         }
     }
@@ -3177,7 +3177,7 @@ mod tests {
             LogicalPlanType::Values { rows: r, schema: s } => {
                 assert_eq!(rows, r);
                 assert_eq!(schema, s);
-            }
+            },
             _ => panic!("Expected Values plan"),
         }
     }
@@ -3226,7 +3226,7 @@ mod tests {
                 assert_eq!(right_schema, rs);
                 assert_eq!(*predicate, join_condition);
                 assert!(matches!(join_type, JoinOperator::Inner(_)));
-            }
+            },
             _ => panic!("Expected NestedLoopJoin plan type"),
         }
     }
@@ -3275,7 +3275,7 @@ mod tests {
                 assert_eq!(right_schema, rs);
                 assert_eq!(*predicate, join_condition);
                 assert!(matches!(join_type, JoinOperator::Inner(_)));
-            }
+            },
             _ => panic!("Expected HashJoin plan type"),
         }
     }
@@ -3310,7 +3310,7 @@ mod tests {
             } => {
                 assert_eq!(sort_specifications, se);
                 assert_eq!(schema, s);
-            }
+            },
             _ => panic!("Expected Sort plan"),
         }
     }
@@ -3329,7 +3329,7 @@ mod tests {
             LogicalPlanType::Limit { limit, schema: s } => {
                 assert_eq!(limit, 10);
                 assert_eq!(schema, s);
-            }
+            },
             _ => panic!("Expected Limit plan"),
         }
     }
@@ -3367,7 +3367,7 @@ mod tests {
                 assert_eq!(k, 5);
                 assert_eq!(sort_specifications, se);
                 assert_eq!(schema, s);
-            }
+            },
             _ => panic!("Expected TopN plan"),
         }
     }
@@ -3422,7 +3422,7 @@ mod tests {
                 assert_eq!(sort_specifications, se);
                 assert_eq!(groups, g);
                 assert_eq!(schema, s);
-            }
+            },
             _ => panic!("Expected TopNPerGroup plan"),
         }
     }
@@ -3481,7 +3481,7 @@ mod tests {
                 assert_eq!(aggregates, a);
                 assert_eq!(partitions, p);
                 assert_eq!(schema, s);
-            }
+            },
             _ => panic!("Expected Window plan"),
         }
     }
@@ -3513,10 +3513,10 @@ mod tests {
                 match &plan.plan_type {
                     LogicalPlanType::TableScan { table_name, .. } => {
                         assert_eq!(table_name, "users");
-                    }
+                    },
                     _ => panic!("Expected TableScan as inner plan"),
                 }
-            }
+            },
             _ => panic!("Expected Explain plan"),
         }
     }
@@ -3560,7 +3560,7 @@ mod tests {
                 assert_eq!(transaction_modifier, *tm);
                 assert_eq!(statements, *stmts);
                 assert_eq!(has_end_keyword, *hek);
-            }
+            },
             _ => panic!("Expected StartTransaction plan"),
         }
     }
@@ -3578,7 +3578,7 @@ mod tests {
                 assert!(!(*chain));
                 assert!(!(*end));
                 assert!(modifier.is_none());
-            }
+            },
             _ => panic!("Expected Commit plan"),
         }
     }
@@ -3595,7 +3595,7 @@ mod tests {
             } => {
                 assert_eq!(chain, *c);
                 assert!(savepoint.is_none());
-            }
+            },
             _ => panic!("Expected Rollback plan"),
         }
     }
@@ -3621,7 +3621,7 @@ mod tests {
                 } else {
                     panic!("Expected savepoint to be Some");
                 }
-            }
+            },
             _ => panic!("Expected Rollback plan with savepoint"),
         }
     }
@@ -3634,7 +3634,7 @@ mod tests {
         match &plan.plan_type {
             LogicalPlanType::Savepoint { name: n } => {
                 assert_eq!(name, *n);
-            }
+            },
             _ => panic!("Expected Savepoint plan"),
         }
     }
@@ -3647,7 +3647,7 @@ mod tests {
         match &plan.plan_type {
             LogicalPlanType::ReleaseSavepoint { name: n } => {
                 assert_eq!(name, *n);
-            }
+            },
             _ => panic!("Expected ReleaseSavepoint plan"),
         }
     }
@@ -3672,7 +3672,7 @@ mod tests {
                 assert_eq!(if_exists, *ie);
                 assert_eq!(names, *n);
                 assert_eq!(cascade, *c);
-            }
+            },
             _ => panic!("Expected Drop plan"),
         }
     }
@@ -3691,7 +3691,7 @@ mod tests {
             } => {
                 assert_eq!(schema_name, *sn);
                 assert_eq!(if_not_exists, *ine);
-            }
+            },
             _ => panic!("Expected CreateSchema plan"),
         }
     }
@@ -3710,7 +3710,7 @@ mod tests {
             } => {
                 assert_eq!(db_name, *dn);
                 assert_eq!(if_not_exists, *ine);
-            }
+            },
             _ => panic!("Expected CreateDatabase plan"),
         }
     }
@@ -3729,7 +3729,7 @@ mod tests {
             } => {
                 assert_eq!(table_name, *tn);
                 assert_eq!(operation, *op);
-            }
+            },
             _ => panic!("Expected AlterTable plan"),
         }
     }
@@ -3754,7 +3754,7 @@ mod tests {
                 assert_eq!(view_name, *vn);
                 assert_eq!(schema, *s);
                 assert_eq!(if_not_exists, *ine);
-            }
+            },
             _ => panic!("Expected CreateView plan"),
         }
     }
@@ -3773,7 +3773,7 @@ mod tests {
             } => {
                 assert_eq!(view_name, *vn);
                 assert_eq!(operation, *op);
-            }
+            },
             _ => panic!("Expected AlterView plan"),
         }
     }
@@ -3798,7 +3798,7 @@ mod tests {
                 assert!(!(*extended));
                 assert!(!(*full));
                 assert!(!(*external));
-            }
+            },
             _ => panic!("Expected ShowTables plan"),
         }
 
@@ -3827,7 +3827,7 @@ mod tests {
                 assert!(*extended);
                 assert!(*full);
                 assert!(*external);
-            }
+            },
             _ => panic!("Expected ShowTables plan with options"),
         }
     }
@@ -3841,7 +3841,7 @@ mod tests {
                 // Successfully created a ShowDatabases plan
                 assert_eq!(terse, &false);
                 assert_eq!(history, &false);
-            }
+            },
             _ => panic!("Expected ShowDatabases plan"),
         }
     }
@@ -3855,7 +3855,7 @@ mod tests {
                 // Successfully created a ShowDatabases plan with options
                 assert_eq!(terse, &true);
                 assert_eq!(history, &true);
-            }
+            },
             _ => panic!("Expected ShowDatabases plan with options"),
         }
     }
@@ -3878,7 +3878,7 @@ mod tests {
                 assert_eq!(schema_name, *sn);
                 assert!(!(*extended));
                 assert!(!(*full));
-            }
+            },
             _ => panic!("Expected ShowColumns plan"),
         }
     }
@@ -3891,7 +3891,7 @@ mod tests {
         match &plan.plan_type {
             LogicalPlanType::Use { db_name: dn } => {
                 assert_eq!(db_name, *dn);
-            }
+            },
             _ => panic!("Expected Use plan"),
         }
     }
@@ -3912,7 +3912,7 @@ mod tests {
                 assert_eq!(chain, *c);
                 assert_eq!(end, *e);
                 assert_eq!(&modifier, m);
-            }
+            },
             _ => panic!("Expected Commit plan"),
         }
     }
@@ -3942,7 +3942,7 @@ mod tests {
                 assert_eq!(schema_name, *sn);
                 assert_eq!(*e, extended);
                 assert_eq!(*f, full);
-            }
+            },
             _ => panic!("Expected ShowColumns plan with options"),
         }
     }

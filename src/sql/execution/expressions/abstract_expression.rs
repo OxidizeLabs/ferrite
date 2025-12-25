@@ -214,53 +214,53 @@ impl ExpressionOps for Expression {
             Self::Constant(expr) => Ok(expr.get_value().clone()),
             Self::ColumnRef(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Arithmetic(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Comparison(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Logic(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::String(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Array(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Assignment(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Mock(expr) => {
                 // For mock expressions, we'll just use the regular evaluate
                 expr.evaluate(left_tuple, left_schema)
-            }
+            },
             Self::Aggregate(expr) => expr.evaluate(left_tuple, right_schema),
             Self::Window(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Cast(expr) => expr.evaluate(left_tuple, right_schema),
             Self::Case(expr) => expr.evaluate(left_tuple, right_schema),
             Self::Function(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Subquery(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::In(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Between(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Like(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Extract(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Exists(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Regex(expr) => expr.evaluate(left_tuple, left_schema),
             Self::DateTime(expr) => expr.evaluate(left_tuple, left_schema),
@@ -273,7 +273,7 @@ impl ExpressionOps for Expression {
             Self::IsDistinct(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Position(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Method(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Struct(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Overlay(expr) => expr.evaluate(left_tuple, left_schema),
@@ -294,10 +294,10 @@ impl ExpressionOps for Expression {
             Self::CeilFloor(expr) => expr.evaluate(left_tuple, left_schema),
             Self::Substring(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
             Self::Literal(expr) => {
                 expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)
-            }
+            },
         }
     }
 
@@ -536,14 +536,14 @@ impl ExpressionOps for Expression {
                     return Err(error);
                 }
                 Ok(())
-            }
+            },
             // Other expression types validate their children
             _ => {
                 for child in self.get_children() {
                     child.validate(schema)?;
                 }
                 Ok(())
-            }
+            },
         }
     }
 }
@@ -557,350 +557,350 @@ impl Display for Expression {
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::ColumnRef(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Arithmetic(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Comparison(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Logic(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::String(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Array(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Assignment(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Mock(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Aggregate(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Window(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Cast(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Case(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Function(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Subquery(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::In(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Between(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Like(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Extract(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Exists(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Regex(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Coalesce(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Random(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Trim(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Interval(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::GroupingSets(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Filter(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::IsDistinct(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Position(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Method(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Struct(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Overlay(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Collate(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::AtTimeZone(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::MapAccess(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Tuple(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Wildcard(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::QualifiedWildcard(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::TypedString(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Subscript(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::IsCheck(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::BinaryOp(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Any(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::All(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::UnaryOp(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Convert(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::CeilFloor(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Substring(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::Literal(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
             Self::DateTime(expr) => {
                 if f.alternate() {
                     write!(f, "{:#}", expr)
                 } else {
                     write!(f, "{}", expr)
                 }
-            }
+            },
         }
     }
 }

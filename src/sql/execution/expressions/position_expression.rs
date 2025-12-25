@@ -53,7 +53,7 @@ impl ExpressionOps for PositionExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION substring must be a string".to_string(),
                 ));
-            }
+            },
         };
 
         let string_str = match string_val.get_val() {
@@ -62,7 +62,7 @@ impl ExpressionOps for PositionExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION string must be a string".to_string(),
                 ));
-            }
+            },
         };
 
         // Find the position (1-indexed as per SQL standard)
@@ -101,7 +101,7 @@ impl ExpressionOps for PositionExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION substring must be a string".to_string(),
                 ));
-            }
+            },
         };
 
         let string_str = match string_val.get_val() {
@@ -110,7 +110,7 @@ impl ExpressionOps for PositionExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "POSITION string must be a string".to_string(),
                 ));
-            }
+            },
         };
 
         // Find the position (1-indexed as per SQL standard)

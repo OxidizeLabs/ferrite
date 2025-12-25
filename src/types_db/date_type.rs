@@ -91,7 +91,7 @@ impl Type for DateType {
             Val::Interval(days) => {
                 // Adding days to a date
                 Ok(Value::new_with_type(Val::Date(*days as i32), TypeId::Date))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-date/interval types to Date".to_string()),
         }
@@ -105,18 +105,18 @@ impl Type for DateType {
                     Val::Interval(-(*r as i64)),
                     TypeId::Interval,
                 ))
-            }
+            },
             Val::Integer(r) => {
                 // Subtracting days from a date
                 Ok(Value::new_with_type(Val::Date(-*r), TypeId::Date))
-            }
+            },
             Val::Interval(days) => {
                 // Subtracting an interval from a date
                 Ok(Value::new_with_type(
                     Val::Date(-(*days as i32)),
                     TypeId::Date,
                 ))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-date/interval types from Date".to_string()),
         }
@@ -165,7 +165,7 @@ impl Type for DateType {
                 } else {
                     format!("INVALID_DATE({})", days)
                 }
-            }
+            },
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
         }

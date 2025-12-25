@@ -137,7 +137,7 @@ mod tests {
                 assert_eq!(values[0], Value::new(1));
                 assert_eq!(values[1], Value::new("test"));
                 assert_eq!(values[2], Value::new(std::f64::consts::PI));
-            }
+            },
             _ => panic!("Expected Vector value"),
         }
     }
@@ -186,7 +186,7 @@ mod tests {
             Expression::Tuple(t) => {
                 assert_eq!(t.get_children().len(), 2);
                 assert_eq!(t.get_return_type().get_name(), "tuple");
-            }
+            },
             _ => panic!("Expected Tuple expression"),
         }
     }

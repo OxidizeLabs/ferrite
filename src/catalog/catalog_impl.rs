@@ -183,11 +183,11 @@
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::database::Database;
-use crate::catalog::system_catalog::{
-    SystemCatalogSchemas, SystemCatalogTables, TableCatalogRow, SYS_TABLES_OID,
-};
 use crate::catalog::schema::Schema;
-use crate::common::config::{storage_bincode_config, IndexOidT, TableOidT};
+use crate::catalog::system_catalog::{
+    SYS_TABLES_OID, SystemCatalogSchemas, SystemCatalogTables, TableCatalogRow,
+};
+use crate::common::config::{IndexOidT, TableOidT, storage_bincode_config};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::{IndexInfo, IndexType};
@@ -417,7 +417,9 @@ impl Catalog {
     /// # Returns
     /// Some(TableInfo) if table creation succeeds, None if current database is not set or table with same name already exists
     pub fn create_table(&mut self, name: String, schema: Schema) -> Option<TableInfo> {
-        let table_info = self.get_current_database_mut()?.create_table(name.clone(), schema.clone())?;
+        let table_info = self
+            .get_current_database_mut()?
+            .create_table(name.clone(), schema.clone())?;
 
         // Record metadata in system catalog (__tables)
         self.record_system_table(&table_info, &schema);
@@ -459,7 +461,13 @@ impl Catalog {
         index_type: IndexType,
     ) -> Option<(Arc<IndexInfo>, Arc<RwLock<BPlusTree>>)> {
         let result = self.get_current_database_mut()?.create_index(
-            index_name, table_name, key_schema.clone(), key_attrs.clone(), key_size, unique, index_type.clone(),
+            index_name,
+            table_name,
+            key_schema.clone(),
+            key_attrs.clone(),
+            key_size,
+            unique,
+            index_type.clone(),
         );
 
         if let Some((index_info, btree)) = &result {
@@ -472,7 +480,11 @@ impl Catalog {
                 index_type,
             );
             // Ensure index metadata is tracked for lookups
-            self.add_index(index_info.get_index_oid(), index_info.clone(), btree.clone());
+            self.add_index(
+                index_info.get_index_oid(),
+                index_info.clone(),
+                btree.clone(),
+            );
         }
 
         result
@@ -546,10 +558,8 @@ impl Catalog {
         // Load snapshot first if available to seed faster rebuild
         if snapshot_path.exists() {
             if let Ok(bytes) = fs::read(snapshot_path) {
-                if let Ok((snapshot_rows, _)) = decode_from_slice::<Vec<TableCatalogRow>, _>(
-                    &bytes,
-                    storage_bincode_config(),
-                )
+                if let Ok((snapshot_rows, _)) =
+                    decode_from_slice::<Vec<TableCatalogRow>, _>(&bytes, storage_bincode_config())
                 {
                     for row in snapshot_rows {
                         if row.table_oid <= SYS_TABLES_OID {
@@ -593,9 +603,12 @@ impl Catalog {
             match decode_from_slice::<Schema, _>(&row.schema_bin, storage_bincode_config()) {
                 Ok(res) => res,
                 Err(err) => {
-                    warn!("Failed to decode schema for table {}: {}", row.table_oid, err);
+                    warn!(
+                        "Failed to decode schema for table {}: {}",
+                        row.table_oid, err
+                    );
                     return None;
-                }
+                },
             };
 
         let heap = Arc::new(TableHeap::reopen(
@@ -632,11 +645,7 @@ impl Catalog {
         let sys_table = self.system.tables.get_table_heap();
         let meta = Arc::new(TupleMeta::new(0));
 
-        let _ = sys_table.insert_tuple_from_values(
-            values,
-            &self.system_schemas.tables,
-            meta,
-        );
+        let _ = sys_table.insert_tuple_from_values(values, &self.system_schemas.tables, meta);
 
         info!(
             "Recorded table '{}' (oid {}) in system catalog",

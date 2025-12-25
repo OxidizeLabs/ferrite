@@ -59,13 +59,13 @@ impl ExpressionOps for IntervalExpression {
                         s
                     ))
                 })?
-            }
+            },
             _ => {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "Invalid value type {:?} for interval",
                     value.get_type_id()
                 )));
-            }
+            },
         };
 
         // Create a struct value with the interval field and amount
@@ -342,10 +342,10 @@ mod tests {
                 match i.value().as_ref() {
                     Expression::Literal(l) => {
                         assert_eq!(l.get_value().get_val(), &Val::TinyInt(10));
-                    }
+                    },
                     _ => panic!("Expected Literal expression"),
                 }
-            }
+            },
             _ => panic!("Expected Interval expression"),
         }
     }

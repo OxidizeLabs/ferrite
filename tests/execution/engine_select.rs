@@ -1,6 +1,6 @@
+use super::common::TestResultWriter;
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
-use super::common::TestResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
 #[tokio::test]
@@ -89,7 +89,10 @@ async fn select_where_order_by() {
         .collect();
     assert_eq!(
         actual,
-        vec![("2".to_string(), "b".to_string()), ("3".to_string(), "c".to_string())],
+        vec![
+            ("2".to_string(), "b".to_string()),
+            ("3".to_string(), "c".to_string())
+        ],
         "SELECT with WHERE and ORDER BY should project filtered rows in order"
     );
 }

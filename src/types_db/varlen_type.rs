@@ -104,7 +104,7 @@ impl Type for VarCharType {
                 } else {
                     Value::new(r.chars().min().unwrap_or_default().to_string())
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -117,7 +117,7 @@ impl Type for VarCharType {
                 } else {
                     Value::new(r.chars().max().unwrap_or_default().to_string())
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

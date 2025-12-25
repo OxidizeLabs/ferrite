@@ -4,6 +4,8 @@ use criterion::{
     AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, SamplingMode, Throughput,
     criterion_group, criterion_main,
 };
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 use std::fs::{OpenOptions, create_dir_all};
 use std::hash::Hash;
 use std::hint::black_box;
@@ -11,8 +13,6 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 
 // =================================================================================
 // TIME COMPLEXITY BENCHMARKS
@@ -281,16 +281,16 @@ fn benchmark_eviction_scenarios(c: &mut Criterion) {
                             let key = format!("stable_{}", working_set_idx);
                             let result = cache.get(&key).is_some();
                             black_box(result);
-                        }
+                        },
                         10..=13 => {
                             // 25% updates
                             let key = format!("stable_{}", working_set_idx);
                             cache.insert(key, format!("updated_{}", i));
-                        }
+                        },
                         _ => {
                             // 12.5% new inserts
                             cache.insert(format!("new_{}", i), format!("new_data_{}", i));
-                        }
+                        },
                     }
                 }
                 black_box(cache)
@@ -661,12 +661,12 @@ fn run_ops_once<K: Clone + Eq + Hash, V: Clone>(
         match *op {
             Op::Insert(kidx) => {
                 cache.insert(keys[kidx].clone(), v.clone());
-            }
+            },
             Op::Get(kidx) => {
                 if cache.get(&keys[kidx]).is_some() {
                     hits += 1;
                 }
-            }
+            },
         }
     }
     hits

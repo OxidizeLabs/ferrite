@@ -67,19 +67,19 @@ impl FilterExecutor {
                         tuple.get_values()
                     );
                     *b
-                }
+                },
                 _ => {
                     error!(
                         "WHERE filter evaluation returned non-boolean value: {:?}",
                         value
                     );
                     false
-                }
+                },
             },
             Err(e) => {
                 error!("Failed to evaluate WHERE filter: {}", e);
                 false
-            }
+            },
         }
     }
 
@@ -102,7 +102,7 @@ impl FilterExecutor {
             None => {
                 error!("No aggregate expression found in HAVING filter");
                 return false;
-            }
+            },
         };
 
         debug!(
@@ -126,11 +126,11 @@ impl FilterExecutor {
                     AggregationType::CountStar => {
                         let count = self.group_tuples.len() as i64;
                         Value::new_with_type(Val::BigInt(count), TypeId::BigInt)
-                    }
+                    },
                     AggregationType::Count => {
                         let count = self.group_tuples.len() as i64;
                         Value::new_with_type(Val::BigInt(count), TypeId::BigInt)
-                    }
+                    },
                     AggregationType::Sum => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut sum_val: Option<Value> = None;
@@ -146,7 +146,7 @@ impl FilterExecutor {
                         }
 
                         sum_val.unwrap_or_else(|| Value::new(Val::Null))
-                    }
+                    },
                     AggregationType::Avg => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut sum_val: Option<Value> = None;
@@ -174,21 +174,21 @@ impl FilterExecutor {
                                             Val::Decimal(int_val as f64 / count as f64),
                                             TypeId::Decimal,
                                         )
-                                    }
+                                    },
                                     TypeId::BigInt => {
                                         let bigint_val = sum.as_bigint().unwrap();
                                         Value::new_with_type(
                                             Val::Decimal(bigint_val as f64 / count as f64),
                                             TypeId::Decimal,
                                         )
-                                    }
+                                    },
                                     TypeId::Decimal => {
                                         let decimal_val = sum.as_decimal().unwrap();
                                         Value::new_with_type(
                                             Val::Decimal(decimal_val / count as f64),
                                             TypeId::Decimal,
                                         )
-                                    }
+                                    },
                                     _ => Value::new(Val::Null),
                                 }
                             } else {
@@ -197,7 +197,7 @@ impl FilterExecutor {
                         } else {
                             Value::new(Val::Null)
                         }
-                    }
+                    },
                     AggregationType::Min => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut min_val: Option<Value> = None;
@@ -217,7 +217,7 @@ impl FilterExecutor {
                         }
 
                         min_val.unwrap_or_else(|| Value::new(Val::Null))
-                    }
+                    },
                     AggregationType::Max => {
                         let col_expr = agg.get_children()[0].clone();
                         let mut max_val: Option<Value> = None;
@@ -237,17 +237,17 @@ impl FilterExecutor {
                         }
 
                         max_val.unwrap_or_else(|| Value::new(Val::Null))
-                    }
+                    },
                     AggregationType::StdDev | AggregationType::Variance => {
                         // For testing purposes, return null for these aggregates
                         Value::new(Val::Null)
-                    }
+                    },
                 }
-            }
+            },
             _ => {
                 error!("Expected aggregate expression in HAVING clause");
                 return false;
-            }
+            },
         };
 
         // Create a clone of agg_value for debug logging to avoid borrow issues
@@ -268,19 +268,19 @@ impl FilterExecutor {
                         b, agg_value_for_debug
                     );
                     *b
-                }
+                },
                 _ => {
                     error!(
                         "HAVING filter evaluation returned non-boolean value: {:?}",
                         value
                     );
                     false
-                }
+                },
             },
             Err(e) => {
                 error!("Failed to evaluate HAVING filter: {}", e);
                 false
-            }
+            },
         }
     }
 }
@@ -304,12 +304,12 @@ impl AbstractExecutor for FilterExecutor {
                 match self.child_executor.next() {
                     Ok(Some((tuple, _))) => {
                         self.group_tuples.push(tuple);
-                    }
+                    },
                     Ok(None) => break,
                     Err(e) => {
                         error!("Error during FilterExecutor initialization: {}", e);
                         break;
-                    }
+                    },
                 }
             }
         }
@@ -334,11 +334,11 @@ impl AbstractExecutor for FilterExecutor {
                             return Ok(Some((tuple, rid)));
                         }
                         debug!("Tuple did not match filter, continuing...");
-                    }
+                    },
                     None => {
                         debug!("No more tuples from child executor");
                         return Ok(None);
-                    }
+                    },
                 }
             },
             FilterType::Having => {
@@ -354,7 +354,7 @@ impl AbstractExecutor for FilterExecutor {
                 }
                 debug!("No more tuples matching HAVING clause");
                 Ok(None)
-            }
+            },
         }
     }
 
@@ -591,14 +591,14 @@ mod tests {
         let const_value = match &aggregate_type {
             AggregationType::CountStar | AggregationType::Count => {
                 Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt)
-            }
+            },
             AggregationType::Sum => match agg_return_type.get_type() {
                 TypeId::BigInt => {
                     Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt)
-                }
+                },
                 TypeId::Decimal => {
                     Value::new_with_type(Val::Decimal(threshold as f64), TypeId::Decimal)
-                }
+                },
                 _ => Value::new_with_type(Val::Integer(threshold), TypeId::Integer),
             },
             AggregationType::Min
@@ -608,10 +608,10 @@ mod tests {
             | AggregationType::Variance => match agg_return_type.get_type() {
                 TypeId::BigInt => {
                     Value::new_with_type(Val::BigInt(threshold as i64), TypeId::BigInt)
-                }
+                },
                 TypeId::Decimal => {
                     Value::new_with_type(Val::Decimal(threshold as f64), TypeId::Decimal)
-                }
+                },
                 _ => Value::new_with_type(Val::Integer(threshold), TypeId::Integer),
             },
         };
@@ -762,7 +762,7 @@ mod tests {
                         _ => panic!("Expected integer value for age"),
                     };
                     results.push((name, age));
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }
@@ -834,7 +834,7 @@ mod tests {
                         _ => panic!("Expected integer value for age"),
                     };
                     results.push(age);
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }
@@ -952,7 +952,7 @@ mod tests {
                         _ => panic!("Expected integer for age"),
                     };
                     results.push(age);
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }
@@ -1071,7 +1071,7 @@ mod tests {
                         _ => panic!("Expected integer value for age"),
                     };
                     results.push(age);
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }
@@ -1178,7 +1178,7 @@ mod tests {
                         _ => panic!("Expected decimal value for salary"),
                     };
                     results.push(salary);
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }
@@ -1257,7 +1257,7 @@ mod tests {
                         _ => panic!("Expected decimal value for salary"),
                     };
                     results.push(salary);
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }
@@ -1344,7 +1344,7 @@ mod tests {
                         _ => panic!("Expected decimal value for salary"),
                     };
                     results.push(salary);
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }
@@ -1443,7 +1443,7 @@ mod tests {
                         _ => panic!("Expected decimal value for salary"),
                     };
                     results.push(salary);
-                }
+                },
                 Ok(None) => break,
                 Err(e) => panic!("Error during execution: {}", e),
             }

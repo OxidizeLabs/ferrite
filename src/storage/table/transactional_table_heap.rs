@@ -755,8 +755,9 @@ impl TransactionalTableHeap {
             ));
         }
         if meta.is_committed() {
-            return Err("Insert TupleMeta must be uncommitted (commit_timestamp must be None)"
-                .to_string());
+            return Err(
+                "Insert TupleMeta must be uncommitted (commit_timestamp must be None)".to_string(),
+            );
         }
         if meta.is_deleted() {
             return Err("Insert TupleMeta must not be deleted".to_string());
@@ -766,9 +767,7 @@ impl TransactionalTableHeap {
         }
 
         // Perform insert using internal method
-        let rid = self
-            .table_heap
-            .insert_tuple_internal(meta, tuple)?;
+        let rid = self.table_heap.insert_tuple_internal(meta, tuple)?;
 
         // Transaction bookkeeping
         txn.append_write_set(self.table_oid, rid);
@@ -796,7 +795,7 @@ impl TransactionalTableHeap {
                 } else {
                     Ok((meta, tuple))
                 }
-            }
+            },
             IsolationLevel::ReadCommitted => {
                 if meta.get_creator_txn_id() == txn.get_transaction_id() {
                     if meta.is_deleted() {
@@ -815,7 +814,7 @@ impl TransactionalTableHeap {
                     // to find the latest committed version that is visible.
                     self.get_visible_version(rid, txn, txn_manager, meta, tuple)
                 }
-            }
+            },
             _ => self.get_visible_version(rid, txn, txn_manager, meta, tuple),
         }
     }
@@ -951,12 +950,12 @@ impl TransactionalTableHeap {
             TupleVisibility::Visible => {
                 log::debug!("Latest version is visible, returning it");
                 return Ok((meta, tuple));
-            }
+            },
             TupleVisibility::Deleted => {
                 log::debug!("Latest version is a visible tombstone; row is absent");
                 return Err("Tuple is deleted".to_string());
-            }
-            TupleVisibility::Invisible => { /* walk the chain */ }
+            },
+            TupleVisibility::Invisible => { /* walk the chain */ },
         }
 
         // If the latest version isn't visible, check a version chain
@@ -1037,12 +1036,12 @@ impl TransactionalTableHeap {
                         current_meta.get_commit_timestamp()
                     );
                     return Ok((current_meta, current_tuple));
-                }
+                },
                 TupleVisibility::Deleted => {
                     log::debug!("Found visible tombstone in chain; row is absent");
                     return Err("Tuple is deleted".to_string());
-                }
-                TupleVisibility::Invisible => { /* keep walking */ }
+                },
+                TupleVisibility::Invisible => { /* keep walking */ },
             }
 
             // Move to next version in chain using the undo log's prev_version
@@ -1387,10 +1386,10 @@ impl TransactionalTableHeap {
                         if !page_writes.contains(&page_id) {
                             page_writes.push(page_id);
                         }
-                    }
+                    },
                     Err(e) => {
                         return Err(format!("Failed to insert tuple: {}", e));
-                    }
+                    },
                 }
             }
 
@@ -1669,7 +1668,11 @@ mod tests {
         let txn_insert = txn_ctx_insert.get_transaction();
         let rid = ctx
             .txn_heap
-            .insert_tuple_from_values(vec![Value::new(1), Value::new(100)], &schema, txn_ctx_insert)
+            .insert_tuple_from_values(
+                vec![Value::new(1), Value::new(100)],
+                &schema,
+                txn_ctx_insert,
+            )
             .expect("Insert failed");
         ctx.txn_manager
             .commit(txn_insert.clone(), ctx.txn_heap.get_table_heap().get_bpm())

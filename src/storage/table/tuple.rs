@@ -191,7 +191,7 @@
 
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::common::config::{storage_bincode_config, Timestamp, TxnId};
+use crate::common::config::{Timestamp, TxnId, storage_bincode_config};
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::types_db::value::Value;
@@ -334,14 +334,20 @@ impl TupleMeta {
     /// the chain using only `is_visible_to()` (which excludes tombstones), you can
     /// incorrectly "resurrect" rows by skipping a visible delete marker.
     pub fn is_applicable_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
-        !matches!(self.visibility_status(txn_id, read_ts), TupleVisibility::Invisible)
+        !matches!(
+            self.visibility_status(txn_id, read_ts),
+            TupleVisibility::Invisible
+        )
     }
 
     /// Returns `true` if this tuple version is visible and represents a live (non-deleted) row.
     ///
     /// This is appropriate for filtering scan output, but **not** for version-chain traversal.
     pub fn is_visible_to(&self, txn_id: TxnId, read_ts: Timestamp) -> bool {
-        matches!(self.visibility_status(txn_id, read_ts), TupleVisibility::Visible)
+        matches!(
+            self.visibility_status(txn_id, read_ts),
+            TupleVisibility::Visible
+        )
     }
 
     /// Gets the undo log index for this tuple version
@@ -461,9 +467,8 @@ impl Tuple {
     ///
     /// Panics if the number of values doesn't match the schema's column count.
     pub fn new(values: &[Value], schema: &Schema, rid: RID) -> Self {
-        Self::try_new(values, schema, rid).unwrap_or_else(|e| {
-            panic!("Values length does not match schema column count: {e}")
-        })
+        Self::try_new(values, schema, rid)
+            .unwrap_or_else(|e| panic!("Values length does not match schema column count: {e}"))
     }
 
     /// Fallible constructor that validates the value count against the schema.
@@ -849,7 +854,7 @@ mod tests {
             TupleError::KeyAttrOutOfBounds { attr, column_count } => {
                 assert_eq!(attr, 999);
                 assert_eq!(column_count, tuple.get_column_count());
-            }
+            },
             other => panic!("unexpected error: {other:?}"),
         }
     }

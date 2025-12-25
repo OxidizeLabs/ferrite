@@ -91,12 +91,12 @@ impl CompressionEngine {
 
         // Use lz4_flex for compression (prepend size for easier decompression)
         let compressed = lz4_flex::compress_prepend_size(data);
-        
+
         // Add magic header
         let mut result = Vec::with_capacity(1 + compressed.len());
         result.push(MAGIC_LZ4);
         result.extend_from_slice(&compressed);
-        
+
         result
     }
 
@@ -113,10 +113,10 @@ impl CompressionEngine {
         let mut result = Vec::with_capacity(1 + compressed.len());
         result.push(MAGIC_ZSTD);
         result.extend_from_slice(&compressed);
-        
+
         result
     }
-    
+
     /// Decompresses data based on detected format
     pub fn decompress_data(&self, compressed: &[u8]) -> Vec<u8> {
         if compressed.is_empty() {
@@ -229,11 +229,11 @@ mod tests {
     fn test_lz4_compression_roundtrip() {
         let mut engine = CompressionEngine::new();
         let data = b"Hello, LZ4 compression! This is a test string that should be compressed.";
-        
+
         let compressed = engine.compress_data(data, CompressionAlgorithm::LZ4, 0);
         assert!(!compressed.is_empty());
         assert_eq!(compressed[0], MAGIC_LZ4);
-        
+
         let decompressed = engine.decompress_data(&compressed);
         assert_eq!(decompressed, data);
     }
@@ -242,11 +242,11 @@ mod tests {
     fn test_zstd_compression_roundtrip() {
         let mut engine = CompressionEngine::new();
         let data = b"Hello, Zstd compression! This is a test string that should be compressed with high ratio.";
-        
+
         let compressed = engine.compress_data(data, CompressionAlgorithm::Zstd, 3);
         assert!(!compressed.is_empty());
         assert_eq!(compressed[0], MAGIC_ZSTD);
-        
+
         let decompressed = engine.decompress_data(&compressed);
         assert_eq!(decompressed, data);
     }
@@ -255,10 +255,10 @@ mod tests {
     fn test_no_compression_roundtrip() {
         let mut engine = CompressionEngine::new();
         let data = b"Hello, No compression!";
-        
+
         let compressed = engine.compress_data(data, CompressionAlgorithm::None, 0);
         assert_eq!(compressed, data);
-        
+
         let decompressed = engine.decompress_data(&compressed);
         assert_eq!(decompressed, data);
     }
@@ -267,7 +267,7 @@ mod tests {
     fn test_empty_data() {
         let mut engine = CompressionEngine::new();
         let data = b"";
-        
+
         let compressed_lz4 = engine.compress_data(data, CompressionAlgorithm::LZ4, 0);
         assert!(compressed_lz4.is_empty());
         let decompressed_lz4 = engine.decompress_data(&compressed_lz4);
@@ -283,9 +283,9 @@ mod tests {
     fn test_compression_stats() {
         let mut engine = CompressionEngine::new();
         let data = vec![0u8; 1000]; // Highly compressible data
-        
+
         let compressed = engine.compress_data(&data, CompressionAlgorithm::LZ4, 0);
-        
+
         let (original, comp, ratio) = engine.get_stats();
         assert_eq!(original, 1000);
         assert_eq!(comp, compressed.len() as u64);

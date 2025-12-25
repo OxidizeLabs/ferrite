@@ -263,11 +263,11 @@ impl ExecutionEngine {
             Ok(executor) => {
                 debug!("Successfully created executor");
                 executor
-            }
+            },
             Err(e) => {
                 error!("Failed to create executor: {}", e);
                 return Err(e);
-            }
+            },
         };
 
         // Initialize executor
@@ -289,14 +289,14 @@ impl ExecutionEngine {
                     match root_executor.next() {
                         Ok(Some(_)) => {
                             has_results = true;
-                        }
+                        },
                         Ok(None) => {
                             break; // No more tuples
-                        }
+                        },
                         Err(e) => {
                             error!("Error during execution: {}", e);
                             return Err(e);
-                        }
+                        },
                     }
                 }
 
@@ -307,7 +307,7 @@ impl ExecutionEngine {
                         // If we reach here without error, the insert was successful
                         info!("Insert operation executed successfully");
                         Ok(true)
-                    }
+                    },
                     PlanNode::Update(_) => {
                         // UPDATE operations return success based on whether any rows were affected
                         if has_results {
@@ -317,7 +317,7 @@ impl ExecutionEngine {
                             info!("Update operation completed - no rows affected");
                             Ok(false)
                         }
-                    }
+                    },
                     PlanNode::Delete(_) => {
                         // DELETE operations return success based on whether any rows were affected
                         if has_results {
@@ -327,11 +327,11 @@ impl ExecutionEngine {
                             info!("Delete operation completed - no rows affected");
                             Ok(false)
                         }
-                    }
+                    },
                     PlanNode::CreateTable(_) | PlanNode::CreateIndex(_) => {
                         info!("Create operation executed successfully");
                         Ok(true)
-                    }
+                    },
                     _ => {
                         if has_results {
                             info!("Modification statement executed successfully");
@@ -340,9 +340,9 @@ impl ExecutionEngine {
                             info!("No rows affected");
                             Ok(false)
                         }
-                    }
+                    },
                 }
-            }
+            },
             PlanNode::StartTransaction(_) => {
                 debug!("Executing start transaction statement");
 
@@ -361,13 +361,13 @@ impl ExecutionEngine {
                             txn_id, isolation_level
                         );
                         Ok(true)
-                    }
+                    },
                     Err(e) => {
                         error!("Error starting transaction: {}", e);
                         Err(e)
-                    }
+                    },
                 }
-            }
+            },
             PlanNode::CommitTransaction(_) => {
                 debug!("Executing commit transaction statement");
 
@@ -399,28 +399,28 @@ impl ExecutionEngine {
                                             info!(
                                                 "New transaction chained successfully after commit"
                                             );
-                                        }
+                                        },
                                         Err(e) => {
                                             error!("Failed to chain new transaction: {}", e);
                                             return Err(e);
-                                        }
+                                        },
                                     }
                                 }
 
                                 Ok(success)
-                            }
+                            },
                             Err(e) => {
                                 error!("Failed to commit transaction {}: {}", txn_id, e);
                                 Err(e)
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(e) => {
                         error!("Error in commit transaction executor: {}", e);
                         Err(e)
-                    }
+                    },
                 }
-            }
+            },
             PlanNode::RollbackTransaction(_) => {
                 debug!("Executing rollback transaction statement");
 
@@ -446,28 +446,28 @@ impl ExecutionEngine {
                                             info!(
                                                 "New transaction chained successfully after rollback"
                                             );
-                                        }
+                                        },
                                         Err(e) => {
                                             error!("Failed to chain new transaction: {}", e);
                                             return Err(e);
-                                        }
+                                        },
                                     }
                                 }
 
                                 Ok(success)
-                            }
+                            },
                             Err(e) => {
                                 error!("Failed to rollback transaction {}: {}", txn_id, e);
                                 Err(e)
-                            }
+                            },
                         }
-                    }
+                    },
                     Err(e) => {
                         error!("Error in rollback transaction executor: {}", e);
                         Err(e)
-                    }
+                    },
                 }
-            }
+            },
             PlanNode::CommandResult(cmd) => {
                 debug!("Executing command: {}", cmd);
 
@@ -479,20 +479,20 @@ impl ExecutionEngine {
                     match root_executor.next() {
                         Ok(Some(_)) => {
                             has_results = true;
-                        }
+                        },
                         Ok(None) => {
                             break; // No more tuples
-                        }
+                        },
                         Err(e) => {
                             error!("Error during command execution: {}", e);
                             return Err(e);
-                        }
+                        },
                     }
                 }
 
                 // For other commands, just return success based on whether the executor produced results
                 Ok(has_results)
-            }
+            },
 
             _ => {
                 debug!("Executing query statement");
@@ -524,20 +524,20 @@ impl ExecutionEngine {
                             // Write row with schema context
                             writer.write_row_with_schema(values, &schema);
                             tuple_count += 1;
-                        }
+                        },
                         Ok(None) => {
                             break; // No more tuples
-                        }
+                        },
                         Err(e) => {
                             error!("Error during query execution: {}", e);
                             return Err(e);
-                        }
+                        },
                     }
                 }
 
                 debug!("Query returned {} tuples", tuple_count);
                 Ok(true)
-            }
+            },
         }
     }
 
@@ -554,11 +554,11 @@ impl ExecutionEngine {
             Ok(executor) => {
                 debug!("Successfully created executor for plan: {}", plan);
                 Ok(executor)
-            }
+            },
             Err(e) => {
                 error!("Failed to create executor for plan: {}, error: {}", plan, e);
                 Err(DBError::Execution(e))
-            }
+            },
         }
     }
 
@@ -660,11 +660,11 @@ impl ExecutionEngine {
             true => {
                 debug!("Transaction committed successfully");
                 Ok(true)
-            }
+            },
             false => {
                 debug!("Transaction commit failed");
                 Ok(false)
-            }
+            },
         }
     }
 
@@ -716,11 +716,11 @@ impl ExecutionEngine {
                 context.set_chain_after_transaction(false);
 
                 Ok(true)
-            }
+            },
             Err(err) => {
                 error!("Failed to start chained transaction: {}", err);
                 Ok(false)
-            }
+            },
         }
     }
 
@@ -1003,10 +1003,10 @@ mod tests {
                     let rows = writer.get_rows();
                     log::info!("Query returned {} rows", rows.len());
                     assert_eq!(rows.len(), 1, "Incorrect number of rows");
-                }
+                },
                 Err(e) => {
                     panic!("Error executing query '{}': {:?}", sql, e);
-                }
+                },
             }
         }
 

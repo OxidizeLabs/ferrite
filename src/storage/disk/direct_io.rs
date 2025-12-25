@@ -152,7 +152,7 @@
 //! | Non-power-of-two alignment  | `Err(InvalidInput)` - invalid configuration |
 
 use log::{debug, warn};
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::fs::{File, OpenOptions};
 use std::io::{Error as IoError, ErrorKind, Result as IoResult, Write};
 use std::ops::{Deref, DerefMut};
@@ -297,8 +297,8 @@ impl AlignedBuffer {
         if size == 0 {
             // Avoid relying on allocator behavior for zero-sized allocations.
             // For size=0, a dangling aligned pointer is valid to form slices of length 0.
-            let layout = Layout::from_size_align(0, alignment)
-                .expect("Invalid layout for aligned buffer");
+            let layout =
+                Layout::from_size_align(0, alignment).expect("Invalid layout for aligned buffer");
             return Self {
                 ptr: std::ptr::NonNull::<u8>::dangling().as_ptr(),
                 size,
@@ -306,8 +306,8 @@ impl AlignedBuffer {
             };
         }
 
-        let layout = Layout::from_size_align(size, alignment)
-            .expect("Invalid layout for aligned buffer");
+        let layout =
+            Layout::from_size_align(size, alignment).expect("Invalid layout for aligned buffer");
 
         let ptr = unsafe { alloc_zeroed(layout) };
         if ptr.is_null() {
@@ -538,8 +538,8 @@ pub fn read_aligned(
 
         let mut buffer = create_aligned_buffer(io_size, config.alignment.max(1));
         read_exact_at(file, offset, buffer.as_mut_slice())?;
-        
-        // Note: The buffer might be larger than requested 'size'. 
+
+        // Note: The buffer might be larger than requested 'size'.
         // The caller is responsible for slicing only what they need.
         Ok(buffer)
     } else {
@@ -562,7 +562,7 @@ pub fn read_aligned_into(
 
     if direct_io_requires_alignment(config) {
         validate_alignment(config.alignment)?;
-        
+
         let offset_aligned = is_offset_aligned(offset, config.alignment);
         let ptr_aligned = is_aligned(buf, config.alignment);
         let size_aligned = is_size_aligned(buf.len(), config.alignment);
@@ -579,9 +579,9 @@ pub fn read_aligned_into(
         if !ptr_aligned || !size_aligned {
             let aligned_size = round_up_to_alignment(buf.len(), config.alignment);
             let mut bounce_buffer = create_aligned_buffer(aligned_size, config.alignment);
-            
+
             read_exact_at(file, offset, bounce_buffer.as_mut_slice())?;
-            
+
             // Copy relevant part to user buffer
             buf.copy_from_slice(&bounce_buffer[..buf.len()]);
             return Ok(());
@@ -631,8 +631,13 @@ pub fn write_aligned(
         aligned.as_mut_slice().copy_from_slice(data);
         write_all_at(file, offset, aligned.as_slice())
     } else {
-        if config.enabled && !direct_io_requires_alignment(config) && !is_aligned(data, config.alignment) {
-            warn!("Data buffer is not aligned; this is fine on this platform but may reduce performance");
+        if config.enabled
+            && !direct_io_requires_alignment(config)
+            && !is_aligned(data, config.alignment)
+        {
+            warn!(
+                "Data buffer is not aligned; this is fine on this platform but may reduce performance"
+            );
         }
         write_all_at(file, offset, data)
     }

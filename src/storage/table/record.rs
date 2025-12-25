@@ -256,7 +256,7 @@ impl Record {
     pub fn deserialize_from(storage: &[u8]) -> Result<Self, TupleError> {
         let (record, bytes_read): (Self, usize) =
             bincode::decode_from_slice(storage, storage_bincode_config())
-            .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
+                .map_err(|e| TupleError::DeserializationError(e.to_string()))?;
         if bytes_read != storage.len() {
             return Err(TupleError::DeserializationError(format!(
                 "unexpected trailing bytes: consumed {bytes_read} of {}",
@@ -317,7 +317,11 @@ impl Record {
     /// This intentionally avoids the name `to_string` to prevent confusion with the standard
     /// library's `ToString::to_string()` (which is implemented via `Display`).
     pub fn format_with_schema(&self, schema: &Schema) -> String {
-        format!("RID: {}, {}", self.rid, self.tuple.format_with_schema(schema))
+        format!(
+            "RID: {}, {}",
+            self.rid,
+            self.tuple.format_with_schema(schema)
+        )
     }
 
     /// Formats the record using the provided schema, in a "detailed" form.
@@ -469,7 +473,12 @@ mod tests {
     #[test]
     fn test_record_new_overwrites_tuple_rid() {
         let schema = Arc::new(create_sample_schema());
-        let values = vec![Value::new(1), Value::new("Alice"), Value::new(30), Value::new(true)];
+        let values = vec![
+            Value::new(1),
+            Value::new("Alice"),
+            Value::new(30),
+            Value::new(true),
+        ];
 
         let tuple_rid = RID::new(9, 9);
         let tuple = Tuple::new(&values, &schema, tuple_rid);

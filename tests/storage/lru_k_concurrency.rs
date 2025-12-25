@@ -43,7 +43,10 @@ mod thread_safety {
             h.join().unwrap();
         }
 
-        assert_eq!(inserted.load(Ordering::SeqCst), threads * inserts_per_thread);
+        assert_eq!(
+            inserted.load(Ordering::SeqCst),
+            threads * inserts_per_thread
+        );
         let guard = cache.lock().unwrap();
         assert!(guard.len() <= guard.capacity());
     }
@@ -113,13 +116,13 @@ mod thread_safety {
                             match (tid + i) % 3 {
                                 0 => {
                                     let _ = guard.touch(&key);
-                                }
+                                },
                                 1 => {
                                     let _ = guard.access_history(&key);
-                                }
+                                },
                                 _ => {
                                     let _ = guard.k_distance(&key);
-                                }
+                                },
                             }
                         }
                     }
@@ -200,21 +203,21 @@ mod thread_safety {
                                 0 => {
                                     let key = 1_000 + (tid * ops_per_thread + i) as u64;
                                     guard.insert(key, key);
-                                }
+                                },
                                 1 | 2 => {
                                     let key = (i % 100) as u64;
                                     let _ = guard.get(&key);
-                                }
+                                },
                                 3 => {
                                     let key = (i % 60) as u64;
                                     let _ = guard.touch(&key);
-                                }
+                                },
                                 4 => {
                                     let _ = guard.peek_lru_k();
-                                }
+                                },
                                 _ => {
                                     let _ = guard.pop_lru_k();
-                                }
+                                },
                             }
                         }
                         op_counter.fetch_add(1, Ordering::SeqCst);
@@ -322,13 +325,13 @@ mod stress_testing {
                             match phase {
                                 0 => {
                                     guard.insert(key, key + 2);
-                                }
+                                },
                                 1 => {
                                     let _ = guard.get(&key);
-                                }
+                                },
                                 _ => {
                                     let _ = guard.touch(&key);
-                                }
+                                },
                             }
                         }
 

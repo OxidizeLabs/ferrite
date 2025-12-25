@@ -169,7 +169,7 @@ mod tests {
                 assert!(inner_node.is_end());
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
                 assert!(inner_node.get_children().is_empty());
-            }
+            },
             _ => panic!("Expected CommitTransaction variant"),
         }
 
@@ -206,7 +206,7 @@ mod tests {
                 if node.is_end() {
                     write!(result, "\n{}   End: true", indent).unwrap();
                 }
-            }
+            },
             _ => panic!("Expected CommitTransaction variant"),
         }
 

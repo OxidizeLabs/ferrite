@@ -211,7 +211,7 @@ mod tests {
                 assert!(inner_node.is_read_only());
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
                 assert!(inner_node.get_children().is_empty());
-            }
+            },
             _ => panic!("Expected StartTransaction variant"),
         }
 
@@ -248,7 +248,7 @@ mod tests {
                 if node.is_read_only() {
                     write!(result, "\n{}   Read Only: true", indent).unwrap();
                 }
-            }
+            },
             _ => panic!("Expected StartTransaction variant"),
         }
 

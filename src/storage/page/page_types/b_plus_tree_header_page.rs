@@ -38,7 +38,7 @@
 //! header.increment_tree_height();
 //! ```
 
-use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
+use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, storage_bincode_config};
 use crate::common::exception::PageError;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 use std::any::Any;

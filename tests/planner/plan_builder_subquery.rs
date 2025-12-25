@@ -1,13 +1,13 @@
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
 use ferrite::sql::planner::logical_plan::LogicalPlanType;
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -58,15 +58,36 @@ impl TestContext {
     fn create_employees_departments(&mut self) {
         let mut catalog = self.catalog.write();
         let employees = ferrite::catalog::schema::Schema::new(vec![
-            ferrite::catalog::column::Column::new("id", ferrite::types_db::type_id::TypeId::Integer),
-            ferrite::catalog::column::Column::new("name", ferrite::types_db::type_id::TypeId::VarChar),
-            ferrite::catalog::column::Column::new("salary", ferrite::types_db::type_id::TypeId::Decimal),
-            ferrite::catalog::column::Column::new("dept_id", ferrite::types_db::type_id::TypeId::Integer),
+            ferrite::catalog::column::Column::new(
+                "id",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
+            ferrite::catalog::column::Column::new(
+                "name",
+                ferrite::types_db::type_id::TypeId::VarChar,
+            ),
+            ferrite::catalog::column::Column::new(
+                "salary",
+                ferrite::types_db::type_id::TypeId::Decimal,
+            ),
+            ferrite::catalog::column::Column::new(
+                "dept_id",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
         ]);
         let departments = ferrite::catalog::schema::Schema::new(vec![
-            ferrite::catalog::column::Column::new("dept_id", ferrite::types_db::type_id::TypeId::Integer),
-            ferrite::catalog::column::Column::new("name", ferrite::types_db::type_id::TypeId::VarChar),
-            ferrite::catalog::column::Column::new("budget", ferrite::types_db::type_id::TypeId::Decimal),
+            ferrite::catalog::column::Column::new(
+                "dept_id",
+                ferrite::types_db::type_id::TypeId::Integer,
+            ),
+            ferrite::catalog::column::Column::new(
+                "name",
+                ferrite::types_db::type_id::TypeId::VarChar,
+            ),
+            ferrite::catalog::column::Column::new(
+                "budget",
+                ferrite::types_db::type_id::TypeId::Decimal,
+            ),
         ]);
         let _ = catalog.create_table("employees".to_string(), employees);
         let _ = catalog.create_table("departments".to_string(), departments);

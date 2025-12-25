@@ -57,7 +57,7 @@ impl Ord for TupleWithKeys {
                         CmpBool::CmpFalse => continue, // Equal, check next key
                         CmpBool::CmpNull => return Ordering::Equal,
                     }
-                }
+                },
                 CmpBool::CmpNull => return Ordering::Equal,
             }
         }
@@ -137,12 +137,12 @@ impl AbstractExecutor for WindowExecutor {
                         let partition_keys = self.evaluate_partition_keys(&tuple);
                         let sort_keys = self.evaluate_sort_keys(&tuple);
                         all_tuples.push((partition_keys, sort_keys, tuple, rid));
-                    }
+                    },
                     Ok(None) => break,
                     Err(e) => {
                         debug!("Error from child executor: {}", e);
                         return; // Initialize failed, but we don't propagate errors from init
-                    }
+                    },
                 }
             }
 
@@ -233,13 +233,13 @@ impl AbstractExecutor for WindowExecutor {
                     // Row number is 1-based within partition
                     let row_number = (self.tuple_index + 1) as i32;
                     window_results.push(Value::new(row_number));
-                }
+                },
                 _ => {
                     // For now, only support ROW_NUMBER
                     return Err(DBError::Execution(
                         "Unsupported window function".to_string(),
                     ));
-                }
+                },
             }
         }
 

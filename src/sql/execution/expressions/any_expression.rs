@@ -68,7 +68,7 @@ impl ExpressionOps for AnyExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "Right side of ANY/SOME must be a vector or subquery result".to_string(),
                 ));
-            }
+            },
         };
 
         // ANY/SOME is true if the comparison is true for at least one value
@@ -80,7 +80,7 @@ impl ExpressionOps for AnyExpression {
                 CmpBool::CmpTrue => {
                     found_true = true;
                     break;
-                }
+                },
                 CmpBool::CmpNull => found_null = true,
                 CmpBool::CmpFalse => continue,
             }
@@ -117,7 +117,7 @@ impl ExpressionOps for AnyExpression {
                 return Err(ExpressionError::InvalidOperation(
                     "Right side of ANY/SOME must be a vector or subquery result".to_string(),
                 ));
-            }
+            },
         };
 
         let mut found_true = false;
@@ -128,7 +128,7 @@ impl ExpressionOps for AnyExpression {
                 CmpBool::CmpTrue => {
                     found_true = true;
                     break;
-                }
+                },
                 CmpBool::CmpNull => found_null = true,
                 CmpBool::CmpFalse => continue,
             }

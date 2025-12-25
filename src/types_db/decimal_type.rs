@@ -30,7 +30,7 @@ impl Type for DecimalType {
                 } else {
                     CmpBool::from(0.0 == *r)
                 }
-            }
+            },
             Val::BigInt(r) => CmpBool::from(0.0 == *r as f64),
             Val::Integer(r) => CmpBool::from(0.0 == *r as f64),
             Val::SmallInt(r) => CmpBool::from(0.0 == *r as f64),
@@ -56,7 +56,7 @@ impl Type for DecimalType {
                 } else {
                     CmpBool::from(0.0 < *r)
                 }
-            }
+            },
             Val::BigInt(r) => CmpBool::from(0.0 < *r as f64),
             Val::Integer(r) => CmpBool::from(0.0 < *r as f64),
             Val::SmallInt(r) => CmpBool::from(0.0 < *r as f64),
@@ -74,7 +74,7 @@ impl Type for DecimalType {
                 } else {
                     CmpBool::from(0.0 <= *r)
                 }
-            }
+            },
             Val::BigInt(r) => CmpBool::from(0.0 <= *r as f64),
             Val::Integer(r) => CmpBool::from(0.0 <= *r as f64),
             Val::SmallInt(r) => CmpBool::from(0.0 <= *r as f64),
@@ -92,7 +92,7 @@ impl Type for DecimalType {
                 } else {
                     CmpBool::from(0.0 > *r)
                 }
-            }
+            },
             Val::BigInt(r) => CmpBool::from(0.0 > *r as f64),
             Val::Integer(r) => CmpBool::from(0.0 > *r as f64),
             Val::SmallInt(r) => CmpBool::from(0.0 > *r as f64),
@@ -110,7 +110,7 @@ impl Type for DecimalType {
                 } else {
                     CmpBool::from(0.0 >= *r)
                 }
-            }
+            },
             Val::BigInt(r) => CmpBool::from(0.0 >= *r as f64),
             Val::Integer(r) => CmpBool::from(0.0 >= *r as f64),
             Val::SmallInt(r) => CmpBool::from(0.0 >= *r as f64),
@@ -197,7 +197,7 @@ impl Type for DecimalType {
                 } else {
                     Value::new(0.0f64.min(*r))
                 }
-            }
+            },
             Val::BigInt(r) => Value::new(0.0f64.min(*r as f64)),
             Val::Integer(r) => Value::new(0.0f64.min(*r as f64)),
             Val::SmallInt(r) => Value::new(0.0f64.min(*r as f64)),
@@ -214,7 +214,7 @@ impl Type for DecimalType {
                 } else {
                     Value::new(0.0f64.max(*r))
                 }
-            }
+            },
             Val::BigInt(r) => Value::new(0.0f64.max(*r as f64)),
             Val::Integer(r) => Value::new(0.0f64.max(*r as f64)),
             Val::SmallInt(r) => Value::new(0.0f64.max(*r as f64)),
@@ -313,7 +313,7 @@ impl DecimalType {
                             .to_string()
                     }
                 }
-            }
+            },
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
         }
