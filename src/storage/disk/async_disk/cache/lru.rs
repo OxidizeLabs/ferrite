@@ -50,7 +50,7 @@
 //! |------------------------|----------------------------------------------------|
 //! | `LRUCore<K, V>`        | Single-threaded core with HashMap + linked list    |
 //! | `ConcurrentLRUCache`   | Thread-safe wrapper with `parking_lot::RwLock`     |
-//! | `Node<K, V>`           | Intrusive list node with key, Arc<V>, prev/next    |
+//! | `Node<K, V>`           | Intrusive list node with key, `Arc<V>`, prev/next  |
 //! | `BufferPoolCache<V>`   | Type alias for `ConcurrentLRUCache<u32, V>`        |
 //! | `PageCache<K, V>`      | Type alias for generic page caching                |
 //! | `LRUCache<K, V>`       | Type alias for `LRUCore` (single-threaded usage)   |
@@ -146,8 +146,8 @@
 //! |----------------------|-----------|--------------------------------------|
 //! | `new(capacity)`      | None      | Create concurrent cache              |
 //! | `insert(k, v)`       | Write     | Insert value (wraps in Arc)          |
-//! | `insert_arc(k, arc)` | Write     | Insert pre-wrapped Arc<V>            |
-//! | `get(&k)`            | Write     | Get + move to MRU (returns Arc<V>)   |
+//! | `insert_arc(k, arc)` | Write     | Insert pre-wrapped `Arc<V>`          |
+//! | `get(&k)`            | Write     | Get + move to MRU (returns `Arc<V>`) |
 //! | `peek(&k)`           | Read      | Get without reordering               |
 //! | `remove(&k)`         | Write     | Remove entry                         |
 //! | `touch(&k)`          | Write     | Move to MRU                          |
@@ -361,13 +361,13 @@ where
 ///
 /// This implementation achieves zero-copy semantics through:
 /// - Keys: Copy types (like PageId) - cheap to copy, owned in HashMap
-/// - Values: Arc<V> - zero-copy sharing via reference counting
+/// - Values: `Arc<V>` - zero-copy sharing via reference counting
 ///
 /// ## Memory Safety Guarantees:
 /// - All nodes are allocated via Box::leak and deallocated via Box::from_raw
 /// - NonNull ensures no null pointer dereferences
 /// - Doubly-linked list invariants are maintained at all operation boundaries
-/// - Arc<V> provides thread-safe reference counting
+/// - `Arc<V>` provides thread-safe reference counting
 ///
 /// ## Performance Characteristics:
 /// - All operations are O(1): insert, get, remove, eviction
@@ -377,7 +377,7 @@ where
 /// ## Thread Safety:
 /// - Core is single-threaded for maximum performance
 /// - Thread safety provided by wrapper (ConcurrentLRUCache)
-/// - Values are thread-safe via Arc<V>
+/// - Values are thread-safe via `Arc<V>`
 pub struct LRUCore<K, V>
 where
     K: Copy + Eq + Hash,
@@ -677,7 +677,7 @@ where
         }
     }
 
-    /// Zero-copy get: returns Arc<V> clone (O(1) atomic increment)
+    /// Zero-copy get: returns `Arc<V>` clone (O(1) atomic increment)
     fn get(&mut self, key: &K) -> Option<&Arc<V>> {
         if let Some(&node) = self.map.get(key) {
             // Move to head (mark as most recently used) - O(1)
@@ -729,7 +729,7 @@ where
     K: Copy + Eq + Hash,
 {
     /// Zero-copy peek: read-only lookup without LRU update (allows concurrent reads)
-    /// Returns Arc<V> clone for zero-copy sharing
+    /// Returns `Arc<V>` clone for zero-copy sharing
     pub fn peek(&self, key: &K) -> Option<Arc<V>> {
         if let Some(&node) = self.map.get(key) {
             unsafe {
@@ -747,7 +747,7 @@ impl<K, V> MutableCache<K, Arc<V>> for LRUCore<K, V>
 where
     K: Copy + Eq + Hash,
 {
-    /// Zero-copy remove: returns Arc<V> without cloning data
+    /// Zero-copy remove: returns `Arc<V>` without cloning data
     fn remove(&mut self, key: &K) -> Option<Arc<V>> {
         if let Some(node) = self.map.remove(key) {
             unsafe {
@@ -775,7 +775,7 @@ impl<K, V> LRUCacheTrait<K, Arc<V>> for LRUCore<K, V>
 where
     K: Copy + Eq + Hash,
 {
-    /// Zero-copy pop_lru: returns (K, Arc<V>) without cloning data
+    /// Zero-copy pop_lru: returns `(K, Arc<V>)` without cloning data
     fn pop_lru(&mut self) -> Option<(K, Arc<V>)> {
         self.tail.map(|tail_node| unsafe {
             // SAFETY: tail_node is our tail pointer, so it's valid
@@ -884,22 +884,22 @@ where
         }
     }
 
-    /// Insert with value ownership transfer to Arc<V>
-    /// Returns the previous Arc<V> if key existed
+    /// Insert with value ownership transfer to `Arc<V>`
+    /// Returns the previous `Arc<V>` if key existed
     pub fn insert(&self, key: K, value: V) -> Option<Arc<V>> {
         let value_arc = Arc::new(value); // Wrap in Arc once
         let mut cache = self.inner.write();
         cache.insert(key, value_arc)
     }
 
-    /// Insert Arc<V> directly (zero-copy if already Arc-wrapped)
+    /// Insert `Arc<V>` directly (zero-copy if already Arc-wrapped)
     pub fn insert_arc(&self, key: K, value: Arc<V>) -> Option<Arc<V>> {
         let mut cache = self.inner.write();
         cache.insert(key, value)
     }
 
     /// Get with LRU update (requires write lock)
-    /// Returns Arc<V> for zero-copy sharing
+    /// Returns `Arc<V>` for zero-copy sharing
     pub fn get(&self, key: &K) -> Option<Arc<V>> {
         let mut cache = self.inner.write();
         cache.get(key).map(Arc::clone)
@@ -912,7 +912,7 @@ where
         cache.peek(key)
     }
 
-    /// Remove entry and return Arc<V>
+    /// Remove entry and return `Arc<V>`
     pub fn remove(&self, key: &K) -> Option<Arc<V>> {
         let mut cache = self.inner.write();
         cache.remove(key)
@@ -5743,7 +5743,7 @@ mod tests {
                 cache.insert(1, Arc::new(1));
 
                 // Capture state
-                let state: Vec<_> = cache.map.iter().map(|(k, _)| *k).collect();
+                let state: Vec<_> = cache.map.keys().copied().collect();
                 assert_eq!(state.len(), 1);
             }
 

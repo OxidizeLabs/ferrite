@@ -11,7 +11,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 /// Expression that evaluates a value against ALL values in a subquery/array
-/// e.g. x > ALL(SELECT y FROM t) or x > ALL(ARRAY[1,2,3])
+/// e.g. x > ALL(SELECT y FROM t) or x > ALL(ARRAY\[1,2,3\])
 #[derive(Debug, Clone, PartialEq)]
 pub struct AllExpression {
     /// The left expression to compare

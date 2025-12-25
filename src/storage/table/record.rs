@@ -293,7 +293,7 @@ impl Record {
                 self.len = self
                     .len
                     .checked_add(buf.len())
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "length overflow"))?;
+                    .ok_or_else(|| io::Error::other("length overflow"))?;
                 Ok(buf.len())
             }
             fn flush(&mut self) -> io::Result<()> {

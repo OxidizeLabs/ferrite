@@ -170,7 +170,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, thread};
 
-/// [LOCK_NOTE]
+/// \[LOCK_NOTE\]
 ///
 /// # General Behavior
 /// - Both `lock_table` and `lock_row` are blocking methods; they should wait until the lock is granted and then return.
@@ -237,7 +237,7 @@ use std::{fmt, thread};
 /// - IS -> [S, X, IX, SIX]
 /// - S -> [X, SIX]
 /// - IX -> [X, SIX]
-/// - SIX -> [X]
+/// - SIX -> \[X\]
 ///
 /// Any other upgrade is considered incompatible, and such an attempt should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `INCOMPATIBLE_UPGRADE`.
 ///
@@ -247,7 +247,7 @@ use std::{fmt, thread};
 /// If a lock is granted to a transaction, the lock manager should update its lock sets appropriately (check `transaction.rs`).
 ///
 /// Consider which type of lock to directly apply on the table when implementing the executor later.
-/// [UNLOCK_NOTE]
+/// \[UNLOCK_NOTE\]
 ///
 /// # General Behavior
 /// - Both `unlock_table` and `unlock_row` should release the lock on the resource and return.

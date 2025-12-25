@@ -262,7 +262,7 @@ mod tests {
     fn create_test_tuple() -> (Tuple, Schema) {
         let schema = create_test_schema();
         let tuple = Tuple::new(
-            &vec![
+            &[
                 Value::new(42),                     // Integer
                 Value::new(std::f64::consts::PI),   // Decimal
                 Value::new("test"),                 // VarChar

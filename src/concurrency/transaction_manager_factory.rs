@@ -151,7 +151,6 @@ use std::sync::Arc;
 /// transitions with WAL logging, buffer flush of pages dirtied by the txn,
 /// and lock release via LockManager. Keeps TransactionManager focused on
 /// state/MVCC while centralizing I/O and synchronization concerns here.
-
 pub struct TransactionManagerFactory {
     transaction_manager: Arc<TransactionManager>,
     lock_manager: Arc<LockManager>,

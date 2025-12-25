@@ -233,10 +233,10 @@ impl Index for ExtendableHashTableIndex {
         let tree_arc = Arc::new(RwLock::new(BPlusTree::new(4, Arc::clone(&self.metadata))));
 
         // Populate a temporary B+ tree with at most one entry so we can reuse IndexIterator.
-        if let Ok(k) = self.extract_key_value(key) {
-            if let Some(rid) = self.container.lock().get_value(&k) {
-                let _ = tree_arc.write().insert(k, rid);
-            }
+        if let Ok(k) = self.extract_key_value(key)
+            && let Some(rid) = self.container.lock().get_value(&k)
+        {
+            let _ = tree_arc.write().insert(k, rid);
         }
 
         IndexIterator::new(tree_arc, Some(start_end.clone()), Some(start_end))

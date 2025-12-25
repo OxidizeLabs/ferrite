@@ -650,7 +650,7 @@ impl LogRecoveryManager {
                     debug!("Redoing MARK_DELETE for RID {:?}", rid);
                     if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
                         let mut page = page_guard.write();
-                        if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
+                        if let Ok((mut meta, tuple)) = page.get_tuple(rid, true) {
                             meta.set_deleted(true);
                             let _ = page.update_tuple(meta, &tuple, *rid);
                             page.set_dirty(true);
@@ -663,7 +663,7 @@ impl LogRecoveryManager {
                     debug!("Redoing APPLY_DELETE for RID {:?}", rid);
                     if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
                         let mut page = page_guard.write();
-                        if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
+                        if let Ok((mut meta, tuple)) = page.get_tuple(rid, true) {
                             meta.set_deleted(true);
                             let _ = page.update_tuple(meta, &tuple, *rid);
                             page.set_dirty(true);
@@ -693,7 +693,7 @@ impl LogRecoveryManager {
             debug!("Undoing INSERT for RID {:?}", rid);
             if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
                 let mut page = page_guard.write();
-                if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
+                if let Ok((mut meta, tuple)) = page.get_tuple(rid, true) {
                     meta.set_deleted(true);
                     let _ = page.update_tuple(meta, &tuple, *rid);
                     page.set_dirty(true);

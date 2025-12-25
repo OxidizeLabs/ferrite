@@ -218,7 +218,7 @@ mod tests {
             Column::new("col4", TypeId::Decimal),
         ];
         Tuple::new(
-            &vec![
+            &[
                 Value::new(42),
                 Value::new("test".to_string()),
                 Value::new(true),
@@ -273,7 +273,7 @@ mod tests {
             let right_schema = create_test_schema();
 
             let left_tuple = Tuple::new(
-                &vec![
+                &[
                     Value::new(1),
                     Value::new("left".to_string()),
                     Value::new(true),
@@ -284,7 +284,7 @@ mod tests {
             );
 
             let right_tuple = Tuple::new(
-                &vec![
+                &[
                     Value::new(2),
                     Value::new("right".to_string()),
                     Value::new(false),

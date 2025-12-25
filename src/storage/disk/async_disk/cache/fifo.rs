@@ -316,7 +316,7 @@ where
         self.insertion_order.len()
     }
 
-    /// Checks if the internal cache HashMap contains a specific Arc<K>.
+    /// Checks if the internal cache HashMap contains a specific `Arc<K>`.
     /// This is primarily for testing stale entry behavior.
     pub fn cache_contains_key(&self, key: &Arc<K>) -> bool {
         self.cache.contains_key(key)

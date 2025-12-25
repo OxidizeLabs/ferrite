@@ -414,7 +414,7 @@ mod tests {
         // Enqueue multiple operations with same priority
         let mut operation_ids = Vec::new();
         for i in 0..5 {
-            let id = (i + 1) as u64;
+            let id = i + 1;
             queue_manager
                 .enqueue_operation(
                     IOOperationType::ReadPage { page_id: i },
@@ -484,7 +484,7 @@ mod tests {
         assert_eq!(all_receivers.len(), expected_total);
 
         // Verify all operation IDs are unique
-        let mut ids: Vec<_> = all_receivers.iter().copied().collect();
+        let mut ids: Vec<_> = all_receivers.to_vec();
         ids.sort();
         let unique_ids: std::collections::HashSet<_> = ids.iter().cloned().collect();
         assert_eq!(unique_ids.len(), expected_total);

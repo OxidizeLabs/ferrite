@@ -48,7 +48,7 @@
 //! # Thread Safety
 //!
 //! `TablePage` itself is not thread-safe. Concurrent access should be coordinated
-//! through [`PageGuard`](crate::storage::page::PageGuard) and the buffer pool manager.
+//! through `PageGuard` and the buffer pool manager.
 
 use crate::common::config::{
     DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE, storage_bincode_config,
@@ -74,7 +74,7 @@ use std::mem::size_of;
 ///   num_tuples (2), num_deleted_tuples (2).
 /// - Start magic (4 bytes): 0xDEADBEEF (big-endian) for basic corruption check.
 /// - Slot directory entries (one per tuple), packed front-to-back:
-///     [offset: u16][size: u16][TupleMeta (bincode-encoded, variable)]
+///   [offset: u16][size: u16][TupleMeta (bincode-encoded, variable)]
 /// - End magic (4 bytes): 0xCAFEBABE (big-endian) immediately after the last
 ///   encoded TupleMeta.
 /// - Tuple bodies: written from the end of the page backward; `offset` points
@@ -275,10 +275,7 @@ impl TablePage {
 
         let tuple_offset = slot_end_offset.saturating_sub(tuple_size);
 
-        let metadata_footprint = match self.metadata_footprint_with_new(meta) {
-            Some(bytes) => bytes,
-            None => return None,
-        };
+        let metadata_footprint = self.metadata_footprint_with_new(meta)?;
 
         // Ensure we have enough space for tuple data + metadata region.
         if tuple_offset < metadata_footprint as u16 {
@@ -1554,7 +1551,7 @@ mod tuple_operation_tests {
         // [PAGE_TYPE (1)] [header] [start magic (4)] [tuple offset+size (4)] [meta bytes] [end magic (4)]
         let header_start = PAGE_TYPE_OFFSET + 1;
         let header_size = TablePageHeader::size();
-        let meta_bytes = bincode::encode_to_vec(&meta, storage_bincode_config()).unwrap();
+        let meta_bytes = bincode::encode_to_vec(meta, storage_bincode_config()).unwrap();
 
         let meta_start = header_start + header_size + 4 + 4;
         let expected_end_magic_offset = meta_start + meta_bytes.len();

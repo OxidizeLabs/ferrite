@@ -1701,7 +1701,7 @@ mod tests {
         let (mut manager, _temp_dir) = create_test_manager().await;
 
         let page_ids = [1, 2, 3];
-        let test_data = vec![
+        let test_data = [
             page_with_prefix(&[1, 2, 3, 4]),
             page_with_prefix(&[5, 6, 7, 8]),
             page_with_prefix(&[9, 10, 11, 12]),

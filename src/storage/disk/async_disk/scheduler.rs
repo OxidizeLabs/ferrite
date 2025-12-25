@@ -92,10 +92,10 @@ impl WorkStealingScheduler {
     pub fn try_steal_work(&self, worker_id: usize) -> Option<IOTask> {
         for i in 1..self.worker_count {
             let steal_from = (worker_id + i) % self.worker_count;
-            if let Ok(mut rx) = self.receivers[steal_from].try_lock() {
-                if let Ok(task) = rx.try_recv() {
-                    return Some(task);
-                }
+            if let Ok(mut rx) = self.receivers[steal_from].try_lock()
+                && let Ok(task) = rx.try_recv()
+            {
+                return Some(task);
             }
         }
         None
@@ -159,22 +159,22 @@ impl PriorityTaskScheduler {
 
     pub fn get_next_task(&self) -> Option<IOTask> {
         // Try high priority first, then normal, then low
-        if let Ok(mut rx) = self.high_receiver.try_lock() {
-            if let Ok(task) = rx.try_recv() {
-                return Some(task);
-            }
+        if let Ok(mut rx) = self.high_receiver.try_lock()
+            && let Ok(task) = rx.try_recv()
+        {
+            return Some(task);
         }
 
-        if let Ok(mut rx) = self.normal_receiver.try_lock() {
-            if let Ok(task) = rx.try_recv() {
-                return Some(task);
-            }
+        if let Ok(mut rx) = self.normal_receiver.try_lock()
+            && let Ok(task) = rx.try_recv()
+        {
+            return Some(task);
         }
 
-        if let Ok(mut rx) = self.low_receiver.try_lock() {
-            if let Ok(task) = rx.try_recv() {
-                return Some(task);
-            }
+        if let Ok(mut rx) = self.low_receiver.try_lock()
+            && let Ok(task) = rx.try_recv()
+        {
+            return Some(task);
         }
 
         None

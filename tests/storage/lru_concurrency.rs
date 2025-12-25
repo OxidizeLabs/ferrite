@@ -203,7 +203,7 @@ mod thread_safety {
         assert_eq!(op_count.load(Ordering::SeqCst), expected_ops);
         assert_eq!(cache.capacity(), capacity);
         assert!(cache.len() <= cache.capacity());
-        assert!(cache.len() > 0);
+        assert!(!cache.is_empty());
     }
 }
 

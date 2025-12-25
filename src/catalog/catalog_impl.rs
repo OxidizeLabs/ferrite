@@ -556,24 +556,22 @@ impl Catalog {
         let mut rows: Vec<TableCatalogRow> = Vec::new();
 
         // Load snapshot first if available to seed faster rebuild
-        if snapshot_path.exists() {
-            if let Ok(bytes) = fs::read(snapshot_path) {
-                if let Ok((snapshot_rows, _)) =
-                    decode_from_slice::<Vec<TableCatalogRow>, _>(&bytes, storage_bincode_config())
-                {
-                    for row in snapshot_rows {
-                        if row.table_oid <= SYS_TABLES_OID {
-                            continue;
-                        }
-                        if let Some(info) = self.row_to_table_info(&row) {
-                            rebuilt.push(info);
-                        }
-                    }
+        if snapshot_path.exists()
+            && let Ok(bytes) = fs::read(snapshot_path)
+            && let Ok((snapshot_rows, _)) =
+                decode_from_slice::<Vec<TableCatalogRow>, _>(&bytes, storage_bincode_config())
+        {
+            for row in snapshot_rows {
+                if row.table_oid <= SYS_TABLES_OID {
+                    continue;
+                }
+                if let Some(info) = self.row_to_table_info(&row) {
+                    rebuilt.push(info);
                 }
             }
         }
 
-        while let Some((_meta, tuple)) = scan.next() {
+        for (_meta, tuple) in scan {
             if let Some(row) = TableCatalogRow::from_tuple(&tuple) {
                 // Skip system tables themselves
                 if row.table_oid <= SYS_TABLES_OID {
@@ -591,10 +589,10 @@ impl Catalog {
             db.load_tables_from_catalog(rebuilt);
         }
 
-        if !rows.is_empty() {
-            if let Ok(bytes) = encode_to_vec(&rows, storage_bincode_config()) {
-                let _ = fs::write(snapshot_path, bytes);
-            }
+        if !rows.is_empty()
+            && let Ok(bytes) = encode_to_vec(&rows, storage_bincode_config())
+        {
+            let _ = fs::write(snapshot_path, bytes);
         }
     }
 
