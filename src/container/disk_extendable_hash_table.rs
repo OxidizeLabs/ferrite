@@ -321,7 +321,7 @@ impl DiskExtendableHashTable {
                 None => {
                     debug!("Failed to get directory page for index {}", directory_index);
                     return false;
-                }
+                },
             };
 
             let bucket_index = {
@@ -337,7 +337,7 @@ impl DiskExtendableHashTable {
                 None => {
                     debug!("Failed to get bucket page for index {}", bucket_index);
                     return false;
-                }
+                },
             };
 
             // Try to insert into bucket

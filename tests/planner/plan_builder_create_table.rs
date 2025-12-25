@@ -1,7 +1,4 @@
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -10,6 +7,9 @@ use ferrite::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use ferrite::types_db::type_id::TypeId;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -78,7 +78,7 @@ impl TestContext {
                     create_table.get_output_schema().clone(),
                 );
                 Ok(())
-            }
+            },
             _ => Err("Expected CreateTable plan node".to_string()),
         }
     }
@@ -313,7 +313,7 @@ async fn create_temporary_table() {
         } => {
             assert_eq!(table_name, "temp_data");
             assert_eq!(schema.get_column_count(), 2);
-        }
+        },
         _ => panic!("Expected CreateTable plan node"),
     }
 }
@@ -428,7 +428,7 @@ async fn test_create_table_with_engine_options() {
     match &plan.plan_type {
         LogicalPlanType::CreateTable { table_name, .. } => {
             assert_eq!(table_name, "test_table");
-        }
+        },
         _ => panic!("Expected CreateTable plan node"),
     }
 }

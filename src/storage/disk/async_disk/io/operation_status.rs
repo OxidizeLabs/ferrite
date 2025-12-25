@@ -261,7 +261,7 @@ impl OperationStatus {
                     completed_at: Instant::now(),
                     result,
                 }
-            }
+            },
             other => other, // Already completed or cancelled
         }
     }

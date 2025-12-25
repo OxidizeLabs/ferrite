@@ -296,12 +296,7 @@ impl UndoLog {
             is_deleted,
             "UndoLog::new_for_delete must be called with is_deleted=true"
         );
-        Self::validate_invariants(
-            is_deleted,
-            &modified_fields,
-            tuple.as_ref(),
-            Some(rid),
-        );
+        Self::validate_invariants(is_deleted, &modified_fields, tuple.as_ref(), Some(rid));
         Self {
             is_deleted,
             modified_fields,
@@ -562,15 +557,15 @@ impl Transaction {
                     self.txn_id_human_readable()
                 );
                 return self.commit_ts();
-            }
+            },
             TransactionState::Aborted => {
                 log::warn!(
                     "commit() called on aborted txn {}",
                     self.txn_id_human_readable()
                 );
                 return self.commit_ts();
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         let commit_ts = watermark.get_next_ts();
@@ -603,15 +598,15 @@ impl Transaction {
                     self.txn_id_human_readable()
                 );
                 return;
-            }
+            },
             TransactionState::Committed => {
                 log::warn!(
                     "abort() called after commit on txn {}",
                     self.txn_id_human_readable()
                 );
                 return;
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // Remove this transaction from active transactions
@@ -640,28 +635,26 @@ impl Transaction {
                 let visible = !meta.is_deleted();
                 debug!("READ_UNCOMMITTED visibility: {}", visible);
                 visible
-            }
+            },
             IsolationLevel::ReadCommitted => {
                 let visible = (meta.is_committed() || meta.get_creator_txn_id() == self.txn_id)
                     && !meta.is_deleted();
                 debug!("READ_COMMITTED visibility: {}", visible);
                 visible
-            }
+            },
             IsolationLevel::RepeatableRead | IsolationLevel::Serializable => {
                 let visible = !meta.is_deleted()
                     && (meta.get_creator_txn_id() == self.txn_id
                         || (meta.is_committed()
-                            && meta
-                                .get_commit_timestamp()
-                                .is_some_and(|ts| ts <= read_ts)));
+                            && meta.get_commit_timestamp().is_some_and(|ts| ts <= read_ts)));
                 debug!("REPEATABLE_READ/SERIALIZABLE visibility: {}", visible);
                 visible
-            }
+            },
             IsolationLevel::Snapshot => {
                 let visible = meta.is_visible_to(self.txn_id, read_ts);
                 debug!("SNAPSHOT visibility: {}", visible);
                 visible
-            }
+            },
         }
     }
 }
@@ -859,12 +852,12 @@ mod tests {
                         } else if rid == rid2 {
                             found_table1_rid2 = true;
                         }
-                    }
+                    },
                     2 => {
                         if rid == rid1 {
                             found_table2_rid1 = true;
                         }
-                    }
+                    },
                     _ => panic!("Unexpected table ID"),
                 }
             }

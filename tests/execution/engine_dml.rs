@@ -1114,7 +1114,7 @@ async fn test_insert_with_foreign_key_relationships() {
 				.await
 				.unwrap();
             assert!(ok);
-        }
+        },
     }
 
     // Insert parent records first
@@ -1278,7 +1278,7 @@ async fn test_insert_performance_bulk_operations() {
         Ok(success) => {
             assert!(success, "INSERT with SELECT failed");
             println!("INSERT with SELECT (25 rows) completed successfully");
-        }
+        },
         Err(_) => println!("INSERT with SELECT expressions not supported"),
     }
 
@@ -1474,7 +1474,7 @@ async fn test_insert_with_computed_columns() {
         Ok(success) => {
             assert!(success, "SELECT with computed columns failed");
             println!("SELECT with computed columns succeeded");
-        }
+        },
         Err(_) => println!("Note: Advanced computed column expressions not supported"),
     }
 
@@ -1502,7 +1502,7 @@ async fn test_insert_with_computed_columns() {
 				.await
 				.unwrap();
             assert!(ok, "Verification query failed");
-        }
+        },
         Err(_) => println!("Note: Mathematical expressions in INSERT VALUES not supported"),
     }
 
@@ -1518,7 +1518,7 @@ async fn test_insert_with_computed_columns() {
         Ok(success) => {
             assert!(success, "INSERT with SELECT computation failed");
             println!("INSERT with SELECT computation succeeded");
-        }
+        },
         Err(_) => println!("Note: Computed INSERT with SELECT not supported"),
     }
 

@@ -276,13 +276,13 @@ impl SchemaManager {
                     if seen_columns.insert(col_name.clone()) {
                         columns.push(agg.get_return_type().clone());
                     }
-                }
+                },
                 _ => {
                     let col_name = agg_expr.get_return_type().get_name().to_string();
                     if seen_columns.insert(col_name.clone()) {
                         columns.push(agg_expr.get_return_type().clone());
                     }
-                }
+                },
             }
         }
 
@@ -356,16 +356,16 @@ impl SchemaManager {
                 ColumnOption::PrimaryKey(_) => {
                     is_primary_key = true;
                     is_not_null = true; // PRIMARY KEY implies NOT NULL
-                }
+                },
                 ColumnOption::Unique(_) => {
                     is_unique = true;
-                }
+                },
                 ColumnOption::NotNull => {
                     is_not_null = true;
-                }
+                },
                 ColumnOption::Null => {
                     is_not_null = false;
-                }
+                },
                 ColumnOption::ForeignKey(fk) => {
                     // Convert ObjectName to table name string
                     let table_name = self.object_name_to_string(&fk.foreign_table);
@@ -395,19 +395,19 @@ impl SchemaManager {
                         on_delete: on_delete_action,
                         on_update: on_update_action,
                     });
-                }
+                },
                 ColumnOption::Check(expr) => {
                     // Convert the expression to a string representation
                     check_constraint = Some(format!("{}", expr));
-                }
+                },
                 ColumnOption::Default(expr) => {
                     // Convert the expression to a Value
                     // For now, we'll store it as a string representation
                     default_value = Some(Value::new(format!("{}", expr)));
-                }
+                },
                 _ => {
                     // Ignore other column options for now
-                }
+                },
             }
         }
 
@@ -470,7 +470,7 @@ impl SchemaManager {
                     default_value,
                     foreign_key,
                 ))
-            }
+            },
 
             // Float types with precision
             DataType::Float(exact_info) => {
@@ -488,7 +488,7 @@ impl SchemaManager {
                     default_value,
                     foreign_key,
                 ))
-            }
+            },
 
             // Variable length string types - use default lengths for now
             DataType::Varchar(_) | DataType::String(_) => Ok(Column::from_sql_info(
@@ -533,7 +533,7 @@ impl SchemaManager {
                     default_value,
                     foreign_key,
                 ))
-            }
+            },
 
             // Integer types with optional display width (we ignore display width for now)
             DataType::TinyInt(_)
@@ -570,7 +570,7 @@ impl SchemaManager {
                     default_value,
                     foreign_key,
                 ))
-            }
+            },
 
             // All other types use default parameters
             _ => Ok(Column::from_sql_info(
@@ -605,7 +605,7 @@ impl SchemaManager {
                     ));
                 }
                 Ok((Some(*precision as u8), None))
-            }
+            },
             ExactNumberInfo::PrecisionAndScale(precision, scale) => {
                 if *precision > u8::MAX as u64 {
                     return Err(format!(
@@ -615,7 +615,11 @@ impl SchemaManager {
                     ));
                 }
                 if *scale < 0 || *scale > u8::MAX as i64 {
-                    return Err(format!("Scale {} is out of valid range (0-{})", scale, u8::MAX));
+                    return Err(format!(
+                        "Scale {} is out of valid range (0-{})",
+                        scale,
+                        u8::MAX
+                    ));
                 }
                 if *scale as u64 > *precision {
                     return Err(format!(
@@ -624,7 +628,7 @@ impl SchemaManager {
                     ));
                 }
                 Ok((Some(*precision as u8), Some(*scale as u8)))
-            }
+            },
         }
     }
 
@@ -666,7 +670,7 @@ impl SchemaManager {
             DataType::Float(_) => Ok(TypeId::Float),
             DataType::Varchar(_) | DataType::String(_) | DataType::Text | DataType::Char(_) => {
                 Ok(TypeId::VarChar)
-            }
+            },
             DataType::Array(_) => Ok(TypeId::Vector),
             DataType::Timestamp(_, _) => Ok(TypeId::Timestamp),
             // Character types
@@ -737,7 +741,10 @@ impl SchemaManager {
             DataType::Datetime(_) => Ok(TypeId::Timestamp),
             DataType::Datetime64(_, _) => Ok(TypeId::Timestamp),
             DataType::TimestampNtz(_) => Ok(TypeId::Timestamp),
-            DataType::Interval { fields: _, precision: _ } => Ok(TypeId::Interval),
+            DataType::Interval {
+                fields: _,
+                precision: _,
+            } => Ok(TypeId::Interval),
             // Special types
             DataType::JSON => Ok(TypeId::JSON),
             DataType::JSONB => Ok(TypeId::JSON),
@@ -758,7 +765,7 @@ impl SchemaManager {
                 } else {
                     Err(format!("Unsupported SQL type: {:?}", sql_type))
                 }
-            }
+            },
             DataType::Map(_, _) => Err(format!("Unsupported SQL type: {:?}", sql_type)),
             DataType::Tuple(_) => Err(format!("Unsupported SQL type: {:?}", sql_type)),
             DataType::Nested(_) => Err(format!("Unsupported SQL type: {:?}", sql_type)),
@@ -874,7 +881,7 @@ impl SchemaManager {
                     "Column {}.{} not found in left schema",
                     table_alias, column_name
                 ))
-            }
+            },
             "t2" => {
                 // Search only in right schema for t2
                 for i in 0..right_schema.get_column_count() {
@@ -887,7 +894,7 @@ impl SchemaManager {
                     "Column {}.{} not found in right schema",
                     table_alias, column_name
                 ))
-            }
+            },
             _ => Err(format!("Unknown table alias: {}", table_alias)),
         }
     }
@@ -911,7 +918,7 @@ impl SchemaManager {
                         let qualified_name = format!("{}.{}", idents[0].value, idents[1].value);
                         alias_map.insert(qualified_name, alias.value.clone());
                     }
-                }
+                },
                 sqlparser::ast::SelectItem::UnnamedExpr(expr) => {
                     // For expressions without explicit aliases, check if they match GROUP BY expressions
                     if let Expr::CompoundIdentifier(idents) = expr
@@ -932,8 +939,8 @@ impl SchemaManager {
                             }
                         }
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -1064,7 +1071,7 @@ impl SchemaManager {
             Err(_) => {
                 // If casting fails, use NULL
                 Value::new_with_type(crate::types_db::value::Val::Null, target_type)
-            }
+            },
         }
     }
 }
@@ -2646,7 +2653,10 @@ mod tests {
         );
         assert_eq!(
             manager
-                .convert_sql_type(&DataType::Interval { fields: None, precision: None })
+                .convert_sql_type(&DataType::Interval {
+                    fields: None,
+                    precision: None
+                })
                 .unwrap(),
             TypeId::Interval
         );

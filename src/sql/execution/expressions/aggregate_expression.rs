@@ -72,14 +72,14 @@ impl AggregateExpression {
                         } else {
                             full_name.to_string()
                         }
-                    }
+                    },
                     Expression::Constant(const_expr) => const_expr.to_string(),
                     Expression::Arithmetic(arith_expr) => arith_expr.to_string(),
                     Expression::Function(func_expr) => func_expr.to_string(),
                     _ => "expr".to_string(),
                 };
                 format!("{}_{}", self.function_name, expr_str.replace('.', "_"))
-            }
+            },
         }
     }
 
@@ -116,7 +116,7 @@ impl AggregateExpression {
                 } else {
                     Ok(Value::new(1_i64))
                 }
-            }
+            },
             AggregationType::Sum => {
                 if self.children.is_empty() {
                     return Ok(Value::new(0_i64));
@@ -128,7 +128,7 @@ impl AggregateExpression {
                 } else {
                     Ok(value)
                 }
-            }
+            },
             AggregationType::Min | AggregationType::Max => {
                 if self.children.is_empty() {
                     return Ok(Value::new(Val::Null));
@@ -136,7 +136,7 @@ impl AggregateExpression {
 
                 let value = self.children[0].evaluate(tuple, schema)?;
                 Ok(value)
-            }
+            },
             AggregationType::Avg => {
                 if self.children.is_empty() {
                     return Ok(Value::new(Val::Null));
@@ -148,7 +148,7 @@ impl AggregateExpression {
                 } else {
                     Ok(value)
                 }
-            }
+            },
             AggregationType::StdDev | AggregationType::Variance => {
                 if self.children.is_empty() {
                     return Ok(Value::new(Val::Null));
@@ -160,7 +160,7 @@ impl AggregateExpression {
                 } else {
                     Ok(value)
                 }
-            }
+            },
         }
     }
 }

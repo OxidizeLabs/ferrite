@@ -73,7 +73,7 @@ impl BinaryOpExpression {
                     return Err("Logical operators require boolean operands".to_string());
                 }
                 Ok(Column::new("logical_result", TypeId::Boolean))
-            }
+            },
 
             // Arithmetic operators
             BinaryOperator::Plus
@@ -89,7 +89,7 @@ impl BinaryOpExpression {
                 | (TypeId::SmallInt, TypeId::Integer)
                 | (TypeId::SmallInt, TypeId::SmallInt) => {
                     Ok(Column::new("arithmetic_result", TypeId::Integer))
-                }
+                },
                 (TypeId::Decimal, TypeId::Decimal)
                 | (TypeId::Integer, TypeId::Decimal)
                 | (TypeId::Decimal, TypeId::Integer)
@@ -98,7 +98,7 @@ impl BinaryOpExpression {
                 | (TypeId::SmallInt, TypeId::Decimal)
                 | (TypeId::Decimal, TypeId::SmallInt) => {
                     Ok(Column::new("arithmetic_result", TypeId::Decimal))
-                }
+                },
                 (TypeId::BigInt, TypeId::BigInt)
                 | (TypeId::BigInt, TypeId::Integer)
                 | (TypeId::Integer, TypeId::BigInt)
@@ -107,10 +107,10 @@ impl BinaryOpExpression {
                 | (TypeId::BigInt, TypeId::SmallInt)
                 | (TypeId::SmallInt, TypeId::BigInt) => {
                     Ok(Column::new("arithmetic_result", TypeId::BigInt))
-                }
+                },
                 (TypeId::BigInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::BigInt) => {
                     Ok(Column::new("arithmetic_result", TypeId::Decimal))
-                }
+                },
                 _ => Err(format!(
                     "Invalid types for arithmetic operation: {:?} and {:?}",
                     left_type, right_type
@@ -123,7 +123,7 @@ impl BinaryOpExpression {
                     return Err("String concatenation requires string operands".to_string());
                 }
                 Ok(Column::new("concat_result", TypeId::VarChar))
-            }
+            },
 
             _ => Err(format!("Unsupported binary operator: {:?}", op)),
         }
@@ -172,7 +172,7 @@ impl BinaryOpExpression {
                     "Invalid comparison operator: {:?}",
                     self.op
                 )));
-            }
+            },
         };
         Ok(Value::from(result))
     }
@@ -192,10 +192,10 @@ impl BinaryOpExpression {
                             "Invalid logical operator: {:?}",
                             self.op
                         )));
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(
                 "Logical operations require boolean operands".to_string(),
             )),
@@ -224,7 +224,7 @@ impl ExpressionOps for BinaryOpExpression {
 
             BinaryOperator::And | BinaryOperator::Or => {
                 self.evaluate_logical(&left_val, &right_val)
-            }
+            },
 
             BinaryOperator::StringConcat => match (left_val.get_val(), right_val.get_val()) {
                 (Val::VarLen(l), Val::VarLen(r)) => Ok(Value::from(format!("{}{}", l, r))),
@@ -310,7 +310,7 @@ impl ExpressionOps for BinaryOpExpression {
                         "Logical operators require boolean operands".to_string(),
                     ));
                 }
-            }
+            },
 
             BinaryOperator::StringConcat => {
                 if left_type != TypeId::VarChar || right_type != TypeId::VarChar {
@@ -318,13 +318,13 @@ impl ExpressionOps for BinaryOpExpression {
                         "String concatenation requires string operands".to_string(),
                     ));
                 }
-            }
+            },
 
             _ => {
                 // For other operators, just verify return type can be inferred
                 Self::infer_return_type(&self.left, &self.right, &self.op)
                     .map_err(ExpressionError::InvalidOperation)?;
-            }
+            },
         }
 
         Ok(())

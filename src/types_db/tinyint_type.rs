@@ -31,21 +31,21 @@ impl Type for TinyIntType {
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             Val::Integer(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 == val)
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 == val)
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) == *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -69,21 +69,21 @@ impl Type for TinyIntType {
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Integer(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 < val)
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 < val)
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) < *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -99,21 +99,21 @@ impl Type for TinyIntType {
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Integer(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 <= val)
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 <= val)
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) <= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -129,21 +129,21 @@ impl Type for TinyIntType {
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Integer(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 > val)
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 > val)
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) > *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -159,21 +159,21 @@ impl Type for TinyIntType {
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Integer(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 >= val)
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     CmpBool::from(0 >= val)
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) >= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -230,7 +230,7 @@ impl Type for TinyIntType {
                 .ok_or_else(|| "TinyInt overflow in multiplication".to_string()),
             Val::SmallInt(_) | Val::Integer(_) | Val::BigInt(_) | Val::Decimal(_) => {
                 Ok(Value::new(0i8))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply TinyInt by non-numeric type".to_string()),
         }
@@ -261,7 +261,7 @@ impl Type for TinyIntType {
             Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
             Val::TinyInt(_) | Val::SmallInt(_) | Val::Integer(_) | Val::BigInt(_) => {
                 Value::new(0i8)
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -275,21 +275,21 @@ impl Type for TinyIntType {
                 } else {
                     Value::new(if *r < 0 { i8::MIN } else { 0 })
                 }
-            }
+            },
             Val::Integer(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     Value::new(0i8.min(val))
                 } else {
                     Value::new(if *r < 0 { i8::MIN } else { 0 })
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     Value::new(0i8.min(val))
                 } else {
                     Value::new(if *r < 0 { i8::MIN } else { 0 })
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -303,21 +303,21 @@ impl Type for TinyIntType {
                 } else {
                     Value::new(if *r > 0 { i8::MAX } else { 0 })
                 }
-            }
+            },
             Val::Integer(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     Value::new(0i8.max(val))
                 } else {
                     Value::new(if *r > 0 { i8::MAX } else { 0 })
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i8::try_from(*r) {
                     Value::new(0i8.max(val))
                 } else {
                     Value::new(if *r > 0 { i8::MAX } else { 0 })
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

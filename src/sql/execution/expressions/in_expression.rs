@@ -84,7 +84,7 @@ impl InExpression {
             _ => {
                 owned_values.push(list_result);
                 &owned_values
-            }
+            },
         };
 
         self.check_value_in_list(value, list_values)
@@ -101,7 +101,7 @@ impl InExpression {
             Val::Null => {
                 // If the subquery returns NULL, the IN operator result is also NULL
                 Ok(Value::new(Val::Null))
-            }
+            },
             // If the subquery returns a scalar value, convert it to a single-item list
             _ => self.check_value_in_list(value, &[subquery_result]),
         }
@@ -148,7 +148,7 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    }
+                    },
                     (TypeId::Integer, TypeId::SmallInt) => {
                         // Convert SmallInt to Integer
                         if let Val::SmallInt(n) = list_value.get_val() {
@@ -156,7 +156,7 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    }
+                    },
                     (TypeId::Integer, TypeId::BigInt) => {
                         // Convert BigInt to Integer if it fits
                         if let Val::BigInt(n) = list_value.get_val() {
@@ -168,7 +168,7 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    }
+                    },
                     (TypeId::Integer, TypeId::Decimal) => {
                         // Convert Decimal to Integer if it's a whole number
                         if let Val::Decimal(n) = list_value.get_val() {
@@ -180,7 +180,7 @@ impl InExpression {
                         } else {
                             list_value.clone()
                         }
-                    }
+                    },
                     // Add more type conversions as needed
                     _ => list_value.clone(),
                 }
@@ -193,13 +193,13 @@ impl InExpression {
                 crate::types_db::types::CmpBool::CmpTrue => {
                     found = true;
                     break;
-                }
+                },
                 crate::types_db::types::CmpBool::CmpFalse => {
                     // Continue checking other values
-                }
+                },
                 crate::types_db::types::CmpBool::CmpNull => {
                     has_null = true;
-                }
+                },
             }
         }
 
@@ -231,15 +231,15 @@ impl ExpressionOps for InExpression {
             InOperand::List(list_expr) => {
                 let list_result = list_expr.evaluate(tuple, schema)?;
                 self.evaluate_list(&value, list_result)
-            }
+            },
             InOperand::Subquery(subquery_expr) => {
                 let subquery_result = subquery_expr.evaluate(tuple, schema)?;
                 self.evaluate_subquery(&value, subquery_result)
-            }
+            },
             InOperand::Unnest(array_expr) => {
                 let unnest_result = array_expr.evaluate(tuple, schema)?;
                 self.evaluate_unnest(&value, unnest_result)
-            }
+            },
         }?;
 
         // Apply negation if this is a NOT IN expression
@@ -266,7 +266,7 @@ impl ExpressionOps for InExpression {
                 let list_result =
                     list_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
                 self.evaluate_list(&value, list_result)
-            }
+            },
             InOperand::Subquery(subquery_expr) => {
                 let subquery_result = subquery_expr.evaluate_join(
                     left_tuple,
@@ -275,12 +275,12 @@ impl ExpressionOps for InExpression {
                     right_schema,
                 )?;
                 self.evaluate_subquery(&value, subquery_result)
-            }
+            },
             InOperand::Unnest(array_expr) => {
                 let unnest_result =
                     array_expr.evaluate_join(left_tuple, left_schema, right_tuple, right_schema)?;
                 self.evaluate_unnest(&value, unnest_result)
-            }
+            },
         }?;
 
         // Apply negation if this is a NOT IN expression

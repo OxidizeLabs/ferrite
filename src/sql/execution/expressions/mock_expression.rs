@@ -30,7 +30,7 @@ impl MockExpression {
                 // Format timestamp as "0 days 0:0:42 UTC"
                 let val = Val::Timestamp(42u64);
                 Value::new_with_type(val, TypeId::Timestamp)
-            }
+            },
             TypeId::VarChar => Value::new(name.clone()),
             TypeId::Vector => Value::new_vector(vec![Value::new(1), Value::new(2), Value::new(3)]),
             TypeId::Invalid => Value::new(Val::Null),
@@ -39,7 +39,7 @@ impl MockExpression {
                 let field_names = vec!["field1", "field2"];
                 let values = vec![Value::new(42), Value::new("test")];
                 Value::new_struct(field_names, values)
-            }
+            },
             _ => todo!(),
         });
 

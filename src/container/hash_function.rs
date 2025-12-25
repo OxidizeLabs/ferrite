@@ -52,12 +52,12 @@ where
             key if key.is::<u32>() => hasher.write_u32(*key.downcast_ref::<u32>().unwrap()),
             key if key.is::<String>() => {
                 hasher.write(key.downcast_ref::<String>().unwrap().as_bytes())
-            }
+            },
             key if key.is::<&str>() => hasher.write(key.downcast_ref::<&str>().unwrap().as_bytes()),
             _ => {
                 // Fallback for types that implement `Hash`
                 key.hash(&mut hasher);
-            }
+            },
         }
 
         hasher.finish()

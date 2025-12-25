@@ -29,7 +29,7 @@ impl UnaryOpExpression {
                     ));
                 }
                 Column::new("unary_not", TypeId::Boolean)
-            }
+            },
             UnaryOperator::Plus | UnaryOperator::Minus => {
                 let type_id = expr.get_return_type().get_type();
                 if !matches!(
@@ -54,7 +54,7 @@ impl UnaryOpExpression {
                         type_id
                     },
                 )
-            }
+            },
             _ => return Err(format!("Unsupported unary operator: {:?}", op)),
         };
 
@@ -82,7 +82,7 @@ impl ExpressionOps for UnaryOpExpression {
                         "NOT operator can only be applied to boolean values".to_string(),
                     )),
                 }
-            }
+            },
             UnaryOperator::Plus => Ok(val), // Unary plus is a no-op
             UnaryOperator::Minus => {
                 if val.is_null() {
@@ -98,7 +98,7 @@ impl ExpressionOps for UnaryOpExpression {
                         "Unary minus can only be applied to numeric values".to_string(),
                     )),
                 }
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Unsupported unary operator: {:?}",
                 self.op
@@ -128,7 +128,7 @@ impl ExpressionOps for UnaryOpExpression {
                         "NOT operator can only be applied to boolean values".to_string(),
                     )),
                 }
-            }
+            },
             UnaryOperator::Plus => Ok(val),
             UnaryOperator::Minus => {
                 if val.is_null() {
@@ -144,7 +144,7 @@ impl ExpressionOps for UnaryOpExpression {
                         "Unary minus can only be applied to numeric values".to_string(),
                     )),
                 }
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Unsupported unary operator: {:?}",
                 self.op
@@ -183,7 +183,7 @@ impl ExpressionOps for UnaryOpExpression {
                         "NOT operator requires boolean operand".to_string(),
                     ));
                 }
-            }
+            },
             UnaryOperator::Plus | UnaryOperator::Minus => {
                 let type_id = self.expr.get_return_type().get_type();
                 if !matches!(
@@ -199,13 +199,13 @@ impl ExpressionOps for UnaryOpExpression {
                         type_id
                     )));
                 }
-            }
+            },
             _ => {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "Unsupported unary operator: {:?}",
                     self.op
                 )));
-            }
+            },
         }
         Ok(())
     }

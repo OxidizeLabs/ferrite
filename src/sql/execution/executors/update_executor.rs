@@ -60,10 +60,10 @@ impl AbstractExecutor for UpdateExecutor {
                         child_executor.init();
                         self.child_executor = Some(child_executor);
                         debug!("Child executor created and initialized");
-                    }
+                    },
                     Err(e) => {
                         error!("Failed to create child executor: {}", e);
-                    }
+                    },
                 }
             } else {
                 debug!("No child plans found - update will scan entire table");
@@ -130,7 +130,7 @@ impl AbstractExecutor for UpdateExecutor {
                             let column_idx = assignment_expr.get_target_column_index();
                             let new_value = assignment_expr.evaluate(&tuple, &schema)?;
                             updated_values[column_idx] = new_value;
-                        }
+                        },
                         _ => {
                             // Fall back to legacy pair format if needed
                             for i in (0..expressions.len()).step_by(2) {
@@ -146,7 +146,7 @@ impl AbstractExecutor for UpdateExecutor {
                                 }
                             }
                             break; // Only process once for legacy format
-                        }
+                        },
                     }
                 }
 
@@ -166,11 +166,11 @@ impl AbstractExecutor for UpdateExecutor {
                             "Successfully updated tuple #{} with RID {:?}",
                             update_count, rid
                         );
-                    }
+                    },
                     Err(e) => {
                         error!("Failed to update tuple with RID {:?}: {}", rid, e);
                         return Err(DBError::Execution(format!("Update failed: {}", e)));
-                    }
+                    },
                 }
             }
         } else {
@@ -713,12 +713,12 @@ mod tests {
                 "Charlie" => {
                     assert_eq!(age, Value::new(36));
                     found_updates += 1;
-                }
+                },
                 "Eve" => {
                     assert_eq!(age, Value::new(33));
                     found_updates += 1;
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 

@@ -202,6 +202,8 @@
 //! - **Pinning/Unpinning**: Prevents eviction of pages in use by execution threads
 //! - **Replacement Policy**: Uses `LRUKReplacer` for access-frequency-based eviction
 //! - **Cache Coordination**: Manages L1/L2 cache interaction and efficiency
+use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+use crate::common::config::{DB_PAGE_SIZE, FrameId, INVALID_PAGE_ID, PageId};
 use crate::common::exception::DeletePageError;
 use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use crate::storage::page::page_guard::{PageGuard, PageUnpinner};
@@ -214,8 +216,6 @@ use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
-use crate::common::config::{FrameId, PageId, DB_PAGE_SIZE, INVALID_PAGE_ID};
 
 // Type aliases for complex types
 type PageCollection = Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>;
@@ -451,7 +451,10 @@ impl BufferPoolManager {
     ///
     /// # Returns
     /// An optional `PageGuard<T>`.
-    pub fn fetch_page<T: Page + 'static>(self: &Arc<Self>, page_id: PageId) -> Option<PageGuard<T>> {
+    pub fn fetch_page<T: Page + 'static>(
+        self: &Arc<Self>,
+        page_id: PageId,
+    ) -> Option<PageGuard<T>> {
         trace!("Fetching page {} of type {:?}", page_id, T::TYPE_ID);
 
         if page_id == INVALID_PAGE_ID || page_id >= self.next_page_id.load(Ordering::SeqCst) {
@@ -533,7 +536,7 @@ impl BufferPoolManager {
             Err(e) => {
                 error!("Failed to load page {} : {}", page_id, e);
                 return None;
-            }
+            },
         };
 
         // Verify page type and create page
@@ -650,7 +653,7 @@ impl BufferPoolManager {
             None => {
                 trace!("Page {} not found in page table", page_id);
                 return false;
-            }
+            },
         };
         drop(page_table);
 
@@ -1222,13 +1225,13 @@ impl BufferPoolManager {
                             in_memory_pages.push((page_id, None));
                         }
                     }
-                }
+                },
                 Err(e) => {
                     error!("Failed to load pages in batch: {}", e);
                     for page_id in pages_to_load {
                         in_memory_pages.push((page_id, None));
                     }
-                }
+                },
             }
         }
 
@@ -1337,11 +1340,11 @@ impl BufferPoolManager {
                     dirty_pages.len()
                 );
                 Ok(dirty_pages.len())
-            }
+            },
             Err(e) => {
                 error!("Failed to flush pages in batch: {}", e);
                 Err(format!("Batch flush failed: {}", e))
-            }
+            },
         }
     }
 
@@ -1396,11 +1399,11 @@ impl BufferPoolManager {
                     page_ids.len()
                 );
                 Ok(page_ids.len())
-            }
+            },
             Err(e) => {
                 error!("Failed to prefetch pages to disk cache: {}", e);
                 Err(format!("Prefetch failed: {}", e))
-            }
+            },
         }
     }
 
@@ -1594,14 +1597,14 @@ impl BufferPoolManager {
                     operation_name, duration
                 );
                 Ok(value)
-            }
+            },
             Ok(Err(e)) => {
                 error!(
                     "Async operation '{}' failed after {:?}: {}",
                     operation_name, duration, e
                 );
                 Err(format!("Operation '{}' failed: {}", operation_name, e))
-            }
+            },
             Err(_) => {
                 error!(
                     "Async operation '{}' timed out after {:?}",
@@ -1611,7 +1614,7 @@ impl BufferPoolManager {
                     "Operation '{}' timed out after 30 seconds",
                     operation_name
                 ))
-            }
+            },
         }
     }
 
@@ -2025,10 +2028,10 @@ mod tests {
         match result {
             Ok(count) => {
                 assert_eq!(count, 3);
-            }
+            },
             Err(e) => {
                 panic!("Complex workflow failed: {}", e);
-            }
+            },
         }
     }
 

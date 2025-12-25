@@ -204,9 +204,9 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
 use log::debug;
 use parking_lot::RwLock;
+use sqlparser::ast::RenameTableNameKind::{As, To};
 use sqlparser::ast::*;
 use std::sync::Arc;
-use sqlparser::ast::RenameTableNameKind::{As, To};
 
 pub struct LogicalPlanBuilder {
     pub expression_parser: ExpressionParser,
@@ -226,12 +226,12 @@ impl LogicalPlanBuilder {
         let mut current_plan = match &*query.body {
             SetExpr::Select(select) => {
                 self.build_select_plan_with_order_by(select, query.order_by.as_ref())?
-            }
+            },
             SetExpr::Query(nested_query) => self.build_query_plan(nested_query)?,
             SetExpr::Values(values) => {
                 let schema = self.schema_manager.create_values_schema(&values.rows)?;
                 self.build_values_plan(&values.rows, &schema)?
-            }
+            },
             SetExpr::Update(update_stmt) => match update_stmt {
                 Statement::Update(update) => self.build_update_plan(
                     &update.table,
@@ -249,22 +249,22 @@ impl LogicalPlanBuilder {
                 return Err(
                     "Set operations (UNION, INTERSECT, etc.) are not yet supported".to_string(),
                 );
-            }
+            },
             SetExpr::Insert(_) => {
                 return Err(
                     "INSERT is not supported in this context. Use Statement::Insert instead."
                         .to_string(),
                 );
-            }
+            },
             SetExpr::Table(table) => {
                 return Err(format!(
                     "Table expressions are not yet supported: {:?}",
                     table
                 ));
-            }
+            },
             SetExpr::Merge(_) => {
                 return Err("MERGE is not supported in this context".to_string());
-            }
+            },
         };
 
         // For non-SELECT queries, handle ORDER BY here if present
@@ -283,7 +283,7 @@ impl LogicalPlanBuilder {
                 OrderByKind::All(_) => {
                     // Handle ALL case if needed
                     return Err("ORDER BY ALL is not supported yet".to_string());
-                }
+                },
             };
 
             current_plan = LogicalPlan::sort(sort_specifications, schema.clone(), current_plan);
@@ -300,10 +300,8 @@ impl LogicalPlanBuilder {
             let (limit_expr, offset_expr) = match limit_clause {
                 LimitClause::LimitOffset { limit, offset, .. } => {
                     (limit.as_ref(), offset.as_ref().map(|o| &o.value))
-                }
-                LimitClause::OffsetCommaLimit { offset, limit } => {
-                    (Some(limit), Some(offset))
-                }
+                },
+                LimitClause::OffsetCommaLimit { offset, limit } => (Some(limit), Some(offset)),
             };
 
             // Apply OFFSET first
@@ -434,7 +432,7 @@ impl LogicalPlanBuilder {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
                     }
-                }
+                },
                 SelectItem::ExprWithAlias { expr, alias: _ } => {
                     // Use the original schema for parsing expressions to ensure all columns are available
                     let parsed_expr = self
@@ -444,11 +442,11 @@ impl LogicalPlanBuilder {
                         has_aggregates = true;
                         agg_exprs.push(Arc::new(parsed_expr));
                     }
-                }
+                },
                 SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
                     // We'll check for wildcards after determining if there are aggregates
                     // No action needed here
-                }
+                },
             }
         }
 
@@ -617,13 +615,13 @@ impl LogicalPlanBuilder {
                                 );
                             }
                             specs
-                        }
+                        },
                     }
-                }
+                },
                 OrderByKind::All(_) => {
                     // Handle ALL case if needed
                     return Err("ORDER BY ALL is not supported yet".to_string());
-                }
+                },
             };
 
             current_plan = LogicalPlan::sort(
@@ -742,11 +740,11 @@ impl LogicalPlanBuilder {
                             }
                         }
                     }
-                }
+                },
                 SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
                     // This should have been caught earlier, but just in case
                     return Err("Wildcard projections are not supported with GROUP BY".to_string());
-                }
+                },
             }
         }
 
@@ -786,14 +784,14 @@ impl LogicalPlanBuilder {
                         Expr::Identifier(ident) => ident.value.clone(),
                         Expr::CompoundIdentifier(parts) if parts.len() == 2 => {
                             format!("{}.{}", parts[0].value, parts[1].value)
-                        }
+                        },
                         _ => {
                             // For aggregate expressions, use the get_column_name method
                             match &parsed_expr {
                                 Expression::Aggregate(agg) => agg.get_column_name(),
                                 _ => parsed_expr.to_string(),
                             }
-                        }
+                        },
                     };
 
                     let output_col =
@@ -858,7 +856,7 @@ impl LogicalPlanBuilder {
                     } else {
                         projection_exprs.push(Arc::new(parsed_expr));
                     }
-                }
+                },
                 SelectItem::ExprWithAlias { expr, alias } => {
                     debug!(
                         "Processing aliased expression: {:?} AS {}",
@@ -936,8 +934,8 @@ impl LogicalPlanBuilder {
 
                                         col_idx_opt =
                                             input_schema.get_qualified_column_index(expected_alias);
-                                    }
-                                    _ => {}
+                                    },
+                                    _ => {},
                                 }
                             }
 
@@ -957,7 +955,7 @@ impl LogicalPlanBuilder {
                     } else {
                         projection_exprs.push(Arc::new(parsed_expr));
                     }
-                }
+                },
                 SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(_, _) => {
                     debug!("Processing wildcard");
                     for i in 0..input_schema.get_column_count() {
@@ -968,7 +966,7 @@ impl LogicalPlanBuilder {
                             ColumnRefExpression::new(0, i as usize, col.clone(), vec![]),
                         )));
                     }
-                }
+                },
             }
         }
 
@@ -1068,7 +1066,7 @@ impl LogicalPlanBuilder {
                 Expr::CompoundIdentifier(parts) if !parts.is_empty() => {
                     // Be permissive and accept the last identifier segment (e.g. schema.table.col)
                     Ok(parts.last().unwrap().value.clone())
-                }
+                },
                 other => Err(format!(
                     "Unsupported column reference in constraint: {:?}",
                     other
@@ -1088,16 +1086,16 @@ impl LogicalPlanBuilder {
                             Some(column) => {
                                 column.set_primary_key(true);
                                 column.set_not_null(true); // PRIMARY KEY implies NOT NULL
-                            }
+                            },
                             None => {
                                 return Err(format!(
                                     "Primary key column '{}' not found in table",
                                     pk_col_name
                                 ));
-                            }
+                            },
                         }
                     }
-                }
+                },
                 TableConstraint::Unique(unique) => {
                     // Set unique flag on the specified columns
                     for unique_index_col in &unique.columns {
@@ -1108,16 +1106,16 @@ impl LogicalPlanBuilder {
                         match column_found {
                             Some(column) => {
                                 column.set_unique(true);
-                            }
+                            },
                             None => {
                                 return Err(format!(
                                     "Unique constraint column '{}' not found in table",
                                     unique_col_name
                                 ));
-                            }
+                            },
                         }
                     }
-                }
+                },
                 TableConstraint::ForeignKey(fk) => {
                     // Process FOREIGN KEY constraint
                     if fk.columns.len() != 1 {
@@ -1151,23 +1149,23 @@ impl LogicalPlanBuilder {
                                 "Set FOREIGN KEY constraint on column '{}' referencing '{}({})'",
                                 fk_col_name, referred_table, referred_col_name
                             );
-                        }
+                        },
                         None => {
                             return Err(format!(
                                 "FOREIGN KEY constraint column '{}' not found in table",
                                 fk_col_name
                             ));
-                        }
+                        },
                     }
-                }
+                },
                 TableConstraint::Check { .. } => {
                     // Check constraints at table level would require complex expression parsing
                     log::warn!("Table-level CHECK constraints are not yet supported");
-                }
+                },
                 _ => {
                     // Other constraint types not supported yet
                     log::warn!("Unsupported table constraint type encountered");
-                }
+                },
             }
         }
         Ok(())
@@ -1192,7 +1190,7 @@ impl LogicalPlanBuilder {
                     .collect::<Vec<_>>()
                     .join("_");
                 format!("{}_{}_idx", table_name, columns_str)
-            }
+            },
         };
         let table_name = match &create_index.table_name {
             ObjectName(parts) if parts.len() == 1 => parts[0].to_string(),
@@ -1306,14 +1304,14 @@ impl LogicalPlanBuilder {
                 // APPLY joins require a table function on the right
                 JoinOperator::CrossApply => {
                     return Err("CROSS APPLY joins are not yet supported".to_string());
-                }
+                },
                 JoinOperator::OuterApply => {
                     return Err("OUTER APPLY joins are not yet supported".to_string());
-                }
+                },
                 // Time-series join variant
                 JoinOperator::AsOf { .. } => {
                     return Err("AS OF joins are not yet supported".to_string());
-                }
+                },
             };
 
             current_plan = Box::new(LogicalPlan::new(
@@ -1352,7 +1350,7 @@ impl LogicalPlanBuilder {
                 }
 
                 Ok(LogicalPlan::table_scan(table_name, schema, table_oid))
-            }
+            },
             TableFactor::Derived {
                 subquery, alias, ..
             } => {
@@ -1381,7 +1379,7 @@ impl LogicalPlanBuilder {
                 }
 
                 Ok(plan)
-            }
+            },
             TableFactor::NestedJoin {
                 table_with_joins,
                 alias,
@@ -1411,7 +1409,7 @@ impl LogicalPlanBuilder {
                 }
 
                 Ok(plan)
-            }
+            },
             _ => Err(format!("Unsupported table factor type: {:?}", table_factor)),
         }
     }
@@ -1445,7 +1443,7 @@ impl LogicalPlanBuilder {
                 };
 
                 Ok(LogicalPlan::table_scan(table_name, final_schema, table_oid))
-            }
+            },
             _ => Err("Only simple table scans are supported".to_string()),
         }
     }
@@ -1606,17 +1604,17 @@ impl LogicalPlanBuilder {
                     return Err("Schema name cannot be empty".to_string());
                 }
                 obj_name.0[0].to_string()
-            }
+            },
             SchemaName::UnnamedAuthorization(ident) => {
                 // Using authorization identifier as schema name
                 ident.to_string()
-            }
+            },
             SchemaName::NamedAuthorization(obj_name, _) => {
                 if obj_name.0.is_empty() {
                     return Err("Schema name cannot be empty".to_string());
                 }
                 obj_name.0[0].to_string()
-            }
+            },
         };
 
         // Use the existing LogicalPlan::create_schema constructor
@@ -1707,7 +1705,7 @@ impl LogicalPlanBuilder {
                         if *if_not_exists { "IF NOT EXISTS " } else { "" },
                         column_def.name.value
                     )
-                }
+                },
                 AlterTableOperation::DropColumn {
                     has_column_keyword,
                     column_names,
@@ -1730,7 +1728,7 @@ impl LogicalPlanBuilder {
                         "DROP {}{}{}{}",
                         column_kw, if_exists_kw, cols, behavior_suffix
                     )
-                }
+                },
                 AlterTableOperation::RenameColumn {
                     old_column_name,
                     new_column_name,
@@ -1739,7 +1737,7 @@ impl LogicalPlanBuilder {
                         "RENAME COLUMN {} TO {}",
                         old_column_name.value, new_column_name.value
                     )
-                }
+                },
                 AlterTableOperation::RenameTable {
                     table_name: new_table,
                 } => {
@@ -1752,7 +1750,7 @@ impl LogicalPlanBuilder {
                                 ObjectNamePart::Identifier(ident) => ident.value.clone(),
                                 ObjectNamePart::Function(func) => func.name.value.clone(),
                             }
-                        }
+                        },
                         To(object_name) => {
                             if object_name.0.is_empty() {
                                 return Err("New table name cannot be empty".to_string());
@@ -1761,17 +1759,17 @@ impl LogicalPlanBuilder {
                                 ObjectNamePart::Identifier(ident) => ident.value.clone(),
                                 ObjectNamePart::Function(func) => func.name.value.clone(),
                             }
-                        }
+                        },
                     };
                     format!("RENAME TO {}", new_name)
-                }
+                },
                 AlterTableOperation::AlterColumn { column_name, .. } => {
                     format!("ALTER COLUMN {}", column_name.value)
-                }
+                },
                 _ => {
                     // Generic operation string for other types
                     "ALTER TABLE OPERATION".to_string()
-                }
+                },
             }
         };
 
@@ -1965,11 +1963,11 @@ impl LogicalPlanBuilder {
                                 SelectItem::UnnamedExpr(expr) => proj_str.push(expr.to_string()),
                                 SelectItem::ExprWithAlias { expr, alias } => {
                                     proj_str.push(format!("{} AS {}", expr, alias.value));
-                                }
+                                },
                                 SelectItem::Wildcard(_) => proj_str.push("*".to_string()),
                                 SelectItem::QualifiedWildcard(_, _) => {
                                     proj_str.push("table.*".to_string())
-                                }
+                                },
                             }
                         }
                     }
@@ -2005,15 +2003,15 @@ impl LogicalPlanBuilder {
                     GroupByExpr::All(_) => operation.push_str(" GROUP BY ALL"),
                     GroupByExpr::Expressions(exprs, _) if !exprs.is_empty() => {
                         operation.push_str(" GROUP BY ...");
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
 
                 // Indicate if HAVING clause is present
                 if select.having.is_some() {
                     operation.push_str(" HAVING ...");
                 }
-            }
+            },
             SetExpr::Values(_) => operation.push_str("VALUES (...)"),
             SetExpr::Query(_) => operation.push_str("(...)"),
             SetExpr::SetOperation { op, .. } => operation.push_str(&format!("{:?} ...", op)),
@@ -2037,7 +2035,7 @@ impl LogicalPlanBuilder {
                     SqlOption::Clustered(clustered) => match clustered {
                         TableOptionsClustered::ColumnstoreIndex => {
                             operation.push_str("COLUMNSTORE_INDEX");
-                        }
+                        },
                         TableOptionsClustered::ColumnstoreIndexOrder(columns) => {
                             operation.push_str("COLUMNSTORE_INDEX_ORDER (");
                             for (j, col) in columns.iter().enumerate() {
@@ -2047,7 +2045,7 @@ impl LogicalPlanBuilder {
                                 operation.push_str(&col.value);
                             }
                             operation.push(')');
-                        }
+                        },
                         TableOptionsClustered::Index(indexes) => {
                             operation.push_str("INDEX (");
                             for (j, index) in indexes.iter().enumerate() {
@@ -2060,14 +2058,14 @@ impl LogicalPlanBuilder {
                                 }
                             }
                             operation.push(')');
-                        }
+                        },
                     },
                     SqlOption::Ident(ident) => {
                         operation.push_str(&ident.value);
-                    }
+                    },
                     SqlOption::KeyValue { key, value } => {
                         operation.push_str(&format!("{} = {}", key.value, value));
-                    }
+                    },
                     SqlOption::Partition {
                         column_name,
                         range_direction,
@@ -2087,10 +2085,10 @@ impl LogicalPlanBuilder {
                             operation.push_str(&value.to_string());
                         }
                         operation.push_str("))");
-                    }
-                    SqlOption::Comment(_) => {}
-                    SqlOption::TableSpace(_) => {}
-                    SqlOption::NamedParenthesizedList(_) => {}
+                    },
+                    SqlOption::Comment(_) => {},
+                    SqlOption::TableSpace(_) => {},
+                    SqlOption::NamedParenthesizedList(_) => {},
                 }
             }
             operation.push(')');
@@ -2121,7 +2119,7 @@ impl LogicalPlanBuilder {
                         TableFactor::Table { name, .. } => name.to_string(),
                         _ => return Err("Only simple table deletes supported".to_string()),
                     }
-                }
+                },
                 FromTable::WithoutKeyword(tables) => {
                     if tables.is_empty() {
                         return Err("No table specified in DELETE statement".to_string());
@@ -2139,7 +2137,7 @@ impl LogicalPlanBuilder {
                         TableFactor::Table { name, .. } => name.to_string(),
                         _ => return Err("Only simple table deletes supported".to_string()),
                     }
-                }
+                },
             };
 
             // Get schema from catalog
@@ -2256,22 +2254,22 @@ impl LogicalPlanBuilder {
                             "LIKE pattern '{}' not fully implemented for SHOW DATABASES",
                             pattern
                         );
-                    }
+                    },
                     ShowStatementFilter::ILike(pattern) => {
                         debug!(
                             "ILIKE pattern '{}' not fully implemented for SHOW DATABASES",
                             pattern
                         );
-                    }
+                    },
                     ShowStatementFilter::Where(_expr) => {
                         debug!("WHERE clause not fully implemented for SHOW DATABASES");
-                    }
+                    },
                     ShowStatementFilter::NoKeyword(value) => {
                         debug!(
                             "NoKeyword filter '{}' not fully implemented for SHOW DATABASES",
                             value
                         );
-                    }
+                    },
                 },
             }
         }
@@ -2310,7 +2308,7 @@ impl LogicalPlanBuilder {
                             ObjectNamePart::Identifier(ident) => ident.value.clone(),
                             ObjectNamePart::Function(func) => func.name.value.clone(),
                         }
-                    }
+                    },
                     None => return Err("Table name is required for SHOW COLUMNS".to_string()),
                 };
 
@@ -2335,25 +2333,25 @@ impl LogicalPlanBuilder {
                                                     *extended,
                                                     *full,
                                                 ))
-                                            }
+                                            },
                                             _ => Err("Table name is required for SHOW COLUMNS"
                                                 .to_string()),
                                         }
-                                    }
+                                    },
                                 };
                             }
                             // If we don't have a filter with the table name, we can't proceed
                             return Err("Table name is required for SHOW COLUMNS".to_string());
-                        }
+                        },
                         Some(ShowStatementInParentType::Table) => {
                             // In this case, parent_name is the table and we might have the schema elsewhere
                             None
-                        }
+                        },
                         _ => None,
                     };
 
                 (parent_name, schema_name)
-            }
+            },
             None => {
                 // If there's no show_in clause, we need to extract the table name
                 // from the filter position if available
@@ -2370,14 +2368,14 @@ impl LogicalPlanBuilder {
                                         *extended,
                                         *full,
                                     ))
-                                }
+                                },
                                 _ => Err("Table name is required for SHOW COLUMNS".to_string()),
                             }
-                        }
+                        },
                     };
                 }
                 return Err("Table name is required for SHOW COLUMNS".to_string());
-            }
+            },
         };
 
         // Create the logical plan with the appropriate options
@@ -2395,21 +2393,21 @@ impl LogicalPlanBuilder {
                                 "LIKE pattern '{}' not fully implemented for SHOW COLUMNS",
                                 pattern
                             );
-                        }
+                        },
                         ShowStatementFilter::ILike(pattern) => {
                             debug!(
                                 "ILIKE pattern '{}' not fully implemented for SHOW COLUMNS",
                                 pattern
                             );
-                        }
+                        },
                         ShowStatementFilter::Where(_expr) => {
                             debug!("WHERE clause not fully implemented for SHOW COLUMNS");
-                        }
+                        },
                         ShowStatementFilter::NoKeyword(_) => {
                             // Already handled above
-                        }
+                        },
                     }
-                }
+                },
             }
         }
 
@@ -2441,7 +2439,7 @@ impl LogicalPlanBuilder {
                     ObjectNamePart::Identifier(ident) => ident.value.clone(),
                     ObjectNamePart::Function(func) => func.name.value.clone(),
                 }
-            }
+            },
             Use::Catalog(obj_name) => {
                 if obj_name.0.is_empty() {
                     return Err("Empty catalog name in USE statement".to_string());
@@ -2451,19 +2449,19 @@ impl LogicalPlanBuilder {
                     ObjectNamePart::Identifier(ident) => ident.value.clone(),
                     ObjectNamePart::Function(func) => func.name.value.clone(),
                 }
-            }
+            },
             Use::Warehouse(_obj_name) => {
                 return Err("USE WAREHOUSE statement is not supported".to_string());
-            }
+            },
             Use::Role(_obj_name) => {
                 return Err("USE ROLE statement is not supported".to_string());
-            }
+            },
             Use::SecondaryRoles(_) => {
                 return Err("USE SECONDARY ROLES statement is not supported".to_string());
-            }
+            },
             Use::Default => {
                 return Err("USE DEFAULT statement is not supported".to_string());
-            }
+            },
         };
 
         // Create and return the USE logical plan
@@ -2488,7 +2486,7 @@ impl LogicalPlanBuilder {
                 Statement::Query(query) => self.build_query_plan(query)?,
                 Statement::Insert { .. } => {
                     return Err("EXPLAIN INSERT not yet supported".to_string());
-                }
+                },
                 _ => return Err("EXPLAIN for this statement type not yet supported".to_string()),
             };
 
@@ -2504,10 +2502,10 @@ impl LogicalPlanBuilder {
         let table_name = match &insert.table {
             TableObject::TableName(obj_name) => {
                 self.expression_parser.extract_table_name(obj_name)?
-            }
+            },
             TableObject::TableFunction(_) => {
                 return Err("Table functions are not supported in INSERT statements".to_string());
-            }
+            },
         };
 
         // Get table info from catalog
@@ -2556,7 +2554,7 @@ impl LogicalPlanBuilder {
                         return Err("SELECT schema doesn't match INSERT target".to_string());
                     }
                     select_plan
-                }
+                },
                 _ => return Err("Only VALUES and SELECT supported in INSERT".to_string()),
             },
             None => return Err("INSERT statement must have a source".to_string()),
@@ -2621,7 +2619,7 @@ impl LogicalPlanBuilder {
                 AssignmentTarget::ColumnName(obj_name) => obj_name.to_string(),
                 AssignmentTarget::Tuple(_) => {
                     return Err("Tuple assignments are not supported".to_string());
-                }
+                },
             };
 
             // Check if column exists in the schema and get its index

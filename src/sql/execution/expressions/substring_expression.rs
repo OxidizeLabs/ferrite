@@ -76,7 +76,7 @@ impl ExpressionOps for SubstringExpression {
                     "SUBSTRING requires string input, got {:?}",
                     string_val.get_type_id()
                 )));
-            }
+            },
         };
 
         // Evaluate the FROM expression (start position)
@@ -96,7 +96,7 @@ impl ExpressionOps for SubstringExpression {
                     "SUBSTRING FROM requires numeric input, got {:?}",
                     from_val.get_type_id()
                 )));
-            }
+            },
         };
 
         // Convert to 0-indexed for Rust
@@ -137,7 +137,7 @@ impl ExpressionOps for SubstringExpression {
                         "SUBSTRING FOR requires numeric input, got {:?}",
                         for_val.get_type_id()
                     )));
-                }
+                },
             };
 
             // If length is negative, return empty string (SQL standard behavior)
@@ -181,7 +181,7 @@ impl ExpressionOps for SubstringExpression {
                     "SUBSTRING requires string input, got {:?}",
                     string_val.get_type_id()
                 )));
-            }
+            },
         };
 
         // Evaluate the FROM expression (start position)
@@ -203,7 +203,7 @@ impl ExpressionOps for SubstringExpression {
                     "SUBSTRING FROM requires numeric input, got {:?}",
                     from_val.get_type_id()
                 )));
-            }
+            },
         };
 
         // Convert to 0-indexed for Rust
@@ -245,7 +245,7 @@ impl ExpressionOps for SubstringExpression {
                         "SUBSTRING FOR requires numeric input, got {:?}",
                         for_val.get_type_id()
                     )));
-                }
+                },
             };
 
             // If length is negative, return empty string (SQL standard behavior)

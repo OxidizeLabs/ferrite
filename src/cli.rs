@@ -46,20 +46,20 @@ impl CLI {
                         if line.trim().ends_with(';') {
                             break;
                         }
-                    }
+                    },
                     Err(ReadlineError::Interrupted) => {
                         println!("^C");
                         buffer.clear();
                         break;
-                    }
+                    },
                     Err(ReadlineError::Eof) => {
                         println!("Bye!");
                         return Ok(());
-                    }
+                    },
                     Err(err) => {
                         println!("Error: {:?}", err);
                         return Ok(());
-                    }
+                    },
                 }
             }
 
@@ -76,26 +76,26 @@ impl CLI {
                     self.cleanup_transaction();
                     println!("Bye!");
                     break;
-                }
+                },
                 "help" => {
                     self.print_help();
-                }
+                },
                 "begin" => {
                     self.begin_transaction(IsolationLevel::RepeatableRead)?;
-                }
+                },
                 "commit" => {
                     self.commit_transaction().await?;
-                }
+                },
                 "rollback" => {
                     self.rollback_transaction()?;
-                }
+                },
                 "show tables" => {
                     let mut writer = CliResultWriter::new();
                     self.db.display_tables(&mut writer)?;
-                }
+                },
                 _ => {
                     self.execute_command(command).await?;
-                }
+                },
             }
         }
 
@@ -126,12 +126,12 @@ impl CLI {
             {
                 Ok(_) => {
                     println!("Transaction committed successfully.");
-                }
+                },
                 Err(e) => {
                     println!("Error during commit: {}. Rolling back changes.", e);
                     // Attempt rollback on error
                     self.db.get_transaction_factory().abort_transaction(txn_ctx);
-                }
+                },
             }
         } else {
             println!("No active transaction to commit.");
@@ -181,9 +181,9 @@ impl CLI {
                     Err(e) => {
                         println!("Error executing query: {:?}", e);
                         Ok(())
-                    }
+                    },
                 }
-            }
+            },
             None => {
                 // Auto-commit mode
                 match self
@@ -195,9 +195,9 @@ impl CLI {
                     Err(e) => {
                         println!("Error executing query: {:?}", e);
                         Ok(())
-                    }
+                    },
                 }
-            }
+            },
         }
     }
 

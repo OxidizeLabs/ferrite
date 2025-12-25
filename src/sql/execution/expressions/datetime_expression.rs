@@ -162,7 +162,7 @@ impl DateTimeExpression {
                     .ok_or_else(|| ExpressionError::InvalidOperation("Invalid date".to_string()))?;
                 date.and_hms_opt(0, 0, 0)
                     .ok_or_else(|| ExpressionError::InvalidOperation("Invalid date".to_string()))?
-            }
+            },
             DateTimeField::Quarter => {
                 let month = (naive.month() - 1) / 3 * 3 + 1;
                 naive
@@ -173,7 +173,7 @@ impl DateTimeExpression {
                     .unwrap()
                     .and_hms_opt(0, 0, 0)
                     .ok_or_else(|| ExpressionError::InvalidOperation("Invalid date".to_string()))?
-            }
+            },
             DateTimeField::Day => naive
                 .date()
                 .and_hms_opt(0, 0, 0)
@@ -198,7 +198,7 @@ impl DateTimeExpression {
                     .unwrap()
                     .and_hms_opt(0, 0, 0)
                     .ok_or_else(|| ExpressionError::InvalidOperation("Invalid date".to_string()))?
-            }
+            },
             DateTimeField::Decade => {
                 let year = (naive.year() / 10) * 10;
                 naive
@@ -211,7 +211,7 @@ impl DateTimeExpression {
                     .unwrap()
                     .and_hms_opt(0, 0, 0)
                     .ok_or_else(|| ExpressionError::InvalidOperation("Invalid date".to_string()))?
-            }
+            },
             DateTimeField::Week(Some(_)) => {
                 let weekday = naive.weekday().num_days_from_monday();
                 naive
@@ -219,7 +219,7 @@ impl DateTimeExpression {
                     .sub(chrono::Duration::days(weekday as i64))
                     .and_hms_opt(0, 0, 0)
                     .ok_or_else(|| ExpressionError::InvalidOperation("Invalid date".to_string()))?
-            }
+            },
             DateTimeField::Second => naive
                 .date()
                 .and_hms_opt(naive.hour(), naive.minute(), naive.second())
@@ -229,7 +229,7 @@ impl DateTimeExpression {
                     "Unsupported date_trunc part: {:?}",
                     part
                 )));
-            }
+            },
         };
         Ok(Utc.from_utc_datetime(&truncated))
     }
@@ -245,7 +245,7 @@ impl DateTimeExpression {
             DateTimeField::Day => Ok(timestamp.day() as i32),
             DateTimeField::DayOfWeek | DateTimeField::Dow => {
                 Ok(timestamp.weekday().num_days_from_monday() as i32)
-            }
+            },
             DateTimeField::DayOfYear | DateTimeField::Doy => Ok(timestamp.ordinal() as i32),
             DateTimeField::Hour => Ok(timestamp.hour() as i32),
             DateTimeField::Minute => Ok(timestamp.minute() as i32),
@@ -258,13 +258,13 @@ impl DateTimeExpression {
             DateTimeField::Epoch => Ok(timestamp.timestamp() as i32),
             DateTimeField::Millisecond | DateTimeField::Milliseconds => {
                 Ok((timestamp.timestamp_subsec_millis() % 1000) as i32)
-            }
+            },
             DateTimeField::Microsecond | DateTimeField::Microseconds => {
                 Ok((timestamp.timestamp_subsec_micros() % 1_000_000) as i32)
-            }
+            },
             DateTimeField::Nanosecond | DateTimeField::Nanoseconds => {
                 Ok((timestamp.timestamp_subsec_nanos() % 1_000_000_000) as i32)
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Unsupported date_part: {:?}",
                 part
@@ -373,19 +373,19 @@ impl ExpressionOps for DateTimeExpression {
                                     ))
                                 })?
                                 .with_timezone(&Utc)
-                        }
+                        },
                         Val::Timestamp(ts) => {
                             Utc.timestamp_opt(*ts as i64, 0).single().ok_or_else(|| {
                                 ExpressionError::InvalidOperation(
                                     "Invalid timestamp value".to_string(),
                                 )
                             })?
-                        }
+                        },
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
                             ));
-                        }
+                        },
                     };
                     let result = self.evaluate_date_trunc(part, timestamp)?;
                     Ok(Value::new(Self::format_datetime_utc(result)))
@@ -394,7 +394,7 @@ impl ExpressionOps for DateTimeExpression {
                         "Missing date part for date_trunc".to_string(),
                     ))
                 }
-            }
+            },
             DateTimeOperation::DatePart => {
                 if let Some(part) = &self.part {
                     if self.args.len() != 1 {
@@ -414,19 +414,19 @@ impl ExpressionOps for DateTimeExpression {
                                     ))
                                 })?
                                 .with_timezone(&Utc)
-                        }
+                        },
                         Val::Timestamp(ts) => {
                             Utc.timestamp_opt(*ts as i64, 0).single().ok_or_else(|| {
                                 ExpressionError::InvalidOperation(
                                     "Invalid timestamp value".to_string(),
                                 )
                             })?
-                        }
+                        },
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
                             ));
-                        }
+                        },
                     };
                     let result = self.evaluate_date_part(part, timestamp)?;
                     Ok(Value::new(result))
@@ -435,7 +435,7 @@ impl ExpressionOps for DateTimeExpression {
                         "Missing date part for date_part".to_string(),
                     ))
                 }
-            }
+            },
             DateTimeOperation::MakeDate => self.evaluate_make_date(tuple, schema),
             DateTimeOperation::MakeTime => self.evaluate_make_time(tuple, schema),
             DateTimeOperation::MakeTimestamp => self.evaluate_make_timestamp(tuple, schema),
@@ -463,7 +463,7 @@ impl ExpressionOps for DateTimeExpression {
                                         "Invalid timestamp value".to_string(),
                                     )
                                 })?
-                            }
+                            },
                             Val::VarLen(ts_str) | Val::ConstLen(ts_str) => {
                                 DateTime::parse_from_rfc3339(ts_str)
                                     .map_err(|e| {
@@ -473,7 +473,7 @@ impl ExpressionOps for DateTimeExpression {
                                         ))
                                     })?
                                     .with_timezone(&Utc)
-                            }
+                            },
                             _ => unreachable!(),
                         };
 
@@ -488,7 +488,7 @@ impl ExpressionOps for DateTimeExpression {
                         // Add duration to timestamp
                         let result = timestamp + duration;
                         Ok(Value::new(Self::format_datetime_utc(result)))
-                    }
+                    },
                     // Interval + Timestamp (for addition)
                     (
                         Val::VarLen(interval_str) | Val::ConstLen(interval_str),
@@ -501,7 +501,7 @@ impl ExpressionOps for DateTimeExpression {
                                         "Invalid timestamp value".to_string(),
                                     )
                                 })?
-                            }
+                            },
                             Val::VarLen(ts_str) | Val::ConstLen(ts_str) => {
                                 DateTime::parse_from_rfc3339(ts_str)
                                     .map_err(|e| {
@@ -511,7 +511,7 @@ impl ExpressionOps for DateTimeExpression {
                                         ))
                                     })?
                                     .with_timezone(&Utc)
-                            }
+                            },
                             _ => unreachable!(),
                         };
 
@@ -526,7 +526,7 @@ impl ExpressionOps for DateTimeExpression {
                         // Add duration to timestamp
                         let result = timestamp + duration;
                         Ok(Value::new(Self::format_datetime_utc(result)))
-                    }
+                    },
                     // Timestamp - Interval (for subtraction)
                     (
                         Val::Timestamp(_) | Val::VarLen(_) | Val::ConstLen(_),
@@ -539,7 +539,7 @@ impl ExpressionOps for DateTimeExpression {
                                         "Invalid timestamp value".to_string(),
                                     )
                                 })?
-                            }
+                            },
                             Val::VarLen(ts_str) | Val::ConstLen(ts_str) => {
                                 DateTime::parse_from_rfc3339(ts_str)
                                     .map_err(|e| {
@@ -549,7 +549,7 @@ impl ExpressionOps for DateTimeExpression {
                                         ))
                                     })?
                                     .with_timezone(&Utc)
-                            }
+                            },
                             _ => unreachable!(),
                         };
 
@@ -564,7 +564,7 @@ impl ExpressionOps for DateTimeExpression {
                         // Subtract duration from timestamp
                         let result = timestamp - duration;
                         Ok(Value::new(Self::format_datetime_utc(result)))
-                    }
+                    },
                     // Timestamp - Timestamp (only for subtraction)
                     (
                         Val::Timestamp(_) | Val::VarLen(_) | Val::ConstLen(_),
@@ -577,7 +577,7 @@ impl ExpressionOps for DateTimeExpression {
                                         "Invalid timestamp value".to_string(),
                                     )
                                 })?
-                            }
+                            },
                             Val::VarLen(ts_str) | Val::ConstLen(ts_str) => {
                                 DateTime::parse_from_rfc3339(ts_str)
                                     .map_err(|e| {
@@ -587,7 +587,7 @@ impl ExpressionOps for DateTimeExpression {
                                         ))
                                     })?
                                     .with_timezone(&Utc)
-                            }
+                            },
                             _ => unreachable!(),
                         };
                         let timestamp2 = match right.get_val() {
@@ -597,7 +597,7 @@ impl ExpressionOps for DateTimeExpression {
                                         "Invalid timestamp value".to_string(),
                                     )
                                 })?
-                            }
+                            },
                             Val::VarLen(ts_str) | Val::ConstLen(ts_str) => {
                                 DateTime::parse_from_rfc3339(ts_str)
                                     .map_err(|e| {
@@ -607,14 +607,14 @@ impl ExpressionOps for DateTimeExpression {
                                         ))
                                     })?
                                     .with_timezone(&Utc)
-                            }
+                            },
                             _ => unreachable!(),
                         };
 
                         let duration = timestamp1.sub(timestamp2);
                         let duration_str = format!("{:?}", duration);
                         Ok(Value::new(duration_str))
-                    }
+                    },
                     _ => Err(ExpressionError::InvalidOperation(format!(
                         "Invalid operands for {:?} operation: {:?} and {:?}",
                         self.operation,
@@ -622,7 +622,7 @@ impl ExpressionOps for DateTimeExpression {
                         right.get_val()
                     ))),
                 }
-            }
+            },
         }
     }
 
@@ -670,19 +670,19 @@ impl ExpressionOps for DateTimeExpression {
                                     ))
                                 })?
                                 .with_timezone(&Utc)
-                        }
+                        },
                         Val::Timestamp(ts) => {
                             Utc.timestamp_opt(*ts as i64, 0).single().ok_or_else(|| {
                                 ExpressionError::InvalidOperation(
                                     "Invalid timestamp value".to_string(),
                                 )
                             })?
-                        }
+                        },
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
                             ));
-                        }
+                        },
                     };
                     let result = self.evaluate_date_trunc(part, timestamp)?;
                     Ok(Value::new(Self::format_datetime_utc(result)))
@@ -691,7 +691,7 @@ impl ExpressionOps for DateTimeExpression {
                         "Missing date part for date_trunc".to_string(),
                     ))
                 }
-            }
+            },
             DateTimeOperation::DatePart => {
                 if let Some(part) = &self.part {
                     if self.args.len() != 1 {
@@ -716,19 +716,19 @@ impl ExpressionOps for DateTimeExpression {
                                     ))
                                 })?
                                 .with_timezone(&Utc)
-                        }
+                        },
                         Val::Timestamp(ts) => {
                             Utc.timestamp_opt(*ts as i64, 0).single().ok_or_else(|| {
                                 ExpressionError::InvalidOperation(
                                     "Invalid timestamp value".to_string(),
                                 )
                             })?
-                        }
+                        },
                         _ => {
                             return Err(ExpressionError::InvalidOperation(
                                 "Expected timestamp value".to_string(),
                             ));
-                        }
+                        },
                     };
                     let result = self.evaluate_date_part(part, timestamp)?;
                     Ok(Value::new(result))
@@ -737,7 +737,7 @@ impl ExpressionOps for DateTimeExpression {
                         "Missing date part for date_part".to_string(),
                     ))
                 }
-            }
+            },
             DateTimeOperation::MakeDate
             | DateTimeOperation::MakeTime
             | DateTimeOperation::MakeTimestamp
@@ -769,7 +769,7 @@ impl ExpressionOps for DateTimeExpression {
 
                 // Use the regular evaluate method with the dummy tuple
                 self.evaluate(&dummy_tuple, &Schema::new(vec![]))
-            }
+            },
         }
     }
 
@@ -831,7 +831,7 @@ impl ExpressionOps for DateTimeExpression {
                         arg_type.get_type()
                     )));
                 }
-            }
+            },
             DateTimeOperation::MakeDate => {
                 if self.args.len() != 3 {
                     return Err(ExpressionError::InvalidOperation(
@@ -849,7 +849,7 @@ impl ExpressionOps for DateTimeExpression {
                         )));
                     }
                 }
-            }
+            },
             DateTimeOperation::MakeTime => {
                 if self.args.len() != 3 {
                     return Err(ExpressionError::InvalidOperation(
@@ -867,7 +867,7 @@ impl ExpressionOps for DateTimeExpression {
                         )));
                     }
                 }
-            }
+            },
             DateTimeOperation::MakeTimestamp => {
                 if self.args.len() != 6 {
                     return Err(ExpressionError::InvalidOperation(
@@ -885,7 +885,7 @@ impl ExpressionOps for DateTimeExpression {
                         )));
                     }
                 }
-            }
+            },
             DateTimeOperation::Add | DateTimeOperation::Subtract => {
                 if self.args.len() != 2 {
                     return Err(ExpressionError::InvalidOperation(format!(
@@ -911,7 +911,7 @@ impl ExpressionOps for DateTimeExpression {
                                 "Addition requires timestamp and interval".to_string(),
                             ));
                         }
-                    }
+                    },
                     DateTimeOperation::Subtract => {
                         let valid = (left_type.get_type() == TypeId::Timestamp
                             && right_type.get_type() == TypeId::VarChar)
@@ -923,10 +923,10 @@ impl ExpressionOps for DateTimeExpression {
                                 "Subtraction requires timestamp - interval or timestamp - timestamp".to_string()
                             ));
                         }
-                    }
+                    },
                     _ => unreachable!(),
                 }
-            }
+            },
         }
 
         Ok(())
@@ -943,7 +943,7 @@ impl Display for DateTimeExpression {
                     self.part.as_ref().unwrap(),
                     self.args[0]
                 )
-            }
+            },
             DateTimeOperation::DatePart => {
                 write!(
                     f,
@@ -951,21 +951,21 @@ impl Display for DateTimeExpression {
                     self.part.as_ref().unwrap(),
                     self.args[0]
                 )
-            }
+            },
             DateTimeOperation::MakeDate => {
                 write!(
                     f,
                     "make_date({}, {}, {})",
                     self.args[0], self.args[1], self.args[2]
                 )
-            }
+            },
             DateTimeOperation::MakeTime => {
                 write!(
                     f,
                     "make_time({}, {}, {})",
                     self.args[0], self.args[1], self.args[2]
                 )
-            }
+            },
             DateTimeOperation::MakeTimestamp => {
                 write!(
                     f,
@@ -977,13 +977,13 @@ impl Display for DateTimeExpression {
                     self.args[4],
                     self.args[5]
                 )
-            }
+            },
             DateTimeOperation::Add => {
                 write!(f, "{} + {}", self.args[0], self.args[1])
-            }
+            },
             DateTimeOperation::Subtract => {
                 write!(f, "{} - {}", self.args[0], self.args[1])
-            }
+            },
         }
     }
 }

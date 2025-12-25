@@ -43,11 +43,11 @@ impl SeqScanExecutor {
                         table_info.get_table_heap(),
                         table_oid, // Pass table_oid instead of txn_ctx
                     ))
-                }
+                },
                 None => {
                     error!("Table with OID {} not found in catalog", table_oid);
                     panic!("Table not found");
-                }
+                },
             }
         };
 
@@ -136,7 +136,7 @@ impl AbstractExecutor for SeqScanExecutor {
             Some(iter) => iter,
             None => {
                 return Err(DBError::Execution("Iterator not initialized".to_string()));
-            }
+            },
         };
 
         // Keep trying until we find a valid tuple or reach the end

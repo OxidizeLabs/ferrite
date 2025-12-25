@@ -64,15 +64,15 @@ impl AbstractExecutor for SortExecutor {
                         if tuple_count % 100 == 0 {
                             trace!("Collected {} tuples so far", tuple_count);
                         }
-                    }
+                    },
                     Ok(None) => {
                         // No more tuples
                         break;
-                    }
+                    },
                     Err(e) => {
                         error!("Error collecting tuples from child executor: {}", e);
                         break;
-                    }
+                    },
                 }
             }
             debug!("Collected {} tuples for sorting", self.sorted_tuples.len());

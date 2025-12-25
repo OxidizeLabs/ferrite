@@ -1,13 +1,13 @@
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
 use ferrite::sql::planner::logical_plan::LogicalPlanType;
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,
@@ -69,7 +69,7 @@ impl TestContext {
                         "INTEGER" => ferrite::types_db::type_id::TypeId::Integer,
                         "VARCHAR(255)" | "VARCHAR(50)" | "TEXT" | "VARCHAR" => {
                             ferrite::types_db::type_id::TypeId::VarChar
-                        }
+                        },
                         _ => ferrite::types_db::type_id::TypeId::VarChar,
                     };
                     ferrite::catalog::column::Column::new(col_name, type_id)
@@ -94,7 +94,7 @@ async fn update_simple_set() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(update_expressions.len(), 1);
-        }
+        },
         _ => panic!("Expected Update plan"),
     }
 }
@@ -117,7 +117,7 @@ async fn update_with_where_clause() {
                 LogicalPlanType::Filter { .. } => (),
                 _ => panic!("Expected Filter child for Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan"),
     }
 }
@@ -136,7 +136,7 @@ async fn update_multiple_columns() {
             update_expressions, ..
         } => {
             assert_eq!(update_expressions.len(), 2);
-        }
+        },
         _ => panic!("Expected Update plan"),
     }
 }
@@ -165,10 +165,10 @@ async fn test_update_with_arithmetic_expression() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::TableScan { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected TableScan node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -201,10 +201,10 @@ async fn test_update_with_complex_where() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Filter { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected Filter node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -258,10 +258,10 @@ async fn test_update_with_null() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Filter { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected Filter node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -293,10 +293,10 @@ async fn test_update_with_string_literal() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::TableScan { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected TableScan node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -328,10 +328,10 @@ async fn test_update_with_column_reference() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::TableScan { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected TableScan node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -366,10 +366,10 @@ async fn test_update_different_data_types() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::TableScan { table_name, .. } => {
                     assert_eq!(table_name, "mixed_types");
-                }
+                },
                 _ => panic!("Expected TableScan node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -401,10 +401,10 @@ async fn test_update_with_subexpression() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Filter { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected Filter node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -434,10 +434,10 @@ async fn test_update_single_column_table() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::TableScan { table_name, .. } => {
                     assert_eq!(table_name, "single_col");
-                }
+                },
                 _ => panic!("Expected TableScan node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -481,13 +481,13 @@ async fn test_update_with_comparison_in_where() {
                 match &plan.children[0].plan_type {
                     LogicalPlanType::Filter { table_name, .. } => {
                         assert_eq!(table_name, "users");
-                    }
+                    },
                     _ => panic!(
                         "Expected Filter node as child of Update for: {}",
                         update_sql
                     ),
                 }
-            }
+            },
             _ => panic!("Expected Update plan node for: {}", update_sql),
         }
     }
@@ -529,13 +529,13 @@ async fn test_update_with_logical_operators() {
                 match &plan.children[0].plan_type {
                     LogicalPlanType::Filter { table_name, .. } => {
                         assert_eq!(table_name, "users");
-                    }
+                    },
                     _ => panic!(
                         "Expected Filter node as child of Update for: {}",
                         update_sql
                     ),
                 }
-            }
+            },
             _ => panic!("Expected Update plan node for: {}", update_sql),
         }
     }
@@ -568,10 +568,10 @@ async fn test_update_with_parentheses_in_expression() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::Filter { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected Filter node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -604,10 +604,10 @@ async fn test_update_all_columns() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::TableScan { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected TableScan node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }
@@ -641,10 +641,10 @@ async fn test_update_same_column_multiple_times() {
             match &plan.children[0].plan_type {
                 LogicalPlanType::TableScan { table_name, .. } => {
                     assert_eq!(table_name, "users");
-                }
+                },
                 _ => panic!("Expected TableScan node as child of Update"),
             }
-        }
+        },
         _ => panic!("Expected Update plan node"),
     }
 }

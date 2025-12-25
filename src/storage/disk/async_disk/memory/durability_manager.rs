@@ -166,9 +166,9 @@
 
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
-use std::future::Future;
-use std::io::{Result as IoResult};
 use parking_lot::Mutex;
+use std::future::Future;
+use std::io::Result as IoResult;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -176,7 +176,7 @@ use std::time::{Duration, Instant};
 pub trait DurabilityProvider {
     /// Syncs data pages to disk
     fn sync_data(&self) -> impl Future<Output = IoResult<()>> + Send;
-    
+
     /// Syncs the WAL/log file to disk
     fn sync_log(&self) -> impl Future<Output = IoResult<()>> + Send;
 }
@@ -249,13 +249,13 @@ impl DurabilityManager {
             DurabilityLevel::None => {
                 // No durability guarantees - just return
                 Ok(result)
-            }
+            },
             DurabilityLevel::Buffer => {
                 // Buffer durability - data is in OS buffers but not necessarily on disk
                 // We assume writing to WAL (OS buffer) is sufficient for this level if enabled
                 result.wal_written = self.wal_enabled;
                 Ok(result)
-            }
+            },
             DurabilityLevel::Sync => {
                 // Sync durability - ensure data reaches disk
                 result.sync_performed = self.should_sync_pages(pages)?;
@@ -269,7 +269,7 @@ impl DurabilityManager {
                 }
 
                 Ok(result)
-            }
+            },
             DurabilityLevel::Durable => {
                 // Full durability - sync to disk and WAL
                 result.sync_performed = true;
@@ -286,7 +286,7 @@ impl DurabilityManager {
                 self.pending_syncs.fetch_add(pages.len(), Ordering::Relaxed);
                 *self.last_sync_time.lock() = Instant::now();
                 Ok(result)
-            }
+            },
         }
     }
 
@@ -299,7 +299,7 @@ impl DurabilityManager {
             FsyncPolicy::Periodic(duration) => {
                 let last_sync = *self.last_sync_time.lock();
                 Ok(last_sync.elapsed() >= duration)
-            }
+            },
         }
     }
 
@@ -358,7 +358,7 @@ impl DurabilityManager {
                 let base_overhead = Duration::from_millis(1);
                 let size_overhead = Duration::from_nanos((total_size / 1024) as u64);
                 Ok(base_overhead + size_overhead)
-            }
+            },
             DurabilityLevel::Durable => {
                 // Higher overhead for full durability
                 let total_size: usize = pages.iter().map(|(_, data)| data.len()).sum();
@@ -370,7 +370,7 @@ impl DurabilityManager {
                     Duration::ZERO
                 };
                 Ok(base_overhead + size_overhead + wal_overhead)
-            }
+            },
         }
     }
 }
@@ -382,8 +382,12 @@ mod tests {
 
     struct MockDurabilityProvider;
     impl DurabilityProvider for MockDurabilityProvider {
-        async fn sync_data(&self) -> IoResult<()> { Ok(()) }
-        async fn sync_log(&self) -> IoResult<()> { Ok(()) }
+        async fn sync_data(&self) -> IoResult<()> {
+            Ok(())
+        }
+        async fn sync_log(&self) -> IoResult<()> {
+            Ok(())
+        }
     }
 
     #[test]

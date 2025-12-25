@@ -550,11 +550,11 @@ impl DBInstance {
                     self.transaction_factory.abort_transaction(txn_ctx);
                     Ok(false)
                 }
-            }
+            },
             Err(e) => {
                 self.transaction_factory.abort_transaction(txn_ctx);
                 Err(e)
-            }
+            },
         }
     }
 
@@ -746,22 +746,22 @@ impl DBInstance {
                         }
                         debug!("Query executed successfully");
                         Ok(DatabaseResponse::Results(writer.into_results()))
-                    }
+                    },
                     Err(e) => {
                         if !has_current_transaction {
                             self.transaction_factory.abort_transaction(txn_ctx);
                         }
                         Err(e)
-                    }
+                    },
                 }
-            }
+            },
             DatabaseRequest::BeginTransaction { isolation_level } => {
                 let mut sessions = self.client_sessions.lock();
                 let session = sessions.get_mut(&client_id).ok_or_else(|| {
                     DBError::Client(format!("No session found for client {}", client_id))
                 })?;
                 self.handle_begin_transaction(session, isolation_level)
-            }
+            },
             #[allow(clippy::await_holding_lock)]
             DatabaseRequest::Commit => {
                 let mut sessions = self.client_sessions.lock();
@@ -769,14 +769,14 @@ impl DBInstance {
                     DBError::Client(format!("No session found for client {}", client_id))
                 })?;
                 self.handle_commit(session).await
-            }
+            },
             DatabaseRequest::Rollback => {
                 let mut sessions = self.client_sessions.lock();
                 let session = sessions.get_mut(&client_id).ok_or_else(|| {
                     DBError::Client(format!("No session found for client {}", client_id))
                 })?;
                 self.handle_rollback(session)
-            }
+            },
             #[allow(clippy::await_holding_lock)]
             DatabaseRequest::Prepare(sql) => {
                 let mut sessions = self.client_sessions.lock();
@@ -784,7 +784,7 @@ impl DBInstance {
                     DBError::Client(format!("No session found for client {}", client_id))
                 })?;
                 self.handle_sql_query(sql, session).await
-            }
+            },
             #[allow(clippy::await_holding_lock)]
             DatabaseRequest::Execute { stmt_id, params } => {
                 let mut sessions = self.client_sessions.lock();
@@ -793,14 +793,14 @@ impl DBInstance {
                 })?;
                 self.handle_execute_statement(stmt_id, params, session)
                     .await
-            }
+            },
             DatabaseRequest::Close(stmt_id) => {
                 let mut sessions = self.client_sessions.lock();
                 let session = sessions.get_mut(&client_id).ok_or_else(|| {
                     DBError::Client(format!("No session found for client {}", client_id))
                 })?;
                 self.handle_close_statement(stmt_id, session)
-            }
+            },
         }
     }
 
@@ -832,14 +832,14 @@ impl DBInstance {
                     }
                     Ok(DatabaseResponse::Error(error))
                 }
-            }
+            },
             Err(e) => {
                 let error = format!("Query error: {}", e);
                 if self.debug_mode {
                     error!("Client {}: {}", session.id, error);
                 }
                 Ok(DatabaseResponse::Error(error))
-            }
+            },
         }
     }
 
@@ -953,7 +953,7 @@ impl DBInstance {
                         "Prepared statement {} not found",
                         stmt_id
                     )));
-                }
+                },
             }
         };
 
@@ -1006,14 +1006,14 @@ impl DBInstance {
                     }
                     Ok(DatabaseResponse::Error(error))
                 }
-            }
+            },
             Err(e) => {
                 let error = format!("Statement execution error: {}", e);
                 if self.debug_mode {
                     error!("Client {}: {}", session.id, error);
                 }
                 Ok(DatabaseResponse::Error(error))
-            }
+            },
         }
     }
 
@@ -1082,11 +1082,11 @@ impl DBInstance {
                     self.transaction_factory.abort_transaction(txn_ctx);
                     Ok(false)
                 }
-            }
+            },
             Err(e) => {
                 self.transaction_factory.abort_transaction(txn_ctx);
                 Err(e)
-            }
+            },
         }
     }
 
@@ -1178,7 +1178,7 @@ mod tests {
             // Explicitly shut down log manager to ensure flush thread stops and resources are released
             db_instance.get_log_manager().write().shut_down();
         }
-        
+
         // Second session - open existing DB (should trigger recovery)
         {
             let db_instance = DBInstance::new(config.clone()).await.unwrap();
@@ -1200,7 +1200,7 @@ mod tests {
                 println!("Query failed: {:?}", e);
             }
             assert!(result.is_ok(), "Should be able to query recovered table");
-            
+
             // Explicitly shut down log manager
             db_instance.get_log_manager().write().shut_down();
         }

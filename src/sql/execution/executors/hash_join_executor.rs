@@ -74,7 +74,7 @@ impl HashJoinExecutor {
                         Err(_) => {
                             debug!("Failed to evaluate right key expression");
                             return false;
-                        }
+                        },
                     };
 
                     if let Some(ref mut ht) = self.hash_table
@@ -85,12 +85,12 @@ impl HashJoinExecutor {
                     }
 
                     self.right_tuples.push((rid, tuple));
-                }
+                },
                 Ok(None) => break,
                 Err(e) => {
                     debug!("Error from right child executor: {}", e);
                     return false;
-                }
+                },
             }
         }
 
@@ -124,7 +124,7 @@ impl AbstractExecutor for HashJoinExecutor {
                 match self.left_child.next()? {
                     Some((tuple, rid)) => {
                         self.current_left_tuple = Some((tuple, rid));
-                    }
+                    },
                     None => return Ok(None),
                 }
             }
@@ -143,7 +143,7 @@ impl AbstractExecutor for HashJoinExecutor {
                     debug!("Failed to evaluate left key expression");
                     self.current_left_tuple = None;
                     continue;
-                }
+                },
             };
 
             if let Some(ref ht) = self.hash_table

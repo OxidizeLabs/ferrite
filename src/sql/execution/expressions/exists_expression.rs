@@ -304,10 +304,10 @@ mod tests {
                 match e.get_child_at(0).as_ref() {
                     Expression::Constant(c) => {
                         assert_eq!(c.get_value(), &Value::new(2));
-                    }
+                    },
                     _ => panic!("Expected Constant expression"),
                 }
-            }
+            },
             _ => panic!("Expected Exists expression"),
         }
     }

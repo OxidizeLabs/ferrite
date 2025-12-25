@@ -246,15 +246,15 @@
 //! | `ApplyDelete` | Mark deleted | Restore tuple |
 //! | `NewPage` | Allocate page | (no undo) |
 
-use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
+use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::recovery::log_iterator::LogIterator;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::async_disk::AsyncDiskManager;
+use crate::storage::page::page_impl::PageTrait;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::tuple::TupleMeta;
-use crate::storage::page::page_impl::PageTrait;
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -312,8 +312,7 @@ impl LogRecoveryManager {
         info!("Starting database recovery");
 
         // Phase 1: Analysis - determine active transactions at time of crash
-        let (mut txn_table, mut dirty_page_table, start_redo_lsn) =
-            self.analyze_log().await?;
+        let (mut txn_table, mut dirty_page_table, start_redo_lsn) = self.analyze_log().await?;
 
         // Phase 2: Redo - reapply all updates (even from aborted transactions)
         self.redo_log(&mut txn_table, &mut dirty_page_table, start_redo_lsn)
@@ -362,15 +361,15 @@ impl LogRecoveryManager {
                 LogRecordType::Begin => {
                     // Add to active transaction table
                     txn_table.add_txn(txn_id, lsn);
-                }
+                },
                 LogRecordType::Commit => {
                     // Remove from active transactions
                     txn_table.remove_txn(txn_id);
-                }
+                },
                 LogRecordType::Abort => {
                     // Remove from active transactions
                     txn_table.remove_txn(txn_id);
-                }
+                },
                 LogRecordType::Update
                 | LogRecordType::Insert
                 | LogRecordType::MarkDelete
@@ -384,7 +383,7 @@ impl LogRecoveryManager {
                         // Add to dirty page table if not already there
                         dirty_page_table.add_page(page_id, lsn);
                     }
-                }
+                },
                 LogRecordType::NewPage => {
                     // Update transaction table
                     txn_table.update_txn(txn_id, lsn);
@@ -393,8 +392,8 @@ impl LogRecoveryManager {
                     if let Some(page_id) = log_record.get_page_id() {
                         dirty_page_table.add_page(*page_id, lsn);
                     }
-                }
-                LogRecordType::Invalid => {}
+                },
+                LogRecordType::Invalid => {},
             }
         }
 
@@ -457,7 +456,7 @@ impl LogRecoveryManager {
                     } else {
                         false
                     }
-                }
+                },
                 _ => false, // Don't redo other types
             };
 
@@ -512,23 +511,23 @@ impl LogRecoveryManager {
                                     // We've reached the beginning of this transaction
                                     debug!("Reached BEGIN record for transaction {}", txn_id);
                                     break;
-                                }
+                                },
                                 LogRecordType::Insert => {
                                     // Undo insert by deleting
                                     self.undo_insert(&log_record)?;
-                                }
+                                },
                                 LogRecordType::Update => {
                                     // Undo update by restoring old value
                                     self.undo_update(&log_record)?;
-                                }
+                                },
                                 LogRecordType::MarkDelete => {
                                     // Undo delete by restoring tuple
                                     self.undo_delete(&log_record)?;
-                                }
+                                },
                                 LogRecordType::NewPage => {
                                     // Don't need to undo new page creation
-                                }
-                                _ => {} // Ignore other record types for undo
+                                },
+                                _ => {}, // Ignore other record types for undo
                             }
 
                             // Move to previous LSN
@@ -596,14 +595,14 @@ impl LogRecoveryManager {
                     .get_insert_rid()
                     .or(record.get_update_rid())
                     .map(|rid| rid.get_page_id())
-            }
+            },
             LogRecordType::MarkDelete
             | LogRecordType::ApplyDelete
             | LogRecordType::RollbackDelete => record.get_delete_rid().map(|rid| rid.get_page_id()),
             LogRecordType::NewPage => {
                 // For new page records, the page ID is directly accessible
                 record.get_page_id().copied()
-            }
+            },
             _ => None,
         }
     }
@@ -619,9 +618,7 @@ impl LogRecoveryManager {
                     (record.get_insert_rid(), record.get_insert_tuple())
                 {
                     debug!("Redoing INSERT for RID {:?}", rid);
-                    if let Some(page_guard) =
-                        self.bpm.fetch_page::<TablePage>(rid.get_page_id())
-                    {
+                    if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
                         let mut page = page_guard.write();
                         let meta = TupleMeta::new(record.get_txn_id());
                         if let Some(tuple) = record.get_insert_tuple() {
@@ -630,7 +627,7 @@ impl LogRecoveryManager {
                         }
                     }
                 }
-            }
+            },
             LogRecordType::Update => {
                 if let (Some(rid), Some(_tuple)) =
                     (record.get_update_rid(), record.get_update_tuple())
@@ -638,23 +635,20 @@ impl LogRecoveryManager {
                     debug!("Redoing UPDATE for RID {:?}", rid);
                     if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
                         let mut page = page_guard.write();
-                        if let (Some(tuple), Some(_old)) = (
-                            record.get_update_tuple(),
-                            record.get_original_tuple(),
-                        ) {
+                        if let (Some(tuple), Some(_old)) =
+                            (record.get_update_tuple(), record.get_original_tuple())
+                        {
                             let meta = TupleMeta::new(record.get_txn_id());
                             let _ = page.update_tuple(meta, tuple, *rid);
                             page.set_dirty(true);
                         }
                     }
                 }
-            }
+            },
             LogRecordType::MarkDelete => {
                 if let Some(rid) = record.get_delete_rid() {
                     debug!("Redoing MARK_DELETE for RID {:?}", rid);
-                    if let Some(page_guard) =
-                        self.bpm.fetch_page::<TablePage>(rid.get_page_id())
-                    {
+                    if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
                         let mut page = page_guard.write();
                         if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
                             meta.set_deleted(true);
@@ -663,13 +657,11 @@ impl LogRecoveryManager {
                         }
                     }
                 }
-            }
+            },
             LogRecordType::ApplyDelete => {
                 if let Some(rid) = record.get_delete_rid() {
                     debug!("Redoing APPLY_DELETE for RID {:?}", rid);
-                    if let Some(page_guard) =
-                        self.bpm.fetch_page::<TablePage>(rid.get_page_id())
-                    {
+                    if let Some(page_guard) = self.bpm.fetch_page::<TablePage>(rid.get_page_id()) {
                         let mut page = page_guard.write();
                         if let Ok((mut meta, tuple)) = page.get_tuple(&rid, true) {
                             meta.set_deleted(true);
@@ -678,7 +670,7 @@ impl LogRecoveryManager {
                         }
                     }
                 }
-            }
+            },
             LogRecordType::NewPage => {
                 if let Some(page_id) = record.get_page_id() {
                     debug!("Redoing NEW_PAGE for page {}", page_id);
@@ -686,8 +678,8 @@ impl LogRecoveryManager {
                         let _ = self.bpm.new_page::<TablePage>();
                     }
                 }
-            }
-            _ => {} // Ignore other record types for redo
+            },
+            _ => {}, // Ignore other record types for redo
         }
         Ok(())
     }
@@ -810,13 +802,13 @@ impl DirtyPageTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
+    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::common::rid::RID;
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction::Transaction;
-    use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
-    use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::recovery::wal_manager::WALManager;
     use crate::storage::disk::async_disk::DiskManagerConfig;
     use crate::storage::table::tuple::Tuple;
@@ -1063,11 +1055,10 @@ mod tests {
             // Now recover
             let (mut txn_table, mut dirty_page_table, start_redo_lsn) =
                 ctx.recovery_manager.analyze_log().await.unwrap();
-            let redo_result = ctx.recovery_manager.redo_log(
-                &mut txn_table,
-                &mut dirty_page_table,
-                start_redo_lsn,
-            ).await;
+            let redo_result = ctx
+                .recovery_manager
+                .redo_log(&mut txn_table, &mut dirty_page_table, start_redo_lsn)
+                .await;
 
             assert!(redo_result.is_ok(), "Redo phase should succeed");
 

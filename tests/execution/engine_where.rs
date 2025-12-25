@@ -630,10 +630,10 @@ async fn test_where_in_conditions() {
                         actual_names
                     );
                 }
-            }
+            },
             Err(_) => {
                 println!("IN operator not yet implemented, skipping test: {}", sql);
-            }
+            },
         }
     }
 }
@@ -747,13 +747,13 @@ async fn test_where_between_conditions() {
                         actual_names
                     );
                 }
-            }
+            },
             Err(_) => {
                 println!(
                     "BETWEEN operator not yet implemented, skipping test: {}",
                     sql
                 );
-            }
+            },
         }
     }
 }
@@ -870,10 +870,10 @@ async fn test_where_like_patterns() {
                         actual_names
                     );
                 }
-            }
+            },
             Err(_) => {
                 println!("LIKE operator not yet implemented, skipping test: {}", sql);
-            }
+            },
         }
     }
 }
@@ -985,13 +985,13 @@ async fn test_where_date_time_comparisons() {
                         actual_names
                     );
                 }
-            }
+            },
             Err(_) => {
                 println!(
                     "Date/time comparison not fully implemented, skipping test: {}",
                     sql
                 );
-            }
+            },
         }
     }
 }
@@ -1204,13 +1204,13 @@ async fn test_where_subquery_conditions() {
                         actual_names
                     );
                 }
-            }
+            },
             Err(_) => {
                 println!(
                     "Subquery in WHERE not fully implemented, skipping test: {}",
                     sql
                 );
-            }
+            },
         }
     }
 }

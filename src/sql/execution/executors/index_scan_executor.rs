@@ -51,11 +51,11 @@ impl IndexScanExecutor {
             Some(info) => {
                 debug!("Found table '{}' in catalog", table_name);
                 info
-            }
+            },
             None => {
                 error!("Table '{}' not found in catalog", table_name);
                 panic!("Table not found");
-            }
+            },
         };
 
         // Create TransactionalTableHeap
@@ -109,12 +109,12 @@ impl IndexScanExecutor {
                                         None => {
                                             start_value = Some(value);
                                             include_start = child_start_incl;
-                                        }
+                                        },
                                         Some(current) if value > *current => {
                                             start_value = Some(value);
                                             include_start = child_start_incl;
-                                        }
-                                        _ => {}
+                                        },
+                                        _ => {},
                                     }
                                 }
 
@@ -124,24 +124,24 @@ impl IndexScanExecutor {
                                         None => {
                                             end_value = Some(value);
                                             include_end = child_end_incl;
-                                        }
+                                        },
                                         Some(current) if value < *current => {
                                             end_value = Some(value);
                                             include_end = child_end_incl;
-                                        }
-                                        _ => {}
+                                        },
+                                        _ => {},
                                     }
                                 }
                             }
                         }
                         ranges.push((start_value, include_start, end_value, include_end));
-                    }
+                    },
                     LogicType::Or => {
                         // For OR, collect all ranges and union them
                         for child in logic_expr.get_children() {
                             ranges.extend(Self::analyze_predicate_ranges(child));
                         }
-                    }
+                    },
                     LogicType::Not => {
                         // For NOT operations on comparisons, we need to invert the bounds
                         if let Some(child) = logic_expr.get_children().first() {
@@ -156,46 +156,46 @@ impl IndexScanExecutor {
                                                 // NOT (x = value) -> x < value OR x > value
                                                 // This requires full scan as it creates a disjoint range
                                                 Vec::new()
-                                            }
+                                            },
                                             ComparisonType::GreaterThan => {
                                                 // NOT (x > value) -> x <= value
                                                 vec![(None, false, Some(value), true)]
-                                            }
+                                            },
                                             ComparisonType::GreaterThanOrEqual => {
                                                 // NOT (x >= value) -> x < value
                                                 vec![(None, false, Some(value), false)]
-                                            }
+                                            },
                                             ComparisonType::LessThan => {
                                                 // NOT (x < value) -> x >= value
                                                 vec![(Some(value), true, None, false)]
-                                            }
+                                            },
                                             ComparisonType::LessThanOrEqual => {
                                                 // NOT (x <= value) -> x > value
                                                 vec![(Some(value), false, None, false)]
-                                            }
+                                            },
                                             ComparisonType::NotEqual => {
                                                 // NOT (x != value) -> x = value
                                                 vec![(Some(value.clone()), true, Some(value), true)]
-                                            }
+                                            },
                                             ComparisonType::IsNotNull => {
                                                 // NOT (IS NOT NULL) -> IS NULL
                                                 // This requires special handling at runtime
                                                 Vec::new()
-                                            }
+                                            },
                                         }
                                     } else {
                                         Vec::new()
                                     }
-                                }
+                                },
                                 _ => Vec::new(), // NOT on non-comparison expressions
                             }
                         } else {
                             Vec::new()
                         };
-                    }
+                    },
                 }
                 ranges
-            }
+            },
             Expression::Comparison(comp_expr) => {
                 if let Ok(value) = comp_expr.get_right().evaluate(
                     &Tuple::new(&[], &Schema::new(vec![]), RID::new(0, 0)),
@@ -205,37 +205,37 @@ impl IndexScanExecutor {
                         ComparisonType::Equal => {
                             // For equality, use same value for both bounds, inclusive
                             vec![(Some(value.clone()), true, Some(value), true)]
-                        }
+                        },
                         ComparisonType::GreaterThan => {
                             // x > value
                             vec![(Some(value), false, None, false)]
-                        }
+                        },
                         ComparisonType::GreaterThanOrEqual => {
                             // x >= value
                             vec![(Some(value), true, None, false)]
-                        }
+                        },
                         ComparisonType::LessThan => {
                             // x < value
                             vec![(None, false, Some(value), false)]
-                        }
+                        },
                         ComparisonType::LessThanOrEqual => {
                             // x <= value
                             vec![(None, false, Some(value), true)]
-                        }
+                        },
                         ComparisonType::NotEqual => {
                             // Full scan for not equal
                             Vec::new()
-                        }
+                        },
                         ComparisonType::IsNotNull => {
                             // For IS NOT NULL, scan all non-null values
                             // This effectively means no bounds, as we'll filter nulls later
                             Vec::new()
-                        }
+                        },
                     }
                 } else {
                     Vec::new()
                 }
-            }
+            },
             _ => Vec::new(),
         }
     }
@@ -265,12 +265,12 @@ impl IndexScanExecutor {
                 (None, Some(value)) => {
                     final_start = Some(value);
                     final_start_incl = start_incl;
-                }
+                },
                 (Some(current), Some(value)) if value < *current => {
                     final_start = Some(value);
                     final_start_incl = start_incl;
-                }
-                _ => {}
+                },
+                _ => {},
             }
 
             // Take maximum end value
@@ -278,12 +278,12 @@ impl IndexScanExecutor {
                 (None, Some(value)) => {
                     final_end = Some(value);
                     final_end_incl = end_incl;
-                }
+                },
                 (Some(current), Some(value)) if value > *current => {
                     final_end = Some(value);
                     final_end_incl = end_incl;
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
 
@@ -363,7 +363,7 @@ impl AbstractExecutor for IndexScanExecutor {
                 Err(e) => {
                     error!("Index iterator error: {}", e);
                     return Err(DBError::Execution(format!("index iterator error: {e}")));
-                }
+                },
             };
 
             debug!("Found RID {:?} in index", rid);
@@ -387,11 +387,11 @@ impl AbstractExecutor for IndexScanExecutor {
                                         predicates_match = false;
                                         break;
                                     }
-                                }
+                                },
                                 _ => {
                                     predicates_match = false;
                                     break;
-                                }
+                                },
                             }
                         }
                     }
@@ -403,11 +403,11 @@ impl AbstractExecutor for IndexScanExecutor {
 
                     debug!("Successfully fetched tuple for RID {:?}", rid);
                     return Ok(Some((tuple, rid)));
-                }
+                },
                 Err(e) => {
                     debug!("Failed to fetch tuple for RID {:?}, skipping: {}", rid, e);
                     continue;
-                }
+                },
             }
         }
 

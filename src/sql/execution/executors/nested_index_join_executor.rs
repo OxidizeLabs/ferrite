@@ -68,16 +68,16 @@ impl NestedIndexJoinExecutor {
                 Val::Boolean(b) => {
                     trace!("Predicate evaluation returned boolean: {}", b);
                     *b
-                }
+                },
                 other => {
                     trace!("Predicate evaluation returned non-boolean: {:?}", other);
                     false
-                }
+                },
             },
             Err(e) => {
                 trace!("Predicate evaluation error: {:?}", e);
                 false
-            }
+            },
         }
     }
 
@@ -223,7 +223,7 @@ impl NestedIndexJoinExecutor {
                 // Store the executor for retrieving right tuples
                 self.current_right_executor = Some(Box::new(seq_scan_executor));
                 return Some(());
-            }
+            },
         };
 
         // Create and execute index scan
@@ -884,13 +884,13 @@ mod tests {
             Val::Boolean(b) => {
                 debug!("Boolean result: {}", b);
                 assert!(b, "Predicate should evaluate to true for matching IDs");
-            }
+            },
             other => {
                 panic!(
                     "Expected boolean result from predicate evaluation, got: {:?}",
                     other
                 );
-            }
+            },
         }
     }
 
@@ -1022,7 +1022,7 @@ mod tests {
                             data
                         );
                     }
-                }
+                },
                 Val::Integer(2) => {
                     debug!("Checking ID=2, expected data='Y', actual data={:?}", data);
                     if *data != Val::VarLen("Y".to_string()) {
@@ -1031,7 +1031,7 @@ mod tests {
                             data
                         );
                     }
-                }
+                },
                 Val::Integer(4) => {
                     debug!("Checking ID=4, expected data='Z', actual data={:?}", data);
                     if *data != Val::VarLen("Z".to_string()) {
@@ -1040,7 +1040,7 @@ mod tests {
                             data
                         );
                     }
-                }
+                },
                 _ => debug!("Unexpected ID in right table: {:?}", id),
             }
         }

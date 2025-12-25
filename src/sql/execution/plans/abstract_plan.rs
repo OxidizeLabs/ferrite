@@ -181,7 +181,7 @@ impl PlanNode {
                 panic!(
                     "CommandResult and Explain plan nodes cannot be used with as_abstract_plan_node"
                 )
-            }
+            },
         }
     }
 
@@ -206,7 +206,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::IndexScan(node) => {
                 result.push_str(&format!("{}→ IndexScan\n", indent));
                 result.push_str(&format!("{}   Index: {}\n", indent, node.get_index_name()));
@@ -223,7 +223,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Filter(node) => {
                 result.push_str(&format!("{}→ Filter\n", indent));
                 result.push_str(&format!(
@@ -239,7 +239,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::HashJoin(node) => {
                 result.push_str(&format!("{}→ HashJoin\n", indent));
                 result.push_str(&format!(
@@ -259,7 +259,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Aggregation(node) => {
                 result.push_str(&format!("{}→ Aggregation\n", indent));
                 result.push_str(&format!(
@@ -280,7 +280,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Insert(node) => {
                 result.push_str(&format!("{}→ Insert\n", indent));
                 result.push_str(&format!(
@@ -296,7 +296,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Values(node) => {
                 result.push_str(&format!("{}→ Values\n", indent));
                 result.push_str(&format!(
@@ -312,7 +312,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::CreateTable(node) => {
                 result.push_str(&format!("{}→ CreateTable\n", indent));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
@@ -329,7 +329,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::NestedLoopJoin(node) => {
                 result.push_str(&format!("{}→ NestedLoopJoin\n", indent));
                 result.push_str(&format!(
@@ -341,7 +341,7 @@ impl PlanNode {
                 result.push_str(&node.get_left_child().explain_internal(depth + 1));
                 result.push_str(&format!("{}   Right Child:\n", indent));
                 result.push_str(&node.get_right_child().explain_internal(depth + 1));
-            }
+            },
             PlanNode::Sort(node) => {
                 result.push_str(&format!("{}→ Sort\n", indent));
                 result.push_str(&format!(
@@ -357,7 +357,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join(" "),
                 );
-            }
+            },
             PlanNode::Limit(node) => {
                 result.push_str(&format!("{}→ Limit\n", indent));
                 result.push_str(&format!("{}   Limit: {}\n", indent, node.get_limit()));
@@ -369,7 +369,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join(" "),
                 );
-            }
+            },
             PlanNode::Offset(node) => {
                 result.push_str(&format!("{}→ Offset\n", indent));
                 result.push_str(&format!("{}   Offset: {}\n", indent, node.get_offset()));
@@ -381,10 +381,10 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join(" "),
                 );
-            }
+            },
             PlanNode::Empty => {
                 result.push_str(&format!("{}→ Empty\n", indent));
-            }
+            },
             PlanNode::TableScan(node) => {
                 result.push_str(&format!("{}→ TableScan\n", indent));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
@@ -404,7 +404,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Update(node) => {
                 result.push_str(&format!("{}→ Update\n", indent));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
@@ -421,7 +421,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Delete(node) => {
                 result.push_str(&format!("{}→ Delete\n", indent));
                 result.push_str(&format!("{}   Table: {}\n", indent, node.get_table_name()));
@@ -438,7 +438,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::NestedIndexJoin(node) => {
                 result.push_str(&format!("{}→ NestedIndexJoin\n", indent));
                 result.push_str(&format!(
@@ -454,7 +454,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Projection(node) => {
                 result.push_str(&format!("{}→ Projection\n", indent));
                 result.push_str(&format!(
@@ -470,7 +470,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::TopN(node) => {
                 result.push_str(&format!("{}→ TopN: {}\n", indent, node.get_k()));
                 result.push_str(&format!(
@@ -486,7 +486,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::TopNPerGroup(node) => {
                 result.push_str(&format!("{}→ TopNPerGroup\n", indent));
                 result.push_str(&format!(
@@ -502,7 +502,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Window(node) => {
                 result.push_str(&format!("{}→ Window\n", indent));
                 result.push_str(&format!(
@@ -518,7 +518,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::CreateIndex(node) => {
                 result.push_str(&format!("{}→ CreateIndex\n", indent));
                 result.push_str(&format!("{}   Index: {}\n", indent, node.get_index_name()));
@@ -528,7 +528,7 @@ impl PlanNode {
                     indent,
                     node.get_output_schema()
                 ));
-            }
+            },
             PlanNode::MockScan(node) => {
                 result.push_str(&format!("{}→ MockScan\n", indent));
                 result.push_str(&format!(
@@ -544,7 +544,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::Distinct(node) => {
                 result.push_str(&format!("{}→ Distinct\n", indent));
                 result.push_str(&format!(
@@ -560,7 +560,7 @@ impl PlanNode {
                         .collect::<Vec<String>>()
                         .join("\n"),
                 );
-            }
+            },
             PlanNode::StartTransaction(node) => {
                 result.push_str(&format!("{}→ StartTransaction\n", indent));
                 if let Some(level) = node.get_isolation_level() {
@@ -569,7 +569,7 @@ impl PlanNode {
                 if node.is_read_only() {
                     result.push_str(&format!("{}   Read Only: true\n", indent));
                 }
-            }
+            },
             PlanNode::CommitTransaction(node) => {
                 result.push_str(&format!("{}→ CommitTransaction\n", indent));
                 if node.is_chain() {
@@ -578,7 +578,7 @@ impl PlanNode {
                 if node.is_end() {
                     result.push_str(&format!("{}   End: true\n", indent));
                 }
-            }
+            },
             PlanNode::RollbackTransaction(node) => {
                 result.push_str(&format!("{}→ RollbackTransaction\n", indent));
                 if node.is_chain() {
@@ -587,15 +587,15 @@ impl PlanNode {
                 if let Some(savepoint) = node.get_savepoint() {
                     result.push_str(&format!("{}   Savepoint: {}\n", indent, savepoint));
                 }
-            }
+            },
             PlanNode::CommandResult(cmd) => {
                 result.push_str(&format!("{}→ Command\n", indent));
                 result.push_str(&format!("{}   SQL: {}\n", indent, cmd));
-            }
+            },
             PlanNode::Explain(plan) => {
                 result.push_str(&format!("{}→ Explain\n", indent));
                 result.push_str(&plan.explain_internal(depth + 1));
-            }
+            },
         }
         result
     }
@@ -647,7 +647,7 @@ impl PlanNode {
                     context,
                     Arc::new(node.clone()),
                 )))
-            }
+            },
             PlanNode::Projection(node) => {
                 let child_plan = node
                     .get_children()
@@ -660,7 +660,7 @@ impl PlanNode {
                     context,
                     Arc::new(node.clone()),
                 )))
-            }
+            },
             PlanNode::Aggregation(node) => {
                 let child_plan = node
                     .get_children()
@@ -673,7 +673,7 @@ impl PlanNode {
                     Arc::from(node.clone()),
                     child_executor,
                 )))
-            }
+            },
 
             PlanNode::Empty => Err("Cannot create executor for empty plan node".to_string()),
             PlanNode::MockScan(node) => {
@@ -687,7 +687,7 @@ impl PlanNode {
                     tuples,
                     schema,
                 )))
-            }
+            },
             PlanNode::TableScan(node) => Ok(Box::new(TableScanExecutor::new(
                 context,
                 Arc::new(node.clone()),
@@ -714,7 +714,7 @@ impl PlanNode {
                             "Failed to create child executor for Limit node: {}",
                             e
                         ));
-                    }
+                    },
                 };
 
                 Ok(Box::new(LimitExecutor::new(
@@ -722,7 +722,7 @@ impl PlanNode {
                     context,
                     Arc::new(node.clone()),
                 )))
-            }
+            },
             PlanNode::Offset(node) => {
                 let child_plan = node
                     .get_children()
@@ -737,7 +737,7 @@ impl PlanNode {
                             "Failed to create child executor for Offset node: {}",
                             e
                         ));
-                    }
+                    },
                 };
 
                 Ok(Box::new(OffsetExecutor::new(
@@ -745,7 +745,7 @@ impl PlanNode {
                     context,
                     Arc::new(node.clone()),
                 )))
-            }
+            },
             PlanNode::NestedLoopJoin(node) => Ok(Box::new(NestedLoopJoinExecutor::new(
                 context,
                 Arc::new(node.clone()),
@@ -767,7 +767,7 @@ impl PlanNode {
                     left_executor,
                     right_executor,
                 )))
-            }
+            },
             PlanNode::Sort(node) => {
                 let child_plan = node
                     .get_children()
@@ -780,10 +780,10 @@ impl PlanNode {
                     context,
                     Arc::new(node.clone()),
                 )))
-            }
+            },
             PlanNode::TopN(node) => {
                 Ok(Box::new(TopNExecutor::new(context, Arc::new(node.clone()))))
-            }
+            },
             PlanNode::TopNPerGroup(node) => Ok(Box::new(TopNPerGroupExecutor::new(
                 context,
                 Arc::new(node.clone()),
@@ -799,7 +799,7 @@ impl PlanNode {
                     node.get_output_schema().clone(),
                     child_executor,
                 )))
-            }
+            },
             PlanNode::Window(node) => Ok(Box::new(WindowExecutor::new(
                 context,
                 Arc::new(node.clone()),
@@ -814,18 +814,18 @@ impl PlanNode {
                     context,
                     node.clone(),
                 )))
-            }
+            },
             PlanNode::RollbackTransaction(node) => {
                 use crate::sql::execution::executors::rollback_transaction_executor::RollbackTransactionExecutor;
                 Ok(Box::new(RollbackTransactionExecutor::new(
                     context,
                     node.clone(),
                 )))
-            }
+            },
             PlanNode::CommandResult(cmd) => {
                 use crate::sql::execution::executors::command_executor::CommandExecutor;
                 Ok(Box::new(CommandExecutor::new(context, cmd.clone())))
-            }
+            },
             PlanNode::Explain(_) => todo!(),
         }
     }

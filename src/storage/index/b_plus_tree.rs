@@ -258,7 +258,7 @@ impl BPlusTree {
                         nodes_to_check.push((Arc::clone(&node.children[child_idx]), new_path));
                     }
                     drop(node);
-                }
+                },
                 NodeType::Leaf => {
                     debug!("Processing leaf node with keys: {:?}", node.keys);
 
@@ -294,7 +294,7 @@ impl BPlusTree {
                         }
                     }
                     drop(node);
-                }
+                },
             }
         }
 
@@ -333,11 +333,11 @@ impl BPlusTree {
                     let next_node = Arc::clone(&node.children[child_idx]);
                     drop(node);
                     current_node = next_node;
-                }
+                },
                 NodeType::Leaf => {
                     debug!("Found leaf node");
                     break;
-                }
+                },
             }
         }
 
@@ -369,11 +369,11 @@ impl BPlusTree {
                     let next_node = Arc::clone(next);
                     drop(node);
                     current_node = next_node;
-                }
+                },
                 None => {
                     debug!("Reached last leaf, ending scan");
                     break;
-                }
+                },
             }
         }
 
@@ -398,11 +398,11 @@ impl BPlusTree {
                     let next_node = Arc::clone(&node.children[0]);
                     drop(node);
                     current_node = next_node;
-                }
+                },
                 NodeType::Leaf => {
                     debug!("Found leftmost leaf node");
                     break;
-                }
+                },
             }
         }
 
@@ -489,7 +489,7 @@ impl BPlusTree {
                     for (i, child) in node.children.iter().enumerate() {
                         visualize_node(&child.read(), level + 1, i, format_key, result, leaf_nodes);
                     }
-                }
+                },
                 NodeType::Leaf => {
                     // Format leaf node representation
                     let leaf_str = format!(
@@ -509,7 +509,7 @@ impl BPlusTree {
 
                     // Store leaf node for link visualization
                     leaf_nodes.push(leaf_str);
-                }
+                },
             }
         }
 
@@ -538,7 +538,7 @@ impl BPlusTree {
                         let next = Arc::clone(&node.children[0]);
                         drop(node);
                         current = next;
-                    }
+                    },
                     NodeType::Leaf => break,
                 }
             }
@@ -557,11 +557,11 @@ impl BPlusTree {
                         let next_node = Arc::clone(next);
                         drop(node);
                         current = next_node;
-                    }
+                    },
                     None => {
                         result.push_str(" → ∅\n");
                         break;
-                    }
+                    },
                 }
 
                 // Safety check
@@ -670,7 +670,7 @@ impl BPlusTree {
                 node.values.insert(pos, rid);
                 debug!("Leaf node after insertion: keys={:?}", node.keys);
                 true
-            }
+            },
             NodeType::Internal => {
                 let pos = self.find_insert_position(&node.keys, &key);
                 debug!("Found child position {} in internal node", pos);
@@ -732,7 +732,7 @@ impl BPlusTree {
                     debug!("Recursing into child node");
                     self.insert_non_full(&mut child_guard, key, rid)
                 }
-            }
+            },
         }
     }
 
@@ -778,7 +778,7 @@ impl BPlusTree {
                     new_node_arc.read().keys,
                     parent.keys
                 );
-            }
+            },
             NodeType::Internal => {
                 debug!("Splitting internal node at position {}", middle);
 
@@ -810,7 +810,7 @@ impl BPlusTree {
                     "Internal split complete - Left node: {:?}, Middle key: {:?}, Right node: {:?}",
                     child_guard.keys, middle_key, new_node.keys
                 );
-            }
+            },
         }
         true
     }
@@ -932,7 +932,7 @@ impl BPlusTree {
                 right.values.insert(0, value);
                 // Update parent's separator key
                 parent.keys[child_idx - 1] = key;
-            }
+            },
             NodeType::Internal => {
                 // Move parent's separator down to right child
                 let separator = parent.keys[child_idx - 1].clone();
@@ -947,7 +947,7 @@ impl BPlusTree {
 
                 // Move rightmost key from left to parent
                 parent.keys[child_idx - 1] = left.keys.pop().unwrap();
-            }
+            },
         }
     }
 
@@ -967,7 +967,7 @@ impl BPlusTree {
                 left.values.push(value);
                 // Update parent's separator key
                 parent.keys[child_idx] = right.keys[0].clone();
-            }
+            },
             NodeType::Internal => {
                 // Move parent's separator down to left child
                 let separator = parent.keys[child_idx].clone();
@@ -982,7 +982,7 @@ impl BPlusTree {
 
                 // Move leftmost key from right to parent
                 parent.keys[child_idx] = right.keys.remove(0);
-            }
+            },
         }
     }
 
@@ -1001,7 +1001,7 @@ impl BPlusTree {
                 left.values.append(&mut right.values);
                 // Update leaf node links
                 left.next_leaf = right.next_leaf.take();
-            }
+            },
             NodeType::Internal => {
                 // Move parent's separator key down to left sibling
                 let separator = parent.keys.remove(child_idx - 1);
@@ -1010,7 +1010,7 @@ impl BPlusTree {
                 // Move all keys and children from right to left
                 left.keys.append(&mut right.keys);
                 left.children.append(&mut right.children);
-            }
+            },
         }
 
         // Remove the right child from parent
@@ -1039,7 +1039,7 @@ impl BPlusTree {
                 left.values.append(&mut right.values);
                 // Update leaf node links
                 left.next_leaf = right.next_leaf.take();
-            }
+            },
             NodeType::Internal => {
                 // Move parent's separator key down to left node
                 let separator = parent.keys.remove(child_idx);
@@ -1048,7 +1048,7 @@ impl BPlusTree {
                 // Move all keys and children from right to left
                 left.keys.append(&mut right.keys);
                 left.children.append(&mut right.children);
-            }
+            },
         }
 
         // Remove the right sibling from parent
@@ -1705,10 +1705,10 @@ mod split_behavior_tests {
             match next_child {
                 Some(child) => {
                     current_node = child; // now safe to reassign
-                }
+                },
                 None => {
                     break;
-                }
+                },
             }
         }
 

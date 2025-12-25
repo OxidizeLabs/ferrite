@@ -40,7 +40,7 @@ impl Type for VectorType {
                     })
                     .collect();
                 CmpBool::from(empty_vec == other_vec)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -72,7 +72,7 @@ impl Type for VectorType {
                 } else {
                     CmpBool::from(empty_vec.len() < other_vec.len())
                 }
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -90,7 +90,7 @@ impl Type for VectorType {
                     })
                     .collect();
                 CmpBool::from(empty_vec.len() <= other_vec.len())
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -108,7 +108,7 @@ impl Type for VectorType {
                     })
                     .collect();
                 CmpBool::from(empty_vec.len() > other_vec.len())
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -126,7 +126,7 @@ impl Type for VectorType {
                     })
                     .collect();
                 CmpBool::from(empty_vec.len() >= other_vec.len())
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -139,11 +139,11 @@ impl Type for VectorType {
                 // Clone the values instead of taking references
                 result.extend(r.iter().cloned());
                 Ok(Value::new(result))
-            }
+            },
             Val::Integer(i) => {
                 let result = vec![Value::new(*i)];
                 Ok(Value::new(result))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot add non-vector/integer types to Vector".to_string()),
         }
@@ -182,7 +182,7 @@ impl Type for VectorType {
                 } else {
                     Value::new(Val::Null)
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -204,7 +204,7 @@ impl Type for VectorType {
                 } else {
                     Value::new(Val::Null)
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -222,7 +222,7 @@ impl Type for VectorType {
                     })
                     .collect();
                 format!("[{}]", values.join(", "))
-            }
+            },
             Val::Null => "NULL".to_string(),
             _ => "INVALID".to_string(),
         }
@@ -275,7 +275,7 @@ mod tests {
             Val::Vector(v) => {
                 let expected = vec![Value::new(1i32), Value::new(2i32), Value::new(3i32)];
                 assert_eq!(v, &expected);
-            }
+            },
             _ => panic!("Expected vector result"),
         }
 
@@ -285,7 +285,7 @@ mod tests {
             Val::Vector(v) => {
                 let expected = vec![Value::new(4i32)];
                 assert_eq!(v, &expected);
-            }
+            },
             _ => panic!("Expected vector result"),
         }
 

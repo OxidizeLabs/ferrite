@@ -195,7 +195,7 @@ mod tests {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_name(), "id");
                 assert_eq!(mock.get_type(), TypeId::Integer);
-            }
+            },
             _ => panic!("Expected Mock expression"),
         }
     }
@@ -226,7 +226,7 @@ mod tests {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::Integer);
                 assert_eq!(mock.get_name(), "result");
-            }
+            },
             _ => panic!("Expected Mock expression"),
         }
 
@@ -235,7 +235,7 @@ mod tests {
             Expression::Mock(mock) => {
                 assert_eq!(mock.get_type(), TypeId::VarChar);
                 assert_eq!(mock.get_name(), "name");
-            }
+            },
             _ => panic!("Expected Mock expression"),
         }
     }

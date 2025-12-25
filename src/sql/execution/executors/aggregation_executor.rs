@@ -106,7 +106,7 @@ impl AggregationExecutor {
                                     agg_value.values[i] = agg_value.values[i].add(&arg_val)?;
                                 }
                             }
-                        }
+                        },
                         AggregationType::Count | AggregationType::CountStar => {
                             let count = if agg_value.values[i].is_null() {
                                 Value::new(1i64)
@@ -114,7 +114,7 @@ impl AggregationExecutor {
                                 agg_value.values[i].add(&Value::new(1i64))?
                             };
                             agg_value.values[i] = count;
-                        }
+                        },
                         AggregationType::Min => {
                             let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
                             if !arg_val.is_null() {
@@ -126,7 +126,7 @@ impl AggregationExecutor {
                                     agg_value.values[i] = arg_val
                                 }
                             }
-                        }
+                        },
                         AggregationType::Max => {
                             let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
                             if !arg_val.is_null() {
@@ -138,7 +138,7 @@ impl AggregationExecutor {
                                     agg_value.values[i] = arg_val
                                 }
                             }
-                        }
+                        },
                         AggregationType::Avg => {
                             let arg_val = agg.get_arg().evaluate(tuple, schema).unwrap();
                             if !arg_val.is_null() {
@@ -155,27 +155,27 @@ impl AggregationExecutor {
                                     agg_value.values[i] = agg_value.values[i].add(&arg_val)?;
                                 }
                             }
-                        }
+                        },
                         _ => {
                             return Err(format!(
                                 "Unsupported aggregate type: {:?}",
                                 agg.get_agg_type()
                             ));
-                        }
+                        },
                     }
-                }
+                },
                 Expression::ColumnRef(_) => {
                     debug!("Column reference found in values");
                     // For group by columns, store the value only on first occurrence
                     if agg_value.values[i].is_null() {
                         agg_value.values[i] = agg_expr.evaluate(tuple, schema).unwrap();
                     }
-                }
+                },
                 _ => {
                     debug!("Other expression type found in aggregates");
                     // For other expressions, evaluate each time
                     agg_value.values[i] = agg_expr.evaluate(tuple, schema).unwrap();
-                }
+                },
             }
             debug!("Updated aggregate values: {:?}", agg_value.values);
         }
@@ -220,12 +220,12 @@ impl AbstractExecutor for AggregationExecutor {
                         ) {
                             error!("Error computing aggregate: {}", e);
                         }
-                    }
+                    },
                     Ok(None) => break,
                     Err(e) => {
                         debug!("Error from child executor: {}", e);
                         return; // Initialize failed, but we don't propagate errors from init
-                    }
+                    },
                 }
             }
 
@@ -243,15 +243,15 @@ impl AbstractExecutor for AggregationExecutor {
                         match agg.get_agg_type() {
                             AggregationType::Count | AggregationType::CountStar => {
                                 agg_values.values[i] = Value::new(0i64);
-                            }
+                            },
                             AggregationType::Sum => {
                                 agg_values.values[i] = Value::new(0); // or NULL depending on your requirements
-                            }
+                            },
                             AggregationType::Min | AggregationType::Max => {
                                 agg_values.values[i] = Value::from(TypeId::Invalid);
                                 // NULL for min/max
-                            }
-                            _ => {}
+                            },
+                            _ => {},
                         }
                     }
                 }
@@ -270,7 +270,7 @@ impl AbstractExecutor for AggregationExecutor {
                             if let CmpBool::CmpTrue = v2.compare_less_than(v1) {
                                 return std::cmp::Ordering::Greater;
                             }
-                        }
+                        },
                         CmpBool::CmpNull => continue,
                     }
                 }
@@ -307,11 +307,11 @@ impl AbstractExecutor for AggregationExecutor {
                                 TypeId::Integer => {
                                     let int_val = value.values[i].as_integer()?;
                                     Value::new(int_val as f64)
-                                }
+                                },
                                 TypeId::BigInt => {
                                     let bigint_val = value.values[i].as_bigint()?;
                                     Value::new(bigint_val as f64)
-                                }
+                                },
                                 TypeId::Decimal => value.values[i].clone(),
                                 _ => {
                                     debug!(
@@ -319,7 +319,7 @@ impl AbstractExecutor for AggregationExecutor {
                                         value.values[i].get_type_id()
                                     );
                                     Value::new(Val::Null)
-                                }
+                                },
                             };
 
                             let count_value = Value::new(count as f64);
@@ -333,11 +333,11 @@ impl AbstractExecutor for AggregationExecutor {
                                     Ok(avg_result) => {
                                         debug!("Division successful: {:?}", avg_result);
                                         value.values[i] = avg_result;
-                                    }
+                                    },
                                     Err(e) => {
                                         debug!("Division failed: {}", e);
                                         value.values[i] = Value::new(Val::Null);
-                                    }
+                                    },
                                 }
                             } else {
                                 debug!("Sum is null, setting average to NULL");

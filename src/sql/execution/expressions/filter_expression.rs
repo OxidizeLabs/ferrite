@@ -87,7 +87,7 @@ impl ExpressionOps for FilterExpression {
                 } else {
                     Ok(Value::new(false))
                 }
-            }
+            },
             FilterType::Having => {
                 // For HAVING clauses, evaluate aggregate first against the original schema
                 let agg_result = self
@@ -128,7 +128,7 @@ impl ExpressionOps for FilterExpression {
                 } else {
                     Ok(Value::new(false))
                 }
-            }
+            },
         }
     }
 
@@ -153,7 +153,7 @@ impl ExpressionOps for FilterExpression {
                 } else {
                     Ok(Value::new(false))
                 }
-            }
+            },
             FilterType::Having => {
                 // For HAVING clauses, evaluate aggregate first against the joined schemas
                 let agg_result = self
@@ -182,7 +182,7 @@ impl ExpressionOps for FilterExpression {
                 } else {
                     Ok(Value::new(false))
                 }
-            }
+            },
         }
     }
 
@@ -197,7 +197,7 @@ impl ExpressionOps for FilterExpression {
                         child_idx
                     )
                 }
-            }
+            },
             FilterType::Having => match child_idx {
                 0 => self.aggregate.as_ref().unwrap(),
                 1 => &self.predicate,
@@ -230,7 +230,7 @@ impl ExpressionOps for FilterExpression {
                     children[0].clone(),
                     self.return_type.clone(),
                 )))
-            }
+            },
             FilterType::Having => {
                 if children.len() != 2 {
                     panic!(
@@ -243,7 +243,7 @@ impl ExpressionOps for FilterExpression {
                     children[1].clone(),
                     self.return_type.clone(),
                 )))
-            }
+            },
         }
     }
 
@@ -281,7 +281,7 @@ impl ExpressionOps for FilterExpression {
                 }
                 trace!("FilterExpression: Validation successful");
                 Ok(())
-            }
+            },
             FilterType::Having => {
                 // Validate the aggregate expression
                 if let Some(agg) = &self.aggregate {
@@ -310,7 +310,7 @@ impl ExpressionOps for FilterExpression {
                 }
                 trace!("FilterExpression: Validation successful");
                 Ok(())
-            }
+            },
         }
     }
 }

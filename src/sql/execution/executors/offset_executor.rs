@@ -54,7 +54,7 @@ impl AbstractExecutor for OffsetExecutor {
                 match child.next()? {
                     Some(_) => {
                         self.current_index += 1;
-                    }
+                    },
                     None => return Ok(None), // No more tuples to skip
                 }
             } else {

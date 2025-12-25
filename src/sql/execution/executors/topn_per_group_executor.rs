@@ -54,7 +54,7 @@ impl Ord for TupleWithKeys {
                         CmpBool::CmpFalse => continue, // Equal, check next key
                         CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
                     }
-                }
+                },
                 CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
             }
         }
@@ -138,7 +138,7 @@ impl TopNPerGroupExecutor {
                         CmpBool::CmpFalse => continue, // Equal, check next key
                         CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
                     }
-                }
+                },
                 CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
             }
         }
@@ -197,12 +197,12 @@ impl AbstractExecutor for TopNPerGroupExecutor {
                             group_heap.push(Reverse(tuple_with_keys));
                         }
                     }
-                }
+                },
                 Ok(None) => break,
                 Err(e) => {
                     debug!("Error from child executor: {}", e);
                     return; // Initialize failed, but we don't propagate errors from init
-                }
+                },
             }
         }
 

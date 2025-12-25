@@ -226,13 +226,7 @@ impl IOQueueManager {
     /// * `priority` - Priority level (higher numbers = higher priority)
     /// * `id` - Unique operation identifier (typically allocated by a tracker)
     ///
-    pub async fn enqueue_operation(
-        &self,
-        operation_type: IOOperationType,
-        priority: u8,
-        id: u64,
-    ) {
-
+    pub async fn enqueue_operation(&self, operation_type: IOOperationType, priority: u8, id: u64) {
         let operation = IOOperation {
             priority,
             id,
@@ -462,15 +456,14 @@ mod tests {
                     let mut receivers = Vec::new();
                     for op_id in 0..num_ops_per_task {
                         let id = (task_id * num_ops_per_task + op_id + 1) as u64;
-                        qm
-                            .enqueue_operation(
-                                IOOperationType::ReadPage {
-                                    page_id: (task_id * num_ops_per_task + op_id) as u64,
-                                },
-                                ((task_id + op_id) % 10) as u8, // Varying priorities
-                                id,
-                            )
-                            .await;
+                        qm.enqueue_operation(
+                            IOOperationType::ReadPage {
+                                page_id: (task_id * num_ops_per_task + op_id) as u64,
+                            },
+                            ((task_id + op_id) % 10) as u8, // Varying priorities
+                            id,
+                        )
+                        .await;
                         receivers.push(id);
                     }
                     receivers
@@ -654,7 +647,7 @@ mod tests {
                 assert_eq!(page_id, 1);
                 assert_eq!(data.len(), 1024 * 1024);
                 assert_eq!(data, large_data);
-            }
+            },
             _ => panic!("Expected WritePage operation"),
         }
     }
@@ -696,7 +689,9 @@ mod tests {
         assert!(queue_manager.is_empty().await);
 
         // Should work normally
-        queue_manager.enqueue_operation(IOOperationType::Sync, 5, 1).await;
+        queue_manager
+            .enqueue_operation(IOOperationType::Sync, 5, 1)
+            .await;
         assert!(!queue_manager.is_empty().await);
     }
 
@@ -747,7 +742,9 @@ mod tests {
             assert_eq!(queue_manager.queue_size().await, 0);
             assert!(queue_manager.dequeue_operation().await.is_none());
 
-            queue_manager.enqueue_operation(IOOperationType::Sync, 5, 1).await;
+            queue_manager
+                .enqueue_operation(IOOperationType::Sync, 5, 1)
+                .await;
 
             assert!(!queue_manager.is_empty().await);
             assert_eq!(queue_manager.queue_size().await, 1);

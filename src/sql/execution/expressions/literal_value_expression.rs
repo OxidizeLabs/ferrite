@@ -44,10 +44,10 @@ impl LiteralValueExpression {
                         return Err(format!("Number '{}' is too large to represent", n));
                     }
                 }
-            }
+            },
             SQLValue::SingleQuotedString(s) | SQLValue::DoubleQuotedString(s) => {
                 (Value::from(s.as_str()), TypeId::VarChar)
-            }
+            },
             SQLValue::Boolean(b) => (Value::from(b), TypeId::Boolean),
             SQLValue::Null => (Value::new(Val::Null), TypeId::Invalid),
             _ => return Err(format!("Unsupported value type: {:?}", sql_value)),

@@ -258,7 +258,7 @@ impl Optimizer {
             } => {
                 info!("Creating constraint indexes for new table '{}'", table_name);
                 self.create_table_constraint_indexes(table_name, schema)?;
-            }
+            },
             LogicalPlanType::TableScan { table_name, .. } => {
                 // Check if this table needs constraint indexes
                 let catalog = self.catalog.read();
@@ -275,8 +275,8 @@ impl Optimizer {
                         self.create_table_constraint_indexes(table_name, &schema)?;
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // Recursively process children
@@ -323,13 +323,13 @@ impl Optimizer {
                         "✓ Created PRIMARY KEY index '{}' for table '{}'",
                         pk_index_name, table_name
                     );
-                }
+                },
                 None => {
                     warn!(
                         "✗ Failed to create PRIMARY KEY index for table '{}'",
                         table_name
                     );
-                }
+                },
             }
         }
 
@@ -356,14 +356,14 @@ impl Optimizer {
                             column.get_name(),
                             table_name
                         );
-                    }
+                    },
                     None => {
                         warn!(
                             "✗ Failed to create UNIQUE index for column '{}' in table '{}'",
                             column.get_name(),
                             table_name
                         );
-                    }
+                    },
                 }
             }
         }
@@ -392,14 +392,14 @@ impl Optimizer {
                             fk_constraint.referenced_table,
                             fk_constraint.referenced_column
                         );
-                    }
+                    },
                     None => {
                         warn!(
                             "✗ Failed to create FOREIGN KEY index for column '{}' in table '{}'",
                             column.get_name(),
                             table_name
                         );
-                    }
+                    },
                 }
 
                 // PERFORMANCE OPTIMIZATION: Also create index on referenced column if it doesn't already exist
@@ -510,13 +510,13 @@ impl Optimizer {
                                 "✓ Created referenced column index '{}' for '{}.{}'",
                                 index_name, referenced_table, referenced_column
                             );
-                        }
+                        },
                         None => {
                             warn!(
                                 "✗ Failed to create referenced column index for '{}.{}'",
                                 referenced_table, referenced_column
                             );
-                        }
+                        },
                     }
                 }
             }
@@ -596,11 +596,11 @@ impl Optimizer {
                     debug!("No suitable index found for the first column");
                 }
                 Ok(plan)
-            }
+            },
             _ => {
                 trace!("Non-table-scan node, checking children");
                 self.apply_index_scan_to_children(plan)
-            }
+            },
         }
     }
 
@@ -630,7 +630,7 @@ impl Optimizer {
                     }
                 }
                 self.apply_early_pruning_to_children(plan)
-            }
+            },
             LogicalPlanType::Filter {
                 schema: _,
                 output_schema: _,
@@ -649,7 +649,7 @@ impl Optimizer {
                     }
                 }
                 self.apply_early_pruning_to_children(plan)
-            }
+            },
             _ => self.apply_early_pruning_to_children(plan),
         }
     }
@@ -670,7 +670,7 @@ impl Optimizer {
                 } else {
                     Ok(plan)
                 }
-            }
+            },
             LogicalPlanType::Projection {
                 expressions,
                 schema: _,
@@ -686,7 +686,7 @@ impl Optimizer {
                 } else {
                     Ok(plan)
                 }
-            }
+            },
             _ => self.apply_rewrite_rules_to_children(plan),
         }
     }
@@ -724,7 +724,7 @@ impl Optimizer {
                     plan.children = vec![optimized_left, optimized_right];
                     Ok(plan)
                 }
-            }
+            },
             _ => self.optimize_joins_children(plan),
         }
     }
@@ -754,7 +754,7 @@ impl Optimizer {
                     plan.children = vec![self.optimize_sort_and_limit(child)?];
                 }
                 Ok(plan)
-            }
+            },
             _ => self.optimize_sort_and_limit_children(plan),
         }
     }
@@ -826,7 +826,7 @@ impl Optimizer {
                     },
                     vec![child],
                 )))
-            }
+            },
             LogicalPlanType::Filter {
                 schema: _,
                 output_schema: _,
@@ -855,7 +855,7 @@ impl Optimizer {
                         vec![],
                     )))
                 }
-            }
+            },
             _ => Ok(Box::new(LogicalPlan::new(
                 LogicalPlanType::Filter {
                     schema: Default::default(),
@@ -943,7 +943,7 @@ impl Optimizer {
                     warn!("Table with OID {} not found in catalog", table_oid);
                     return Err(DBError::TableNotFound(table_name.clone()));
                 }
-            }
+            },
             LogicalPlanType::NestedLoopJoin { predicate, .. } => {
                 if check_options.has_check(&CheckOption::EnableNljCheck)
                     && predicate.get_children().is_empty()
@@ -953,7 +953,7 @@ impl Optimizer {
                         "NLJ requires join predicate".to_string(),
                     ));
                 }
-            }
+            },
             LogicalPlanType::TopN {
                 k,
                 sort_specifications,
@@ -965,8 +965,8 @@ impl Optimizer {
                         "Invalid TopN specification".to_string(),
                     ));
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // Recursively validate children

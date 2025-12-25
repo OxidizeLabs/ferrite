@@ -194,4 +194,3 @@ fn make_test_name(root: &Path, path: &Path) -> String {
     );
     name
 }
-

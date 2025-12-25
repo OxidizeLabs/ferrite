@@ -63,7 +63,7 @@ impl ExpressionOps for OverlayExpression {
                     "OVERLAY base expression must be a string, got {:?}",
                     base_str.get_type_id()
                 )));
-            }
+            },
         };
 
         let overlay_text = match overlay_str.get_val() {
@@ -73,7 +73,7 @@ impl ExpressionOps for OverlayExpression {
                     "OVERLAY PLACING expression must be a string, got {:?}",
                     overlay_str.get_type_id()
                 )));
-            }
+            },
         };
 
         // Get the starting position (1-indexed in SQL)
@@ -86,13 +86,13 @@ impl ExpressionOps for OverlayExpression {
                     )));
                 }
                 (*i as usize).saturating_sub(1) // Convert to 0-indexed for Rust
-            }
+            },
             _ => {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY FROM expression must be an integer, got {:?}",
                     from_pos.get_type_id()
                 )));
-            }
+            },
         };
 
         // Get the length to replace (if specified)
@@ -106,13 +106,13 @@ impl ExpressionOps for OverlayExpression {
                         )));
                     }
                     *i as usize
-                }
+                },
                 _ => {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "OVERLAY FOR expression must be an integer, got {:?}",
                         len.get_type_id()
                     )));
-                }
+                },
             },
             None => overlay_text.len(), // When FOR is not specified, replace characters equal to the length of overlay string
         };
@@ -169,7 +169,7 @@ impl ExpressionOps for OverlayExpression {
                     "OVERLAY base expression must be a string, got {:?}",
                     base_str.get_type_id()
                 )));
-            }
+            },
         };
 
         let overlay_text = match overlay_str.get_val() {
@@ -179,7 +179,7 @@ impl ExpressionOps for OverlayExpression {
                     "OVERLAY PLACING expression must be a string, got {:?}",
                     overlay_str.get_type_id()
                 )));
-            }
+            },
         };
 
         // Get the starting position (1-indexed in SQL)
@@ -192,13 +192,13 @@ impl ExpressionOps for OverlayExpression {
                     )));
                 }
                 (*i as usize).saturating_sub(1) // Convert to 0-indexed for Rust
-            }
+            },
             _ => {
                 return Err(ExpressionError::InvalidOperation(format!(
                     "OVERLAY FROM expression must be an integer, got {:?}",
                     from_pos.get_type_id()
                 )));
-            }
+            },
         };
 
         // Get the length to replace (if specified)
@@ -212,13 +212,13 @@ impl ExpressionOps for OverlayExpression {
                         )));
                     }
                     *i as usize
-                }
+                },
                 _ => {
                     return Err(ExpressionError::InvalidOperation(format!(
                         "OVERLAY FOR expression must be an integer, got {:?}",
                         len.get_type_id()
                     )));
-                }
+                },
             },
             None => overlay_text.len(), // When FOR is not specified, replace characters equal to the length of overlay string
         };

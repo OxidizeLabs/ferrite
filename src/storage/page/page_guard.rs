@@ -152,8 +152,8 @@ use crate::common::config::PageId;
 use crate::storage::page::{Page, PageTrait, PageType};
 use log::trace;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A callback interface used by `PageGuard` to notify the buffer pool manager
 /// when the guard is dropped (i.e., when the page should be unpinned).
@@ -191,8 +191,7 @@ impl<P: Page + 'static> PageGuard<P> {
         };
         trace!(
             "Created new page guard for page {} with pin count {}",
-            page_id,
-            pin_count
+            page_id, pin_count
         );
 
         Self {
@@ -212,8 +211,7 @@ impl<P: Page + 'static> PageGuard<P> {
         let pin_count = page.read().get_pin_count();
         trace!(
             "Created new page guard for new page {} with pin count {}",
-            page_id,
-            pin_count
+            page_id, pin_count
         );
 
         Self {
@@ -268,8 +266,7 @@ impl<P: PageTrait + ?Sized> Drop for PageGuard<P> {
         if let Some(unpinner) = &self.unpinner {
             trace!(
                 "Dropping page {} (delegating unpin; dirty={})",
-                self.page_id,
-                is_dirty
+                self.page_id, is_dirty
             );
             let ok = unpinner.unpin_page(self.page_id, is_dirty);
             trace!("Unpin delegated for page {} -> {}", self.page_id, ok);
@@ -309,8 +306,7 @@ impl PageGuard<dyn PageTrait> {
         };
         trace!(
             "Created new untyped page guard for page {} with pin count {}",
-            page_id,
-            pin_count
+            page_id, pin_count
         );
         Self {
             page,

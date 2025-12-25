@@ -190,7 +190,7 @@ mod tests {
                 assert_eq!(values[0], Value::new(1)); // test.id
                 assert_eq!(values[1], Value::new("John")); // test.name
                 assert_eq!(values[2], Value::new(25)); // test.age
-            }
+            },
             _ => panic!("Expected Vector value"),
         }
     }
@@ -233,7 +233,7 @@ mod tests {
                 assert_eq!(values[0], Value::new(1)); // left.id
                 assert_eq!(values[1], Value::new("John")); // left.name
                 assert_eq!(values[2], Value::new(25)); // left.age
-            }
+            },
             _ => panic!("Expected Vector value"),
         }
     }
@@ -286,7 +286,7 @@ mod tests {
             Expression::QualifiedWildcard(qw) => {
                 assert_eq!(qw.qualifier, vec!["test".to_string()]);
                 assert_eq!(qw.get_children().len(), 1);
-            }
+            },
             _ => panic!("Expected QualifiedWildcard expression"),
         }
     }
@@ -328,7 +328,7 @@ mod tests {
                 assert_eq!(values.len(), 2); // Should only get db.schema.table.* columns
                 assert_eq!(values[0], Value::new(1));
                 assert_eq!(values[1], Value::new("test"));
-            }
+            },
             _ => panic!("Expected Vector value"),
         }
     }

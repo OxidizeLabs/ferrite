@@ -69,7 +69,7 @@ impl ExpressionOps for ConvertExpression {
                     } else {
                         Err(ExpressionError::InvalidOperation(e))
                     }
-                }
+                },
             }
         } else {
             Ok(value)
@@ -108,7 +108,7 @@ impl ExpressionOps for ConvertExpression {
                     } else {
                         Err(ExpressionError::InvalidOperation(e))
                     }
-                }
+                },
             }
         } else {
             Ok(value)
@@ -434,7 +434,7 @@ mod tests {
                 assert_eq!(conv.target_type, original.target_type);
                 assert_eq!(conv.charset, original.charset);
                 assert_eq!(conv.is_try, original.is_try);
-            }
+            },
             _ => panic!("Expected Convert expression"),
         }
 
@@ -452,7 +452,7 @@ mod tests {
                 assert_eq!(conv.charset, original.charset);
                 assert_eq!(conv.is_try, original.is_try);
                 assert_eq!(conv.get_children().len(), 1);
-            }
+            },
             _ => panic!("Expected Convert expression"),
         }
     }

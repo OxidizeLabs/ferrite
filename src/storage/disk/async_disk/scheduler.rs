@@ -17,10 +17,10 @@
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::config::IOPriority;
 use std::io::Result as IoResult;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
-use tokio::sync::{mpsc, oneshot, Mutex, Notify};
-use std::sync::Arc;
+use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 
 /// Advanced work-stealing I/O scheduler
 #[derive(Debug)]
@@ -149,11 +149,11 @@ impl PriorityTaskScheduler {
             IOPriority::Normal => self.normal_priority_queue.send(task).await,
             IOPriority::Low => self.low_priority_queue.send(task).await,
         };
-        
+
         if result.is_ok() {
             self.notify.notify_one();
         }
-        
+
         result
     }
 

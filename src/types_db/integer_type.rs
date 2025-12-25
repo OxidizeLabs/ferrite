@@ -34,7 +34,7 @@ impl Type for IntegerType {
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) == *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -60,7 +60,7 @@ impl Type for IntegerType {
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) < *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -78,7 +78,7 @@ impl Type for IntegerType {
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) <= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -96,7 +96,7 @@ impl Type for IntegerType {
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) > *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -114,7 +114,7 @@ impl Type for IntegerType {
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) >= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -152,7 +152,7 @@ impl Type for IntegerType {
                 } else {
                     Err("Integer overflow in subtraction".to_string())
                 }
-            }
+            },
             Val::Decimal(r) => Ok(Value::new(-(*r as i32))),
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot subtract non-numeric types from Integer".to_string()),
@@ -167,7 +167,7 @@ impl Type for IntegerType {
                 .ok_or_else(|| "Integer overflow in multiplication".to_string()),
             Val::TinyInt(_) | Val::SmallInt(_) | Val::BigInt(_) | Val::Decimal(_) => {
                 Ok(Value::new(0))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply Integer by non-numeric type".to_string()),
         }
@@ -212,7 +212,7 @@ impl Type for IntegerType {
                 } else {
                     Value::new(if *r < 0 { i32::MIN } else { 0 })
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -228,7 +228,7 @@ impl Type for IntegerType {
                 } else {
                     Value::new(if *r > 0 { i32::MAX } else { 0 })
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

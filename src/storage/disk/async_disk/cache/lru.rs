@@ -305,12 +305,12 @@
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LRUCacheTrait, MutableCache,
 };
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 /// Node in the doubly-linked list for LRU tracking
 /// Zero-copy design: Keys are Copy types, Values are Arc-wrapped for sharing
@@ -490,7 +490,7 @@ where
                     (*node.as_ptr()).prev = None;
                     (*old_head.as_ptr()).prev = Some(node);
                     self.head = Some(node);
-                }
+                },
                 None => {
                     // Empty list - node becomes both head and tail
                     // SAFETY: node is valid and not in list
@@ -498,7 +498,7 @@ where
                     (*node.as_ptr()).prev = None;
                     self.head = Some(node);
                     self.tail = Some(node);
-                }
+                },
             }
         }
     }
@@ -526,24 +526,24 @@ where
                     // SAFETY: prev and next are valid (in our list)
                     (*prev.as_ptr()).next = Some(next);
                     (*next.as_ptr()).prev = Some(prev);
-                }
+                },
                 (Some(prev), None) => {
                     // Tail node - update tail pointer
                     // SAFETY: prev is valid (in our list)
                     (*prev.as_ptr()).next = None;
                     self.tail = Some(prev);
-                }
+                },
                 (None, Some(next)) => {
                     // Head node - update head pointer
                     // SAFETY: next is valid (in our list)
                     (*next.as_ptr()).prev = None;
                     self.head = Some(next);
-                }
+                },
                 (None, None) => {
                     // Only node - clear head and tail
                     self.head = None;
                     self.tail = None;
-                }
+                },
             }
         }
     }
@@ -4834,19 +4834,19 @@ mod tests {
                         "insert" => {
                             cache1.insert(key, Arc::new(value));
                             cache2.insert(key, Arc::new(value));
-                        }
+                        },
                         "get" => {
                             cache1.get(&key);
                             cache2.get(&key);
-                        }
+                        },
                         "touch" => {
                             cache1.touch(&key);
                             cache2.touch(&key);
-                        }
+                        },
                         "remove" => {
                             cache1.remove(&key);
                             cache2.remove(&key);
-                        }
+                        },
                         _ => panic!("Unknown operation"),
                     }
 
@@ -4866,7 +4866,7 @@ mod tests {
                     // Check that LRU is identical
                     match (cache1.peek_lru(), cache2.peek_lru()) {
                         (Some((key1, _)), Some((key2, _))) => assert_eq!(key1, key2),
-                        (None, None) => {} // Both empty
+                        (None, None) => {}, // Both empty
                         _ => panic!("LRU mismatch between caches"),
                     }
                 }
@@ -4888,12 +4888,14 @@ mod tests {
 
         mod state_consistency {
             use super::*;
-            use std::sync::Arc;
             use std::collections::HashSet;
             use std::ptr::NonNull;
+            use std::sync::Arc;
 
-            fn count_nodes<K, V>(cache: &LRUCore<K, V>) -> usize 
-            where K: Copy + Eq + Hash {
+            fn count_nodes<K, V>(cache: &LRUCore<K, V>) -> usize
+            where
+                K: Copy + Eq + Hash,
+            {
                 let mut count = 0;
                 let mut current = cache.head;
                 while let Some(node_ptr) = current {
@@ -4919,7 +4921,7 @@ mod tests {
 
                 cache.remove(&1);
                 assert_eq!(cache.map.len(), count_nodes(&cache));
-                
+
                 cache.clear();
                 assert_eq!(cache.map.len(), count_nodes(&cache));
             }
@@ -4928,7 +4930,7 @@ mod tests {
             fn test_head_tail_pointer_consistency() {
                 // Test that head/tail pointers are consistent with actual list structure
                 let mut cache = LRUCore::new(10);
-                
+
                 // Empty
                 assert!(cache.head.is_none());
                 assert!(cache.tail.is_none());
@@ -4938,7 +4940,7 @@ mod tests {
                 assert!(cache.head.is_some());
                 assert!(cache.tail.is_some());
                 assert_eq!(cache.head, cache.tail);
-                
+
                 unsafe {
                     assert!(cache.head.unwrap().as_ref().prev.is_none());
                     assert!(cache.tail.unwrap().as_ref().next.is_none());
@@ -4949,7 +4951,7 @@ mod tests {
                 assert!(cache.head.is_some());
                 assert!(cache.tail.is_some());
                 assert_ne!(cache.head, cache.tail);
-                
+
                 unsafe {
                     // Head should be 2 (MRU)
                     assert_eq!(cache.head.unwrap().as_ref().key, 2);
@@ -4958,7 +4960,7 @@ mod tests {
 
                     assert!(cache.head.unwrap().as_ref().prev.is_none());
                     assert!(cache.tail.unwrap().as_ref().next.is_none());
-                    
+
                     assert_eq!(cache.head.unwrap().as_ref().next, cache.tail);
                     assert_eq!(cache.tail.unwrap().as_ref().prev, cache.head);
                 }
@@ -4996,23 +4998,23 @@ mod tests {
                 for i in 0..5 {
                     cache.insert(i, Arc::new(i));
                 }
-                
+
                 // Validate manually
                 let mut current = cache.head;
                 let mut prev: Option<NonNull<Node<i32, i32>>> = None;
-                
+
                 while let Some(node_ptr) = current {
-                     unsafe {
-                         let node = node_ptr.as_ref();
-                         assert_eq!(node.prev, prev);
-                         
-                         if let Some(p) = prev {
-                             assert_eq!(p.as_ref().next, Some(node_ptr));
-                         }
-                         
-                         prev = current;
-                         current = node.next;
-                     }
+                    unsafe {
+                        let node = node_ptr.as_ref();
+                        assert_eq!(node.prev, prev);
+
+                        if let Some(p) = prev {
+                            assert_eq!(p.as_ref().next, Some(node_ptr));
+                        }
+
+                        prev = current;
+                        current = node.next;
+                    }
                 }
                 assert_eq!(prev, cache.tail);
             }
@@ -5022,21 +5024,21 @@ mod tests {
                 // Test all invariants are maintained after each cache operation
                 let mut cache = LRUCore::new(5);
                 cache.validate_invariants();
-                
+
                 for i in 0..5 {
                     cache.insert(i, Arc::new(i));
                     cache.validate_invariants();
                 }
-                
+
                 cache.get(&2);
                 cache.validate_invariants();
-                
+
                 cache.insert(5, Arc::new(5)); // Eviction
                 cache.validate_invariants();
-                
+
                 cache.remove(&3);
                 cache.validate_invariants();
-                
+
                 cache.clear();
                 cache.validate_invariants();
             }
@@ -5047,19 +5049,19 @@ mod tests {
                 let mut cache = LRUCore::new(2);
                 cache.insert(1, Arc::new(10));
                 cache.insert(2, Arc::new(20));
-                
+
                 assert_eq!(cache.map.len(), 2);
                 assert_eq!(count_nodes(&cache), 2);
-                
+
                 // Trigger eviction
                 cache.insert(3, Arc::new(30));
-                
+
                 assert_eq!(cache.map.len(), 2);
                 assert_eq!(count_nodes(&cache), 2);
                 assert!(cache.contains(&2));
                 assert!(cache.contains(&3));
                 assert!(!cache.contains(&1));
-                
+
                 cache.validate_invariants();
             }
 
@@ -5068,7 +5070,7 @@ mod tests {
                 // Test that cache never exceeds capacity constraints
                 let capacity = 10;
                 let mut cache = LRUCore::new(capacity);
-                
+
                 for i in 0..capacity * 2 {
                     cache.insert(i, Arc::new(i));
                     assert!(cache.map.len() <= capacity);
@@ -5091,13 +5093,13 @@ mod tests {
                 // Test state consistency when cache has exactly one item
                 let mut cache = LRUCore::new(10);
                 cache.insert(1, Arc::new(100));
-                
+
                 assert!(cache.head.is_some());
                 assert!(cache.tail.is_some());
                 assert_eq!(cache.head, cache.tail);
                 assert_eq!(cache.map.len(), 1);
                 assert_eq!(count_nodes(&cache), 1);
-                
+
                 unsafe {
                     assert!(cache.head.unwrap().as_ref().prev.is_none());
                     assert!(cache.tail.unwrap().as_ref().next.is_none());
@@ -5112,13 +5114,13 @@ mod tests {
                 for i in 0..capacity {
                     cache.insert(i, Arc::new(i));
                 }
-                
+
                 assert_eq!(cache.map.len(), capacity);
                 assert_eq!(count_nodes(&cache), capacity);
                 assert!(cache.head.is_some());
                 assert!(cache.tail.is_some());
                 assert_ne!(cache.head, cache.tail);
-                
+
                 cache.validate_invariants();
             }
 
@@ -5129,9 +5131,9 @@ mod tests {
                 for i in 0..3 {
                     cache.insert(i, Arc::new(i));
                 }
-                
+
                 cache.clear();
-                
+
                 assert!(cache.head.is_none());
                 assert!(cache.tail.is_none());
                 assert!(cache.map.is_empty());
@@ -5142,19 +5144,19 @@ mod tests {
             fn test_state_during_capacity_transitions() {
                 // Test state consistency during transitions between different fill levels
                 let mut cache = LRUCore::new(5);
-                
+
                 // 0 -> 1
                 cache.insert(1, Arc::new(1));
                 assert_eq!(count_nodes(&cache), 1);
-                
+
                 // 1 -> 2
                 cache.insert(2, Arc::new(2));
                 assert_eq!(count_nodes(&cache), 2);
-                
+
                 // 2 -> 1
                 cache.remove(&1);
                 assert_eq!(count_nodes(&cache), 1);
-                
+
                 // 1 -> 0
                 cache.remove(&2);
                 assert_eq!(count_nodes(&cache), 0);
@@ -5169,10 +5171,10 @@ mod tests {
                 for i in 0..10 {
                     cache.insert(i, Arc::new(i));
                 }
-                
+
                 assert_eq!(cache.map.len(), 10);
                 assert_eq!(count_nodes(&cache), 10);
-                
+
                 // Overwrite keys - should reuse or reallocate but keep consistency
                 for i in 0..5 {
                     cache.insert(i, Arc::new(i + 100));
@@ -5188,7 +5190,7 @@ mod tests {
                 for i in 0..5 {
                     cache.insert(i, Arc::new(i * 10));
                 }
-                
+
                 for i in 0..5 {
                     let node_ptr = cache.map.get(&i).unwrap();
                     unsafe {
@@ -5206,13 +5208,13 @@ mod tests {
                 cache.insert(1, Arc::new(1));
                 cache.insert(2, Arc::new(2));
                 cache.insert(3, Arc::new(3));
-                
+
                 // Order: 3 -> 2 -> 1
                 unsafe {
                     assert_eq!(cache.head.unwrap().as_ref().key, 3);
                     assert_eq!(cache.tail.unwrap().as_ref().key, 1);
                 }
-                
+
                 // Access 1 -> moves to head
                 cache.get(&1);
                 // Order: 1 -> 3 -> 2
@@ -5228,7 +5230,7 @@ mod tests {
                 // Using ConcurrentLRUCache which wraps LRUCore
                 let cache = Arc::new(ConcurrentLRUCache::new(10));
                 let mut threads = vec![];
-                
+
                 for i in 0..10 {
                     let cache_clone = cache.clone();
                     threads.push(std::thread::spawn(move || {
@@ -5236,11 +5238,11 @@ mod tests {
                         let _ = cache_clone.get(&i);
                     }));
                 }
-                
+
                 for t in threads {
                     t.join().unwrap();
                 }
-                
+
                 assert!(cache.len() <= 10);
                 // We access inner LRUCore to check consistency via the lock
                 let guard = cache.inner.read();
@@ -5254,7 +5256,7 @@ mod tests {
                 let mut cache = LRUCore::new(0);
                 assert!(cache.insert(1, Arc::new(1)).is_none());
                 assert!(cache.map.is_empty());
-                
+
                 let mut cache = LRUCore::new(1);
                 cache.insert(1, Arc::new(1));
                 // Try to remove non-existent
@@ -5269,11 +5271,11 @@ mod tests {
                 let mut cache = LRUCore::new(5);
                 let val = Arc::new(100);
                 assert_eq!(Arc::strong_count(&val), 1);
-                
+
                 cache.insert(1, val.clone());
                 // 1 in local var, 1 in cache node
                 assert_eq!(Arc::strong_count(&val), 2);
-                
+
                 cache.remove(&1);
                 // 1 in local var
                 assert_eq!(Arc::strong_count(&val), 1);
@@ -5291,18 +5293,18 @@ mod tests {
             fn test_state_transitions_insert_remove() {
                 // Test state consistency during insert/remove cycles
                 let mut cache = LRUCore::new(3);
-                
+
                 // Insert 1, 2, 3
                 cache.insert(1, Arc::new(1));
                 cache.insert(2, Arc::new(2));
                 cache.insert(3, Arc::new(3));
                 cache.validate_invariants();
-                
+
                 // Remove 2 (middle)
                 cache.remove(&2);
                 cache.validate_invariants();
                 assert!(!cache.contains(&2));
-                
+
                 // Insert 4
                 cache.insert(4, Arc::new(4));
                 cache.validate_invariants();
@@ -5314,13 +5316,13 @@ mod tests {
                 let mut cache = LRUCore::new(3);
                 cache.insert(1, Arc::new(1));
                 cache.insert(2, Arc::new(2));
-                
+
                 // Peek shouldn't change state (LRU order)
                 let head_before = unsafe { cache.head.unwrap().as_ref().key };
                 cache.peek(&1);
                 let head_after = unsafe { cache.head.unwrap().as_ref().key };
                 assert_eq!(head_before, head_after);
-                
+
                 // Get should change state (LRU order)
                 cache.get(&1);
                 let head_after_get = unsafe { cache.head.unwrap().as_ref().key };
@@ -5335,7 +5337,7 @@ mod tests {
                 cache.insert(1, Arc::new(1)); // Tail
                 cache.insert(2, Arc::new(2));
                 cache.insert(3, Arc::new(3)); // Head
-                
+
                 // Touch 1 -> moves to head
                 assert!(cache.touch(&1));
                 unsafe {
@@ -5351,7 +5353,7 @@ mod tests {
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(1));
                 cache.insert(2, Arc::new(2));
-                
+
                 // Verify pointers in map point to valid nodes
                 for (k, ptr) in &cache.map {
                     unsafe {
@@ -5369,12 +5371,14 @@ mod tests {
                 for i in 0..5 {
                     cache.insert(i, Arc::new(i));
                 }
-                
+
                 let mut visited = HashSet::new();
                 let mut current = cache.head;
                 while let Some(ptr) = current {
                     assert!(visited.insert(ptr), "Cycle detected!");
-                    unsafe { current = ptr.as_ref().next; }
+                    unsafe {
+                        current = ptr.as_ref().next;
+                    }
                 }
             }
 
@@ -5385,7 +5389,7 @@ mod tests {
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(1));
                 cache.insert(2, Arc::new(2));
-                
+
                 let count_list = count_nodes(&cache);
                 assert_eq!(count_list, cache.map.len());
             }
@@ -5396,10 +5400,10 @@ mod tests {
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(1));
                 let ptr1 = cache.map.get(&1).cloned();
-                
+
                 cache.insert(1, Arc::new(2)); // Overwrite
                 let ptr2 = cache.map.get(&1).cloned();
-                
+
                 // Should use same node or replace it correctly
                 // In this impl, we update value and move to head, node address might be same (if reused) or different (if reallocated)
                 // Looking at insert impl: it replaces value in place!
@@ -5415,7 +5419,7 @@ mod tests {
                 for i in 0..5 {
                     cache.insert(i, Arc::new(i));
                 }
-                
+
                 unsafe {
                     assert!(cache.tail.unwrap().as_ref().next.is_none());
                     assert!(cache.head.unwrap().as_ref().prev.is_none());
@@ -5427,13 +5431,13 @@ mod tests {
                 // Test that head node has prev=None and is most recent
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(1));
-                
+
                 unsafe {
                     let head = cache.head.unwrap().as_ref();
                     assert!(head.prev.is_none());
                     assert_eq!(head.key, 1);
                 }
-                
+
                 cache.insert(2, Arc::new(2));
                 unsafe {
                     let head = cache.head.unwrap().as_ref();
@@ -5448,7 +5452,7 @@ mod tests {
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(1)); // becomes tail when 2 is added
                 cache.insert(2, Arc::new(2));
-                
+
                 unsafe {
                     let tail = cache.tail.unwrap().as_ref();
                     assert!(tail.next.is_none());
@@ -5463,7 +5467,7 @@ mod tests {
                 cache.insert(1, Arc::new(1));
                 cache.insert(2, Arc::new(2)); // Middle
                 cache.insert(3, Arc::new(3));
-                
+
                 // List: 3 -> 2 -> 1
                 unsafe {
                     let mid_ptr = cache.head.unwrap().as_ref().next.unwrap();
@@ -5483,7 +5487,7 @@ mod tests {
                 cache.insert(1, Arc::new(1));
                 cache.insert(2, Arc::new(2));
                 cache.insert(1, Arc::new(3)); // Update 1
-                
+
                 let mut keys = HashSet::new();
                 let mut current = cache.head;
                 while let Some(ptr) = current {
@@ -5500,7 +5504,7 @@ mod tests {
                 // Test that values are consistent between HashMap and list nodes
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(10));
-                
+
                 let map_val = cache.get(&1).unwrap().clone();
                 unsafe {
                     let node_val = &cache.head.unwrap().as_ref().value;
@@ -5588,17 +5592,17 @@ mod tests {
                         c1.insert(i, Arc::new(i));
                     }
                 });
-                
+
                 let c2 = cache.clone();
                 let t2 = std::thread::spawn(move || {
                     for i in 0..100 {
                         c2.get(&i);
                     }
                 });
-                
+
                 t1.join().unwrap();
                 t2.join().unwrap();
-                
+
                 assert!(cache.len() <= 10);
             }
 
@@ -5606,12 +5610,12 @@ mod tests {
             fn test_lock_state_consistency() {
                 // Test RwLock state consistency in concurrent scenarios
                 let cache = Arc::new(ConcurrentLRUCache::new(10));
-                
+
                 // Write lock
                 {
                     cache.insert(1, Arc::new(1));
                 }
-                
+
                 // Read lock
                 {
                     assert!(cache.contains(&1));
@@ -5626,8 +5630,9 @@ mod tests {
                 let _ = std::thread::spawn(move || {
                     let _ = c_clone.insert(1, Arc::new(1));
                     // panic!("Intentional panic");
-                }).join();
-                
+                })
+                .join();
+
                 // Should still work
                 cache.insert(2, Arc::new(2));
                 assert!(cache.contains(&2));
@@ -5687,7 +5692,7 @@ mod tests {
                 let val = Arc::new(42);
                 cache.insert(1, val.clone());
                 assert_eq!(Arc::strong_count(&val), 2);
-                
+
                 cache.remove(&1);
                 assert_eq!(Arc::strong_count(&val), 1);
             }
@@ -5701,12 +5706,12 @@ mod tests {
                 }
                 assert_eq!(cache.len(), 100);
                 assert_eq!(count_nodes(&cache), 100);
-                
+
                 cache.clear();
                 for i in 0..50 {
                     cache.insert(i, Arc::new(i));
                 }
-                 assert_eq!(cache.len(), 50);
+                assert_eq!(cache.len(), 50);
             }
 
             #[test]
@@ -5714,7 +5719,7 @@ mod tests {
                 // Test state consistency when hash collisions occur
                 let mut cache = LRUCore::new(100);
                 for i in 0..200 {
-                     cache.insert(i, Arc::new(i));
+                    cache.insert(i, Arc::new(i));
                 }
             }
 
@@ -5726,7 +5731,7 @@ mod tests {
                 cache.insert(2, Arc::new(2)); // Evict 1
                 assert_eq!(cache.len(), 1);
                 assert!(cache.contains(&2));
-                
+
                 cache.remove(&2);
                 assert!(cache.is_empty());
             }
@@ -5736,7 +5741,7 @@ mod tests {
                 // Test that cache state could be consistently serialized/deserialized
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(1));
-                
+
                 // Capture state
                 let state: Vec<_> = cache.map.iter().map(|(k, _)| *k).collect();
                 assert_eq!(state.len(), 1);
@@ -5747,10 +5752,10 @@ mod tests {
                 // Test state consistency of concurrent cache cloning
                 let cache = Arc::new(ConcurrentLRUCache::new(5));
                 cache.insert(1, Arc::new(1));
-                
+
                 let c2 = cache.clone();
                 assert!(c2.contains(&1));
-                
+
                 cache.insert(2, Arc::new(2));
                 assert!(c2.contains(&2)); // Shared state
             }
@@ -5775,21 +5780,21 @@ mod tests {
                 // Test that same operations produce same internal state
                 let mut c1 = LRUCore::new(5);
                 let mut c2 = LRUCore::new(5);
-                
+
                 let ops = [1, 2, 3, 1, 4, 5, 2, 6];
                 for &op in &ops {
                     c1.insert(op, Arc::new(op));
                     c2.insert(op, Arc::new(op));
                 }
-                
+
                 assert_eq!(c1.len(), c2.len());
                 let mut h1 = c1.head;
                 let mut h2 = c2.head;
                 while let (Some(n1), Some(n2)) = (h1, h2) {
                     unsafe {
-                         assert_eq!(n1.as_ref().key, n2.as_ref().key);
-                         h1 = n1.as_ref().next;
-                         h2 = n2.as_ref().next;
+                        assert_eq!(n1.as_ref().key, n2.as_ref().key);
+                        h1 = n1.as_ref().next;
+                        h2 = n2.as_ref().next;
                     }
                 }
                 assert!(h1.is_none() && h2.is_none());
@@ -5800,7 +5805,7 @@ mod tests {
                 // Test ability to checkpoint and verify cache state
                 let mut cache = LRUCore::new(5);
                 cache.insert(1, Arc::new(1));
-                
+
                 // "Checkpoint" by cloning state to vector
                 let checkpoint: Vec<i32> = unsafe {
                     let mut vec = Vec::new();
@@ -5811,7 +5816,7 @@ mod tests {
                     }
                     vec
                 };
-                
+
                 assert_eq!(checkpoint, vec![1]);
             }
 
@@ -5832,8 +5837,8 @@ mod tests {
     // ==============================================
     mod memory_safety {
         use super::*;
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::thread;
 
         // Helper to track object lifecycle
@@ -5867,7 +5872,7 @@ mod tests {
 
             // Insert 3rd item - should evict 1
             cache.insert(3, Arc::new(LifeCycleTracker::new(3, counter.clone())));
-            
+
             // Should have 2 items in cache (2 and 3), 1 evicted and dropped
             assert_eq!(counter.load(Ordering::SeqCst), 2);
             assert!(!cache.contains(&1));
@@ -5943,10 +5948,10 @@ mod tests {
             // but we can be explicit
             let counter = Arc::new(AtomicUsize::new(100)); // Start at 100 to avoid wrapping on first decrement if bug
             let mut cache = LRUCore::new(1);
-            
+
             cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
             assert_eq!(counter.load(Ordering::SeqCst), 101);
-            
+
             // Evict
             cache.insert(2, Arc::new(LifeCycleTracker::new(2, counter.clone())));
             assert_eq!(counter.load(Ordering::SeqCst), 101); // 1 evicted (-1), 2 added (+1)
@@ -5956,16 +5961,16 @@ mod tests {
         fn test_no_double_free_on_remove() {
             let counter = Arc::new(AtomicUsize::new(100));
             let mut cache = LRUCore::new(5);
-            
+
             cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
             assert_eq!(counter.load(Ordering::SeqCst), 101);
-            
+
             // First remove
             let removed = cache.remove(&1);
             assert!(removed.is_some());
             drop(removed);
             assert_eq!(counter.load(Ordering::SeqCst), 100);
-            
+
             // Second remove (should return None and not affect counter)
             let removed2 = cache.remove(&1);
             assert!(removed2.is_none());
@@ -5974,20 +5979,20 @@ mod tests {
 
         #[test]
         fn test_no_double_free_on_clear() {
-             let counter = Arc::new(AtomicUsize::new(100));
-             let mut cache = LRUCore::new(5);
-             
-             for i in 0..5 {
-                 cache.insert(i, Arc::new(LifeCycleTracker::new(i, counter.clone())));
-             }
-             assert_eq!(counter.load(Ordering::SeqCst), 105);
-             
-             cache.clear();
-             assert_eq!(counter.load(Ordering::SeqCst), 100);
-             
-             // Clear again - should do nothing
-             cache.clear();
-             assert_eq!(counter.load(Ordering::SeqCst), 100);
+            let counter = Arc::new(AtomicUsize::new(100));
+            let mut cache = LRUCore::new(5);
+
+            for i in 0..5 {
+                cache.insert(i, Arc::new(LifeCycleTracker::new(i, counter.clone())));
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 105);
+
+            cache.clear();
+            assert_eq!(counter.load(Ordering::SeqCst), 100);
+
+            // Clear again - should do nothing
+            cache.clear();
+            assert_eq!(counter.load(Ordering::SeqCst), 100);
         }
 
         #[test]
@@ -5995,15 +6000,15 @@ mod tests {
             let mut cache = LRUCore::new(5);
             let key = 1;
             cache.insert(key, Arc::new(100));
-            
+
             let val = cache.get(&key).cloned();
             assert!(val.is_some());
-            
+
             cache.remove(&key);
-            
+
             // Access after free from cache perspective
             assert!(cache.get(&key).is_none());
-            
+
             // But value should still be valid if we held a reference
             assert_eq!(*val.unwrap(), 100);
         }
@@ -6016,10 +6021,10 @@ mod tests {
             cache.insert(1, Arc::new(1));
             cache.insert(2, Arc::new(2));
             cache.insert(3, Arc::new(3));
-            
+
             // Pop LRU
             cache.pop_lru(); // Removes 1
-            
+
             // Check recency rank of remaining items to force traversal
             assert!(cache.recency_rank(&2).is_some());
             assert!(cache.recency_rank(&3).is_some());
@@ -6028,15 +6033,15 @@ mod tests {
 
         #[test]
         fn test_safe_node_allocation() {
-             let mut cache = LRUCore::new(1000);
-             for i in 0..1000 {
-                 cache.insert(i, Arc::new(i));
-             }
-             assert_eq!(cache.len(), 1000);
-             // Verify we can access all of them (nodes are allocated and linked correctly)
-             for i in 0..1000 {
-                 assert!(cache.contains(&i));
-             }
+            let mut cache = LRUCore::new(1000);
+            for i in 0..1000 {
+                cache.insert(i, Arc::new(i));
+            }
+            assert_eq!(cache.len(), 1000);
+            // Verify we can access all of them (nodes are allocated and linked correctly)
+            for i in 0..1000 {
+                assert!(cache.contains(&i));
+            }
         }
 
         #[test]
@@ -6048,7 +6053,7 @@ mod tests {
                     cache.insert(i, Arc::new(LifeCycleTracker::new(i, counter.clone())));
                 }
                 assert_eq!(counter.load(Ordering::SeqCst), 10);
-                
+
                 // Remove some
                 cache.remove(&0);
                 cache.remove(&5);
@@ -6067,7 +6072,7 @@ mod tests {
             cache.insert(1, Arc::new(1));
             cache.insert(2, Arc::new(2));
             cache.insert(3, Arc::new(3));
-            
+
             // This implicitly tests pointer following
             assert_eq!(*cache.peek(&1).unwrap(), 1);
             assert_eq!(*cache.peek(&2).unwrap(), 2);
@@ -6076,25 +6081,25 @@ mod tests {
 
         #[test]
         fn test_safe_list_manipulation() {
-             let mut cache = LRUCore::new(10);
-             // Create a chain
-             for i in 0..5 {
-                 cache.insert(i, Arc::new(i));
-             }
-             
-             // Move middle to head
-             cache.get(&2);
-             
-             // Remove head (LRU)
-             cache.pop_lru(); // Should remove 0 (LRU)
-             
-             // Remove tail (MRU)
-             cache.remove(&2); // 2 was MRU
-             
-             assert_eq!(cache.len(), 3);
-             assert!(cache.contains(&1));
-             assert!(cache.contains(&3));
-             assert!(cache.contains(&4));
+            let mut cache = LRUCore::new(10);
+            // Create a chain
+            for i in 0..5 {
+                cache.insert(i, Arc::new(i));
+            }
+
+            // Move middle to head
+            cache.get(&2);
+
+            // Remove head (LRU)
+            cache.pop_lru(); // Should remove 0 (LRU)
+
+            // Remove tail (MRU)
+            cache.remove(&2); // 2 was MRU
+
+            assert_eq!(cache.len(), 3);
+            assert!(cache.contains(&1));
+            assert!(cache.contains(&3));
+            assert!(cache.contains(&4));
         }
 
         #[test]
@@ -6106,13 +6111,13 @@ mod tests {
             cache.insert(1, tracker.clone());
 
             assert_eq!(counter.load(Ordering::SeqCst), 1);
-            
+
             // Remove from cache
             cache.remove(&1);
-            
+
             // Still alive because we hold a reference
             assert_eq!(counter.load(Ordering::SeqCst), 1);
-            
+
             drop(tracker);
             // Now dead
             assert_eq!(counter.load(Ordering::SeqCst), 0);
@@ -6123,16 +6128,16 @@ mod tests {
             struct Node {
                 _next: Option<Arc<Node>>,
             }
-            
+
             let mut cache = LRUCore::new(2);
             // We just ensure LRU drops its reference.
-            
+
             let counter = Arc::new(AtomicUsize::new(0));
             let cycle_node = Arc::new(LifeCycleTracker::new(1, counter.clone()));
-            
+
             cache.insert(1, cycle_node.clone());
             assert_eq!(counter.load(Ordering::SeqCst), 1);
-            
+
             cache.remove(&1);
             // cycle_node still held by us
             assert_eq!(counter.load(Ordering::SeqCst), 1);
@@ -6145,7 +6150,7 @@ mod tests {
             use std::mem;
             // Ensure Node alignment is respected
             assert!(mem::align_of::<Node<u32, u32>>() >= mem::align_of::<u32>());
-            
+
             let mut cache = LRUCore::new(1);
             cache.insert(1, Arc::new(1u64)); // u64 has stricter alignment
             assert_eq!(**cache.get(&1).unwrap(), 1u64);
@@ -6153,13 +6158,13 @@ mod tests {
 
         #[test]
         fn test_stack_overflow_prevention() {
-             // Test prevention of stack overflow in recursive operations (e.g. Drop)
-             let mut cache = LRUCore::new(10000);
-             for i in 0..10000 {
-                 cache.insert(i, Arc::new(i));
-             }
-             // Drop huge cache
-             drop(cache);
+            // Test prevention of stack overflow in recursive operations (e.g. Drop)
+            let mut cache = LRUCore::new(10000);
+            for i in 0..10000 {
+                cache.insert(i, Arc::new(i));
+            }
+            // Drop huge cache
+            drop(cache);
         }
 
         #[test]
@@ -6181,7 +6186,7 @@ mod tests {
             assert!(cache.pop_lru().is_none());
             assert!(cache.peek_lru().is_none());
             assert!(cache.remove(&1).is_none());
-            
+
             cache.insert(1, Arc::new(1));
             cache.remove(&1);
             // Should be empty again
@@ -6201,86 +6206,90 @@ mod tests {
         #[test]
         fn test_buffer_overflow_prevention() {
             // Not directly applicable to linked list, but we can test capacity limits
-             let mut cache = LRUCore::new(2);
-             cache.insert(1, Arc::new(1));
-             cache.insert(2, Arc::new(2));
-             cache.insert(3, Arc::new(3));
-             assert_eq!(cache.len(), 2);
+            let mut cache = LRUCore::new(2);
+            cache.insert(1, Arc::new(1));
+            cache.insert(2, Arc::new(2));
+            cache.insert(3, Arc::new(3));
+            assert_eq!(cache.len(), 2);
         }
 
         #[test]
         fn test_memory_bounds_checking() {
-             // Capacity check
-             let mut cache = LRUCore::new(1);
-             cache.insert(1, Arc::new(1));
-             cache.insert(2, Arc::new(2));
-             assert_eq!(cache.len(), 1);
-             assert!(cache.contains(&2));
-             assert!(!cache.contains(&1));
+            // Capacity check
+            let mut cache = LRUCore::new(1);
+            cache.insert(1, Arc::new(1));
+            cache.insert(2, Arc::new(2));
+            assert_eq!(cache.len(), 1);
+            assert!(cache.contains(&2));
+            assert!(!cache.contains(&1));
         }
 
         #[test]
         fn test_safe_concurrent_access() {
-             // Verify memory safety under concurrent load
-             let counter = Arc::new(AtomicUsize::new(0));
-             let cache = Arc::new(ConcurrentLRUCache::new(10));
-             
-             let mut handles = vec![];
-             
-             for i in 0..10 {
-                 let cache = cache.clone();
-                 let counter = counter.clone();
-                 handles.push(thread::spawn(move || {
-                     for j in 0..100 {
-                         // Use a larger key space to force evictions
-                         let key = i * 1000 + j;
-                         let val = Arc::new(LifeCycleTracker::new(key as usize, counter.clone()));
-                         cache.insert(key, val);
-                     }
-                 }));
-             }
-             
-             for h in handles {
-                 h.join().unwrap();
-             }
-             
-             // At end, we should have at most 10 items in cache (capacity 10)
-             let count = counter.load(Ordering::SeqCst);
-             assert!(count <= 10, "Memory leak detected: {} items alive (capacity 10)", count);
-             // Note: ConcurrentLRUCache might be slightly loose on exact capacity during heavy contention 
-             // depending on implementation, but should settle.
-             // If strict, count == cache.len().
+            // Verify memory safety under concurrent load
+            let counter = Arc::new(AtomicUsize::new(0));
+            let cache = Arc::new(ConcurrentLRUCache::new(10));
+
+            let mut handles = vec![];
+
+            for i in 0..10 {
+                let cache = cache.clone();
+                let counter = counter.clone();
+                handles.push(thread::spawn(move || {
+                    for j in 0..100 {
+                        // Use a larger key space to force evictions
+                        let key = i * 1000 + j;
+                        let val = Arc::new(LifeCycleTracker::new(key as usize, counter.clone()));
+                        cache.insert(key, val);
+                    }
+                }));
+            }
+
+            for h in handles {
+                h.join().unwrap();
+            }
+
+            // At end, we should have at most 10 items in cache (capacity 10)
+            let count = counter.load(Ordering::SeqCst);
+            assert!(
+                count <= 10,
+                "Memory leak detected: {} items alive (capacity 10)",
+                count
+            );
+            // Note: ConcurrentLRUCache might be slightly loose on exact capacity during heavy contention
+            // depending on implementation, but should settle.
+            // If strict, count == cache.len().
         }
 
         #[test]
         fn test_safe_concurrent_modification() {
-             // Similar to test_safe_concurrent_access but mixing insert/remove
-             let counter = Arc::new(AtomicUsize::new(0));
-             let cache = Arc::new(ConcurrentLRUCache::new(100));
-             
-             let mut handles = vec![];
-             for i in 0..10 {
-                 let cache = cache.clone();
-                 let counter = counter.clone();
-                 handles.push(thread::spawn(move || {
-                     for j in 0..100 {
-                         let key = i * 1000 + j;
-                         let val = Arc::new(LifeCycleTracker::new(key as usize, counter.clone()));
-                         cache.insert(key, val);
-                         if j % 2 == 0 {
-                             cache.remove(&key);
-                         }
-                     }
-                 }));
-             }
-             
-             for h in handles {
-                 h.join().unwrap();
-             }
-             
-             // Check consistency
-             let count = counter.load(Ordering::SeqCst);
-             assert!(count <= 100); 
+            // Similar to test_safe_concurrent_access but mixing insert/remove
+            let counter = Arc::new(AtomicUsize::new(0));
+            let cache = Arc::new(ConcurrentLRUCache::new(100));
+
+            let mut handles = vec![];
+            for i in 0..10 {
+                let cache = cache.clone();
+                let counter = counter.clone();
+                handles.push(thread::spawn(move || {
+                    for j in 0..100 {
+                        let key = i * 1000 + j;
+                        let val = Arc::new(LifeCycleTracker::new(key as usize, counter.clone()));
+                        cache.insert(key, val);
+                        if j % 2 == 0 {
+                            cache.remove(&key);
+                        }
+                    }
+                }));
+            }
+
+            for h in handles {
+                h.join().unwrap();
+            }
+
+            // Check consistency
+            let count = counter.load(Ordering::SeqCst);
+            assert!(count <= 100);
         }
 
         #[test]
@@ -6291,7 +6300,7 @@ mod tests {
 
             #[derive(PartialEq, Eq, Clone, Copy, Debug)]
             struct PanickingKey(i32);
-            
+
             impl Hash for PanickingKey {
                 fn hash<H: Hasher>(&self, state: &mut H) {
                     if self.0 == 666 {
@@ -6302,23 +6311,25 @@ mod tests {
             }
 
             // Use generic type parameters to trick the cache into accepting our key
-            // But ConcurrentLRUCache<K, V> is generic. 
+            // But ConcurrentLRUCache<K, V> is generic.
             // We need to instantiate a cache with PanickingKey.
             // But ConcurrentLRUCache wraps LRUCore.
-            
-            // We can't easily use ConcurrentLRUCache with PanickingKey if we don't change the test signature 
-            // or use a specific instantiation. 
+
+            // We can't easily use ConcurrentLRUCache with PanickingKey if we don't change the test signature
+            // or use a specific instantiation.
             // The test function body can instantiate whatever it wants.
-            
+
             let cache = Arc::new(ConcurrentLRUCache::<PanickingKey, i32>::new(10));
-            
+
             let c_clone = cache.clone();
             let _ = thread::spawn(move || {
                 // This panics inside insert, while lock is held (write lock)
                 // We assume hash is called inside the lock.
                 c_clone.insert(PanickingKey(666), 1);
-            }).join().unwrap_err(); // Should return Err (panic)
-            
+            })
+            .join()
+            .unwrap_err(); // Should return Err (panic)
+
             // Cache should still be accessible (lock released)
             // And insert should have failed cleanly (or leaked node, but cache state should be safe to access)
             assert_eq!(cache.len(), 0);
@@ -6328,12 +6339,12 @@ mod tests {
 
         #[test]
         fn test_panic_safety_memory_cleanup() {
-            use std::panic::{self, AssertUnwindSafe};
             use std::hash::{Hash, Hasher};
+            use std::panic::{self, AssertUnwindSafe};
 
             #[derive(PartialEq, Eq, Clone, Copy, Debug)]
             struct PanickingKey(i32);
-            
+
             impl Hash for PanickingKey {
                 fn hash<H: Hasher>(&self, state: &mut H) {
                     if self.0 == 666 {
@@ -6345,48 +6356,53 @@ mod tests {
 
             let counter = Arc::new(AtomicUsize::new(0));
             let mut cache = LRUCore::new(10);
-            
+
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let tracker = Arc::new(LifeCycleTracker::new(666, counter.clone()));
                 cache.insert(PanickingKey(666), tracker);
             }));
-            
+
             assert!(result.is_err());
-            
+
             // Verify cache is still usable
-            cache.insert(PanickingKey(1), Arc::new(LifeCycleTracker::new(1, counter.clone())));
+            cache.insert(
+                PanickingKey(1),
+                Arc::new(LifeCycleTracker::new(1, counter.clone())),
+            );
             assert_eq!(cache.len(), 1);
         }
 
         #[test]
         fn test_exception_safety_guarantees() {
-             // Basic exception safety (weak): no leaks, invariants hold.
-             // Strong exception safety: state unchanged on failure.
-             
-             // Our insert is not strong exception safe if hash panics (map might be modified? no, insert happens after hash).
-             // But if we leak memory, that's a violation of basic guarantee?
-             // As noted, we might have a leak on panic during insert.
-             // We verify at least the cache invariants hold.
-             
-            use std::panic::{self, AssertUnwindSafe};
+            // Basic exception safety (weak): no leaks, invariants hold.
+            // Strong exception safety: state unchanged on failure.
+
+            // Our insert is not strong exception safe if hash panics (map might be modified? no, insert happens after hash).
+            // But if we leak memory, that's a violation of basic guarantee?
+            // As noted, we might have a leak on panic during insert.
+            // We verify at least the cache invariants hold.
+
             use std::hash::{Hash, Hasher};
+            use std::panic::{self, AssertUnwindSafe};
 
             #[derive(PartialEq, Eq, Clone, Copy, Debug)]
             struct PanickingKey(i32);
             impl Hash for PanickingKey {
                 fn hash<H: Hasher>(&self, state: &mut H) {
-                    if self.0 == 666 { panic!("Panic"); }
+                    if self.0 == 666 {
+                        panic!("Panic");
+                    }
                     self.0.hash(state);
                 }
             }
-            
+
             let mut cache = LRUCore::new(10);
             cache.insert(PanickingKey(1), Arc::new(1));
-            
+
             let _ = panic::catch_unwind(AssertUnwindSafe(|| {
                 cache.insert(PanickingKey(666), Arc::new(2));
             }));
-            
+
             assert_eq!(cache.len(), 1);
             assert!(cache.contains(&PanickingKey(1)));
             // Check internal consistency
@@ -6415,10 +6431,10 @@ mod tests {
                 let c = cache.clone();
                 handles.push(thread::spawn(move || {
                     for j in 0..1000 {
-                         c.insert(j % 200, Arc::new(j));
-                         if j % 3 == 0 {
-                             c.remove(&(j % 200));
-                         }
+                        c.insert(j % 200, Arc::new(j));
+                        if j % 3 == 0 {
+                            c.remove(&(j % 200));
+                        }
                     }
                 }));
             }
@@ -6483,7 +6499,7 @@ mod tests {
         fn test_send_sync_memory_safety() {
             fn assert_send<T: Send>() {}
             fn assert_sync<T: Sync>() {}
-            
+
             assert_send::<LRUCore<i32, i32>>();
             assert_sync::<LRUCore<i32, i32>>();
             assert_send::<ConcurrentLRUCache<i32, i32>>();
@@ -6494,8 +6510,8 @@ mod tests {
         fn test_drop_trait_memory_cleanup() {
             let counter = Arc::new(AtomicUsize::new(0));
             {
-                 let mut cache = LRUCore::new(10);
-                 cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
+                let mut cache = LRUCore::new(10);
+                cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
             }
             assert_eq!(counter.load(Ordering::SeqCst), 0);
         }
@@ -6504,8 +6520,8 @@ mod tests {
         fn test_clone_memory_safety() {
             // Verify ConcurrentLRUCache clone shares state safely
             let cache = Arc::new(ConcurrentLRUCache::new(10));
-            let c2 = cache.clone(); 
-            
+            let c2 = cache.clone();
+
             cache.insert(1, Arc::new(1));
             assert!(c2.contains(&1));
         }
@@ -6521,20 +6537,20 @@ mod tests {
 
         #[test]
         fn test_raw_pointer_safety() {
-             // Implicitly covered by all operations
-             let mut cache = LRUCore::new(10);
-             cache.insert(1, Arc::new(1));
+            // Implicitly covered by all operations
+            let mut cache = LRUCore::new(10);
+            cache.insert(1, Arc::new(1));
         }
 
         #[test]
         fn test_memory_reclamation_safety() {
-             // Verify memory is reclaimed when cache is dropped
-             let counter = Arc::new(AtomicUsize::new(0));
-             {
-                 let mut cache = LRUCore::new(10);
-                 cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
-             }
-             assert_eq!(counter.load(Ordering::SeqCst), 0);
+            // Verify memory is reclaimed when cache is dropped
+            let counter = Arc::new(AtomicUsize::new(0));
+            {
+                let mut cache = LRUCore::new(10);
+                cache.insert(1, Arc::new(LifeCycleTracker::new(1, counter.clone())));
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
         }
 
         #[test]
@@ -6545,42 +6561,43 @@ mod tests {
 
         #[test]
         fn test_cross_thread_memory_safety() {
-             let cache = Arc::new(ConcurrentLRUCache::new(10));
-             let c2 = cache.clone();
-             thread::spawn(move || {
-                 c2.insert(1, Arc::new(1));
-             }).join().unwrap();
-             assert!(cache.contains(&1));
+            let cache = Arc::new(ConcurrentLRUCache::new(10));
+            let c2 = cache.clone();
+            thread::spawn(move || {
+                c2.insert(1, Arc::new(1));
+            })
+            .join()
+            .unwrap();
+            assert!(cache.contains(&1));
         }
-        
+
         #[test]
         fn test_unwind_safety() {
-             // Panic safety check
-             let mut cache = LRUCore::new(10);
-             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                 cache.insert(1, Arc::new(1));
-                 panic!("oops");
-             }));
-             assert!(result.is_err());
-             // Cache dropped here, should clean up.
+            // Panic safety check
+            let mut cache = LRUCore::new(10);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cache.insert(1, Arc::new(1));
+                panic!("oops");
+            }));
+            assert!(result.is_err());
+            // Cache dropped here, should clean up.
         }
 
         #[test]
         fn test_memory_sanitizer_compatibility() {
-             // Placeholder
+            // Placeholder
         }
         #[test]
         fn test_address_sanitizer_compatibility() {
-             // Placeholder
+            // Placeholder
         }
         #[test]
         fn test_thread_sanitizer_compatibility() {
-             // Placeholder
+            // Placeholder
         }
         #[test]
         fn test_leak_sanitizer_compatibility() {
-             // Placeholder
+            // Placeholder
         }
     }
 }
-

@@ -198,4 +198,3 @@ fn atomic_max(target: &AtomicU64, value: u64) {
         }
     }
 }
-

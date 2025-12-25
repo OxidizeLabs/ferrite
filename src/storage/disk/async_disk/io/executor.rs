@@ -372,18 +372,21 @@ impl IOOperationExecutor {
     /// This is the main entry point used by the worker pipeline. Completion /
     /// cancellation is handled by higher-level components (e.g. `CompletionTracker`),
     /// not by this executor.
-    pub async fn execute_operation_type(&self, operation_type: IOOperationType) -> IoResult<Vec<u8>> {
+    pub async fn execute_operation_type(
+        &self,
+        operation_type: IOOperationType,
+    ) -> IoResult<Vec<u8>> {
         match operation_type {
             IOOperationType::ReadPage { page_id } => self.execute_read_page(page_id).await,
             IOOperationType::WritePage { page_id, data } => {
                 self.execute_write_page(page_id, &data).await?;
                 Ok(data)
-            }
+            },
             IOOperationType::ReadLog { offset, size } => self.execute_read_log(offset, size).await,
             IOOperationType::WriteLog { data, offset } => {
                 self.execute_write_log(&data, offset).await?;
                 Ok(data)
-            }
+            },
             IOOperationType::AppendLog { data } => self
                 .execute_append_log(&data)
                 .await
@@ -391,11 +394,11 @@ impl IOOperationExecutor {
             IOOperationType::Sync => {
                 self.execute_sync().await?;
                 Ok(Vec::new())
-            }
+            },
             IOOperationType::SyncLog => {
                 self.execute_sync_log().await?;
                 Ok(Vec::new())
-            }
+            },
         }
     }
 
@@ -1114,11 +1117,11 @@ mod tests {
                             .execute_write_page(i % 10, &data)
                             .await
                             .unwrap();
-                    }
+                    },
                     1 => {
                         // Page read
                         let _ = executor_clone.execute_read_page(i % 10).await.unwrap();
-                    }
+                    },
                     2 => {
                         // Log append
                         let log_data = format!("stress log {}", i);
@@ -1126,11 +1129,11 @@ mod tests {
                             .execute_append_log(log_data.as_bytes())
                             .await
                             .unwrap();
-                    }
+                    },
                     3 => {
                         // Sync
                         executor_clone.execute_sync().await.unwrap();
-                    }
+                    },
                     _ => unreachable!(),
                 }
             });

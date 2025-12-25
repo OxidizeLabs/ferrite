@@ -127,7 +127,7 @@ impl Display for AggregationPlanNode {
             match expr.as_ref() {
                 Expression::Aggregate(agg_expr) => {
                     write!(f, "\n   {}", agg_expr.get_column_name())?;
-                }
+                },
                 _ => write!(f, "\n   {}", expr)?,
             }
         }
@@ -142,7 +142,7 @@ impl Display for AggregationPlanNode {
                 match expr.as_ref() {
                     Expression::ColumnRef(col_ref) => {
                         write!(f, "{}", col_ref.get_return_type().get_name())?;
-                    }
+                    },
                     _ => write!(f, "{}", expr)?,
                 }
             }

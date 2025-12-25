@@ -86,7 +86,7 @@ impl AbstractExecutor for StartTransactionExecutor {
                 }
 
                 debug!("Transaction {} started successfully", transaction_id);
-            }
+            },
             Err(e) => {
                 // Check if the error is due to transaction manager shutdown
                 if e.contains("Transaction manager is shutdown") {
@@ -98,7 +98,7 @@ impl AbstractExecutor for StartTransactionExecutor {
                     "Failed to start transaction: {}",
                     e
                 )));
-            }
+            },
         }
 
         // Transaction operations don't produce tuples
@@ -490,7 +490,7 @@ mod tests {
 
                         // Return transaction for cleanup
                         Some(txn)
-                    }
+                    },
                     Err(_) => None,
                 }
             });

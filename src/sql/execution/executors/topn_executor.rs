@@ -53,7 +53,7 @@ impl Ord for TupleWithKeys {
                         CmpBool::CmpFalse => continue, // Equal, check next key
                         CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
                     }
-                }
+                },
                 CmpBool::CmpNull => return Ordering::Equal, // Treat NULL as equal
             }
         }
@@ -149,15 +149,15 @@ impl AbstractExecutor for TopNExecutor {
                             heap.push(Reverse(tuple_with_keys));
                         }
                     }
-                }
+                },
                 Ok(None) => {
                     // No more tuples
                     break;
-                }
+                },
                 Err(e) => {
                     debug!("Error processing child tuple: {}", e);
                     break;
-                }
+                },
             }
         }
 

@@ -306,7 +306,7 @@ async fn handle_client_connection(
                     format_log(client_id, "Connection", "Client disconnected")
                 );
                 break;
-            }
+            },
             Ok(n) => match handle_client_request(&buffer[..n], db, client_id).await {
                 Ok(response) => {
                     debug!(
@@ -317,7 +317,7 @@ async fn handle_client_connection(
                         log_error(client_id, "Response", &*e, "ERROR");
                         return Err(e);
                     }
-                }
+                },
                 Err(e) => {
                     log_error(client_id, "Query", &*e, "ERROR");
                     let error_msg = format_client_error(&*e);
@@ -327,12 +327,12 @@ async fn handle_client_connection(
                         log_error(client_id, "Response", &*e, "ERROR");
                         return Err(e);
                     }
-                }
+                },
             },
             Err(e) => {
                 log_error(client_id, "Connection", &e, "ERROR");
                 return Err(Box::new(e));
-            }
+            },
         }
     }
 
@@ -381,11 +381,11 @@ async fn handle_client_request(
                 format_log(client_id, "Response", "Query handled successfully")
             );
             Ok(response)
-        }
+        },
         Err(e) => {
             log_error(client_id, "Query", &e, "ERROR");
             Ok(DatabaseResponse::Error(format_client_error(&e)))
-        }
+        },
     }
 }
 

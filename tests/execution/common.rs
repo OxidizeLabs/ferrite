@@ -1,7 +1,4 @@
 use crate::common::logger::init_test_logger;
-use parking_lot::RwLock;
-use std::sync::Arc;
-use tempfile::TempDir;
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -20,6 +17,9 @@ use ferrite::storage::table::table_heap::TableInfo;
 use ferrite::storage::table::transactional_table_heap::TransactionalTableHeap;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
+use parking_lot::RwLock;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 pub struct TestContext {
     pub engine: ExecutionEngine,

@@ -142,7 +142,7 @@ impl AbstractExecutor for CommandExecutor {
             Some((_meta, tuple)) => {
                 let rid = tuple.get_rid();
                 Ok(Some((Arc::new(tuple), rid)))
-            }
+            },
             None => Ok(None),
         }
     }

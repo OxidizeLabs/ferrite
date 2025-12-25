@@ -318,7 +318,6 @@ impl TransactionManager {
         }
     }
 
-
     /// Shuts down the transaction manager
     pub fn shutdown(&self) -> Result<(), String> {
         // Set shutdown flag
@@ -393,14 +392,14 @@ impl TransactionManager {
                     txn.txn_id_human_readable()
                 );
                 return false;
-            }
+            },
             TransactionState::Committed => {
                 log::warn!(
                     "COMMIT: txn {} already committed, treating as success",
                     txn.txn_id_human_readable()
                 );
                 return true;
-            }
+            },
             TransactionState::Running
             | TransactionState::Tainted
             | TransactionState::Shrinking
@@ -410,7 +409,7 @@ impl TransactionManager {
                     txn.txn_id_human_readable(),
                     current_state
                 );
-            }
+            },
         }
 
         // Use logical watermark-based commit to set commit_ts and update running set
@@ -500,21 +499,21 @@ impl TransactionManager {
             | TransactionState::Shrinking
             | TransactionState::Growing => {
                 // Proceed with abort
-            }
+            },
             TransactionState::Committed => {
                 log::warn!(
                     "ABORT: txn {} already committed, nothing to do",
                     txn.txn_id_human_readable()
                 );
                 return;
-            }
+            },
             TransactionState::Aborted => {
                 log::warn!(
                     "ABORT: txn {} already aborted, skipping second abort",
                     txn.txn_id_human_readable()
                 );
                 return;
-            }
+            },
         }
 
         // Get all modified tuples from write set
@@ -564,7 +563,7 @@ impl TransactionManager {
                                 e
                             );
                             continue;
-                        }
+                        },
                     };
 
                     // Check if this was a deleted tuple that needs to be restored
@@ -762,10 +761,10 @@ impl TransactionManager {
         match prev_link {
             Some(link) => {
                 page_info.set_link(rid, link);
-            }
+            },
             None => {
                 page_info.remove_link(&rid);
-            }
+            },
         }
 
         true
@@ -869,7 +868,7 @@ impl TransactionManager {
                         link.prev_log_idx
                     );
                     None
-                }
+                },
             }
         } else {
             log::warn!(
@@ -940,7 +939,7 @@ impl TransactionManager {
             TransactionState::Committed => {
                 let commit_ts = txn.commit_ts();
                 commit_ts == 0 || commit_ts >= watermark
-            }
+            },
             TransactionState::Aborted => txn.read_ts() >= watermark,
             _ => true,
         });
@@ -1185,7 +1184,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Append to write set
@@ -1268,7 +1267,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             txn.append_write_set(table_oid, rid);
@@ -1383,7 +1382,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Try to update with txn2 before txn1 commits - should fail
@@ -1471,7 +1470,7 @@ mod tests {
                             e
                         );
                         return;
-                    }
+                    },
                 };
 
             // In READ UNCOMMITTED, txn2 should be able to read the uncommitted tuple from txn1
@@ -1533,7 +1532,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit the setup transaction
@@ -1617,18 +1616,18 @@ mod tests {
                                     second_tuple.get_values()
                                 );
                             }
-                        }
+                        },
                         Err(e) => {
                             log::debug!("Warning: Second read failed: {}", e);
                             log::debug!(
                                 "This may be acceptable depending on transaction isolation implementation"
                             );
-                        }
+                        },
                     }
-                }
+                },
                 Err(e) => {
                     log::debug!("Skipping update test part: update failed: {}", e);
-                }
+                },
             }
 
             // Cleanup
@@ -1673,7 +1672,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Start a second transaction also with SERIALIZABLE isolation
@@ -1808,10 +1807,10 @@ mod tests {
                     Ok(rid) => {
                         setup_txn.append_write_set(table_oid, rid);
                         rids.push(rid);
-                    }
+                    },
                     Err(e) => {
                         log::debug!("Warning: Failed to insert tuple {}: {}", i, e);
-                    }
+                    },
                 }
             }
 
@@ -1858,7 +1857,7 @@ mod tests {
                         Err(e) => {
                             log::error!("Reader {} failed to create runtime: {}", i, e);
                             return 0;
-                        }
+                        },
                     };
 
                     // Wait for all threads to be ready
@@ -1870,7 +1869,7 @@ mod tests {
                         Err(e) => {
                             log::debug!("Reader {} failed to begin transaction: {}", i, e);
                             return 0;
-                        }
+                        },
                     };
 
                     let txn_ctx = Arc::new(TransactionContext::new(
@@ -1886,11 +1885,11 @@ mod tests {
                             match reader_table_heap.get_tuple(*rid, txn_ctx.clone()) {
                                 Ok(_) => {
                                     successful_reads += 1;
-                                }
+                                },
                                 Err(e) => {
                                     // Tuple might be modified or locked by a writer
                                     log::debug!("Reader {} failed to read tuple: {}", i, e);
-                                }
+                                },
                             }
 
                             // Small sleep to allow interleaving with writers
@@ -1925,7 +1924,7 @@ mod tests {
                         Err(e) => {
                             log::error!("Writer {} failed to create runtime: {}", i, e);
                             return 0;
-                        }
+                        },
                     };
 
                     // Wait for all threads to be ready
@@ -1937,7 +1936,7 @@ mod tests {
                         Err(e) => {
                             log::debug!("Writer {} failed to begin transaction: {}", i, e);
                             return 0;
-                        }
+                        },
                     };
 
                     let txn_ctx = Arc::new(TransactionContext::new(
@@ -2039,14 +2038,14 @@ mod tests {
                 Ok(rid) => {
                     setup_txn.append_write_set(table_oid, rid);
                     rid
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping test_concurrent_updates: Failed to insert initial tuple: {}",
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit the setup transaction
@@ -2094,7 +2093,7 @@ mod tests {
                                     e
                                 );
                                 continue;
-                            }
+                            },
                         };
 
                         let txn_ctx = Arc::new(TransactionContext::new(
@@ -2131,7 +2130,7 @@ mod tests {
                                     );
                                     updater_txn_manager.abort(txn);
                                     continue;
-                                }
+                                },
                             },
                             None => {
                                 log::debug!(
@@ -2141,7 +2140,7 @@ mod tests {
                                 );
                                 updater_txn_manager.abort(txn);
                                 continue;
-                            }
+                            },
                         };
 
                         // Create updated tuple with incremented counter
@@ -2233,7 +2232,7 @@ mod tests {
                     None => {
                         log::debug!("Failed to get counter value from tuple");
                         0
-                    }
+                    },
                 };
 
                 log::debug!(
@@ -2300,14 +2299,14 @@ mod tests {
                 Ok(rid) => {
                     setup_txn.append_write_set(table_oid1, rid);
                     rid
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping test_deadlock_detection: Failed to insert initial tuple 1: {}",
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Insert a second tuple in table 1
@@ -2319,14 +2318,14 @@ mod tests {
                 Ok(rid) => {
                     setup_txn.append_write_set(table_oid1, rid);
                     rid
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping test_deadlock_detection: Failed to insert initial tuple 2: {}",
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit the setup transaction
@@ -2369,7 +2368,7 @@ mod tests {
                     Err(e) => {
                         log::debug!("T1: Failed to begin transaction: {}", e);
                         return "T1: Failed to begin transaction";
-                    }
+                    },
                 };
 
                 let txn_ctx1 = Arc::new(TransactionContext::new(
@@ -2459,7 +2458,7 @@ mod tests {
                     Err(e) => {
                         log::debug!("T2: Failed to begin transaction: {}", e);
                         return "T2: Failed to begin transaction";
-                    }
+                    },
                 };
 
                 let txn_ctx2 = Arc::new(TransactionContext::new(
@@ -2613,7 +2612,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Update the tuple to trigger undo log creation
@@ -2712,7 +2711,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Update the tuple to trigger undo log creation
@@ -2830,7 +2829,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit the first transaction
@@ -2991,7 +2990,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit txn1
@@ -3124,7 +3123,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             assert!(
@@ -3226,7 +3225,7 @@ mod tests {
                     None => {
                         log::debug!("No value found at index 1");
                         -1
-                    }
+                    },
                 };
 
                 log::debug!(
@@ -3280,10 +3279,10 @@ mod tests {
                     Ok(rid) => {
                         setup_txn.append_write_set(table_oid, rid);
                         rids.push(rid);
-                    }
+                    },
                     Err(e) => {
                         log::debug!("Failed to insert tuple {}: {}", i, e);
-                    }
+                    },
                 }
             }
 
@@ -3321,7 +3320,7 @@ mod tests {
                         Err(e) => {
                             log::debug!("Worker {} failed to begin transaction: {}", i, e);
                             return false;
-                        }
+                        },
                     };
 
                     let txn_ctx = Arc::new(TransactionContext::new(
@@ -3469,7 +3468,7 @@ mod tests {
                 Err(e) => {
                     log::debug!("Skipping case 1: initial tuple insertion failed: {}", e);
                     return;
-                }
+                },
             };
 
             // Update the same tuple in the same transaction
@@ -3520,7 +3519,7 @@ mod tests {
                 Err(e) => {
                     log::debug!("Skipping case 2: initial tuple insertion failed: {}", e);
                     return;
-                }
+                },
             };
 
             // Delete the tuple
@@ -3529,7 +3528,7 @@ mod tests {
                 Err(e) => {
                     log::debug!("Case 2: Failed to delete tuple: {}", e);
                     return;
-                }
+                },
             }
 
             // Attempt to update the deleted tuple
@@ -3581,7 +3580,7 @@ mod tests {
                 Err(e) => {
                     log::debug!("Skipping case 3: initial tuple insertion failed: {}", e);
                     return;
-                }
+                },
             };
 
             // Start another transaction that reads and depends on txn3a
@@ -4021,13 +4020,13 @@ mod tests {
                         TransactionState::Committed,
                         "Transaction should transition to Committed state"
                     );
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping part of test_transaction_state_transitions: tuple insertion failed: {}",
                         e
                     );
-                }
+                },
             }
 
             // 3. Running -> Aborted
@@ -4052,13 +4051,13 @@ mod tests {
                         TransactionState::Aborted,
                         "Transaction should transition to Aborted state"
                     );
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping part of test_transaction_state_transitions: tuple insertion failed: {}",
                         e
                     );
-                }
+                },
             }
 
             // 4. Running -> Tainted (if supported)
@@ -4116,14 +4115,14 @@ mod tests {
                     // Update transaction's write set
                     txn1.append_write_set(table_oid, rid);
                     Some(rid)
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping part of test_transaction_recovery: first tuple insertion failed: {}",
                         e
                     );
                     None
-                }
+                },
             };
 
             // Commit the transaction
@@ -4150,14 +4149,14 @@ mod tests {
                     // Update transaction's write set
                     txn2.append_write_set(table_oid, rid);
                     Some(rid)
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping part of test_transaction_recovery: second tuple insertion failed: {}",
                         e
                     );
                     None
-                }
+                },
             };
 
             // 3. Simulate a system restart by "forgetting" about txn2 without committing or aborting
@@ -4260,7 +4259,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Transaction 2: Read with READ_UNCOMMITTED
@@ -4366,7 +4365,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit setup transaction
@@ -4551,7 +4550,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit setup transaction
@@ -4610,14 +4609,14 @@ mod tests {
                 Ok(rid) => {
                     insert_txn.append_write_set(table_oid, rid);
                     Some(rid)
-                }
+                },
                 Err(e) => {
                     log::debug!(
                         "Skipping part of test_phantom_reads: second tuple insertion failed: {}",
                         e
                     );
                     None
-                }
+                },
             };
 
             if rid2.is_none() {
@@ -4721,7 +4720,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             let values2 = vec![Value::new(2), Value::new(200)];
@@ -4737,7 +4736,7 @@ mod tests {
                         e
                     );
                     return;
-                }
+                },
             };
 
             // Commit setup transaction
@@ -4907,7 +4906,7 @@ mod tests {
                     );
                     ctx.txn_manager.abort(txn);
                     return;
-                }
+                },
             };
 
             // Commit the first transaction to make the tuple visible

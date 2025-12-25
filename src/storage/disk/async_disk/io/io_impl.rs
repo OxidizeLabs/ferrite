@@ -742,16 +742,8 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_path = format!(
-            "/tmp/test_db_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
-        let log_path = format!(
-            "/tmp/test_log_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
+        let db_path = format!("/tmp/test_db_{}_{}.dat", std::process::id(), unique_id);
+        let log_path = format!("/tmp/test_log_{}_{}.dat", std::process::id(), unique_id);
 
         // Create test files
         let mut db_file = File::create(&db_path).await.unwrap();

@@ -796,7 +796,7 @@ mod tests {
         match result {
             CoalesceResult::NoCoalesce(returned_data) => {
                 assert_eq!(returned_data, data);
-            }
+            },
             _ => panic!("Expected NoCoalesce result"),
         }
 
@@ -818,7 +818,7 @@ mod tests {
         match result {
             CoalesceResult::Merged(returned_data) => {
                 assert_eq!(returned_data, second_data);
-            }
+            },
             _ => panic!("Expected Merged result"),
         }
 

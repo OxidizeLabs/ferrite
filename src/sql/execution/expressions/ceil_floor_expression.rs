@@ -45,10 +45,10 @@ impl CeilFloorExpression {
             TypeId::Decimal => Column::new("ceil_floor_result", TypeId::Decimal),
             TypeId::Integer | TypeId::BigInt | TypeId::SmallInt | TypeId::TinyInt => {
                 expr.get_return_type().clone()
-            }
+            },
             TypeId::Timestamp if datetime_field.is_some() => {
                 Column::new("ceil_floor_result", TypeId::Timestamp)
-            }
+            },
             _ => return Err("Invalid input type for CEIL/FLOOR operation".to_string()),
         };
 
@@ -97,11 +97,11 @@ impl ExpressionOps for CeilFloorExpression {
                     Val::Decimal(result / multiplier),
                     TypeId::Decimal,
                 ))
-            }
+            },
             TypeId::Integer | TypeId::BigInt | TypeId::SmallInt | TypeId::TinyInt => {
                 // For integer types, just return the input since they're already whole numbers
                 Ok(input_val)
-            }
+            },
             TypeId::Timestamp => {
                 if let Some(field) = &self.datetime_field {
                     let timestamp = input_val.get_val();
@@ -113,35 +113,35 @@ impl ExpressionOps for CeilFloorExpression {
                             DateTimeField::Second => {
                                 // Already in seconds, no rounding needed
                                 *ts
-                            }
+                            },
                             DateTimeField::Minute => {
                                 let minutes = secs / 60;
                                 match self.operation {
                                     CeilFloorOperation::Ceil => (minutes + 1) * 60,
                                     CeilFloorOperation::Floor => minutes * 60,
                                 }
-                            }
+                            },
                             DateTimeField::Hour => {
                                 let hours = secs / 3600;
                                 match self.operation {
                                     CeilFloorOperation::Ceil => (hours + 1) * 3600,
                                     CeilFloorOperation::Floor => hours * 3600,
                                 }
-                            }
+                            },
                             DateTimeField::Day => {
                                 let days = secs / 86400;
                                 match self.operation {
                                     CeilFloorOperation::Ceil => (days + 1) * 86400,
                                     CeilFloorOperation::Floor => days * 86400,
                                 }
-                            }
+                            },
                             DateTimeField::Month => {
                                 let (year, month, _day, _hour, _min, _sec) = timestamp_to_date(*ts);
                                 match self.operation {
                                     CeilFloorOperation::Floor => {
                                         // First day of current month
                                         date_to_timestamp(year, month, 1, 0, 0, 0)
-                                    }
+                                    },
                                     CeilFloorOperation::Ceil => {
                                         if month == 12 {
                                             // First day of next year
@@ -150,9 +150,9 @@ impl ExpressionOps for CeilFloorExpression {
                                             // First day of next month
                                             date_to_timestamp(year, month + 1, 1, 0, 0, 0)
                                         }
-                                    }
+                                    },
                                 }
-                            }
+                            },
                             DateTimeField::Year => {
                                 let (year, _month, _day, _hour, _min, _sec) =
                                     timestamp_to_date(*ts);
@@ -160,19 +160,19 @@ impl ExpressionOps for CeilFloorExpression {
                                     CeilFloorOperation::Floor => {
                                         // First day of current year
                                         date_to_timestamp(year, 1, 1, 0, 0, 0)
-                                    }
+                                    },
                                     CeilFloorOperation::Ceil => {
                                         // First day of next year
                                         date_to_timestamp(year + 1, 1, 1, 0, 0, 0)
-                                    }
+                                    },
                                 }
-                            }
+                            },
                             _ => {
                                 return Err(ExpressionError::InvalidOperation(format!(
                                     "Unsupported DateTimeField: {:?}",
                                     field
                                 )));
-                            }
+                            },
                         };
 
                         Ok(Value::new_with_type(
@@ -189,7 +189,7 @@ impl ExpressionOps for CeilFloorExpression {
                         "DateTime CEIL/FLOOR requires a field specification".to_string(),
                     ))
                 }
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Cannot perform CEIL/FLOOR on type {:?}",
                 input_val.get_type_id()
@@ -250,7 +250,7 @@ impl ExpressionOps for CeilFloorExpression {
                     return Err(ExpressionError::InvalidOperation(
                         "Scale parameter must be an integer type".to_string(),
                     ));
-                }
+                },
             }
         }
 

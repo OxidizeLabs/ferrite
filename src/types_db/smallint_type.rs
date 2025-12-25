@@ -32,14 +32,14 @@ impl Type for SmallIntType {
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i16::try_from(*r) {
                     CmpBool::from(0 == val)
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) == *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -64,14 +64,14 @@ impl Type for SmallIntType {
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i16::try_from(*r) {
                     CmpBool::from(0 < val)
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) < *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -88,14 +88,14 @@ impl Type for SmallIntType {
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i16::try_from(*r) {
                     CmpBool::from(0 <= val)
                 } else {
                     CmpBool::from(*r > 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) <= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -112,14 +112,14 @@ impl Type for SmallIntType {
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i16::try_from(*r) {
                     CmpBool::from(0 > val)
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) > *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -136,14 +136,14 @@ impl Type for SmallIntType {
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i16::try_from(*r) {
                     CmpBool::from(0 >= val)
                 } else {
                     CmpBool::from(*r < 0)
                 }
-            }
+            },
             Val::Decimal(r) => CmpBool::from((0f64) >= *r),
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
@@ -196,7 +196,7 @@ impl Type for SmallIntType {
                 .ok_or_else(|| "SmallInt overflow in multiplication".to_string()),
             Val::TinyInt(_) | Val::Integer(_) | Val::BigInt(_) | Val::Decimal(_) => {
                 Ok(Value::new(0i16))
-            }
+            },
             Val::Null => Ok(Value::new(Val::Null)),
             _ => Err("Cannot multiply SmallInt by non-numeric type".to_string()),
         }
@@ -227,7 +227,7 @@ impl Type for SmallIntType {
             Val::BigInt(r) if *r == 0 => Value::new(Val::Null),
             Val::SmallInt(_) | Val::TinyInt(_) | Val::Integer(_) | Val::BigInt(_) => {
                 Value::new(0i16)
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -242,14 +242,14 @@ impl Type for SmallIntType {
                 } else {
                     Value::new(if *r < 0 { i16::MIN } else { 0 })
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i16::try_from(*r) {
                     Value::new(0i16.min(val))
                 } else {
                     Value::new(if *r < 0 { i16::MIN } else { 0 })
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -264,14 +264,14 @@ impl Type for SmallIntType {
                 } else {
                     Value::new(if *r > 0 { i16::MAX } else { 0 })
                 }
-            }
+            },
             Val::BigInt(r) => {
                 if let Ok(val) = i16::try_from(*r) {
                     Value::new(0i16.max(val))
                 } else {
                     Value::new(if *r > 0 { i16::MAX } else { 0 })
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

@@ -145,7 +145,7 @@ impl ValueRow {
                                 expected: column.get_type(),
                                 actual: value.get_type_id(),
                             });
-                        }
+                        },
                     }
                 } else {
                     value

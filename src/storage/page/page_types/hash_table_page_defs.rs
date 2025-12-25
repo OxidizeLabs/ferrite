@@ -31,9 +31,9 @@
 //! while leaving room for directory metadata (page_id, lsn, global_depth,
 //! local_depths array).
 
+use crate::common::config::DB_PAGE_SIZE;
 use crate::storage::page::page_types::hash_table_block_page::HashTableBlockPage;
 use crate::storage::page::page_types::hash_table_bucket_page::HashTableBucketPage;
-use crate::common::config::DB_PAGE_SIZE;
 use std::mem::size_of;
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);

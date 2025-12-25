@@ -60,7 +60,7 @@ impl AbstractExecutor for LimitExecutor {
                 Some(result) => {
                     self.current_index += 1;
                     Ok(Some(result))
-                }
+                },
                 None => Ok(None),
             }
         } else {

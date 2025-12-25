@@ -255,15 +255,15 @@ impl DatabaseClient {
                     results.rows.len()
                 );
                 Ok(results)
-            }
+            },
             DatabaseResponse::Error(err) => {
                 debug!("[Query] Failed: {}", err);
                 Err(DBError::Client(err))
-            }
+            },
             DatabaseResponse::PrepareOk { .. } => {
                 debug!("[Query] Unexpected prepare response");
                 Err(DBError::Internal("Unexpected prepare response".to_string()))
-            }
+            },
         }
     }
 
@@ -350,7 +350,7 @@ impl DatabaseClient {
                 Ok((response, _)) => {
                     debug!("[Network] Received {} bytes total", buffer.len());
                     return Ok(response);
-                }
+                },
                 Err(e) => {
                     // For bincode, we assume we need more data if decoding fails
                     if buffer.len() < 4096 {
@@ -361,7 +361,7 @@ impl DatabaseClient {
                         "Failed to parse response: {}",
                         e
                     )));
-                }
+                },
             }
         }
 

@@ -100,7 +100,7 @@ impl AbstractExecutor for ProjectionExecutor {
                     match expression.evaluate(&input_tuple, child_schema) {
                         Ok(value) => {
                             projected_values.push(value);
-                        }
+                        },
                         Err(e) => {
                             // Handle invalid column references gracefully by skipping the tuple
                             if let crate::common::exception::ExpressionError::InvalidColumnIndex(
@@ -114,7 +114,7 @@ impl AbstractExecutor for ProjectionExecutor {
                                 "Failed to evaluate projection expression: {}",
                                 e
                             )));
-                        }
+                        },
                     }
                 }
 
@@ -127,11 +127,11 @@ impl AbstractExecutor for ProjectionExecutor {
 
                 trace!("ProjectionExecutor produced projected tuple");
                 Ok(Some((output_tuple, rid)))
-            }
+            },
             None => {
                 debug!("ProjectionExecutor reached end of input");
                 Ok(None)
-            }
+            },
         }
     }
 

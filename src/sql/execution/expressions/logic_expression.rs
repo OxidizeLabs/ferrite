@@ -101,7 +101,7 @@ impl LogicExpression {
                 } else {
                     CmpBool::CmpFalse
                 }
-            }
+            },
             _ => CmpBool::CmpNull,
         }
     }
@@ -235,14 +235,14 @@ impl Display for LogicExpression {
                 } else {
                     write!(f, "({} {} {})", self.left, op_str, self.right)
                 }
-            }
+            },
             LogicType::Not => {
                 if f.alternate() {
                     write!(f, "NOT ({:#})", self.left)
                 } else {
                     write!(f, "NOT ({})", self.left)
                 }
-            }
+            },
         }
     }
 }

@@ -39,11 +39,11 @@ impl FunctionExpression {
                 match arg_type {
                     TypeId::Integer | TypeId::BigInt | TypeId::SmallInt | TypeId::TinyInt => {
                         Ok(Column::new(func_name, TypeId::BigInt))
-                    }
+                    },
                     TypeId::Decimal | TypeId::Float => Ok(Column::new(func_name, TypeId::Decimal)),
                     _ => Err(format!("Invalid argument type for {}", func_name)),
                 }
-            }
+            },
             "MIN" | "MAX" => {
                 if children.is_empty() {
                     return Err(format!("{} requires at least one argument", func_name));
@@ -53,10 +53,10 @@ impl FunctionExpression {
                     func_name,
                     children[0].get_return_type().get_type(),
                 ))
-            }
+            },
             "LOWER" | "UPPER" | "TRIM" | "LTRIM" | "RTRIM" => {
                 Ok(Column::new(func_name, TypeId::VarChar))
-            }
+            },
             "SUBSTRING" => Ok(Column::new(func_name, TypeId::VarChar)),
             "LENGTH" | "POSITION" => Ok(Column::new(func_name, TypeId::Integer)),
             "ROUND" | "ABS" => {
@@ -67,11 +67,11 @@ impl FunctionExpression {
                 match arg_type {
                     TypeId::Integer | TypeId::BigInt | TypeId::SmallInt | TypeId::TinyInt => {
                         Ok(Column::new(func_name, arg_type))
-                    }
+                    },
                     TypeId::Decimal => Ok(Column::new(func_name, TypeId::Decimal)),
                     _ => Err(format!("Invalid argument type for {}", func_name)),
                 }
-            }
+            },
             "COALESCE" => {
                 if children.is_empty() {
                     return Err("COALESCE requires at least one argument".to_string());
@@ -81,7 +81,7 @@ impl FunctionExpression {
                     func_name,
                     children[0].get_return_type().get_type(),
                 ))
-            }
+            },
             _ => Err(format!("Unknown function: {}", func_name)),
         }
     }
@@ -128,7 +128,7 @@ impl ExpressionOps for FunctionExpression {
                         "LOWER function requires string argument".to_string(),
                     )),
                 }
-            }
+            },
             "UPPER" => {
                 if child_values.len() != 1 {
                     return Err(ExpressionError::InvalidOperation(
@@ -147,7 +147,7 @@ impl ExpressionOps for FunctionExpression {
                         "UPPER function requires string argument".to_string(),
                     )),
                 }
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Unsupported function: {}",
                 self.name
@@ -193,7 +193,7 @@ impl ExpressionOps for FunctionExpression {
                         "LOWER function requires string argument".to_string(),
                     )),
                 }
-            }
+            },
             "UPPER" => {
                 if child_values.len() != 1 {
                     return Err(ExpressionError::InvalidOperation(
@@ -212,7 +212,7 @@ impl ExpressionOps for FunctionExpression {
                         "UPPER function requires string argument".to_string(),
                     )),
                 }
-            }
+            },
             _ => Err(ExpressionError::InvalidOperation(format!(
                 "Unsupported function: {}",
                 self.name
@@ -260,14 +260,14 @@ impl ExpressionOps for FunctionExpression {
                 if !matches!(child_type, TypeId::VarChar | TypeId::Char) {
                     // We'll allow it but might want to add a warning
                 }
-            }
+            },
             "CONCAT" => {
                 if self.children.is_empty() {
                     return Err(ExpressionError::InvalidOperation(
                         "CONCAT function requires at least one argument".to_string(),
                     ));
                 }
-            }
+            },
             "ABS" | "ROUND" => {
                 if self.children.is_empty() || self.children.len() > 2 {
                     return Err(ExpressionError::InvalidOperation(format!(
@@ -304,8 +304,8 @@ impl ExpressionOps for FunctionExpression {
                         ));
                     }
                 }
-            }
-            _ => {} // Other functions will be validated at runtime
+            },
+            _ => {}, // Other functions will be validated at runtime
         }
         Ok(())
     }

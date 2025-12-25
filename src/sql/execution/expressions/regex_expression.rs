@@ -117,7 +117,7 @@ impl RegexExpression {
                             }
                             result.push_str(&regex::escape(&next.to_string()));
                         }
-                    }
+                    },
                     _ => result.push_str(&regex::escape(&c.to_string())),
                 }
             }
@@ -209,7 +209,7 @@ impl ExpressionOps for RegexExpression {
                 };
 
                 Ok(Value::new(result))
-            }
+            },
             Err(e) => Err(e),
         }
     }

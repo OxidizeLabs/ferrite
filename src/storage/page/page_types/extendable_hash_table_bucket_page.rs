@@ -44,7 +44,7 @@
 //! Entries are serialized using [`bincode`] for persistence. The format stores
 //! the local depth, size, max size, followed by length-prefixed key-value pairs.
 
-use crate::common::config::{storage_bincode_config, DB_PAGE_SIZE, PageId};
+use crate::common::config::{DB_PAGE_SIZE, PageId, storage_bincode_config};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};

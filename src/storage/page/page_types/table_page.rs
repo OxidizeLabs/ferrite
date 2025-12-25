@@ -51,7 +51,7 @@
 //! through [`PageGuard`](crate::storage::page::PageGuard) and the buffer pool manager.
 
 use crate::common::config::{
-    storage_bincode_config, DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE,
+    DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE, storage_bincode_config,
 };
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
@@ -490,7 +490,10 @@ impl TablePage {
         let end = start + *size as usize;
 
         // Deserialize tuple data
-        match bincode::decode_from_slice::<Tuple, _>(&self.data[start..end], storage_bincode_config()) {
+        match bincode::decode_from_slice::<Tuple, _>(
+            &self.data[start..end],
+            storage_bincode_config(),
+        ) {
             Ok((mut tuple, _)) => {
                 // Tuple RID is not persisted; set it from the caller-provided RID.
                 tuple.set_rid(*rid);
@@ -506,7 +509,7 @@ impl TablePage {
                     None => owned_meta.clear_undo_log_idx(),
                 }
                 Ok((owned_meta, tuple))
-            }
+            },
             Err(e) => Err(format!("Failed to deserialize tuple: {}", e)),
         }
     }
@@ -892,7 +895,9 @@ impl TablePage {
     }
 
     fn metadata_footprint_with_new(&self, meta: &TupleMeta) -> Option<usize> {
-        let meta_len = bincode::encode_to_vec(meta, storage_bincode_config()).ok()?.len();
+        let meta_len = bincode::encode_to_vec(meta, storage_bincode_config())
+            .ok()?
+            .len();
         Some(
             1 // page type
                 + TablePageHeader::size()
@@ -977,11 +982,11 @@ impl TablePage {
             Some(offset) => {
                 debug!("Found available offset: {}", offset);
                 offset
-            }
+            },
             None => {
                 debug!("No available offset found for tuple");
                 return None;
-            }
+            },
         };
 
         // Verify the RID in the tuple matches what we expect
@@ -1000,11 +1005,11 @@ impl TablePage {
             Ok(data) => {
                 debug!("Serialized tuple data length: {}", data.len());
                 data
-            }
+            },
             Err(e) => {
                 error!("Failed to serialize tuple: {}", e);
                 return None;
-            }
+            },
         };
 
         // Store tuple metadata and data
@@ -1071,11 +1076,11 @@ impl TablePage {
             Some(offset) => {
                 debug!("Found available offset: {}", offset);
                 offset
-            }
+            },
             None => {
                 debug!("No available offset found for tuple");
                 return None;
-            }
+            },
         };
 
         // Skip RID validation - use the provided RID
@@ -1085,11 +1090,11 @@ impl TablePage {
             Ok(data) => {
                 debug!("Serialized tuple data length: {}", data.len());
                 data
-            }
+            },
             Err(e) => {
                 error!("Failed to serialize tuple: {}", e);
                 return None;
-            }
+            },
         };
 
         // Store tuple metadata and data
@@ -1336,9 +1341,10 @@ mod unit_tests {
         let tuple = Tuple::new(&values, &schema, next_rid);
 
         // Now check that get_next_tuple_offset returns None
-        assert!(page
-            .get_next_tuple_offset(&TupleMeta::new(123), &tuple)
-            .is_none());
+        assert!(
+            page.get_next_tuple_offset(&TupleMeta::new(123), &tuple)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1360,7 +1366,7 @@ mod unit_tests {
                         "Unexpected error message: {}",
                         err
                     );
-                }
+                },
             }
         }
 
@@ -1424,7 +1430,7 @@ mod unit_tests {
                     "Unexpected error message: {}",
                     err
                 );
-            }
+            },
         }
     }
 
@@ -1442,7 +1448,7 @@ mod unit_tests {
                     "Unexpected error message: {}",
                     err
                 );
-            }
+            },
         }
     }
 
@@ -1461,7 +1467,7 @@ mod unit_tests {
                     "Unexpected error message: {}",
                     err
                 );
-            }
+            },
         }
     }
 }
@@ -1576,7 +1582,9 @@ mod tuple_operation_tests {
 
         // Deserialization should succeed and preserve the metadata.
         let deserialized = TablePage::deserialize(&serialized).expect("deserialize failed");
-        let (deser_meta, _) = deserialized.get_tuple(&rid, false).expect("get_tuple failed");
+        let (deser_meta, _) = deserialized
+            .get_tuple(&rid, false)
+            .expect("get_tuple failed");
         assert_eq!(deser_meta.get_creator_txn_id(), meta.get_creator_txn_id());
         assert_eq!(deser_meta.is_deleted(), meta.is_deleted());
     }
@@ -1757,9 +1765,10 @@ mod capacity_tests {
         let tuple = Tuple::new(&values, &schema, next_rid);
 
         // Now check that get_next_tuple_offset returns None
-        assert!(page
-            .get_next_tuple_offset(&TupleMeta::new(123), &tuple)
-            .is_none());
+        assert!(
+            page.get_next_tuple_offset(&TupleMeta::new(123), &tuple)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1920,7 +1929,7 @@ mod serialization_tests {
                         debug!("Thread {} failed to acquire lock, retrying...", i);
                         thread::sleep(Duration::from_millis(10));
                         page_clone.lock()
-                    }
+                    },
                 };
 
                 match page_guard.get_tuple(&rid, false) {
@@ -1936,11 +1945,11 @@ mod serialization_tests {
                             retrieved_meta.get_commit_timestamp(),
                             retrieved_tuple.get_value(0).clone(),
                         ))
-                    }
+                    },
                     Err(e) => {
                         error!("Thread {} failed to retrieve tuple: {:?}", i, e);
                         Err(e)
-                    }
+                    },
                 }
             });
             handles.push(handle);
@@ -1957,11 +1966,11 @@ mod serialization_tests {
                         result.unwrap_or_else(|_| panic!("Thread {} failed to read tuple", i));
                     assert_eq!(timestamp.unwrap(), 123);
                     assert_eq!(value, Value::new(42));
-                }
+                },
                 Err(e) => {
                     error!("Thread {} panicked: {:?}", i, e);
                     panic!("Thread {} failed", i);
-                }
+                },
             }
         }
     }

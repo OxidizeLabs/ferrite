@@ -458,7 +458,7 @@ where
                         panic!(
                             "Failed to unwrap Arc<K> in pop_oldest - there are external references to the key"
                         );
-                    }
+                    },
                 };
 
                 let value = match Arc::try_unwrap(value_arc) {
@@ -469,7 +469,7 @@ where
                         panic!(
                             "Failed to unwrap Arc<V> in pop_oldest - there are external references to the value"
                         );
-                    }
+                    },
                 };
 
                 return Some((key, value));

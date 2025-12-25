@@ -189,9 +189,9 @@
 //! - After `next()` returns a record, `get_offset()` points to the **next** record
 //! - Direct I/O for database pages does not affect WAL offset layout
 
+use crate::common::config::DB_PAGE_SIZE;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::async_disk::AsyncDiskManager;
-use crate::common::config::DB_PAGE_SIZE;
 use log::{debug, warn};
 use std::sync::Arc;
 
@@ -304,7 +304,8 @@ impl LogIterator {
                     let record_bytes = match self
                         .disk_manager
                         .read_log_sized(offset, record_size as usize)
-                        .await {
+                        .await
+                    {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             warn!(
@@ -319,7 +320,7 @@ impl LogIterator {
                             self.current_offset += 1;
                             attempts += 1;
                             continue;
-                        }
+                        },
                     };
 
                     // Deserialize record bytes into LogRecord.
@@ -334,7 +335,7 @@ impl LogIterator {
                             self.current_offset += 1;
                             attempts += 1;
                             continue;
-                        }
+                        },
                     };
 
                     // Additional validation for records to catch corrupted entries
@@ -362,7 +363,7 @@ impl LogIterator {
                     // WAL offsets are logical byte offsets.
                     self.current_offset += record_size as u64;
                     return Some(record);
-                }
+                },
                 Err(e) => {
                     // Check if this is an EOF error
                     if is_eof_error(&e) {
@@ -380,7 +381,7 @@ impl LogIterator {
                     self.current_offset += 1;
                     attempts += 1;
                     continue;
-                }
+                },
             }
         }
 
@@ -495,8 +496,7 @@ mod tests {
                 .to_string();
 
             // Create disk components
-            let disk_manager =
-                AsyncDiskManager::new(db_path, log_path.clone(), config).await;
+            let disk_manager = AsyncDiskManager::new(db_path, log_path.clone(), config).await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
 
             Self {
@@ -608,7 +608,10 @@ mod tests {
         iter.reset();
         assert!(!iter.is_end());
         assert_eq!(iter.get_offset(), 0);
-        let first = iter.next().await.expect("expected first record after reset");
+        let first = iter
+            .next()
+            .await
+            .expect("expected first record after reset");
         assert_eq!(first.get_txn_id(), 1);
 
         // `set_offset` should also clear EOF state.
@@ -665,13 +668,15 @@ mod tests {
         let mut iter2 = LogIterator::new(ctx.disk_manager.clone());
 
         let manual: Vec<(TxnId, Lsn, LogRecordType)> = iter1
-            .collect().await
+            .collect()
+            .await
             .into_iter()
             .map(|r| (r.get_txn_id(), r.get_lsn(), r.get_log_record_type()))
             .collect();
 
         let collected: Vec<(TxnId, Lsn, LogRecordType)> = iter2
-            .collect().await
+            .collect()
+            .await
             .into_iter()
             .map(|r| (r.get_txn_id(), r.get_lsn(), r.get_log_record_type()))
             .collect();
@@ -755,12 +760,16 @@ mod tests {
         std::fs::write(&log_path, file_bytes).unwrap();
 
         // Now open the disk manager in direct I/O mode over that pre-populated file.
-        let disk_manager =
-            AsyncDiskManager::new(db_path, log_path.clone(), config).await.unwrap();
+        let disk_manager = AsyncDiskManager::new(db_path, log_path.clone(), config)
+            .await
+            .unwrap();
         let disk_manager = Arc::new(disk_manager);
 
         let mut iter = LogIterator::new(disk_manager);
-        let rec = iter.next().await.expect("expected iterator to resync to page 1");
+        let rec = iter
+            .next()
+            .await
+            .expect("expected iterator to resync to page 1");
         assert_eq!(rec.get_txn_id(), 7);
         assert_eq!(rec.get_log_record_type(), LogRecordType::Begin);
 

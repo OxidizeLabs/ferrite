@@ -2,13 +2,13 @@
 // LFU CONCURRENCY TESTS (integration)
 // ==============================================
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread;
 use ferrite::storage::disk::async_disk::cache::cache_traits::CoreCache;
 use ferrite::storage::disk::async_disk::cache::cache_traits::LFUCacheTrait;
 use ferrite::storage::disk::async_disk::cache::cache_traits::MutableCache;
 use ferrite::storage::disk::async_disk::cache::lfu::LFUCache;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 type ThreadSafeLFUCache<K, V> = Arc<Mutex<LFUCache<K, V>>>;
 
@@ -147,11 +147,11 @@ mod thread_safety {
                         0 => {
                             // Thread type 1: increment frequency via get
                             cache_clone.lock().unwrap().get(&key);
-                        }
+                        },
                         1 => {
                             // Thread type 2: increment frequency directly
                             cache_clone.lock().unwrap().increment_frequency(&key);
-                        }
+                        },
                         2 => {
                             // Thread type 3: reset frequency (less frequently)
                             if i % 10 == 0 {
@@ -159,7 +159,7 @@ mod thread_safety {
                             } else {
                                 cache_clone.lock().unwrap().get(&key);
                             }
-                        }
+                        },
                         _ => unreachable!(),
                     }
                 }
@@ -343,7 +343,7 @@ mod thread_safety {
                             let value = thread_id * 1000 + i;
                             cache_clone.lock().unwrap().insert(key, value);
                             counts_clone.lock().unwrap().0 += 1;
-                        }
+                        },
                         2..=4 => {
                             // Get operations (37.5% of operations)
                             let key = if i % 2 == 0 {
@@ -357,13 +357,13 @@ mod thread_safety {
                             };
                             cache_clone.lock().unwrap().get(&key);
                             counts_clone.lock().unwrap().1 += 1;
-                        }
+                        },
                         5 => {
                             // Remove operations (12.5% of operations)
                             let key = format!("initial_{}", i % 150);
                             cache_clone.lock().unwrap().remove(&key);
                             counts_clone.lock().unwrap().2 += 1;
-                        }
+                        },
                         6 => {
                             // Frequency operations (12.5% of operations)
                             let key = format!("initial_{}", i % 150);
@@ -373,7 +373,7 @@ mod thread_safety {
                                 cache_clone.lock().unwrap().reset_frequency(&key);
                             }
                             counts_clone.lock().unwrap().3 += 1;
-                        }
+                        },
                         7 => {
                             // LFU operations (12.5% of operations)
                             if i % 2 == 0 {
@@ -382,7 +382,7 @@ mod thread_safety {
                                 cache_clone.lock().unwrap().pop_lfu();
                             }
                             counts_clone.lock().unwrap().4 += 1;
-                        }
+                        },
                         _ => unreachable!(),
                     }
                 }
@@ -610,14 +610,14 @@ mod thread_safety {
                             let value = (thread_id * 10000 + i) as i32;
                             cache_clone.lock().unwrap().insert(key, value);
                             operation_successful = true;
-                        }
+                        },
                         1 => {
                             // Get operation
                             let key = format!("fair_{}", i % 100);
                             if cache_clone.lock().unwrap().get(&key).is_some() {
                                 operation_successful = true;
                             }
-                        }
+                        },
                         2 => {
                             // Frequency operation
                             let key = format!("fair_{}", i % 100);
@@ -627,13 +627,13 @@ mod thread_safety {
                                 cache_clone.lock().unwrap().reset_frequency(&key);
                             }
                             operation_successful = true;
-                        }
+                        },
                         3 => {
                             // LFU operation
                             if cache_clone.lock().unwrap().peek_lfu().is_some() {
                                 operation_successful = true;
                             }
-                        }
+                        },
                         _ => unreachable!(),
                     }
 
@@ -767,7 +767,7 @@ mod stress_testing {
                                 cache_clone.lock().unwrap().get(&key);
                                 success_count_clone.fetch_add(1, Ordering::Relaxed);
                             }
-                        }
+                        },
                         2 => {
                             // Frequency check
                             if let Ok(cache) = cache_clone.try_lock() {
@@ -776,7 +776,7 @@ mod stress_testing {
                             } else {
                                 conflict_count_clone.fetch_add(1, Ordering::Relaxed);
                             }
-                        }
+                        },
                         3 => {
                             // Insert operation (creates most contention)
                             let new_key = format!("thread_{}_{}", thread_id, i);
@@ -786,7 +786,7 @@ mod stress_testing {
                             } else {
                                 conflict_count_clone.fetch_add(1, Ordering::Relaxed);
                             }
-                        }
+                        },
                         _ => unreachable!(),
                     }
 
@@ -1022,12 +1022,12 @@ mod stress_testing {
                                 Ok(mut cache) => {
                                     cache.get(&key);
                                     local_operations += 1;
-                                }
+                                },
                                 Err(_) => {
                                     errors_encountered_clone.fetch_add(1, Ordering::Relaxed);
-                                }
+                                },
                             }
-                        }
+                        },
                         1 => {
                             // Writer thread - adds new data
                             let key = format!("long_run_{}_{}", thread_id, cycle);
@@ -1035,12 +1035,12 @@ mod stress_testing {
                                 Ok(mut cache) => {
                                     cache.insert(key, (thread_id as i64) * 1000 + cycle);
                                     local_operations += 1;
-                                }
+                                },
                                 Err(_) => {
                                     errors_encountered_clone.fetch_add(1, Ordering::Relaxed);
-                                }
+                                },
                             }
-                        }
+                        },
                         2 => {
                             // Mixed operations thread
                             match cycle % 4 {
@@ -1050,30 +1050,30 @@ mod stress_testing {
                                         cache.get(&key);
                                         local_operations += 1;
                                     }
-                                }
+                                },
                                 1 => {
                                     if let Ok(cache) = cache_clone.lock() {
                                         cache.peek_lfu();
                                         local_operations += 1;
                                     }
-                                }
+                                },
                                 2 => {
                                     let key = format!("mixed_{}_{}", thread_id, cycle);
                                     if let Ok(mut cache) = cache_clone.lock() {
                                         cache.insert(key, cycle);
                                         local_operations += 1;
                                     }
-                                }
+                                },
                                 3 => {
                                     let key = format!("baseline_{}", cycle % 100);
                                     if let Ok(cache) = cache_clone.lock() {
                                         cache.frequency(&key);
                                         local_operations += 1;
                                     }
-                                }
+                                },
                                 _ => unreachable!(),
                             }
-                        }
+                        },
                         _ => unreachable!(),
                     }
 
@@ -1214,19 +1214,19 @@ mod stress_testing {
                             }
 
                             successful_ops_clone.fetch_add(1, Ordering::Relaxed);
-                        }
+                        },
                         2 => {
                             // Access existing large data
                             let key = format!("large_data_{}", i % 700);
                             cache_clone.lock().unwrap().get(&key);
                             successful_ops_clone.fetch_add(1, Ordering::Relaxed);
-                        }
+                        },
                         3 => {
                             // Check frequencies of large items
                             let key = format!("large_data_{}", i % 100);
                             cache_clone.lock().unwrap().frequency(&key);
                             successful_ops_clone.fetch_add(1, Ordering::Relaxed);
-                        }
+                        },
                         4 => {
                             // Find LFU candidate (expensive with large cache)
                             let start = Instant::now();
@@ -1241,7 +1241,7 @@ mod stress_testing {
                             );
 
                             successful_ops_clone.fetch_add(1, Ordering::Relaxed);
-                        }
+                        },
                         _ => unreachable!(),
                     }
 
@@ -1363,7 +1363,7 @@ mod stress_testing {
                                 let key = format!("persistent_{}", i % 50);
                                 cache_clone.lock().unwrap().get(&key);
                                 local_ops += 1;
-                            }
+                            },
                             2 => {
                                 // Insert wave-specific data (reduced frequency)
                                 let key = format!("wave_{}_thread_{}_item_{}", wave, thread_id, i);
@@ -1372,24 +1372,24 @@ mod stress_testing {
                                     .unwrap()
                                     .insert(key, wave * 100 + thread_id);
                                 local_ops += 1;
-                            }
+                            },
                             3 => {
                                 // Check frequency of persistent items
                                 let key = format!("persistent_{}", i % 25);
                                 cache_clone.lock().unwrap().frequency(&key);
                                 local_ops += 1;
-                            }
+                            },
                             4 => {
                                 // Access persistent data again (more frequent access)
                                 let key = format!("persistent_{}", (i + 25) % 50);
                                 cache_clone.lock().unwrap().get(&key);
                                 local_ops += 1;
-                            }
+                            },
                             5 => {
                                 // Peek LFU
                                 cache_clone.lock().unwrap().peek_lfu();
                                 local_ops += 1;
-                            }
+                            },
                             _ => unreachable!(),
                         }
 
@@ -1491,7 +1491,7 @@ mod stress_testing {
                             // Access baseline data
                             let key = format!("baseline_{}", cycle % 75);
                             cache_clone.lock().unwrap().get(&key);
-                        }
+                        },
                         1 => {
                             // Insert background data
                             let key = format!("background_{}_{}", thread_id, ops);
@@ -1499,12 +1499,12 @@ mod stress_testing {
                                 .lock()
                                 .unwrap()
                                 .insert(key, (thread_id * 1000 + ops) as i32);
-                        }
+                        },
                         2 => {
                             // Check frequency
                             let key = format!("baseline_{}", cycle % 50);
                             cache_clone.lock().unwrap().frequency(&key);
-                        }
+                        },
                         _ => unreachable!(),
                     }
 
@@ -1543,13 +1543,13 @@ mod stress_testing {
                                     .unwrap()
                                     .insert(key, thread_id * 10000 + i);
                                 ops += 1;
-                            }
+                            },
                             2 => {
                                 // Access baseline during burst
                                 let key = format!("baseline_{}", i % 75);
                                 cache_clone.lock().unwrap().get(&key);
                                 ops += 1;
-                            }
+                            },
                             3 => {
                                 // Access recent burst items
                                 if i > 10 {
@@ -1557,12 +1557,12 @@ mod stress_testing {
                                     cache_clone.lock().unwrap().get(&key);
                                     ops += 1;
                                 }
-                            }
+                            },
                             4 => {
                                 // LFU operations during burst
                                 cache_clone.lock().unwrap().peek_lfu();
                                 ops += 1;
-                            }
+                            },
                             _ => unreachable!(),
                         }
                     }
@@ -1692,7 +1692,7 @@ mod stress_testing {
                                 // Access initial data (create frequency competition)
                                 let key = format!("initial_{}", local_ops % 50);
                                 cache_clone.lock().unwrap().get(&key);
-                            }
+                            },
                             1 => {
                                 // Insert phase-specific data
                                 let key = format!(
@@ -1703,12 +1703,12 @@ mod stress_testing {
                                     key,
                                     (phase * 1000 + thread_id * 100 + local_ops) as i32,
                                 );
-                            }
+                            },
                             2 => {
                                 // Frequency queries
                                 let key = format!("initial_{}", local_ops % 25);
                                 cache_clone.lock().unwrap().frequency(&key);
-                            }
+                            },
                             3 => {
                                 // LFU operations (these become more expensive as cache fills)
                                 let lfu_start = Instant::now();
@@ -1723,7 +1723,7 @@ mod stress_testing {
                                     phase,
                                     lfu_duration
                                 );
-                            }
+                            },
                             _ => unreachable!(),
                         }
 
@@ -1891,7 +1891,7 @@ mod stress_testing {
                             0 => {
                                 // Uniform: equal probability for all keys
                                 format!("base_{}", i % 100)
-                            }
+                            },
                             1 => {
                                 // Light Zipfian: 85% of accesses to 15% of keys
                                 if i % 20 < 17 {
@@ -1899,7 +1899,7 @@ mod stress_testing {
                                 } else {
                                     format!("base_{}", 15 + (i % 85)) // Cold 85% (keys 15-99)
                                 }
-                            }
+                            },
                             2 => {
                                 // Heavy Zipfian: 95% of accesses to 5% of keys
                                 if i % 20 < 19 {
@@ -1907,7 +1907,7 @@ mod stress_testing {
                                 } else {
                                     format!("base_{}", 5 + (i % 95)) // Cold 95% (keys 5-99)
                                 }
-                            }
+                            },
                             3 => {
                                 // Bimodal: two distinct hot sets
                                 if i % 4 < 2 {
@@ -1917,7 +1917,7 @@ mod stress_testing {
                                 } else {
                                     format!("base_{}", 20 + (i % 30)) // Cold set
                                 }
-                            }
+                            },
                             _ => unreachable!(),
                         };
 
@@ -1927,7 +1927,7 @@ mod stress_testing {
                                 // Access existing keys following the distribution pattern (62.5%)
                                 cache_clone.lock().unwrap().get(&key);
                                 local_ops += 1;
-                            }
+                            },
                             5 => {
                                 // Insert new data occasionally (12.5%)
                                 let new_key = format!("new_{}_{}", thread_id, i);
@@ -1936,17 +1936,17 @@ mod stress_testing {
                                     .unwrap()
                                     .insert(new_key, thread_id * 1000 + i);
                                 local_ops += 1;
-                            }
+                            },
                             6 => {
                                 // Check frequency (12.5%)
                                 cache_clone.lock().unwrap().frequency(&key);
                                 local_ops += 1;
-                            }
+                            },
                             7 => {
                                 // LFU operation (12.5%)
                                 cache_clone.lock().unwrap().peek_lfu();
                                 local_ops += 1;
-                            }
+                            },
                             _ => unreachable!(),
                         }
                     }
@@ -1997,7 +1997,7 @@ mod stress_testing {
                         freq_range as f64 / avg_freq < 3.0,
                         "Uniform distribution should have low frequency variance"
                     );
-                }
+                },
                 1 => {
                     // Light Zipfian: top 20% should have much higher frequencies (85/15 pattern)
                     let top_20_count = frequency_stats.len() / 5;
@@ -2031,7 +2031,7 @@ mod stress_testing {
                         "Most hot keys should survive: {}/15",
                         hot_survivors
                     );
-                }
+                },
                 2 => {
                     // Heavy Zipfian: top 10% should dominate (95% to 5% pattern)
                     let top_10_count = frequency_stats.len() / 10;
@@ -2065,14 +2065,14 @@ mod stress_testing {
                         "Most super-hot keys should survive: {}/5",
                         super_hot_survivors
                     );
-                }
+                },
                 3 => {
                     // Bimodal: should have two distinct frequency groups
                     assert!(
                         max_freq > avg_freq as u64 * 2,
                         "Bimodal should have distinct high-frequency groups"
                     );
-                }
+                },
                 _ => unreachable!(),
             }
 
@@ -2203,13 +2203,13 @@ mod stress_testing {
                             let key = format!("tier1_{}", i % 10);
                             cache_clone.lock().unwrap().get(&key);
                             local_ops += 1;
-                        }
+                        },
                         2 => {
                             // Access tier 2 items moderately (10%)
                             let key = format!("tier2_{}", i % 20);
                             cache_clone.lock().unwrap().get(&key);
                             local_ops += 1;
-                        }
+                        },
                         3 => {
                             // Very rarely access tier 3 items (only early in test)
                             if i < 100 {
@@ -2222,7 +2222,7 @@ mod stress_testing {
                                 cache_clone.lock().unwrap().get(&stress_key);
                             }
                             local_ops += 1;
-                        }
+                        },
                         4..=6 => {
                             // Insert new items - HIGH frequency (30% for strong pressure)
                             let key = format!("stress_{}_{}", thread_id, i);
@@ -2240,7 +2240,7 @@ mod stress_testing {
 
                             cache.insert(key, thread_id * 10000 + i);
                             local_ops += 1;
-                        }
+                        },
                         7 => {
                             // Verify LFU eviction candidate (10%)
                             let cache = cache_clone.lock().unwrap();
@@ -2251,7 +2251,7 @@ mod stress_testing {
                                 }
                             }
                             local_ops += 1;
-                        }
+                        },
                         8 => {
                             // Pop LFU and verify correctness (10%) - Force evictions
                             let mut cache = cache_clone.lock().unwrap();
@@ -2267,7 +2267,7 @@ mod stress_testing {
                                 }
                             }
                             local_ops += 1;
-                        }
+                        },
                         9 => {
                             // Access recent stress items to give them frequency competition (10%)
                             if i > 50 {
@@ -2280,7 +2280,7 @@ mod stress_testing {
                                 cache_clone.lock().unwrap().get(&key);
                             }
                             local_ops += 1;
-                        }
+                        },
                         _ => unreachable!(),
                     }
 

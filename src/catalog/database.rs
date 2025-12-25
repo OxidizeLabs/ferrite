@@ -513,7 +513,7 @@ impl Database {
             IndexType::BPlusTreeIndex => {
                 let order = 4;
                 Arc::new(RwLock::new(BPlusTree::new(order, index_info.clone())))
-            }
+            },
         };
 
         // Update catalog maps

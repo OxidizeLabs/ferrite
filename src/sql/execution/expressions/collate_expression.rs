@@ -180,7 +180,7 @@ mod tests {
             Expression::Collate(collate) => {
                 assert_eq!(collate.collation, "NOCASE");
                 assert_eq!(collate.return_type.get_type(), TypeId::VarChar);
-            }
+            },
             _ => panic!("Expected Collate expression"),
         }
     }

@@ -51,7 +51,7 @@ impl Type for PointType {
                 let this_distance = Self::distance(0.0, 0.0, 0.0, 0.0);
                 let other_distance = Self::distance(0.0, 0.0, *x, *y);
                 CmpBool::from(this_distance < other_distance)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -64,7 +64,7 @@ impl Type for PointType {
                 let this_distance = Self::distance(0.0, 0.0, 0.0, 0.0);
                 let other_distance = Self::distance(0.0, 0.0, *x, *y);
                 CmpBool::from(this_distance <= other_distance)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -77,7 +77,7 @@ impl Type for PointType {
                 let this_distance = Self::distance(0.0, 0.0, 0.0, 0.0);
                 let other_distance = Self::distance(0.0, 0.0, *x, *y);
                 CmpBool::from(this_distance > other_distance)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -90,7 +90,7 @@ impl Type for PointType {
                 let this_distance = Self::distance(0.0, 0.0, 0.0, 0.0);
                 let other_distance = Self::distance(0.0, 0.0, *x, *y);
                 CmpBool::from(this_distance >= other_distance)
-            }
+            },
             Val::Null => CmpBool::CmpNull,
             _ => CmpBool::CmpFalse,
         }
@@ -131,7 +131,7 @@ impl Type for PointType {
                 } else {
                     Value::new(Val::Point(*x, *y))
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }
@@ -147,7 +147,7 @@ impl Type for PointType {
                 } else {
                     Value::new(Val::Point(*x, *y))
                 }
-            }
+            },
             _ => Value::new(Val::Null),
         }
     }

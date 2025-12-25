@@ -43,11 +43,11 @@ async fn test_order_by() {
         Ok(s) => {
             println!("Query execution succeeded");
             s
-        }
+        },
         Err(e) => {
             println!("Query execution failed: {:?}", e);
             panic!("Query execution failed: {:?}", e);
-        }
+        },
     };
 
     assert!(success, "Query execution failed");

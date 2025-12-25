@@ -504,7 +504,7 @@ impl LockRequestQueue {
                 (LockMode::IntentionShared, LockMode::Shared)
                 | (LockMode::IntentionExclusive, LockMode::Exclusive) => {
                     // Don't remove the intention lock, just add the new lock
-                }
+                },
                 // For other upgrades, remove the old lock
                 _ => {
                     if self.upgrading != INVALID_TXN_ID && self.upgrading != txn_id {
@@ -512,7 +512,7 @@ impl LockRequestQueue {
                     }
                     self.upgrading = txn_id;
                     self.request_queue.remove(i);
-                }
+                },
             }
         }
 
@@ -966,14 +966,14 @@ impl LockValidator {
         match lock_mode {
             LockMode::Shared | LockMode::IntentionShared | LockMode::SharedIntentionExclusive => {
                 Err(LockError::LockSharedOnReadUncommitted)
-            }
+            },
             LockMode::Exclusive | LockMode::IntentionExclusive => {
                 if txn.get_state() == TransactionState::Shrinking {
                     Err(LockError::LockOnShrinking)
                 } else {
                     Ok(())
                 }
-            }
+            },
         }
     }
 
@@ -1130,27 +1130,27 @@ impl LockManager {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::ReadCommitted => {
                 if matches!(lock_mode, LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::ReadUncommitted => {
                 if matches!(lock_mode, LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::Serializable => {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::Snapshot => {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
         }
 
         // 5. Remove edges from waits-for graph
@@ -1176,8 +1176,8 @@ impl LockManager {
             | LockMode::SharedIntentionExclusive => {
                 txn.set_state(TransactionState::Aborted);
                 return Err(LockError::IntentionLockOnRow);
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // 3. Check if appropriate table lock is held
@@ -1271,27 +1271,27 @@ impl LockManager {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::ReadCommitted => {
                 if matches!(lock_mode, LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::ReadUncommitted => {
                 if matches!(lock_mode, LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::Serializable => {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
             IsolationLevel::Snapshot => {
                 if matches!(lock_mode, LockMode::Shared | LockMode::Exclusive) {
                     txn.set_state(TransactionState::Shrinking);
                 }
-            }
+            },
         }
 
         // 4. Remove edges from waits-for graph

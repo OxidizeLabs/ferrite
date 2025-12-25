@@ -210,7 +210,7 @@ mod tests {
                 );
                 assert_eq!(inner_node.get_type(), PlanType::Transaction);
                 assert!(inner_node.get_children().is_empty());
-            }
+            },
             _ => panic!("Expected RollbackTransaction variant"),
         }
 
@@ -247,7 +247,7 @@ mod tests {
                 if let Some(savepoint) = node.get_savepoint() {
                     write!(result, "\n{}   Savepoint: {}", indent, savepoint).unwrap();
                 }
-            }
+            },
             _ => panic!("Expected RollbackTransaction variant"),
         }
 

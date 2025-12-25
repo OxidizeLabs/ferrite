@@ -148,22 +148,21 @@
 //! - Locks are released in LIFO order when context drops (safe for deadlock prevention)
 
 use crate::common::config::PageId;
-use crate::storage::page::page_guard::PageGuard;
-use crate::storage::page::page_types::{
-    b_plus_tree_internal_page::BPlusTreeInternalPage,
-    b_plus_tree_leaf_page::BPlusTreeLeafPage,
-};
 use crate::storage::index::btree_observability;
 use crate::storage::index::types::{KeyComparator, KeyType};
+use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::page_types::{
+    b_plus_tree_internal_page::BPlusTreeInternalPage, b_plus_tree_leaf_page::BPlusTreeLeafPage,
+};
 use log::trace;
 use parking_lot::lock_api::ArcRwLockWriteGuard;
 use parking_lot::{RawRwLock, RwLock};
 use std::fmt::{Debug, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use std::thread;
 
 /// Type alias for the Arc-owned write guard.
 /// This is returned by `RwLock::write_arc()` when using the `arc_lock` feature.
@@ -173,19 +172,29 @@ type InternalPageWriteGuard<K, C> = ArcRwLockWriteGuard<RawRwLock, BPlusTreeInte
 ///
 /// This combines all the bounds needed for keys in B+ tree operations,
 /// reducing repetition across generic implementations.
-pub trait BPlusTreeKeyBound: KeyType + Send + Sync + Debug + Display + 'static 
-    + bincode::Encode + bincode::Decode<()> {}
+pub trait BPlusTreeKeyBound:
+    KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>
+{
+}
 
-impl<T> BPlusTreeKeyBound for T where T: KeyType + Send + Sync + Debug + Display + 'static 
-    + bincode::Encode + bincode::Decode<()> {}
+impl<T> BPlusTreeKeyBound for T where
+    T: KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>
+{
+}
 
 /// Trait alias for B+ tree comparator requirements.
 ///
 /// This combines all the bounds needed for key comparators in B+ tree operations.
 /// Note: `KeyComparator<K>` already implies `Fn(&K, &K) -> Ordering`.
-pub trait BPlusTreeComparatorBound<K: KeyType>: KeyComparator<K> + Send + Sync + 'static + Clone {}
+pub trait BPlusTreeComparatorBound<K: KeyType>:
+    KeyComparator<K> + Send + Sync + 'static + Clone
+{
+}
 
-impl<K: KeyType, T> BPlusTreeComparatorBound<K> for T where T: KeyComparator<K> + Send + Sync + 'static + Clone {}
+impl<K: KeyType, T> BPlusTreeComparatorBound<K> for T where
+    T: KeyComparator<K> + Send + Sync + 'static + Clone
+{
+}
 
 /// A write-locked internal page that properly holds the write latch.
 ///
@@ -405,7 +414,7 @@ pub enum OptimisticResult<T> {
 }
 
 /// Tracks held latches during tree traversal.
-/// 
+///
 /// This context manages the lifecycle of latches acquired during B+ tree operations,
 /// ensuring proper release order and preventing deadlocks.
 ///
@@ -494,10 +503,7 @@ where
     ///
     /// # Arguments
     /// * `page_guard` - The PageGuard for the internal page
-    pub fn hold_write_lock(
-        &mut self,
-        page_guard: PageGuard<BPlusTreeInternalPage<K, C>>,
-    ) {
+    pub fn hold_write_lock(&mut self, page_guard: PageGuard<BPlusTreeInternalPage<K, C>>) {
         let page_id = page_guard.get_page_id();
         trace!(
             "Latch crabbing: acquiring and holding write lock on page {}, total held: {}",
@@ -522,7 +528,7 @@ where
     }
 
     /// Release all ancestor latches that are safe to release.
-    /// 
+    ///
     /// In pessimistic mode, once we determine a node is "safe" (won't propagate
     /// changes upward), we can release all ancestor latches.
     ///
@@ -606,7 +612,7 @@ where
 /// This is used in latch crabbing to determine when ancestor latches can be released.
 pub trait NodeSafety {
     /// Check if this node is safe for the given operation.
-    /// 
+    ///
     /// Safety criteria:
     /// - **Search**: Always safe (read-only)
     /// - **Insert**: Has room for at least one more key (won't split)
@@ -629,12 +635,12 @@ where
                 // Using saturating_sub to handle edge case where max_size < 2.
                 let threshold = self.get_max_size().saturating_sub(1);
                 self.get_size() < threshold
-            }
+            },
             OperationType::Delete => {
                 // Safe if we have more than minimum keys OR we're the root.
                 // Root leaf can have any number of keys >= 0.
                 self.is_root() || self.get_size() > self.get_min_size()
-            }
+            },
         }
     }
 }
@@ -652,12 +658,12 @@ where
                 // Using saturating_sub to handle edge case where max_size < 2.
                 let threshold = self.get_max_size().saturating_sub(1);
                 self.get_size() < threshold
-            }
+            },
             OperationType::Delete => {
                 // Safe if we have more than minimum keys OR we're the root.
                 // Root internal node with one child is a special case (tree height reduction).
                 self.is_root() || self.get_size() > self.get_min_size()
-            }
+            },
         }
     }
 }
@@ -713,15 +719,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
     use super::*;
+    use std::cmp::Ordering;
 
     // Test LatchContext basic functionality
     #[test]
     fn test_latch_context_new() {
-        let ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
+        let ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> =
             LatchContext::new(OperationType::Insert, LockingProtocol::Optimistic);
-        
+
         assert_eq!(ctx.operation(), OperationType::Insert);
         assert_eq!(ctx.protocol(), LockingProtocol::Optimistic);
         assert_eq!(ctx.held_count(), 0);
@@ -730,41 +736,41 @@ mod tests {
 
     #[test]
     fn test_latch_context_path_tracking() {
-        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
+        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> =
             LatchContext::new(OperationType::Search, LockingProtocol::Optimistic);
-        
+
         ctx.push_path(1);
         ctx.push_path(2);
         ctx.push_path(3);
-        
+
         assert_eq!(ctx.path(), &[1, 2, 3]);
     }
 
     #[test]
     fn test_latch_context_release_safe_ancestors_preserves_path() {
-        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
+        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> =
             LatchContext::new(OperationType::Insert, LockingProtocol::Pessimistic);
-        
+
         ctx.push_path(1);
         ctx.push_path(2);
-        
+
         // release_safe_ancestors should NOT clear the path
         ctx.release_safe_ancestors();
-        
+
         assert_eq!(ctx.path(), &[1, 2]);
         assert_eq!(ctx.held_count(), 0);
     }
 
     #[test]
     fn test_latch_context_release_all_clears_everything() {
-        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
+        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> =
             LatchContext::new(OperationType::Delete, LockingProtocol::Pessimistic);
-        
+
         ctx.push_path(1);
         ctx.push_path(2);
-        
+
         ctx.release_all();
-        
+
         assert!(ctx.path().is_empty());
         assert_eq!(ctx.held_count(), 0);
     }
@@ -775,7 +781,7 @@ mod tests {
         assert_eq!(OperationType::Search, OperationType::Search);
         assert_eq!(OperationType::Insert, OperationType::Insert);
         assert_eq!(OperationType::Delete, OperationType::Delete);
-        
+
         assert_ne!(OperationType::Search, OperationType::Insert);
         assert_ne!(OperationType::Insert, OperationType::Delete);
         assert_ne!(OperationType::Search, OperationType::Delete);
@@ -811,7 +817,7 @@ mod tests {
         let result: OptimisticResult<i32> = OptimisticResult::NeedRestart;
         match result {
             OptimisticResult::Success(_) => panic!("Expected NeedRestart"),
-            OptimisticResult::NeedRestart => {} // Expected
+            OptimisticResult::NeedRestart => {}, // Expected
         }
     }
 
@@ -819,34 +825,34 @@ mod tests {
     fn test_optimistic_result_debug() {
         let success: OptimisticResult<i32> = OptimisticResult::Success(42);
         let restart: OptimisticResult<i32> = OptimisticResult::NeedRestart;
-        
+
         assert!(format!("{:?}", success).contains("Success"));
         assert!(format!("{:?}", restart).contains("NeedRestart"));
     }
 
     #[test]
     fn test_latch_context_take_held_locks() {
-        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
+        let mut ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> =
             LatchContext::new(OperationType::Insert, LockingProtocol::Pessimistic);
-        
+
         // Initially empty
         assert_eq!(ctx.held_count(), 0);
-        
+
         // Take should return empty vec and leave context unchanged
         let locks = ctx.take_held_locks();
         assert!(locks.is_empty());
         assert_eq!(ctx.held_count(), 0);
-        
+
         // Note: Testing with actual HeldWriteLocks requires buffer pool setup.
-        // The key difference from before is that HeldWriteLock *actually* holds 
+        // The key difference from before is that HeldWriteLock *actually* holds
         // the write lock, whereas PageGuard only provided access to acquire locks.
     }
 
     #[test]
     fn test_latch_context_held_locks_accessors() {
-        let ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> = 
+        let ctx: LatchContext<i32, fn(&i32, &i32) -> Ordering> =
             LatchContext::new(OperationType::Delete, LockingProtocol::Pessimistic);
-        
+
         // Verify held_locks() accessor works
         assert!(ctx.held_locks().is_empty());
         assert_eq!(ctx.held_count(), 0);

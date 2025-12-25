@@ -294,18 +294,18 @@ pub fn record_mvcc_operation(operation: &str, chain_length: usize, duration: Dur
             PERFORMANCE_METRICS
                 .avg_version_chain_length
                 .store(chain_length, Ordering::Relaxed);
-        }
+        },
         "visibility_check" => {
             PERFORMANCE_METRICS
                 .tuple_visibility_checks
                 .fetch_add(1, Ordering::Relaxed);
-        }
+        },
         "snapshot_creation" => {
             PERFORMANCE_METRICS
                 .snapshot_creation_time_ns
                 .store(duration.as_nanos() as u64, Ordering::Relaxed);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -508,19 +508,19 @@ pub fn analyze_bottlenecks() -> BottleneckAnalysis {
                 "SELECT".to_string(),
                 "UPDATE".to_string(),
             ]);
-        }
+        },
         "Disk I/O" => {
             recommendations.push("Use faster storage (SSD)".to_string());
             recommendations.push("Implement better I/O scheduling".to_string());
             recommendations.push("Increase batch sizes".to_string());
             affected_operations.extend(vec!["All operations".to_string()]);
-        }
+        },
         "Lock Manager" => {
             recommendations.push("Reduce lock granularity".to_string());
             recommendations.push("Optimize lock scheduling".to_string());
             recommendations.push("Consider optimistic concurrency".to_string());
             affected_operations.extend(vec!["Concurrent transactions".to_string()]);
-        }
+        },
         "MVCC" => {
             recommendations.push("Implement more aggressive garbage collection".to_string());
             recommendations.push("Optimize version chain traversal".to_string());
@@ -529,8 +529,8 @@ pub fn analyze_bottlenecks() -> BottleneckAnalysis {
                 "READ operations".to_string(),
                 "Long transactions".to_string(),
             ]);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     let mut metrics_snapshot = HashMap::new();

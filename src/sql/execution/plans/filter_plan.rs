@@ -117,7 +117,7 @@ impl Display for FilterNode {
             match self.filter_expr.get_filter_type() {
                 FilterType::Where => {
                     write!(f, "\n   Predicate: {:#}", self.filter_expr.get_predicate())?;
-                }
+                },
                 FilterType::Having => {
                     write!(
                         f,
@@ -125,7 +125,7 @@ impl Display for FilterNode {
                         self.filter_expr.get_aggregate().as_ref().unwrap()
                     )?;
                     write!(f, "\n   Predicate: {:#}", self.filter_expr.get_predicate())?;
-                }
+                },
             }
             write!(f, "\n   Table: {}", self.table_name)?;
             write!(f, "\n   Schema: {}", self.output_schema)?;
@@ -139,7 +139,7 @@ impl Display for FilterNode {
             match self.filter_expr.get_filter_type() {
                 FilterType::Where => {
                     write!(f, "Filter WHERE {}", self.filter_expr.get_predicate())?
-                }
+                },
                 FilterType::Having => write!(
                     f,
                     "Filter HAVING {} {}",
@@ -245,19 +245,19 @@ mod tests {
                     let col_ref = create_column_ref(&schema, 1); // value/age column
                     let constant = create_constant_value(25, schema.get_column(1).unwrap().clone());
                     create_comparison(col_ref, constant, ComparisonType::GreaterThan)
-                }
+                },
                 "id < 100" => {
                     let col_ref = create_column_ref(&schema, 0); // id column
                     let constant =
                         create_constant_value(100, schema.get_column(0).unwrap().clone());
                     create_comparison(col_ref, constant, ComparisonType::LessThan)
-                }
+                },
                 "flag = true" => {
                     let col_ref = create_column_ref(&schema, 3); // flag column
                     let constant =
                         create_constant_value(true, schema.get_column(3).unwrap().clone());
                     create_comparison(col_ref, constant, ComparisonType::Equal)
-                }
+                },
                 expr => {
                     // Parse expression in format: "<column> <op> <value>"
                     let parts: Vec<&str> = expr.split_whitespace().collect();
@@ -283,11 +283,11 @@ mod tests {
                     let value = match column.get_type() {
                         TypeId::Integer => {
                             create_constant_value(value_str.parse::<i32>().unwrap(), column)
-                        }
+                        },
                         TypeId::VarChar => create_constant_value(value_str.to_string(), column),
                         TypeId::Boolean => {
                             create_constant_value(value_str.parse::<bool>().unwrap(), column)
-                        }
+                        },
                         _ => panic!("Unsupported type for column: {}", col_name),
                     };
 
@@ -303,7 +303,7 @@ mod tests {
                     };
 
                     create_comparison(col_ref, value, comp_type)
-                }
+                },
             }
         }
     }

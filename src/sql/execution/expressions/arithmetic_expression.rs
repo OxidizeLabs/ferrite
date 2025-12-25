@@ -57,71 +57,71 @@ impl ArithmeticExpression {
             // Same type operations
             (TypeId::TinyInt, TypeId::TinyInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::TinyInt))
-            }
+            },
             (TypeId::SmallInt, TypeId::SmallInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::SmallInt))
-            }
+            },
             (TypeId::Integer, TypeId::Integer) => {
                 Ok(Column::new("arithmetic_result", TypeId::Integer))
-            }
+            },
             (TypeId::BigInt, TypeId::BigInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::BigInt))
-            }
+            },
             (TypeId::Float, TypeId::Float) => Ok(Column::new("arithmetic_result", TypeId::Float)),
             (TypeId::Decimal, TypeId::Decimal) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
-            }
+            },
 
             // Mixed integer type operations - promote to larger type
             (TypeId::TinyInt, TypeId::SmallInt) | (TypeId::SmallInt, TypeId::TinyInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::SmallInt))
-            }
+            },
             (TypeId::TinyInt, TypeId::Integer) | (TypeId::Integer, TypeId::TinyInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Integer))
-            }
+            },
             (TypeId::TinyInt, TypeId::BigInt) | (TypeId::BigInt, TypeId::TinyInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::BigInt))
-            }
+            },
             (TypeId::SmallInt, TypeId::Integer) | (TypeId::Integer, TypeId::SmallInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Integer))
-            }
+            },
             (TypeId::SmallInt, TypeId::BigInt) | (TypeId::BigInt, TypeId::SmallInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::BigInt))
-            }
+            },
             (TypeId::Integer, TypeId::BigInt) | (TypeId::BigInt, TypeId::Integer) => {
                 Ok(Column::new("arithmetic_result", TypeId::BigInt))
-            }
+            },
 
             // Floating point operations - promote to Decimal for precision
             (TypeId::TinyInt, TypeId::Float) | (TypeId::Float, TypeId::TinyInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Float))
-            }
+            },
             (TypeId::SmallInt, TypeId::Float) | (TypeId::Float, TypeId::SmallInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Float))
-            }
+            },
             (TypeId::Integer, TypeId::Float) | (TypeId::Float, TypeId::Integer) => {
                 Ok(Column::new("arithmetic_result", TypeId::Float))
-            }
+            },
             (TypeId::BigInt, TypeId::Float) | (TypeId::Float, TypeId::BigInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Float))
-            }
+            },
             (TypeId::Float, TypeId::Decimal) | (TypeId::Decimal, TypeId::Float) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
-            }
+            },
 
             // Decimal operations - promote to Decimal for precision
             (TypeId::TinyInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::TinyInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
-            }
+            },
             (TypeId::SmallInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::SmallInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
-            }
+            },
             (TypeId::Integer, TypeId::Decimal) | (TypeId::Decimal, TypeId::Integer) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
-            }
+            },
             (TypeId::BigInt, TypeId::Decimal) | (TypeId::Decimal, TypeId::BigInt) => {
                 Ok(Column::new("arithmetic_result", TypeId::Decimal))
-            }
+            },
 
             _ => Err(format!(
                 "Invalid types for arithmetic operation: {}({:?}) and {}({:?})",
@@ -151,12 +151,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(|v| Value::new_with_type(Val::TinyInt(v), TypeId::TinyInt))
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
 
             // SmallInt operations
             (Val::SmallInt(l), Val::SmallInt(r)) => {
@@ -169,12 +169,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
 
             // Integer operations
             (Val::Integer(l), Val::Integer(r)) => {
@@ -187,12 +187,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
 
             // BigInt operations
             (Val::BigInt(l), Val::BigInt(r)) => {
@@ -205,12 +205,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
 
             // Float operations
             (Val::Float(l), Val::Float(r)) => {
@@ -224,10 +224,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
 
             // Decimal operations
             (Val::Decimal(l), Val::Decimal(r)) => {
@@ -241,10 +241,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
 
             // Mixed integer type operations
             (Val::TinyInt(l), Val::SmallInt(r)) => {
@@ -258,12 +258,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::SmallInt(l), Val::TinyInt(r)) => {
                 let r = *r as i16;
                 let result = match self.op {
@@ -275,12 +275,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(r)
-                    }
+                    },
                 };
                 result
                     .map(|v| Value::new_with_type(Val::SmallInt(v), TypeId::SmallInt))
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::TinyInt(l), Val::Integer(r)) => {
                 let l = *l as i32;
                 let result = match self.op {
@@ -292,12 +292,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::Integer(l), Val::TinyInt(r)) => {
                 let r = *r as i32;
                 let result = match self.op {
@@ -309,12 +309,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::SmallInt(l), Val::Integer(r)) => {
                 let l = *l as i32;
                 let result = match self.op {
@@ -326,12 +326,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::Integer(l), Val::SmallInt(r)) => {
                 let r = *r as i32;
                 let result = match self.op {
@@ -343,12 +343,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::TinyInt(l), Val::BigInt(r)) => {
                 let l = *l as i64;
                 let result = match self.op {
@@ -360,12 +360,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::BigInt(l), Val::TinyInt(r)) => {
                 let r = *r as i64;
                 let result = match self.op {
@@ -377,12 +377,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::SmallInt(l), Val::BigInt(r)) => {
                 let l = *l as i64;
                 let result = match self.op {
@@ -394,12 +394,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::BigInt(l), Val::SmallInt(r)) => {
                 let r = *r as i64;
                 let result = match self.op {
@@ -411,12 +411,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::BigInt(l), Val::Integer(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l.checked_add(*r as i64),
@@ -427,12 +427,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r as i64)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::Integer(l), Val::BigInt(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => (*l as i64).checked_add(*r),
@@ -443,12 +443,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         (*l as i64).checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
 
             // Float with integer types
             (Val::TinyInt(l), Val::Float(r)) => {
@@ -463,10 +463,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
             (Val::Float(l), Val::TinyInt(r)) => {
                 let r = *r as f32;
                 let result = match self.op {
@@ -479,10 +479,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
             (Val::SmallInt(l), Val::Float(r)) => {
                 let l = *l as f32;
                 let result = match self.op {
@@ -495,10 +495,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
             (Val::Float(l), Val::SmallInt(r)) => {
                 let r = *r as f32;
                 let result = match self.op {
@@ -511,10 +511,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
             (Val::Integer(l), Val::Float(r)) => {
                 let l = *l as f32;
                 let result = match self.op {
@@ -527,10 +527,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
             (Val::Float(l), Val::Integer(r)) => {
                 let r = *r as f32;
                 let result = match self.op {
@@ -543,10 +543,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
             (Val::BigInt(l), Val::Float(r)) => {
                 let l = *l as f32;
                 let result = match self.op {
@@ -559,10 +559,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
             (Val::Float(l), Val::BigInt(r)) => {
                 let r = *r as f32;
                 let result = match self.op {
@@ -575,10 +575,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::new_with_type(Val::Float(result), TypeId::Float))
-            }
+            },
 
             // Decimal with integer types
             (Val::TinyInt(l), Val::Decimal(r)) => {
@@ -593,10 +593,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::Decimal(l), Val::TinyInt(r)) => {
                 let r = *r as f64;
                 let result = match self.op {
@@ -609,10 +609,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::SmallInt(l), Val::Decimal(r)) => {
                 let l = *l as f64;
                 let result = match self.op {
@@ -625,10 +625,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::Decimal(l), Val::SmallInt(r)) => {
                 let r = *r as f64;
                 let result = match self.op {
@@ -641,10 +641,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::Integer(l), Val::Decimal(r)) => {
                 let l = *l as f64;
                 let result = match self.op {
@@ -657,10 +657,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::Decimal(l), Val::Integer(r)) => {
                 let r = *r as f64;
                 let result = match self.op {
@@ -673,10 +673,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::BigInt(l), Val::Decimal(r)) => {
                 let l = *l as f64;
                 let result = match self.op {
@@ -689,10 +689,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::Decimal(l), Val::BigInt(r)) => {
                 let r = *r as f64;
                 let result = match self.op {
@@ -705,10 +705,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
 
             // Float with Decimal
             (Val::Float(l), Val::Decimal(r)) => {
@@ -723,10 +723,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::Decimal(l), Val::Float(r)) => {
                 let r = *r as f64;
                 let result = match self.op {
@@ -739,10 +739,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
 
             _ => Err(ExpressionError::ArithmeticError(Unknown)),
         }
@@ -773,7 +773,7 @@ impl ExpressionOps for ArithmeticExpression {
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::BigInt(l), Val::BigInt(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l.checked_add(*r),
@@ -784,7 +784,7 @@ impl ExpressionOps for ArithmeticExpression {
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::Decimal(l), Val::Decimal(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l + *r,
@@ -796,10 +796,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::Integer(l), Val::Decimal(r)) | (Val::Decimal(r), Val::Integer(l)) => {
                 let l = *l as f64;
                 let r = *r;
@@ -813,10 +813,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             (Val::BigInt(l), Val::Integer(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => l.checked_add(*r as i64),
@@ -827,12 +827,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         l.checked_div(*r as i64)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::Integer(l), Val::BigInt(r)) => {
                 let result = match self.op {
                     ArithmeticOp::Add => (*l as i64).checked_add(*r),
@@ -843,12 +843,12 @@ impl ExpressionOps for ArithmeticExpression {
                             return Err(ExpressionError::ArithmeticError(DivisionByZero));
                         }
                         (*l as i64).checked_div(*r)
-                    }
+                    },
                 };
                 result
                     .map(Value::from)
                     .ok_or(ExpressionError::ArithmeticError(Overflow))
-            }
+            },
             (Val::BigInt(l), Val::Decimal(r)) | (Val::Decimal(r), Val::BigInt(l)) => {
                 let l = *l as f64;
                 let r = *r;
@@ -862,10 +862,10 @@ impl ExpressionOps for ArithmeticExpression {
                         } else {
                             Err(ExpressionError::ArithmeticError(DivisionByZero))
                         }?
-                    }
+                    },
                 };
                 Ok(Value::from(result))
-            }
+            },
             _ => Err(ExpressionError::ArithmeticError(Unknown)),
         }
     }

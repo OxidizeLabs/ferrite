@@ -33,7 +33,7 @@ impl SubscriptExpression {
         match &subscript {
             Subscript::Single(idx) => {
                 children.push(idx.clone());
-            }
+            },
             Subscript::Range { start, end } => {
                 if let Some(start_expr) = start {
                     children.push(start_expr.clone());
@@ -41,7 +41,7 @@ impl SubscriptExpression {
                 if let Some(end_expr) = end {
                     children.push(end_expr.clone());
                 }
-            }
+            },
         }
 
         Self {
@@ -65,7 +65,7 @@ impl ExpressionOps for SubscriptExpression {
                     "Cannot perform subscript operation on non-vector type: {:?}",
                     value.get_type_id()
                 )));
-            }
+            },
         };
 
         match &self.subscript {
@@ -89,7 +89,7 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             i as usize
                         }
-                    }
+                    },
                     Val::SmallInt(i) => {
                         let i = *i as i32;
                         if i < 0 {
@@ -105,7 +105,7 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             i as usize
                         }
-                    }
+                    },
                     Val::Integer(i) => {
                         if *i < 0 {
                             let len = vec.len() as i32;
@@ -120,7 +120,7 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             *i as usize
                         }
-                    }
+                    },
                     Val::BigInt(i) => {
                         let i = *i as i32;
                         if i < 0 {
@@ -136,12 +136,12 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             i as usize
                         }
-                    }
+                    },
                     _ => {
                         return Err(ExpressionError::InvalidType(
                             "Array index must be an integer".to_string(),
                         ));
-                    }
+                    },
                 };
 
                 // Check bounds
@@ -153,7 +153,7 @@ impl ExpressionOps for SubscriptExpression {
                 }
 
                 Ok(vec[index].clone())
-            }
+            },
 
             Subscript::Range { start, end } => {
                 let start_idx = match start {
@@ -168,7 +168,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::SmallInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -177,7 +177,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
@@ -185,7 +185,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            }
+                            },
                             Val::BigInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -194,14 +194,14 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range start index must be an integer".to_string(),
                                 ));
-                            }
+                            },
                         }
-                    }
+                    },
                     None => 0,
                 };
 
@@ -217,7 +217,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::SmallInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -226,7 +226,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
@@ -234,7 +234,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            }
+                            },
                             Val::BigInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -243,14 +243,14 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range end index must be an integer".to_string(),
                                 ));
-                            }
+                            },
                         }
-                    }
+                    },
                     None => vec.len(),
                 };
 
@@ -262,7 +262,7 @@ impl ExpressionOps for SubscriptExpression {
                 };
 
                 Ok(Value::new_vector(result))
-            }
+            },
         }
     }
 
@@ -285,7 +285,7 @@ impl ExpressionOps for SubscriptExpression {
                     "Cannot perform subscript operation on non-vector type: {:?}",
                     value.get_type_id()
                 )));
-            }
+            },
         };
 
         match &self.subscript {
@@ -309,7 +309,7 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             i as usize
                         }
-                    }
+                    },
                     Val::SmallInt(i) => {
                         let i = *i as i32;
                         if i < 0 {
@@ -324,7 +324,7 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             i as usize
                         }
-                    }
+                    },
                     Val::Integer(i) => {
                         if *i < 0 {
                             let len = vec.len() as i32;
@@ -338,7 +338,7 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             *i as usize
                         }
-                    }
+                    },
                     Val::BigInt(i) => {
                         let i = *i as i32;
                         if i < 0 {
@@ -353,12 +353,12 @@ impl ExpressionOps for SubscriptExpression {
                         } else {
                             i as usize
                         }
-                    }
+                    },
                     _ => {
                         return Err(ExpressionError::InvalidType(
                             "Array index must be an integer".to_string(),
                         ));
-                    }
+                    },
                 };
 
                 if index >= vec.len() {
@@ -369,7 +369,7 @@ impl ExpressionOps for SubscriptExpression {
                 }
 
                 Ok(vec[index].clone())
-            }
+            },
 
             Subscript::Range { start, end } => {
                 // Similar logic as evaluate() for range handling
@@ -390,7 +390,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::SmallInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -399,7 +399,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
@@ -407,7 +407,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            }
+                            },
                             Val::BigInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -416,14 +416,14 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range start index must be an integer".to_string(),
                                 ));
-                            }
+                            },
                         }
-                    }
+                    },
                     None => 0,
                 };
 
@@ -444,7 +444,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::SmallInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -453,7 +453,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             Val::Integer(i) => {
                                 if *i < 0 {
                                     let len = vec.len() as i32;
@@ -461,7 +461,7 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     *i as usize
                                 }
-                            }
+                            },
                             Val::BigInt(i) => {
                                 let i = *i as i32;
                                 if i < 0 {
@@ -470,14 +470,14 @@ impl ExpressionOps for SubscriptExpression {
                                 } else {
                                     i as usize
                                 }
-                            }
+                            },
                             _ => {
                                 return Err(ExpressionError::InvalidType(
                                     "Range end index must be an integer".to_string(),
                                 ));
-                            }
+                            },
                         }
-                    }
+                    },
                     None => vec.len(),
                 };
 
@@ -488,7 +488,7 @@ impl ExpressionOps for SubscriptExpression {
                 };
 
                 Ok(Value::new_vector(result))
-            }
+            },
         }
     }
 
@@ -523,7 +523,7 @@ impl ExpressionOps for SubscriptExpression {
                     "Expected 2 children for single subscript"
                 );
                 Subscript::Single(children[1].clone())
-            }
+            },
             Subscript::Range { start: _, end: _ } => {
                 assert!(children.len() <= 3, "Too many children for range subscript");
                 Subscript::Range {
@@ -538,7 +538,7 @@ impl ExpressionOps for SubscriptExpression {
                         None
                     },
                 }
-            }
+            },
         };
 
         Arc::new(Expression::Subscript(SubscriptExpression::new(
@@ -569,7 +569,7 @@ impl ExpressionOps for SubscriptExpression {
                         "Array index must be an integer".to_string(),
                     ));
                 }
-            }
+            },
             Subscript::Range { start, end } => {
                 if let Some(start) = start {
                     start.validate(schema)?;
@@ -587,7 +587,7 @@ impl ExpressionOps for SubscriptExpression {
                         ));
                     }
                 }
-            }
+            },
         }
 
         Ok(())
@@ -614,7 +614,7 @@ impl Display for SubscriptExpression {
                     write!(f, "{}", end)?;
                 }
                 write!(f, "]")
-            }
+            },
         }
     }
 }
@@ -713,7 +713,7 @@ mod tests {
                 assert_eq!(v[0], Value::new(2));
                 assert_eq!(v[1], Value::new(3));
                 assert_eq!(v[2], Value::new(4));
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }
@@ -748,7 +748,7 @@ mod tests {
                 assert_eq!(v.len(), 2);
                 assert_eq!(v[0], Value::new(3));
                 assert_eq!(v[1], Value::new(4));
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }
@@ -819,7 +819,7 @@ mod tests {
                 for (i, item) in v.iter().enumerate().take(5) {
                     assert_eq!(*item, Value::new(i as i32 + 1));
                 }
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }
@@ -988,7 +988,7 @@ mod tests {
                 assert_eq!(v[0], Value::new(3));
                 assert_eq!(v[1], Value::new(4));
                 assert_eq!(v[2], Value::new(5));
-            }
+            },
             _ => panic!("Expected vector result"),
         }
 
@@ -1012,7 +1012,7 @@ mod tests {
                 assert_eq!(v[0], Value::new(1));
                 assert_eq!(v[1], Value::new(2));
                 assert_eq!(v[2], Value::new(3));
-            }
+            },
             _ => panic!("Expected vector result"),
         }
 
@@ -1037,7 +1037,7 @@ mod tests {
         match result.get_val() {
             Val::Vector(v) => {
                 assert_eq!(v.len(), 0); // Empty range
-            }
+            },
             _ => panic!("Expected vector result"),
         }
 
@@ -1062,7 +1062,7 @@ mod tests {
         match result.get_val() {
             Val::Vector(v) => {
                 assert_eq!(v.len(), 0); // Empty range when start == end
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }
@@ -1094,7 +1094,7 @@ mod tests {
         match result.get_val() {
             Val::Vector(v) => {
                 assert_eq!(v.len(), 0); // Empty because end > vector.len()
-            }
+            },
             _ => panic!("Expected vector result"),
         }
 
@@ -1119,7 +1119,7 @@ mod tests {
         match result.get_val() {
             Val::Vector(v) => {
                 assert_eq!(v.len(), 0); // Empty because start > vector.len()
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }
@@ -1172,7 +1172,7 @@ mod tests {
         match result.get_val() {
             Val::Vector(v) => {
                 assert_eq!(v.len(), 0); // Empty result
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }
@@ -1297,7 +1297,7 @@ mod tests {
                 assert_eq!(v.len(), 2); // Elements at indices 2 and 3
                 assert_eq!(v[0], Value::new(3));
                 assert_eq!(v[1], Value::new(4));
-            }
+            },
             _ => panic!("Expected vector result"),
         }
 
@@ -1323,7 +1323,7 @@ mod tests {
             Val::Vector(v) => {
                 assert_eq!(v.len(), 1); // Element at index 3
                 assert_eq!(v[0], Value::new(4));
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }
@@ -1377,7 +1377,7 @@ mod tests {
                 assert_eq!(v.len(), 100); // 100 elements from index 100 to 199
                 assert_eq!(v[0], Value::new(100));
                 assert_eq!(v[99], Value::new(199));
-            }
+            },
             _ => panic!("Expected vector result"),
         }
     }

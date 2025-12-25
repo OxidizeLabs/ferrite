@@ -25,11 +25,11 @@ pub struct LiveMetrics {
     pub io_count: AtomicU64,
     pub io_throughput_bytes: AtomicU64,
     pub io_queue_depth: AtomicUsize,
-    
+
     pub read_ops_count: AtomicU64,
     pub write_ops_count: AtomicU64,
     pub batch_ops_count: AtomicU64,
-    
+
     // Latency Distribution (Histogram)
     // Buckets: <10us, <100us, <500us, <1ms, <5ms, <10ms, <50ms, <100ms, <500ms, <1s, >1s
     // 11 buckets
@@ -42,7 +42,7 @@ pub struct LiveMetrics {
     pub cache_misses: AtomicU64,
     pub cache_evictions: AtomicU64,
     pub cache_memory_usage: AtomicUsize,
-    
+
     pub hot_cache_hits: AtomicU64,
     pub warm_cache_hits: AtomicU64,
     pub cold_cache_hits: AtomicU64,
@@ -54,18 +54,18 @@ pub struct LiveMetrics {
     pub write_buffer_utilization: AtomicU64,
     pub flush_count: AtomicU64,
     pub write_amplification: AtomicU64, // Scaled by 100
-    pub compression_ratio: AtomicU64, // Scaled by 100
+    pub compression_ratio: AtomicU64,   // Scaled by 100
     pub total_bytes_written: AtomicU64,
 
     // System Resources
     pub memory_usage: AtomicUsize,
-    pub cpu_usage: AtomicU64, // Scaled by 100
+    pub cpu_usage: AtomicU64,        // Scaled by 100
     pub disk_utilization: AtomicU64, // Scaled by 100
-    
+
     // Error Tracking
     pub error_count: AtomicU64,
     pub retry_count: AtomicU64,
-    
+
     // Performance Counters (calculated periodically)
     pub transactions_per_second: AtomicU64,
     pub pages_per_second: AtomicU64,
@@ -74,7 +74,7 @@ pub struct LiveMetrics {
     // Health Indicators
     pub health_score: AtomicU64, // 0-100 health score
     pub uptime_seconds: AtomicU64,
-    
+
     // Timing
     pub start_time: Instant,
 }
@@ -94,11 +94,11 @@ impl Default for LiveMetrics {
             read_ops_count: AtomicU64::new(0),
             write_ops_count: AtomicU64::new(0),
             batch_ops_count: AtomicU64::new(0),
-            
+
             latency_buckets,
             latency_max: AtomicU64::new(0),
             latency_min: AtomicU64::new(u64::MAX),
-            
+
             cache_hits: AtomicU64::new(0),
             cache_misses: AtomicU64::new(0),
             cache_evictions: AtomicU64::new(0),
@@ -109,27 +109,27 @@ impl Default for LiveMetrics {
             cache_promotions: AtomicU64::new(0),
             cache_demotions: AtomicU64::new(0),
             prefetch_hits: AtomicU64::new(0),
-            
+
             write_buffer_utilization: AtomicU64::new(0),
             flush_count: AtomicU64::new(0),
             write_amplification: AtomicU64::new(0),
             compression_ratio: AtomicU64::new(0),
             total_bytes_written: AtomicU64::new(0),
-            
+
             memory_usage: AtomicUsize::new(0),
             cpu_usage: AtomicU64::new(0),
             disk_utilization: AtomicU64::new(0),
-            
+
             error_count: AtomicU64::new(0),
             retry_count: AtomicU64::new(0),
-            
+
             transactions_per_second: AtomicU64::new(0),
             pages_per_second: AtomicU64::new(0),
             bytes_per_second: AtomicU64::new(0),
-            
+
             health_score: AtomicU64::new(100),
             uptime_seconds: AtomicU64::new(0),
-            
+
             start_time: Instant::now(),
         }
     }

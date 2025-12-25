@@ -3,16 +3,16 @@
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use env_logger::Builder;
-use log::info;
-use rustyline::DefaultEditor;
-use std::error;
-use std::sync::Arc;
 use ferrite::cli::CLI;
 use ferrite::client::DatabaseClient;
 use ferrite::common::db_instance::{DBConfig, DBInstance};
 use ferrite::common::exception::DBError;
 use ferrite::common::logger::initialize_logger;
 use ferrite::server::{ServerConfig, ServerHandle};
+use log::info;
+use rustyline::DefaultEditor;
+use std::error;
+use std::sync::Arc;
 use tokio::signal;
 
 #[derive(Parser)]
@@ -146,7 +146,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
                     if line.trim().ends_with(';') {
                         break;
                     }
-                }
+                },
                 Err(_) => return Ok(()),
             }
         }
@@ -210,7 +210,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
                 if results.messages.is_empty() && results.column_names.is_empty() {
                     println!("\nQuery executed successfully");
                 }
-            }
+            },
             Err(e) => {
                 // Format error message for better readability
                 let error_msg = match e {
@@ -230,7 +230,7 @@ async fn run_client(addr: &str) -> Result<(), Box<dyn error::Error>> {
                     DBError::Recovery(msg) => format!("Recovery Error: {}", msg),
                 };
                 eprintln!("\n{}\n", error_msg);
-            }
+            },
         }
     }
 

@@ -448,7 +448,7 @@ async fn create_index_if_not_exists() {
                 .await
                 .unwrap();
             assert!(ok);
-        }
+        },
         Err(_) => {
             let ok = db
                 .execute_sql(
@@ -459,7 +459,7 @@ async fn create_index_if_not_exists() {
                 .await
                 .unwrap();
             assert!(ok);
-        }
+        },
     }
 
     let ok = db
