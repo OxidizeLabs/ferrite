@@ -169,69 +169,137 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 
+/// Represents a column in a database table schema.
+///
+/// A column captures type information, storage parameters, and SQL constraints.
+/// Columns are typically created using constructors like [`Column::new`] or the
+/// [`ColumnBuilder`] for more complex configurations.
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub struct Column {
+    /// The name of the column.
     column_name: String,
+    /// The data type of the column.
     column_type: TypeId,
+    /// Storage size in bytes (for fixed types) or max length (for variable types).
     length: usize,
+    /// Byte offset within a tuple (set during schema construction).
     column_offset: usize,
+    /// Whether this column is part of the primary key.
     is_primary_key: bool,
-    is_not_null: bool,                         // NOT NULL constraint
-    is_unique: bool,                           // UNIQUE constraint
-    check_constraint: Option<String>,          // CHECK constraint expression
-    default_value: Option<Value>,              // DEFAULT value
-    foreign_key: Option<ForeignKeyConstraint>, // FOREIGN KEY constraint
-    precision: Option<u8>,                     // For DECIMAL/NUMERIC types: total number of digits
-    scale: Option<u8>, // For DECIMAL/NUMERIC types: number of digits after decimal point
+    /// Whether this column has a NOT NULL constraint.
+    is_not_null: bool,
+    /// Whether this column has a UNIQUE constraint.
+    is_unique: bool,
+    /// Optional CHECK constraint expression.
+    check_constraint: Option<String>,
+    /// Optional DEFAULT value for the column.
+    default_value: Option<Value>,
+    /// Optional FOREIGN KEY constraint.
+    foreign_key: Option<ForeignKeyConstraint>,
+    /// Precision for DECIMAL/NUMERIC types (total digits).
+    precision: Option<u8>,
+    /// Scale for DECIMAL/NUMERIC types (digits after decimal point).
+    scale: Option<u8>,
 }
 
-/// Parameters for creating a column from SQL type information
+/// Parameters for creating a column from SQL type information.
+///
+/// This struct encapsulates all SQL column definition parameters for use
+/// with [`Column::from_sql_info`].
 pub struct ColumnSqlInfo {
+    /// The name of the column.
     pub column_name: String,
+    /// The data type of the column.
     pub column_type: TypeId,
+    /// Optional length for variable-length types.
     pub length: Option<usize>,
+    /// Optional precision for numeric types.
     pub precision: Option<u8>,
+    /// Optional scale for decimal types.
     pub scale: Option<u8>,
+    /// Whether this is a primary key column.
     pub is_primary_key: bool,
+    /// Whether the column has NOT NULL constraint.
     pub is_not_null: bool,
+    /// Whether the column has UNIQUE constraint.
     pub is_unique: bool,
+    /// Optional CHECK constraint expression.
     pub check_constraint: Option<String>,
+    /// Optional DEFAULT value.
     pub default_value: Option<Value>,
+    /// Optional FOREIGN KEY constraint.
     pub foreign_key: Option<ForeignKeyConstraint>,
 }
 
-/// Foreign key constraint information
+/// Foreign key constraint information.
+///
+/// Defines a reference to a column in another table with optional
+/// referential actions for DELETE and UPDATE operations.
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub struct ForeignKeyConstraint {
+    /// The name of the referenced table.
     pub referenced_table: String,
+    /// The name of the referenced column.
     pub referenced_column: String,
+    /// Action to take when the referenced row is deleted.
     pub on_delete: Option<ReferentialAction>,
+    /// Action to take when the referenced row is updated.
     pub on_update: Option<ReferentialAction>,
 }
 
-/// Referential actions for foreign key constraints
+/// Referential actions for foreign key constraints.
+///
+/// Specifies what happens to dependent rows when a referenced row is
+/// deleted or updated.
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 pub enum ReferentialAction {
+    /// Delete or update dependent rows automatically.
     Cascade,
+    /// Set the foreign key column(s) to NULL.
     SetNull,
+    /// Set the foreign key column(s) to their default values.
     SetDefault,
+    /// Prevent the operation if dependent rows exist.
     Restrict,
+    /// Same as Restrict but checked at end of transaction.
     NoAction,
 }
 
-/// Builder for creating columns with specific parameters
+/// Builder for creating columns with specific parameters.
+///
+/// Provides a fluent interface for constructing [`Column`] instances with
+/// custom type parameters and constraints.
+///
+/// # Example
+/// ```rust,ignore
+/// let col = ColumnBuilder::new("price", TypeId::Decimal)
+///     .with_precision_and_scale(10, 2)
+///     .as_not_null()
+///     .build();
+/// ```
 #[derive(Debug, Clone)]
 pub struct ColumnBuilder {
+    /// The column name.
     column_name: String,
+    /// The column data type.
     column_type: TypeId,
+    /// Optional length for variable-length types.
     length: Option<usize>,
+    /// Whether this is a primary key.
     is_primary_key: bool,
+    /// Whether NOT NULL constraint applies.
     is_not_null: bool,
+    /// Whether UNIQUE constraint applies.
     is_unique: bool,
+    /// Optional CHECK constraint.
     check_constraint: Option<String>,
+    /// Optional DEFAULT value.
     default_value: Option<Value>,
+    /// Optional FOREIGN KEY constraint.
     foreign_key: Option<ForeignKeyConstraint>,
+    /// Precision for numeric types.
     precision: Option<u8>,
+    /// Scale for decimal types.
     scale: Option<u8>,
 }
 
@@ -533,30 +601,40 @@ impl Column {
         self.column_offset = value;
     }
 
+    /// Returns the data type of this column.
     pub fn get_type(&self) -> TypeId {
         self.column_type
     }
 
+    /// Returns whether this column's data is stored inline in the tuple.
+    ///
+    /// VarChar columns are not inlined (stored separately), while all other
+    /// types are stored directly in the tuple.
     pub fn is_inlined(&self) -> bool {
         self.column_type != TypeId::VarChar
     }
 
+    /// Sets the name of this column.
     pub fn set_name(&mut self, name: String) {
         self.column_name = name;
     }
 
+    /// Returns whether this column is part of the primary key.
     pub fn is_primary_key(&self) -> bool {
         self.is_primary_key
     }
 
+    /// Sets whether this column is part of the primary key.
     pub fn set_primary_key(&mut self, is_primary_key: bool) {
         self.is_primary_key = is_primary_key;
     }
 
+    /// Returns the precision for numeric types (total digits).
     pub fn get_precision(&self) -> Option<u8> {
         self.precision
     }
 
+    /// Returns the scale for decimal types (digits after decimal point).
     pub fn get_scale(&self) -> Option<u8> {
         self.scale
     }
@@ -598,42 +676,52 @@ impl Column {
         )
     }
 
+    /// Returns whether this column has a NOT NULL constraint.
     pub fn is_not_null(&self) -> bool {
         self.is_not_null
     }
 
+    /// Sets whether this column has a NOT NULL constraint.
     pub fn set_not_null(&mut self, is_not_null: bool) {
         self.is_not_null = is_not_null;
     }
 
+    /// Returns whether this column has a UNIQUE constraint.
     pub fn is_unique(&self) -> bool {
         self.is_unique
     }
 
+    /// Sets whether this column has a UNIQUE constraint.
     pub fn set_unique(&mut self, is_unique: bool) {
         self.is_unique = is_unique;
     }
 
+    /// Returns the CHECK constraint expression, if any.
     pub fn get_check_constraint(&self) -> &Option<String> {
         &self.check_constraint
     }
 
+    /// Sets the CHECK constraint expression.
     pub fn set_check_constraint(&mut self, constraint: Option<String>) {
         self.check_constraint = constraint;
     }
 
+    /// Returns the DEFAULT value for this column, if any.
     pub fn get_default_value(&self) -> &Option<Value> {
         &self.default_value
     }
 
+    /// Sets the DEFAULT value for this column.
     pub fn set_default_value(&mut self, value: Option<Value>) {
         self.default_value = value;
     }
 
+    /// Returns the FOREIGN KEY constraint, if any.
     pub fn get_foreign_key(&self) -> &Option<ForeignKeyConstraint> {
         &self.foreign_key
     }
 
+    /// Sets the FOREIGN KEY constraint for this column.
     pub fn set_foreign_key(&mut self, constraint: Option<ForeignKeyConstraint>) {
         self.foreign_key = constraint;
     }
