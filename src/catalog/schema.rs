@@ -150,17 +150,54 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 
+/// Represents the structure of a database table.
+///
+/// A schema is an ordered collection of columns with computed storage layout
+/// information. During construction, byte offsets are calculated for each
+/// column based on their storage sizes.
+///
+/// # Storage Layout
+/// - **Inlined columns**: Fixed-size types stored directly in the tuple
+/// - **Non-inlined columns**: Variable-length types stored as pointers
+///
+/// # Example
+/// ```rust,ignore
+/// let columns = vec![
+///     Column::new("id", TypeId::Integer),
+///     Column::new("name", TypeId::VarChar),
+/// ];
+/// let schema = Schema::new(columns);
+/// ```
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct Schema {
+    /// The ordered list of columns in this schema.
     columns: Vec<Column>,
+    /// Total storage size in bytes for inlined data.
     length: u32,
+    /// Whether all columns are stored inline (no variable-length types).
     tuple_is_inlined: bool,
+    /// Indices of columns that are not inlined (e.g., VarChar).
     unlined_columns: Vec<u32>,
+    /// Indices of columns that form the primary key.
     primary_key_columns: Vec<usize>,
 }
 
 impl Schema {
     /// Creates a new schema from a vector of columns.
+    ///
+    /// This constructor processes each column to compute byte offsets and
+    /// identifies which columns require non-inlined storage (e.g., VarChar).
+    ///
+    /// # Parameters
+    /// - `columns`: A vector of [`Column`] definitions for the schema.
+    ///
+    /// # Returns
+    /// A new `Schema` with computed storage layout metadata.
+    ///
+    /// # Storage Layout Computation
+    /// - Each column's offset is set based on cumulative storage sizes
+    /// - Inlined columns use their actual storage size
+    /// - Non-inlined columns reserve `size_of::<usize>()` bytes for a pointer
     pub fn new(columns: Vec<Column>) -> Schema {
         let mut curr_offset = 0;
         let mut tuple_is_inlined = true;
@@ -192,6 +229,23 @@ impl Schema {
     }
 
     /// Creates a new schema by copying specified columns from another schema.
+    ///
+    /// This is useful for creating projection schemas that contain only a
+    /// subset of columns from the original table schema.
+    ///
+    /// # Parameters
+    /// - `from`: The source schema to copy columns from.
+    /// - `attrs`: Column indices to include in the new schema.
+    ///
+    /// # Returns
+    /// A new `Schema` containing clones of the specified columns.
+    ///
+    /// # Panics
+    /// Panics if any index in `attrs` is out of bounds for the source schema.
+    ///
+    /// # Note
+    /// The new schema preserves the original's storage metadata (length,
+    /// inlined status, primary key columns) rather than recomputing them.
     pub fn copy_schema(from: &Schema, attrs: &[usize]) -> Schema {
         let columns: Vec<Column> = attrs.iter().map(|&i| from.columns[i].clone()).collect();
         Schema {
@@ -204,21 +258,47 @@ impl Schema {
     }
 
     /// Returns a reference to all columns in the schema.
+    ///
+    /// Use this for iterating over columns or accessing multiple columns.
+    /// For single column access, prefer [`get_column`](Self::get_column).
     pub fn get_columns(&self) -> &Vec<Column> {
         &self.columns
     }
 
     /// Returns a mutable reference to all columns in the schema.
+    ///
+    /// Use this when modifying column properties (e.g., setting aliases
+    /// during query planning).
+    ///
+    /// # Warning
+    /// Modifying columns after schema construction may invalidate cached
+    /// storage layout metadata (offsets, inlined status).
     pub fn get_columns_mut(&mut self) -> &mut Vec<Column> {
         &mut self.columns
     }
 
     /// Returns a reference to the column at the specified index.
+    ///
+    /// # Parameters
+    /// - `column_index`: Zero-based index of the column.
+    ///
+    /// # Returns
+    /// `Some(&Column)` if the index is valid, `None` otherwise.
     pub fn get_column(&self, column_index: usize) -> Option<&Column> {
         self.columns.get(column_index)
     }
 
-    /// Returns the index of a column by name.
+    /// Returns the index of a column by its exact name.
+    ///
+    /// Performs a case-sensitive linear search through the columns.
+    /// For qualified name lookup (e.g., `table.column`), use
+    /// [`get_qualified_column_index`](Self::get_qualified_column_index).
+    ///
+    /// # Parameters
+    /// - `column_name`: The exact column name to search for.
+    ///
+    /// # Returns
+    /// `Some(index)` if found, `None` otherwise.
     pub fn get_column_index(&self, column_name: &str) -> Option<usize> {
         for (index, column) in self.columns.iter().enumerate() {
             if column.get_name() == column_name {
@@ -228,7 +308,32 @@ impl Schema {
         None
     }
 
-    /// Returns the index of a column by qualified name (table.column format).
+    /// Returns the index of a column by qualified name (`table.column` format).
+    ///
+    /// This method implements flexible column resolution for SQL queries,
+    /// handling both qualified and unqualified column references.
+    ///
+    /// # Resolution Strategy
+    /// 1. **Exact match**: Try to find a column with the exact name
+    /// 2. **Qualified input** (`table.column`):
+    ///    - Search for columns matching `table.column` pattern
+    ///    - Fall back to matching just the column part (unqualified)
+    /// 3. **Unqualified input**:
+    ///    - Search qualified columns for matching column part
+    ///
+    /// # Parameters
+    /// - `column_name`: Column name, optionally qualified with table alias.
+    ///
+    /// # Returns
+    /// `Some(index)` if a matching column is found, `None` otherwise.
+    ///
+    /// # Examples
+    /// ```rust,ignore
+    /// // Given schema with columns: ["users.id", "users.name", "age"]
+    /// schema.get_qualified_column_index("users.id");  // Some(0)
+    /// schema.get_qualified_column_index("id");        // Some(0) - matches users.id
+    /// schema.get_qualified_column_index("age");       // Some(2) - exact match
+    /// ```
     pub fn get_qualified_column_index(&self, column_name: &str) -> Option<usize> {
         // First try exact match (for already qualified names)
         if let Some(idx) = self.get_column_index(column_name) {
@@ -275,12 +380,16 @@ impl Schema {
         None
     }
 
-    /// Returns a reference to the uninlined column indices.
+    /// Returns a reference to the indices of non-inlined columns.
+    ///
+    /// Non-inlined columns (e.g., `VarChar`) store pointers in the tuple
+    /// rather than the actual data. This list is used by the tuple storage
+    /// layer for proper serialization.
     pub fn get_unlined_columns(&self) -> &Vec<u32> {
         &self.unlined_columns
     }
 
-    /// Returns the count of uninlined columns.
+    /// Returns the count of non-inlined (variable-length) columns.
     pub fn get_unlined_column_count(&self) -> u32 {
         self.unlined_columns.len() as u32
     }
@@ -290,17 +399,44 @@ impl Schema {
         self.columns.len() as u32
     }
 
-    /// Returns the storage size for inlined data.
+    /// Returns the total storage size in bytes for inlined tuple data.
+    ///
+    /// This represents the fixed-size portion of a tuple that is stored
+    /// directly in the page. Variable-length columns contribute only their
+    /// pointer size (`size_of::<usize>()`) to this value.
     pub fn get_inlined_storage_size(&self) -> u32 {
         self.length
     }
 
-    /// Returns whether the tuple is fully inlined.
+    /// Returns whether all columns are stored inline.
+    ///
+    /// A schema is fully inlined if it contains no variable-length types
+    /// (e.g., `VarChar`). Fully inlined tuples are simpler to process
+    /// and have predictable sizes.
     pub fn is_inlined(&self) -> bool {
         self.tuple_is_inlined
     }
 
-    /// Merges two schemas into a new schema.
+    /// Merges two schemas into a new schema by concatenating their columns.
+    ///
+    /// This is used during join operations to create the output schema.
+    /// Columns from the left schema appear first, followed by right schema columns.
+    ///
+    /// # Parameters
+    /// - `left`: The left (outer) schema.
+    /// - `right`: The right (inner) schema.
+    ///
+    /// # Returns
+    /// A new `Schema` containing all columns from both inputs with
+    /// recomputed storage layout.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let users = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+    /// let orders = Schema::new(vec![Column::new("total", TypeId::Decimal)]);
+    /// let joined = Schema::merge(&users, &orders);
+    /// // joined contains: [id, total]
+    /// ```
     pub fn merge(left: &Schema, right: &Schema) -> Schema {
         let mut merged_columns = left.get_columns().clone();
         merged_columns.extend(right.get_columns().iter().cloned());
@@ -308,6 +444,32 @@ impl Schema {
     }
 
     /// Merges two schemas with optional table aliases for column qualification.
+    ///
+    /// Similar to [`merge`](Self::merge), but prefixes column names with table
+    /// aliases to avoid ambiguity in join results. This is essential when both
+    /// schemas contain columns with the same name.
+    ///
+    /// # Parameters
+    /// - `left`: The left (outer) schema.
+    /// - `right`: The right (inner) schema.
+    /// - `left_alias`: Optional alias prefix for left columns (e.g., `"u"` → `"u.id"`).
+    /// - `right_alias`: Optional alias prefix for right columns.
+    ///
+    /// # Returns
+    /// A new `Schema` with aliased column names and recomputed storage layout.
+    ///
+    /// # Alias Behavior
+    /// - If a column already has a qualified name and the alias differs, it is updated
+    /// - If a column already has the same alias, it is left unchanged
+    /// - If no alias is provided, columns are copied as-is
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let users = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+    /// let orders = Schema::new(vec![Column::new("id", TypeId::Integer)]);
+    /// let joined = Schema::merge_with_aliases(&users, &orders, Some("u"), Some("o"));
+    /// // joined contains: [u.id, o.id]
+    /// ```
     pub fn merge_with_aliases(
         left: &Schema,
         right: &Schema,
@@ -367,12 +529,30 @@ impl Schema {
         Schema::new(merged_columns)
     }
 
-    /// Returns the indices of primary key columns.
+    /// Returns the indices of columns that form the primary key.
+    ///
+    /// An empty vector indicates no primary key is defined.
+    /// For composite primary keys, multiple indices are returned.
     pub fn get_primary_key_columns(&self) -> &Vec<usize> {
         &self.primary_key_columns
     }
 
     /// Sets the primary key column indices.
+    ///
+    /// # Parameters
+    /// - `columns`: Vector of column indices that form the primary key.
+    ///
+    /// # Note
+    /// No bounds checking is performed. Callers should ensure all indices
+    /// are valid for this schema. For composite keys, provide multiple indices.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let mut schema = Schema::new(columns);
+    /// schema.set_primary_key_columns(vec![0]);       // Single PK
+    /// schema.set_primary_key_columns(vec![0, 1]);    // Composite PK
+    /// schema.set_primary_key_columns(vec![]);        // Clear PK
+    /// ```
     pub fn set_primary_key_columns(&mut self, columns: Vec<usize>) {
         self.primary_key_columns = columns;
     }
