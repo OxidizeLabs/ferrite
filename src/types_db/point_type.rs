@@ -13,6 +13,7 @@ impl Default for PointType {
 }
 
 impl PointType {
+    /// Creates a new `PointType` instance.
     pub fn new() -> Self {
         PointType
     }

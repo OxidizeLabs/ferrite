@@ -12,6 +12,7 @@ impl Default for InvalidType {
 }
 
 impl InvalidType {
+    /// Creates a new `InvalidType` instance.
     pub fn new() -> Self {
         InvalidType
     }

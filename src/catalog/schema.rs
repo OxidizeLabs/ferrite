@@ -160,6 +160,7 @@ pub struct Schema {
 }
 
 impl Schema {
+    /// Creates a new schema from a vector of columns.
     pub fn new(columns: Vec<Column>) -> Schema {
         let mut curr_offset = 0;
         let mut tuple_is_inlined = true;
@@ -190,6 +191,7 @@ impl Schema {
         }
     }
 
+    /// Creates a new schema by copying specified columns from another schema.
     pub fn copy_schema(from: &Schema, attrs: &[usize]) -> Schema {
         let columns: Vec<Column> = attrs.iter().map(|&i| from.columns[i].clone()).collect();
         Schema {
@@ -201,18 +203,22 @@ impl Schema {
         }
     }
 
+    /// Returns a reference to all columns in the schema.
     pub fn get_columns(&self) -> &Vec<Column> {
         &self.columns
     }
 
+    /// Returns a mutable reference to all columns in the schema.
     pub fn get_columns_mut(&mut self) -> &mut Vec<Column> {
         &mut self.columns
     }
 
+    /// Returns a reference to the column at the specified index.
     pub fn get_column(&self, column_index: usize) -> Option<&Column> {
         self.columns.get(column_index)
     }
 
+    /// Returns the index of a column by name.
     pub fn get_column_index(&self, column_name: &str) -> Option<usize> {
         for (index, column) in self.columns.iter().enumerate() {
             if column.get_name() == column_name {
@@ -222,6 +228,7 @@ impl Schema {
         None
     }
 
+    /// Returns the index of a column by qualified name (table.column format).
     pub fn get_qualified_column_index(&self, column_name: &str) -> Option<usize> {
         // First try exact match (for already qualified names)
         if let Some(idx) = self.get_column_index(column_name) {
@@ -268,32 +275,39 @@ impl Schema {
         None
     }
 
+    /// Returns a reference to the uninlined column indices.
     pub fn get_unlined_columns(&self) -> &Vec<u32> {
         &self.unlined_columns
     }
 
+    /// Returns the count of uninlined columns.
     pub fn get_unlined_column_count(&self) -> u32 {
         self.unlined_columns.len() as u32
     }
 
+    /// Returns the total number of columns in the schema.
     pub fn get_column_count(&self) -> u32 {
         self.columns.len() as u32
     }
 
+    /// Returns the storage size for inlined data.
     pub fn get_inlined_storage_size(&self) -> u32 {
         self.length
     }
 
+    /// Returns whether the tuple is fully inlined.
     pub fn is_inlined(&self) -> bool {
         self.tuple_is_inlined
     }
 
+    /// Merges two schemas into a new schema.
     pub fn merge(left: &Schema, right: &Schema) -> Schema {
         let mut merged_columns = left.get_columns().clone();
         merged_columns.extend(right.get_columns().iter().cloned());
         Schema::new(merged_columns)
     }
 
+    /// Merges two schemas with optional table aliases for column qualification.
     pub fn merge_with_aliases(
         left: &Schema,
         right: &Schema,
@@ -353,10 +367,12 @@ impl Schema {
         Schema::new(merged_columns)
     }
 
+    /// Returns the indices of primary key columns.
     pub fn get_primary_key_columns(&self) -> &Vec<usize> {
         &self.primary_key_columns
     }
 
+    /// Sets the primary key column indices.
     pub fn set_primary_key_columns(&mut self, columns: Vec<usize>) {
         self.primary_key_columns = columns;
     }

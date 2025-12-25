@@ -344,6 +344,7 @@ impl LRUKReplacer {
         self.size
     }
 
+    /// Returns the K value used for the LRU-K replacement policy.
     pub fn get_k(&self) -> usize {
         self.k
     }

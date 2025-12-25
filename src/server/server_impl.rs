@@ -225,6 +225,7 @@ pub struct ServerHandle {
 }
 
 impl ServerHandle {
+    /// Creates a new server handle for the specified port.
     pub fn new(port: u16) -> Self {
         Self {
             port,
@@ -233,6 +234,7 @@ impl ServerHandle {
         }
     }
 
+    /// Starts the server with the provided database instance.
     pub fn start(&mut self, db: Arc<DBInstance>) -> Result<(), Box<dyn std::error::Error>> {
         let port = self.port;
         let runtime = self.runtime.as_ref().unwrap();
@@ -270,6 +272,7 @@ impl ServerHandle {
         Ok(())
     }
 
+    /// Shuts down the server gracefully.
     pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_timeout(Duration::from_secs(10));

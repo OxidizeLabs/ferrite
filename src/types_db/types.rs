@@ -322,6 +322,7 @@ impl From<bool> for CmpBool {
     }
 }
 
+/// Returns a static reference to the type instance for the given type ID.
 pub fn get_instance(type_id: TypeId) -> &'static dyn Type {
     match type_id {
         TypeId::Boolean => &boolean_type::BOOLEAN_TYPE_INSTANCE,
@@ -349,6 +350,7 @@ pub fn get_instance(type_id: TypeId) -> &'static dyn Type {
     }
 }
 
+/// Returns the storage size in bytes for the given type ID.
 pub fn get_type_size(type_id: TypeId) -> u64 {
     match type_id {
         TypeId::Boolean | TypeId::TinyInt => 1,
@@ -365,6 +367,7 @@ pub fn get_type_size(type_id: TypeId) -> u64 {
     }
 }
 
+/// Converts a type ID to its string representation.
 pub fn type_id_to_string(type_id: TypeId) -> String {
     match type_id {
         TypeId::Boolean => "Boolean".to_string(),

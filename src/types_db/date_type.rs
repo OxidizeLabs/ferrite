@@ -14,6 +14,7 @@ impl Default for DateType {
 }
 
 impl DateType {
+    /// Creates a new `DateType` instance.
     pub fn new() -> Self {
         DateType
     }

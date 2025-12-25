@@ -47,6 +47,7 @@ pub struct Value {
 }
 
 impl Value {
+    /// Creates a new `Value` from any type that can be converted into a `Val`.
     pub fn new<T: Into<Val>>(value: T) -> Self {
         let val = value.into();
         let type_id = match &val {
@@ -82,6 +83,7 @@ impl Value {
         }
     }
 
+    /// Creates a new vector `Value` from an iterator of items convertible to `Value`.
     pub fn new_vector<I>(iter: I) -> Self
     where
         I: IntoIterator,
@@ -97,10 +99,12 @@ impl Value {
         }
     }
 
+    /// Returns a reference to the underlying `Val` variant.
     pub fn get_val(&self) -> &Val {
         &self.value_
     }
 
+    /// Returns the storage size in bytes required for this value.
     pub fn get_storage_size(&self) -> u32 {
         match &self.value_ {
             Val::Boolean(_) => 1,
@@ -128,6 +132,7 @@ impl Value {
         }
     }
 
+    /// Serializes this value to a byte vector.
     pub fn as_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         match &self.value_ {
@@ -170,6 +175,7 @@ impl Value {
         matches!(self.value_, Val::Null)
     }
 
+    /// Returns true if this value is a numeric type.
     pub fn is_numeric(&self) -> bool {
         matches!(
             self.value_,
@@ -192,6 +198,7 @@ impl Value {
         }
     }
 
+    /// Creates a new `Value` with an explicit type ID.
     pub fn new_with_type(val: Val, type_id: TypeId) -> Self {
         // `new_with_type` is primarily used for typed NULLs and for constructors that already
         // ensure the `Val` variant matches the `TypeId`. Catch accidental mismatches in debug builds.
@@ -232,6 +239,7 @@ impl Value {
         }
     }
 
+    /// Returns the type identifier for this value.
     pub fn get_type_id(&self) -> TypeId {
         self.type_id_
     }

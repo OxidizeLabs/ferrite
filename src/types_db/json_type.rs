@@ -13,6 +13,7 @@ impl Default for JSONType {
 }
 
 impl JSONType {
+    /// Creates a new `JSONType` instance.
     pub fn new() -> Self {
         JSONType
     }

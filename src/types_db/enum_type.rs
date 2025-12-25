@@ -13,6 +13,7 @@ impl Default for EnumType {
 }
 
 impl EnumType {
+    /// Creates a new `EnumType` instance.
     pub fn new() -> Self {
         EnumType
     }

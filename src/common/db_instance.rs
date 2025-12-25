@@ -497,6 +497,7 @@ impl DBInstance {
         )))
     }
 
+    /// Executes a SQL statement with the specified isolation level.
     pub async fn execute_sql(
         &self,
         sql: &str,
@@ -558,6 +559,7 @@ impl DBInstance {
         }
     }
 
+    /// Executes SQL within an existing transaction context.
     pub async fn execute_transaction(
         &self,
         sql: &str,
@@ -574,6 +576,7 @@ impl DBInstance {
         engine.execute_sql(sql, exec_ctx, writer).await
     }
 
+    /// Displays all tables in the current database.
     pub fn display_tables(&self, writer: &mut dyn ResultWriter) -> Result<(), DBError> {
         let catalog = self.catalog.read();
         let table_names = catalog.get_table_names();
@@ -614,6 +617,7 @@ impl DBInstance {
         Ok(())
     }
 
+    /// Returns information about a specific table.
     pub fn get_table_info(&self, table_name: &str) -> Result<String, DBError> {
         let catalog = self.catalog.read();
         let table_info = catalog.get_table(table_name).unwrap();
@@ -637,27 +641,32 @@ impl DBInstance {
         Ok("Table info displayed".to_string())
     }
 
-    // Add back the getter methods
+    /// Returns a reference to the database configuration.
     pub fn get_config(&self) -> &DBConfig {
         &self.config
     }
 
+    /// Returns a reference to the buffer pool manager.
     pub fn get_buffer_pool_manager(&self) -> &Arc<BufferPoolManager> {
         &self.buffer_pool_manager
     }
 
+    /// Returns a reference to the catalog.
     pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
         &self.catalog
     }
 
+    /// Returns a reference to the transaction factory.
     pub fn get_transaction_factory(&self) -> &Arc<TransactionManagerFactory> {
         &self.transaction_factory
     }
 
+    /// Begins a new transaction with the specified isolation level.
     pub fn begin_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
         self.transaction_factory.begin_transaction(isolation_level)
     }
 
+    /// Commits the transaction with the specified ID.
     pub async fn commit_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
         let txn_manager = self.transaction_factory.get_transaction_manager();
 
@@ -678,6 +687,7 @@ impl DBInstance {
         Ok(())
     }
 
+    /// Aborts the transaction with the specified ID.
     pub fn abort_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
         let txn_manager = self.transaction_factory.get_transaction_manager();
 

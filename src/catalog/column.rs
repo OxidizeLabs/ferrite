@@ -477,6 +477,7 @@ impl Column {
         builder.build()
     }
 
+    /// Creates a copy of this column with a new name.
     pub fn replicate(&self, new_name: &str) -> Self {
         Self {
             column_name: new_name.to_string(),
@@ -494,6 +495,7 @@ impl Column {
         }
     }
 
+    /// Returns a copy of this column with the specified name.
     pub fn with_name(&self, new_name: &str) -> Self {
         Self {
             column_name: new_name.to_string(),
@@ -511,18 +513,22 @@ impl Column {
         }
     }
 
+    /// Returns the name of this column.
     pub fn get_name(&self) -> &str {
         &self.column_name
     }
 
+    /// Returns the storage size of this column in bytes.
     pub fn get_storage_size(&self) -> usize {
         self.length
     }
 
+    /// Returns the byte offset of this column within a tuple.
     pub fn get_offset(&self) -> usize {
         self.column_offset
     }
 
+    /// Sets the byte offset of this column within a tuple.
     pub fn set_offset(&mut self, value: usize) {
         self.column_offset = value;
     }

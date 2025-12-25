@@ -194,6 +194,7 @@ impl Default for SystemCatalogSchemas {
 }
 
 impl SystemCatalogSchemas {
+    /// Creates a new set of system catalog schemas.
     pub fn new() -> Self {
         let tables = Schema::new(vec![
             Column::new("table_oid", TypeId::BigInt),
@@ -247,6 +248,7 @@ pub struct TableCatalogRow {
 }
 
 impl TableCatalogRow {
+    /// Converts this row to a vector of values for storage.
     pub fn to_values(&self) -> Vec<Value> {
         vec![
             Value::new(self.table_oid as i64),
@@ -257,6 +259,7 @@ impl TableCatalogRow {
         ]
     }
 
+    /// Creates a row from a tuple.
     pub fn from_tuple(tuple: &crate::storage::table::tuple::Tuple) -> Option<Self> {
         let oid = value_to_i64(&tuple.get_value(0))? as TableOidT;
         let name = value_to_string(&tuple.get_value(1))?;
@@ -285,6 +288,7 @@ pub struct IndexCatalogRow {
 }
 
 impl IndexCatalogRow {
+    /// Converts this row to a vector of values for storage.
     pub fn to_values(&self) -> Vec<Value> {
         let key_attrs_bin =
             bincode::encode_to_vec(&self.key_attrs, storage_bincode_config()).unwrap_or_default();

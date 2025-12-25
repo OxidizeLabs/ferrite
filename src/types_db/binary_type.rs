@@ -13,6 +13,7 @@ impl Default for BinaryType {
 }
 
 impl BinaryType {
+    /// Creates a new `BinaryType` instance.
     pub fn new() -> Self {
         BinaryType
     }
