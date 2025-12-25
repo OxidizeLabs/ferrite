@@ -160,35 +160,69 @@ use crate::types_db::types::Type;
 use crate::types_db::value::Value;
 use std::collections::HashMap;
 
-/// Constraint validation result
+/// Describes a specific constraint violation detected during validation.
+///
+/// Each variant contains information about the violated constraint,
+/// including the column name(s) and relevant values for error reporting.
 #[derive(Debug, PartialEq)]
 pub enum ConstraintViolation {
+    /// NOT NULL constraint violation: a NULL value was provided for a non-nullable column.
     NotNull {
+        /// The name of the column that cannot be NULL.
         column: String,
     },
+    /// PRIMARY KEY constraint violation: duplicate or NULL value in primary key column(s).
     PrimaryKey {
+        /// The name(s) of the primary key column(s).
         columns: Vec<String>,
     },
+    /// UNIQUE constraint violation: duplicate value in a unique column.
     Unique {
+        /// The name of the unique column.
         column: String,
+        /// The duplicate value (as string representation).
         value: String,
     },
+    /// CHECK constraint violation: the value failed the check expression.
     Check {
+        /// The name of the column with the check constraint.
         column: String,
+        /// The check constraint expression that was violated.
         constraint: String,
     },
+    /// FOREIGN KEY constraint violation: referenced value does not exist.
     ForeignKey {
+        /// The name of the foreign key column.
         column: String,
+        /// The name of the referenced table.
         referenced_table: String,
+        /// The name of the referenced column.
         referenced_column: String,
     },
 }
 
-/// Constraint validator for table operations
+/// Stateful validator for SQL constraint checking during DML operations.
+///
+/// The validator maintains caches for uniqueness checking, allowing it to
+/// detect duplicate values within a batch of inserts. Caches are keyed by
+/// `table:column` format.
+///
+/// # Thread Safety
+/// This struct is **not thread-safe**. Each transaction or thread should
+/// use its own validator instance.
+///
+/// # Example
+/// ```rust,ignore
+/// let mut validator = ConstraintValidator::new();
+/// match validator.validate_tuple(&tuple, &schema, "users") {
+///     Ok(()) => { /* insert succeeded */ }
+///     Err(violations) => { /* handle constraint errors */ }
+/// }
+/// ```
 pub struct ConstraintValidator {
-    /// Cache for unique value tracking per column
+    /// Cache for unique value tracking per column (key: `table:column`).
     unique_values: HashMap<String, HashMap<String, Value>>,
-    /// Cache for primary key tracking
+    /// Cache for primary key tracking (key: `table:pk`).
     primary_key_values: HashMap<String, Value>,
 }
 
@@ -199,6 +233,10 @@ impl Default for ConstraintValidator {
 }
 
 impl ConstraintValidator {
+    /// Creates a new constraint validator with empty caches.
+    ///
+    /// The validator starts with no cached unique or primary key values.
+    /// Values are accumulated as tuples are validated.
     pub fn new() -> Self {
         Self {
             unique_values: HashMap::new(),
@@ -206,7 +244,20 @@ impl ConstraintValidator {
         }
     }
 
-    /// Validate a tuple against all schema constraints
+    /// Validates a tuple against all schema-defined constraints.
+    ///
+    /// Performs comprehensive validation including NOT NULL, UNIQUE, CHECK,
+    /// and PRIMARY KEY constraints. Collects all violations rather than
+    /// failing on the first error.
+    ///
+    /// # Parameters
+    /// - `tuple`: The tuple to validate
+    /// - `schema`: The table schema with constraint definitions
+    /// - `table_name`: The name of the table (used for cache keys)
+    ///
+    /// # Returns
+    /// `Ok(())` if all constraints are satisfied, or `Err(Vec<ConstraintViolation>)`
+    /// containing all detected violations.
     pub fn validate_tuple(
         &mut self,
         tuple: &Tuple,
@@ -246,7 +297,14 @@ impl ConstraintValidator {
         }
     }
 
-    /// Validate NOT NULL constraint
+    /// Validates the NOT NULL constraint for a column value.
+    ///
+    /// # Parameters
+    /// - `column`: The column definition with constraint metadata
+    /// - `value`: The value to validate
+    ///
+    /// # Returns
+    /// `Ok(())` if the constraint is satisfied, or `Err(ConstraintViolation::NotNull)` if violated.
     fn validate_not_null(&self, column: &Column, value: &Value) -> Result<(), ConstraintViolation> {
         if column.is_not_null() && value.is_null() {
             return Err(ConstraintViolation::NotNull {
@@ -256,7 +314,18 @@ impl ConstraintValidator {
         Ok(())
     }
 
-    /// Validate UNIQUE constraint
+    /// Validates the UNIQUE constraint for a column value.
+    ///
+    /// Checks if the value already exists in the validator's cache for this
+    /// table and column. If unique, adds the value to the cache.
+    ///
+    /// # Parameters
+    /// - `column`: The column definition with constraint metadata
+    /// - `value`: The value to validate
+    /// - `table_name`: The name of the table (used for cache key)
+    ///
+    /// # Returns
+    /// `Ok(())` if the value is unique, or `Err(ConstraintViolation::Unique)` if duplicate.
     fn validate_unique(
         &mut self,
         column: &Column,
@@ -282,7 +351,18 @@ impl ConstraintValidator {
         Ok(())
     }
 
-    /// Validate CHECK constraint
+    /// Validates the CHECK constraint for a column value.
+    ///
+    /// Currently supports basic numeric comparison constraints like `price > 0`.
+    /// More complex expressions would require a full expression evaluator.
+    ///
+    /// # Parameters
+    /// - `column`: The column definition with optional check constraint
+    /// - `value`: The value to validate
+    ///
+    /// # Returns
+    /// `Ok(())` if no check constraint or constraint is satisfied,
+    /// or `Err(ConstraintViolation::Check)` if violated.
     fn validate_check_constraint(
         &self,
         column: &Column,
@@ -307,7 +387,19 @@ impl ConstraintValidator {
         Ok(())
     }
 
-    /// Validate PRIMARY KEY constraint
+    /// Validates the PRIMARY KEY constraint for a tuple.
+    ///
+    /// Checks if the primary key value(s) already exist in the validator's cache.
+    /// For single-column primary keys, the full value is cached. Composite keys
+    /// are not fully implemented.
+    ///
+    /// # Parameters
+    /// - `tuple`: The tuple being validated
+    /// - `schema`: The table schema with primary key column(s)
+    /// - `table_name`: The name of the table (used for cache key)
+    ///
+    /// # Returns
+    /// `Ok(())` if the primary key is unique, or `Err(ConstraintViolation::PrimaryKey)` if duplicate.
     fn validate_primary_key(
         &mut self,
         tuple: &Tuple,
@@ -348,7 +440,19 @@ impl ConstraintValidator {
         Ok(())
     }
 
-    /// Validate FOREIGN KEY constraint
+    /// Validates the FOREIGN KEY constraint for a column value.
+    ///
+    /// Checks if the value exists in the referenced table's column. The
+    /// referenced data must be provided externally as a lookup map.
+    ///
+    /// # Parameters
+    /// - `column`: The column definition with foreign key constraint
+    /// - `value`: The value to validate
+    /// - `_referenced_table_data`: Map of existing values in the referenced table
+    ///
+    /// # Returns
+    /// `Ok(())` if the referenced value exists or value is NULL,
+    /// or `Err(ConstraintViolation::ForeignKey)` if the reference is invalid.
     pub fn validate_foreign_key(
         &self,
         column: &Column,
@@ -371,7 +475,15 @@ impl ConstraintValidator {
         Ok(())
     }
 
-    /// Apply default values to a tuple
+    /// Applies default values to NULL columns in a tuple.
+    ///
+    /// For each column with a DEFAULT value defined, if the tuple's value
+    /// is NULL, the default value would be applied. Currently logs the
+    /// intended action (full implementation requires tuple mutation support).
+    ///
+    /// # Parameters
+    /// - `tuple`: The tuple to modify (mutable reference)
+    /// - `schema`: The table schema with default value definitions
     pub fn apply_defaults(&self, tuple: &mut Tuple, schema: &Schema) {
         for (i, column) in schema.get_columns().iter().enumerate() {
             let value = tuple.get_value(i);
