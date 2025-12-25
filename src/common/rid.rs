@@ -246,7 +246,7 @@ impl RID {
         if self.page_id > u32::MAX as PageId {
             return None;
         }
-        let packed = ((self.page_id as u64) << 32) | (self.slot_num as u64);
+        let packed = (self.page_id << 32) | (self.slot_num as u64);
         Some(packed as i64)
     }
 

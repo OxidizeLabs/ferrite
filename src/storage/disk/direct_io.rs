@@ -255,7 +255,7 @@ fn is_offset_aligned(offset: u64, alignment: usize) -> bool {
     if alignment == 0 {
         return true;
     }
-    offset % (alignment as u64) == 0
+    offset.is_multiple_of(alignment as u64)
 }
 
 #[inline]

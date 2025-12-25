@@ -313,9 +313,8 @@ impl TupleMeta {
         }
 
         // Committed versions are visible if commit_ts <= reader's snapshot.
-        if !self
-            .commit_timestamp
-            .is_some_and(|commit_ts| commit_ts <= read_ts)
+        if self
+            .commit_timestamp.is_none_or(|commit_ts| commit_ts > read_ts)
         {
             return TupleVisibility::Invisible;
         }
@@ -545,7 +544,7 @@ impl Tuple {
                 self.len = self
                     .len
                     .checked_add(buf.len())
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "length overflow"))?;
+                    .ok_or_else(|| io::Error::other("length overflow"))?;
                 Ok(buf.len())
             }
             fn flush(&mut self) -> io::Result<()> {

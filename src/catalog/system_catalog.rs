@@ -187,6 +187,12 @@ pub struct SystemCatalogSchemas {
     pub columns: Schema,
 }
 
+impl Default for SystemCatalogSchemas {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemCatalogSchemas {
     pub fn new() -> Self {
         let tables = Schema::new(vec![

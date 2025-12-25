@@ -275,10 +275,7 @@ impl TablePage {
 
         let tuple_offset = slot_end_offset.saturating_sub(tuple_size);
 
-        let metadata_footprint = match self.metadata_footprint_with_new(meta) {
-            Some(bytes) => bytes,
-            None => return None,
-        };
+        let metadata_footprint = self.metadata_footprint_with_new(meta)?;
 
         // Ensure we have enough space for tuple data + metadata region.
         if tuple_offset < metadata_footprint as u16 {

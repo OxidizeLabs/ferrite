@@ -1489,7 +1489,7 @@ impl TupleStorage {
         let mut page = page_guard.write();
 
         // Try to insert into the current page
-        if page.has_space_for(&*meta, &*tuple) {
+        if page.has_space_for(meta, &*tuple) {
             let rid = page
                 .insert_tuple(meta, tuple)
                 .ok_or("Failed to insert tuple into page")?;
