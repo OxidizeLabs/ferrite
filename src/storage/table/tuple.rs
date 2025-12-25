@@ -314,7 +314,8 @@ impl TupleMeta {
 
         // Committed versions are visible if commit_ts <= reader's snapshot.
         if self
-            .commit_timestamp.is_none_or(|commit_ts| commit_ts > read_ts)
+            .commit_timestamp
+            .is_none_or(|commit_ts| commit_ts > read_ts)
         {
             return TupleVisibility::Invisible;
         }

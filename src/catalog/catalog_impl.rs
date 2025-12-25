@@ -558,18 +558,18 @@ impl Catalog {
         // Load snapshot first if available to seed faster rebuild
         if snapshot_path.exists()
             && let Ok(bytes) = fs::read(snapshot_path)
-                && let Ok((snapshot_rows, _)) =
-                    decode_from_slice::<Vec<TableCatalogRow>, _>(&bytes, storage_bincode_config())
-                {
-                    for row in snapshot_rows {
-                        if row.table_oid <= SYS_TABLES_OID {
-                            continue;
-                        }
-                        if let Some(info) = self.row_to_table_info(&row) {
-                            rebuilt.push(info);
-                        }
-                    }
+            && let Ok((snapshot_rows, _)) =
+                decode_from_slice::<Vec<TableCatalogRow>, _>(&bytes, storage_bincode_config())
+        {
+            for row in snapshot_rows {
+                if row.table_oid <= SYS_TABLES_OID {
+                    continue;
                 }
+                if let Some(info) = self.row_to_table_info(&row) {
+                    rebuilt.push(info);
+                }
+            }
+        }
 
         for (_meta, tuple) in scan {
             if let Some(row) = TableCatalogRow::from_tuple(&tuple) {
@@ -590,9 +590,10 @@ impl Catalog {
         }
 
         if !rows.is_empty()
-            && let Ok(bytes) = encode_to_vec(&rows, storage_bincode_config()) {
-                let _ = fs::write(snapshot_path, bytes);
-            }
+            && let Ok(bytes) = encode_to_vec(&rows, storage_bincode_config())
+        {
+            let _ = fs::write(snapshot_path, bytes);
+        }
     }
 
     fn row_to_table_info(&self, row: &TableCatalogRow) -> Option<TableInfo> {
