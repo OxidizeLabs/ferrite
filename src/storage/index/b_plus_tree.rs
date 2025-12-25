@@ -42,7 +42,7 @@
 //! ## Key Components
 //!
 //! - **[`BPlusTree`]**: Main tree structure holding the root node, order, and metadata
-//! - **[`BPlusTreeNode`]**: Internal struct representing both internal and leaf nodes
+//! - **`BPlusTreeNode`**: Internal struct representing both internal and leaf nodes
 //! - **[`NodeType`]**: Enum distinguishing `Internal` from `Leaf` nodes
 //!
 //! ## Features

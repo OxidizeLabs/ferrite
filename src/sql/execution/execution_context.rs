@@ -533,7 +533,7 @@ impl ExecutionContext {
         self.nlj_check_exec_set.push_back((left_exec, right_exec));
     }
 
-    /// Convenience method for adding check options from Box<dyn AbstractExecutor>
+    /// Convenience method for adding check options from `Box<dyn AbstractExecutor>`
     pub fn add_check_option_from_executor_type(
         &mut self,
         left_exec: ExecutorType,

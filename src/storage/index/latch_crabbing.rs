@@ -117,7 +117,7 @@
 //!
 //! ## Observability
 //!
-//! Integrates with [`btree_observability`](super::btree_observability) for:
+//! Integrates with [`btree_observability`] for:
 //! - Warning on slow lock acquisitions (potential deadlock detection)
 //! - Recording lock wait times and hold times
 //! - Optional timeout in tests to prevent infinite hangs

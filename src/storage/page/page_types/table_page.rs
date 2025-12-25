@@ -48,7 +48,7 @@
 //! # Thread Safety
 //!
 //! `TablePage` itself is not thread-safe. Concurrent access should be coordinated
-//! through [`PageGuard`](crate::storage::page::PageGuard) and the buffer pool manager.
+//! through `PageGuard` and the buffer pool manager.
 
 use crate::common::config::{
     DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE, storage_bincode_config,

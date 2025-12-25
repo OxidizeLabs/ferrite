@@ -40,7 +40,7 @@
 //! - **Lookup**: [`hash_to_bucket_index`](ExtendableHTableDirectoryPage::hash_to_bucket_index)
 //!   masks the hash with global depth bits to find the directory slot.
 //! - **Growth**: When a bucket splits and its `local_depth` would exceed `global_depth`,
-//!   the directory doubles in size via [`grow_directory`].
+//!   the directory doubles in size via `grow_directory`.
 //! - **Split**: [`split_bucket`](ExtendableHTableDirectoryPage::split_bucket) handles
 //!   bucket overflow by redistributing directory pointers.
 //! - **Merge**: [`merge_bucket`](ExtendableHTableDirectoryPage::merge_bucket) combines
@@ -48,7 +48,7 @@
 //!
 //! # Invariants
 //!
-//! The directory maintains several invariants (verified by [`verify_integrity`]):
+//! The directory maintains several invariants (verified by `verify_integrity`):
 //! - All local depths ≤ global depth
 //! - Each bucket has exactly 2^(global_depth - local_depth) directory pointers
 //! - All slots pointing to the same bucket have the same local depth

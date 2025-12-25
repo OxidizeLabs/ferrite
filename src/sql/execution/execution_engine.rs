@@ -144,7 +144,7 @@
 //!
 //! ## Async Execution
 //!
-//! The [`execute_sql`] and [`execute_plan`] methods are async to support:
+//! The `execute_sql` and `execute_plan` methods are async to support:
 //! - Non-blocking I/O through `BufferPoolManager`
 //! - Async transaction commits with WAL flushing
 //! - Concurrent query execution in multi-connection scenarios

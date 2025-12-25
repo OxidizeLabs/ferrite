@@ -31,7 +31,7 @@
 //! ## Key Components
 //!
 //! - **[`LRUKReplacer`]**: The main replacer managing frame eviction decisions
-//! - **[`FrameEntry`]**: Internal tracking of access history and evictability
+//! - **`FrameEntry`**: Internal tracking of access history and evictability
 //! - **[`AccessType`]**: Classification of access patterns (Lookup, Scan, Index)
 //! - **[`Frame`]**: Representation of a buffer pool frame
 //!
