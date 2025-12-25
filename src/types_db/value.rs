@@ -31,6 +31,36 @@ pub enum Val {
     Struct,
 }
 
+impl Val {
+    /// Returns the variant name without exposing inner data (for safe logging).
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Val::Boolean(_) => "Boolean",
+            Val::TinyInt(_) => "TinyInt",
+            Val::SmallInt(_) => "SmallInt",
+            Val::Integer(_) => "Integer",
+            Val::BigInt(_) => "BigInt",
+            Val::Decimal(_) => "Decimal",
+            Val::Float(_) => "Float",
+            Val::Timestamp(_) => "Timestamp",
+            Val::Date(_) => "Date",
+            Val::Time(_) => "Time",
+            Val::Interval(_) => "Interval",
+            Val::VarLen(_) => "VarLen",
+            Val::ConstLen(_) => "ConstLen",
+            Val::Binary(_) => "Binary",
+            Val::JSON(_) => "JSON",
+            Val::UUID(_) => "UUID",
+            Val::Vector(_) => "Vector",
+            Val::Array(_) => "Array",
+            Val::Enum(_, _) => "Enum",
+            Val::Point(_, _) => "Point",
+            Val::Null => "Null",
+            Val::Struct => "Struct",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Encode, Decode)]
 pub enum Size {
     Length(usize),
@@ -221,7 +251,8 @@ impl Value {
                     Val::Struct => type_id == TypeId::Struct,
                     Val::Null => true,
                 },
-            "mismatched Val/TypeId passed to Value::new_with_type: val={val:?}, type_id={type_id:?}"
+            "mismatched Val/TypeId passed to Value::new_with_type: val_variant={}, type_id={type_id:?}",
+            val.variant_name()
         );
         Self {
             value_: val,
