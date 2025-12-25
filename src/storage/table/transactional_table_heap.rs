@@ -797,13 +797,7 @@ impl TransactionalTableHeap {
                 }
             },
             IsolationLevel::ReadCommitted => {
-                if meta.get_creator_txn_id() == txn.get_transaction_id() {
-                    if meta.is_deleted() {
-                        Err("Tuple is deleted".to_string())
-                    } else {
-                        Ok((meta, tuple))
-                    }
-                } else if meta.is_committed() {
+                if meta.get_creator_txn_id() == txn.get_transaction_id() || meta.is_committed() {
                     if meta.is_deleted() {
                         Err("Tuple is deleted".to_string())
                     } else {

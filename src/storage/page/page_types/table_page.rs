@@ -74,7 +74,7 @@ use std::mem::size_of;
 ///   num_tuples (2), num_deleted_tuples (2).
 /// - Start magic (4 bytes): 0xDEADBEEF (big-endian) for basic corruption check.
 /// - Slot directory entries (one per tuple), packed front-to-back:
-///     [offset: u16][size: u16][TupleMeta (bincode-encoded, variable)]
+///   [offset: u16][size: u16][TupleMeta (bincode-encoded, variable)]
 /// - End magic (4 bytes): 0xCAFEBABE (big-endian) immediately after the last
 ///   encoded TupleMeta.
 /// - Tuple bodies: written from the end of the page backward; `offset` points

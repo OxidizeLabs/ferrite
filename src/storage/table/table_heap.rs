@@ -616,7 +616,7 @@ impl TableHeap {
                     let txn_manager = txn_ctx.get_transaction_manager();
                     let mut current_link = txn_manager.get_undo_link(rid);
 
-                    while let Some(ref undo_link) = current_link {
+                    if let Some(ref undo_link) = current_link {
                         let undo_log = match txn_manager.get_undo_log(undo_link.clone()) {
                             Ok(log) => log,
                             Err(e) => return Err(format!("Undo log missing: {}", e)),
@@ -643,10 +643,10 @@ impl TableHeap {
                             return Err("Tuple is deleted".to_string());
                         }
                         // First committed version in chain is what READ_COMMITTED should see.
-                        return Ok((Arc::new(prev_meta), undo_log.tuple.clone()));
+                        Ok((Arc::new(prev_meta), undo_log.tuple.clone()))
+                    } else {
+                        Err("No visible version found".to_string())
                     }
-
-                    Err("No visible version found".to_string())
                 }
             },
 
