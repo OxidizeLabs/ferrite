@@ -177,60 +177,120 @@ use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use bincode::{Decode, Encode};
 
-/// The type of the log record.
+/// The type of the log record, identifying the operation being logged.
+///
+/// Each type corresponds to a specific database operation that needs to be
+/// captured for crash recovery. See the module-level documentation for
+/// detailed descriptions of each type.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
 pub enum LogRecordType {
+    /// Represents an invalid or uninitialized log record.
     Invalid = 0,
+    /// A tuple was inserted into a table.
     Insert,
+    /// A tuple was marked for deletion (soft delete).
     MarkDelete,
+    /// A previously marked deletion was finalized (hard delete).
     ApplyDelete,
+    /// A previously marked deletion was rolled back.
     RollbackDelete,
+    /// A tuple was updated (stores both old and new values).
     Update,
+    /// A transaction began execution.
     Begin,
+    /// A transaction committed successfully (durability point).
     Commit,
+    /// A transaction was aborted and its changes rolled back.
     Abort,
+    /// A new page was allocated in the database.
     NewPage,
 }
 
-/// A log record is the unit of logging. It's used to log operations that need to be persisted.
+/// A log record is the unit of logging for Write-Ahead Logging (WAL).
 ///
-/// Each log record has a header that consists of:
-/// - size: The size of the log record in bytes, including the header.
-/// - LSN: Log Sequence Number.
-/// - txn_id: Transaction ID.
-/// - prev_lsn: Previous LSN of the transaction.
-/// - log_record_type: The type of the log record.
+/// Log records capture database operations for crash recovery, enabling the system
+/// to redo committed transactions and undo uncommitted ones after a failure.
 ///
-/// Based on the record type, different additional information is stored.
+/// ## Header Fields
+///
+/// All log records share a common header:
+/// - `size`: Total serialized size in bytes
+/// - `lsn`: Log Sequence Number (unique, monotonically increasing)
+/// - `txn_id`: Transaction ID that created this record
+/// - `prev_lsn`: Links to the previous record in the same transaction
+/// - `log_record_type`: Identifies the operation type
+///
+/// ## Payload Fields
+///
+/// Based on the record type, different payload fields are populated:
+/// - **Insert/Delete**: `rid` + `tuple`
+/// - **Update**: `rid` + `old_tuple` + `new_tuple`
+/// - **NewPage**: `prev_page_id` + `page_id`
+/// - **Transaction (Begin/Commit/Abort)**: No additional payload
 #[derive(Debug, Encode, Decode)]
 pub struct LogRecord {
+    /// Total serialized size in bytes, computed during construction.
     size: i32,
-    lsn: AtomicU64, // AtomicU64 is supported by bincode 2.0 with atomic feature
+    /// Log Sequence Number assigned by the `LogManager`.
+    ///
+    /// Uses `AtomicU64` for lock-free updates after construction.
+    /// Initially set to `INVALID_LSN` and updated when appended to the log.
+    lsn: AtomicU64,
+    /// Transaction ID that created this log record.
     txn_id: TxnId,
+    /// LSN of the previous log record in this transaction's chain.
+    ///
+    /// Used during recovery to traverse a transaction's operations backwards.
+    /// Set to `INVALID_LSN` for the first record in a transaction (Begin).
     prev_lsn: Lsn,
+    /// The type of operation this log record represents.
     log_record_type: LogRecordType,
 
-    // Fields for different types of log records
+    // === Payload fields for different record types ===
+    /// RID of the deleted tuple (for MarkDelete/ApplyDelete/RollbackDelete).
     delete_rid: Option<RID>,
-    delete_tuple: Option<Tuple>, // Store as Tuple for serialization
+    /// The tuple data being deleted (for undo during recovery).
+    delete_tuple: Option<Tuple>,
+    /// RID of the inserted tuple (for Insert).
     insert_rid: Option<RID>,
-    insert_tuple: Option<Tuple>, // Store as Tuple for serialization
+    /// The tuple data being inserted (for redo during recovery).
+    insert_tuple: Option<Tuple>,
+    /// RID of the updated tuple (for Update).
     update_rid: Option<RID>,
-    old_tuple: Option<Tuple>, // Store as Tuple for serialization
-    new_tuple: Option<Tuple>, // Store as Tuple for serialization
+    /// The tuple's original values before the update (for undo during recovery).
+    old_tuple: Option<Tuple>,
+    /// The tuple's new values after the update (for redo during recovery).
+    new_tuple: Option<Tuple>,
+    /// The previous page ID in a page chain (for NewPage).
     prev_page_id: Option<PageId>,
+    /// The newly allocated page ID (for NewPage).
     page_id: Option<PageId>,
 }
 
 impl LogRecord {
-    // Header fields: size (i32) + lsn (AtomicU64) + txn_id (TxnId) + prev_lsn (Lsn) + log_record_type (LogRecordType as i32)
+    /// Minimum size of a log record header in bytes (uncompressed, in-memory representation).
+    ///
+    /// Includes: `size` (i32) + `lsn` (AtomicU64) + `txn_id` (TxnId) + `prev_lsn` (Lsn)
+    /// + `log_record_type` (LogRecordType as i32).
+    ///
+    /// Note: Actual serialized size may differ due to bincode encoding.
     const HEADER_SIZE: usize = size_of::<i32>()
         + size_of::<AtomicU64>()
         + size_of::<TxnId>()
         + size_of::<Lsn>()
         + size_of::<LogRecordType>();
 
+    /// Recalculates the `size` field based on the actual bincode-encoded length.
+    ///
+    /// This method serializes the record to bytes and updates `self.size` with
+    /// the exact encoded length. Called during construction to ensure the size
+    /// field accurately reflects the serialized representation.
+    ///
+    /// # Note
+    ///
+    /// If encoding fails (which should not happen for valid records), an error
+    /// is logged and the current size is left unchanged.
     fn refresh_size_from_encoding(&mut self) {
         match bincode::encode_to_vec(&*self, storage_bincode_config()) {
             Ok(bytes) => self.size = bytes.len() as i32,

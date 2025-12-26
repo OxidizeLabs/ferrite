@@ -195,19 +195,53 @@ use crate::storage::disk::async_disk::AsyncDiskManager;
 use log::{debug, warn};
 use std::sync::Arc;
 
-/// `LogIterator` provides a robust way to iterate through log records in a log file.
-/// It handles EOF detection, validation of records, and proper advancing through the file.
+/// A robust iterator for traversing log records in a Write-Ahead Log (WAL) file.
+///
+/// `LogIterator` handles EOF detection, record validation, corruption recovery
+/// (via resync), and proper offset advancement. It provides both individual
+/// record access via [`next()`](Self::next) and bulk collection via [`collect()`](Self::collect).
+///
+/// See the module-level documentation for architecture details, iteration flow,
+/// and recovery integration examples.
+///
+/// # Thread Safety
+///
+/// `LogIterator` is not `Send` or `Sync`. For concurrent recovery operations,
+/// create separate iterator instances per task.
 pub struct LogIterator {
+    /// Reference to the disk manager for reading log data.
     disk_manager: Arc<AsyncDiskManager>,
+    /// Current byte offset in the log file.
+    ///
+    /// After a successful [`next()`](Self::next) call, this points to the
+    /// start of the next record (or EOF).
     current_offset: u64,
+    /// Flag indicating whether the end of the log file has been reached.
+    ///
+    /// Once `true`, all subsequent [`next()`](Self::next) calls return `None`
+    /// until [`reset()`](Self::reset) or [`set_offset()`](Self::set_offset) is called.
     reached_eof: bool,
+    /// Configurable read buffer size in bytes.
+    ///
+    /// Used for internal buffering during record reads. Default is 1024 bytes.
     buffer_size: usize,
 }
 
+/// Checks if an I/O error represents an end-of-file condition.
+///
+/// Some async/worker pipelines wrap I/O errors and lose the original `ErrorKind`.
+/// This function treats any error with `UnexpectedEof` kind or containing "eof"
+/// in its message as an EOF condition to avoid expensive O(n) resync scanning.
+///
+/// # Parameters
+///
+/// - `e`: The I/O error to check.
+///
+/// # Returns
+///
+/// `true` if the error indicates EOF, `false` otherwise.
 #[inline]
 fn is_eof_error(e: &std::io::Error) -> bool {
-    // Some async/worker pipelines wrap I/O errors and lose the original `ErrorKind`.
-    // Treat any error message containing "eof" as end-of-file to avoid O(n) resync scanning.
     e.kind() == std::io::ErrorKind::UnexpectedEof || e.to_string().to_lowercase().contains("eof")
 }
 
