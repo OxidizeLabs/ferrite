@@ -218,14 +218,43 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 /// Atomic counter for generating unique client IDs.
+///
+/// Starts at 1 and increments for each new connection. Uses `SeqCst` ordering
+/// to ensure unique IDs across all connection handler tasks.
 static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 
-// Helper function to format log messages with consistent structure
+/// Formats a log message with consistent structure for client-related events.
+///
+/// # Parameters
+/// - `client_id`: The unique identifier for the client connection.
+/// - `category`: The log category (e.g., "Connection", "Query", "Request").
+/// - `message`: The log message content.
+///
+/// # Returns
+/// A formatted string in the format: `[Client {id}] [{category}] {message}`
 fn format_log(client_id: u64, category: &str, message: &str) -> String {
     format!("[Client {}] [{}] {}", client_id, category, message)
 }
 
-// Helper function to log server errors with context and details
+/// Logs server errors with structured context and detailed information.
+///
+/// This function provides comprehensive error logging:
+/// 1. Logs the main error message with the specified severity level
+/// 2. For `DBError` types, logs additional category-specific details
+/// 3. Walks the error chain via `source()` and logs each cause
+///
+/// # Parameters
+/// - `client_id`: The unique identifier for the client connection.
+/// - `context`: The error context category (e.g., "Query", "Connection").
+/// - `error`: The error to log (must implement `std::error::Error`).
+/// - `severity`: The log level ("ERROR", "WARN", "DEBUG", or "INFO").
+///
+/// # Example Log Output
+/// ```text
+/// [Client 1] [Query] Table 'users' not found
+/// [Client 1] [Details] TableNotFound Error: users
+/// [Client 1] [Cause 0] underlying io error
+/// ```
 fn log_error(client_id: u64, context: &str, error: &(dyn StdError + 'static), severity: &str) {
     // Log main error with category
     let base_msg = format_log(client_id, context, &error.to_string());
@@ -271,6 +300,22 @@ fn log_error(client_id: u64, context: &str, error: &(dyn StdError + 'static), se
     }
 }
 
+/// Entry point for handling a new client connection.
+///
+/// This function manages the complete lifecycle of a client connection:
+/// 1. Generates a unique client ID using the atomic counter
+/// 2. Creates a client session in the database instance
+/// 3. Enters the request/response loop
+/// 4. Cleans up the session on disconnect (even on error)
+///
+/// # Parameters
+/// - `stream`: The TCP stream for the client connection.
+/// - `db`: The shared database instance.
+///
+/// # Notes
+/// - This function is designed to be spawned as a tokio task
+/// - Session cleanup is guaranteed via the function structure (not Drop)
+/// - Errors during the request loop are logged but don't prevent cleanup
 pub async fn handle_connection(mut stream: TcpStream, db: Arc<DBInstance>) {
     let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::SeqCst);
 
@@ -292,6 +337,24 @@ pub async fn handle_connection(mut stream: TcpStream, db: Arc<DBInstance>) {
     );
 }
 
+/// Main request/response loop for a client connection.
+///
+/// Continuously reads requests from the client, processes them, and sends
+/// responses until the client disconnects or an unrecoverable error occurs.
+///
+/// # Parameters
+/// - `stream`: The TCP stream for reading requests and writing responses.
+/// - `db`: The database instance for query execution.
+/// - `client_id`: The unique identifier for this client connection.
+///
+/// # Returns
+/// - `Ok(())`: Client disconnected normally (read returned 0 bytes).
+/// - `Err(...)`: Unrecoverable I/O error occurred.
+///
+/// # Error Handling
+/// - Query errors are converted to `DatabaseResponse::Error` and sent to client
+/// - Response sending errors terminate the loop and return the error
+/// - Read errors terminate the loop and return the error
 async fn handle_client_connection(
     stream: &mut TcpStream,
     db: &DBInstance,
@@ -339,6 +402,23 @@ async fn handle_client_connection(
     Ok(())
 }
 
+/// Converts an error into a user-friendly message for the client.
+///
+/// For `DBError` types, this produces category-specific messages that are
+/// suitable for display to end users. For other error types, the error's
+/// `Display` implementation is used directly.
+///
+/// # Parameters
+/// - `error`: The error to format.
+///
+/// # Returns
+/// A user-friendly error message string.
+///
+/// # Example
+/// ```text
+/// DBError::TableNotFound("users") -> "Table not found: users"
+/// DBError::SqlError("syntax error") -> "SQL Error: syntax error"
+/// ```
 fn format_client_error(error: &(dyn StdError + 'static)) -> String {
     if let Some(db_error) = error.downcast_ref::<DBError>() {
         match db_error {
@@ -362,6 +442,23 @@ fn format_client_error(error: &(dyn StdError + 'static)) -> String {
     }
 }
 
+/// Parses and dispatches a single client request.
+///
+/// Decodes the raw bytes into a `DatabaseRequest` using bincode, then
+/// delegates to the database instance for execution.
+///
+/// # Parameters
+/// - `data`: Raw bytes received from the client (bincode-encoded request).
+/// - `db`: The database instance for query execution.
+/// - `client_id`: The unique identifier for this client connection.
+///
+/// # Returns
+/// - `Ok(DatabaseResponse)`: The query executed successfully (or failed gracefully).
+/// - `Err(...)`: Request parsing failed (bincode decode error).
+///
+/// # Note
+/// Query execution errors are converted to `DatabaseResponse::Error` and
+/// returned as `Ok(...)`, not `Err(...)`. Only parsing errors bubble up.
 async fn handle_client_request(
     data: &[u8],
     db: &DBInstance,
@@ -389,6 +486,23 @@ async fn handle_client_request(
     }
 }
 
+/// Serializes and sends a response to the client.
+///
+/// Encodes the response using bincode and writes it to the TCP stream.
+/// Handles partial writes by looping until all data is sent.
+///
+/// # Parameters
+/// - `stream`: The TCP stream to write the response to.
+/// - `response`: The database response to serialize and send.
+///
+/// # Returns
+/// - `Ok(())`: Response was successfully sent and flushed.
+/// - `Err(...)`: Serialization or I/O error occurred.
+///
+/// # Implementation Details
+/// - Uses chunked writes to handle large responses
+/// - Detects write failures (0 bytes written) as errors
+/// - Flushes the stream to ensure data is transmitted
 async fn send_response(
     stream: &mut TcpStream,
     response: DatabaseResponse,

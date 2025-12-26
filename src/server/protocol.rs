@@ -215,35 +215,142 @@ use crate::types_db::value::Value;
 use bincode::{Decode, Encode};
 
 /// Client request to the database server.
+///
+/// Represents all possible operations a client can request. Each variant is
+/// serialized via bincode and sent over TCP to the server.
+///
+/// See the module-level documentation for the request/response mapping table.
 #[derive(Debug, Encode, Decode)]
 pub enum DatabaseRequest {
+    /// Execute a SQL query directly.
+    ///
+    /// The SQL string is parsed, planned, and executed by the server.
+    /// Returns `DatabaseResponse::Results` on success.
     Query(String),
-    BeginTransaction { isolation_level: IsolationLevel },
+
+    /// Start an explicit transaction with the specified isolation level.
+    ///
+    /// Returns an empty `Results` on success. Subsequent queries run within
+    /// this transaction until `Commit` or `Rollback` is sent.
+    BeginTransaction {
+        /// The isolation level for the new transaction.
+        isolation_level: IsolationLevel,
+    },
+
+    /// Commit the current transaction.
+    ///
+    /// Makes all changes durable. Returns an empty `Results` on success.
+    /// Fails if no transaction is active.
     Commit,
+
+    /// Abort the current transaction.
+    ///
+    /// Rolls back all changes. Returns an empty `Results` on success.
+    /// Fails if no transaction is active.
     Rollback,
+
+    /// Create a prepared statement.
+    ///
+    /// The SQL string is parsed and planned but not executed. Returns
+    /// `DatabaseResponse::PrepareOk` with a statement ID and parameter types.
     Prepare(String),
-    Execute { stmt_id: u64, params: Vec<Value> },
+
+    /// Execute a prepared statement with the given parameters.
+    ///
+    /// The statement must have been previously created with `Prepare`.
+    /// Returns `DatabaseResponse::Results` on success.
+    Execute {
+        /// The statement ID returned by a previous `Prepare` request.
+        stmt_id: u64,
+        /// Parameter values to bind to the statement's placeholders.
+        params: Vec<Value>,
+    },
+
+    /// Deallocate a prepared statement.
+    ///
+    /// Frees server-side resources for the statement. Returns an empty
+    /// `Results` on success.
     Close(u64),
 }
 
+/// Server response to a client request.
+///
+/// Represents all possible responses the server can send back to the client.
+/// Each variant is serialized via bincode and sent over TCP.
 #[derive(Debug, Encode, Decode)]
 pub enum DatabaseResponse {
+    /// Successful query execution results.
+    ///
+    /// Contains column names, rows of values, and optional messages.
+    /// Used for `Query`, `Execute`, and transaction control responses.
     Results(QueryResults),
+
+    /// Prepared statement created successfully.
+    ///
+    /// Returned in response to a `Prepare` request.
     PrepareOk {
+        /// Unique identifier for the prepared statement.
+        ///
+        /// Use this ID in subsequent `Execute` and `Close` requests.
         stmt_id: u64,
+        /// Expected types for the statement's parameter placeholders.
+        ///
+        /// The client should provide values of these types in the
+        /// `Execute` request's `params` vector.
         param_types: Vec<TypeId>,
     },
+
+    /// Error response for failed operations.
+    ///
+    /// Contains a user-friendly error message describing what went wrong.
     Error(String),
 }
 
+/// Results from a successful query execution.
+///
+/// Contains the column schema, data rows, and optional informational messages.
+/// This is the primary payload for successful query responses.
+///
+/// # Example
+///
+/// ```text
+/// QueryResults {
+///     column_names: ["id", "name"],
+///     rows: [
+///         [Int(1), String("Alice")],
+///         [Int(2), String("Bob")],
+///     ],
+///     messages: ["2 rows returned"],
+/// }
+/// ```
 #[derive(Debug, Encode, Decode)]
 pub struct QueryResults {
+    /// Names of the columns in the result set.
+    ///
+    /// The order matches the order of values in each row.
     pub column_names: Vec<String>,
+
+    /// Data rows, where each row is a vector of values.
+    ///
+    /// Each row has the same length as `column_names`, with values
+    /// corresponding to their respective columns.
     pub rows: Vec<Vec<Value>>,
+
+    /// Informational messages (e.g., row counts, warnings).
+    ///
+    /// These are supplementary messages, not errors. Errors are returned
+    /// via `DatabaseResponse::Error` instead.
     pub messages: Vec<String>,
 }
 
 impl QueryResults {
+    /// Creates an empty result set.
+    ///
+    /// Used for commands that succeed but produce no output, such as
+    /// `BEGIN`, `COMMIT`, `ROLLBACK`, or `CLOSE`.
+    ///
+    /// # Returns
+    /// A `QueryResults` with empty column names, rows, and messages.
     pub fn empty() -> Self {
         Self {
             column_names: Vec::new(),
@@ -252,6 +359,18 @@ impl QueryResults {
         }
     }
 
+    /// Creates a result set with the given columns and rows.
+    ///
+    /// # Parameters
+    /// - `column_names`: The names of the columns in the result set.
+    /// - `rows`: The data rows, where each row is a vector of values.
+    ///
+    /// # Returns
+    /// A `QueryResults` with the specified data and empty messages.
+    ///
+    /// # Note
+    /// Messages can be added after construction by pushing to the
+    /// `messages` field directly.
     pub fn new(column_names: Vec<String>, rows: Vec<Vec<Value>>) -> Self {
         Self {
             column_names,
