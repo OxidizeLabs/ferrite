@@ -229,24 +229,73 @@ use sqlparser::ast::{
 use sqlparser::tokenizer::{Location, Span};
 use std::sync::Arc;
 
-// Type alias for complex return type
+/// Result type for window specification parsing.
+///
+/// Returns a tuple of:
+/// - `Vec<Arc<Expression>>`: PARTITION BY expressions
+/// - `Vec<Arc<Expression>>`: ORDER BY expressions
 type WindowSpecResult = Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>), String>;
 
-/// 1. Responsible for parsing SQL expressions into our internal expression types
+/// Transforms SQL expressions from `sqlparser` AST into internal [`Expression`] trees.
+///
+/// `ExpressionParser` bridges the gap between raw SQL syntax and the typed expression
+/// system used by query executors. It handles type resolution, operator mapping,
+/// function classification, and schema lookups.
+///
+/// See the module-level documentation for architecture details and supported expressions.
+///
+/// # Thread Safety
+///
+/// Holds an `Arc<RwLock<Catalog>>` for schema lookups, making it safe to use across threads.
+/// The parser itself is stateless and can be called concurrently for different expressions.
 pub struct ExpressionParser {
+    /// Reference to the catalog for schema lookups and table metadata.
     catalog: Arc<RwLock<Catalog>>,
 }
 
 impl ExpressionParser {
+    /// Creates a new `ExpressionParser` with the given catalog reference.
+    ///
+    /// # Parameters
+    /// - `catalog`: Shared reference to the catalog for schema lookups.
+    ///
+    /// # Returns
+    /// A new `ExpressionParser` instance.
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         debug!("Creating new ExpressionParser");
         Self { catalog }
     }
 
+    /// Returns a clone of the catalog reference.
+    ///
+    /// Useful when other components need access to the same catalog.
     pub fn catalog(&self) -> Arc<RwLock<Catalog>> {
         self.catalog.clone()
     }
 
+    /// Parses a SQL expression into an internal [`Expression`] tree.
+    ///
+    /// This is the main entry point for expression parsing. It recursively
+    /// transforms `sqlparser::ast::Expr` nodes into our typed expression system.
+    ///
+    /// # Parameters
+    /// - `expr`: The SQL expression AST node to parse.
+    /// - `schema`: The schema context for resolving column references.
+    ///
+    /// # Returns
+    /// - `Ok(Expression)`: The parsed expression tree.
+    /// - `Err(String)`: Descriptive error if parsing fails.
+    ///
+    /// # Supported Expressions
+    /// - Identifiers and compound identifiers (table.column)
+    /// - Literals and constants
+    /// - Binary operations (+, -, *, /, AND, OR, comparisons)
+    /// - Unary operations (NOT, -)
+    /// - IS NULL/NOT NULL, IS TRUE/FALSE
+    /// - BETWEEN, IN, LIKE, SIMILAR TO
+    /// - CASE WHEN, CAST, EXTRACT
+    /// - Functions (scalar, aggregate, window)
+    /// - Subqueries
     pub fn parse_expression(&self, expr: &Expr, schema: &Schema) -> Result<Expression, String> {
         debug!("Parsing expression: {:?}", expr);
         match expr {
@@ -2193,6 +2242,17 @@ impl ExpressionParser {
         }
     }
 
+    /// Prepares metadata for a table scan operation.
+    ///
+    /// Extracts table name, schema, and OID from a SELECT statement's FROM clause.
+    /// Only single-table queries are currently supported.
+    ///
+    /// # Parameters
+    /// - `select`: The SELECT statement to analyze.
+    ///
+    /// # Returns
+    /// - `Ok((table_name, schema, table_oid))`: Table metadata for the scan.
+    /// - `Err(String)`: If multiple tables or non-table sources are used.
     pub fn prepare_table_scan(&self, select: &Select) -> Result<(String, Schema, u64), String> {
         debug!("Preparing table scan for select: {:?}", select);
         if select.from.len() != 1 {
@@ -2217,6 +2277,17 @@ impl ExpressionParser {
         Ok((table_name, schema, table_oid))
     }
 
+    /// Parses the projection items of a SELECT statement.
+    ///
+    /// Currently only supports single-column subquery results.
+    ///
+    /// # Parameters
+    /// - `select`: The SELECT statement to parse.
+    /// - `schema`: The schema context for column resolution.
+    ///
+    /// # Returns
+    /// - `Ok(Expression)`: The parsed projection expression.
+    /// - `Err(String)`: If the SELECT is empty, has multiple columns, or uses wildcards.
     pub fn parse_select_statements(
         &self,
         select: &Select,
@@ -2243,7 +2314,20 @@ impl ExpressionParser {
         }
     }
 
-    /// Process a join operator and constraint to create a join predicate
+    /// Processes a JOIN operator and its constraint to create a join predicate.
+    ///
+    /// Handles all standard SQL join types (INNER, LEFT, RIGHT, FULL, CROSS, SEMI, ANTI)
+    /// and their constraint types (ON, USING, NATURAL, None).
+    ///
+    /// # Parameters
+    /// - `join_operator`: The type of join (INNER, LEFT, etc.) with its constraint.
+    /// - `left_schema`: Schema of the left table in the join.
+    /// - `right_schema`: Schema of the right table in the join.
+    /// - `left_alias`: Optional alias for the left table.
+    /// - `right_alias`: Optional alias for the right table.
+    ///
+    /// # Returns
+    /// A tuple of (predicate_expression, join_operator) or an error.
     fn process_join_operator(
         &self,
         join_operator: &JoinOperator,
@@ -2444,7 +2528,22 @@ impl ExpressionParser {
         }
     }
 
-    /// Process a join constraint to create a join predicate
+    /// Processes a JOIN constraint to create an equality predicate.
+    ///
+    /// # Constraint Types
+    /// - `ON expr`: Parses the expression directly
+    /// - `USING (cols)`: Creates equality predicates for named columns
+    /// - `NATURAL`: Finds common columns and creates equality predicates
+    /// - `None`: Returns TRUE constant (for CROSS JOIN)
+    ///
+    /// # Parameters
+    /// - `constraint`: The join constraint to process.
+    /// - `left_schema`: Schema of the left table.
+    /// - `right_schema`: Schema of the right table.
+    /// - `combined_schema`: Merged schema of both tables for expression parsing.
+    ///
+    /// # Returns
+    /// The join predicate expression or an error.
     #[allow(dead_code)]
     fn process_join_constraint(
         &self,
@@ -2604,6 +2703,15 @@ impl ExpressionParser {
         }
     }
 
+    /// Extracts a simple table name from an `ObjectName`.
+    ///
+    /// Only single-part table names are supported (no schema qualification).
+    ///
+    /// # Parameters
+    /// - `table_name`: The SQL object name to extract from.
+    ///
+    /// # Returns
+    /// The table name string or an error for multi-part names.
     pub fn extract_table_name(&self, table_name: &ObjectName) -> Result<String, String> {
         debug!("Extracting table name from: {:?}", table_name);
         match table_name {
@@ -2615,6 +2723,13 @@ impl ExpressionParser {
         }
     }
 
+    /// Retrieves the schema for a table from the catalog.
+    ///
+    /// # Parameters
+    /// - `table_name`: Name of the table to look up.
+    ///
+    /// # Returns
+    /// The table's schema or an error if not found.
     pub fn get_table_schema(&self, table_name: &str) -> Result<Schema, String> {
         debug!("Getting schema for table: {}", table_name);
         let catalog = self.catalog.read();
@@ -2623,6 +2738,13 @@ impl ExpressionParser {
             .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))
     }
 
+    /// Retrieves the OID for a table from the catalog.
+    ///
+    /// # Parameters
+    /// - `table_name`: Name of the table to look up.
+    ///
+    /// # Returns
+    /// The table's OID or an error if not found.
     pub fn get_table_oid(&self, table_name: &str) -> Result<TableOidT, String> {
         debug!("Getting OID for table: {}", table_name);
         let catalog = self.catalog.read();
@@ -2632,6 +2754,19 @@ impl ExpressionParser {
             .ok_or_else(|| format!("Table '{}' not found in catalog", table_name))
     }
 
+    /// Parses a JOIN condition expression.
+    ///
+    /// Creates a combined schema from both tables and parses the ON clause
+    /// expression against it. Validates that the result is a valid join
+    /// condition (comparison or AND of comparisons).
+    ///
+    /// # Parameters
+    /// - `expr`: The ON clause expression.
+    /// - `left_schema`: Schema of the left table.
+    /// - `right_schema`: Schema of the right table.
+    ///
+    /// # Returns
+    /// The parsed join predicate or an error if invalid.
     pub fn parse_join_condition(
         &self,
         expr: &Expr,
@@ -2668,6 +2803,17 @@ impl ExpressionParser {
         }
     }
 
+    /// Determines the GROUP BY expressions from a SELECT statement.
+    ///
+    /// Handles both explicit GROUP BY expressions and GROUP BY ALL.
+    ///
+    /// # Parameters
+    /// - `select`: The SELECT statement to analyze.
+    /// - `schema`: The schema context for column resolution.
+    /// - `has_group_by`: Whether the SELECT has a GROUP BY clause.
+    ///
+    /// # Returns
+    /// A vector of GROUP BY expressions (empty if no grouping).
     pub fn determine_group_by_expressions(
         &self,
         select: &Select,
@@ -2708,6 +2854,22 @@ impl ExpressionParser {
         }
     }
 
+    /// Resolves a qualified column reference in a joined schema.
+    ///
+    /// Attempts multiple strategies to find the column:
+    /// 1. Fully qualified name (table.column)
+    /// 2. Prefix match (columns starting with table alias)
+    /// 3. Unqualified name match
+    /// 4. Catalog table lookup
+    /// 5. Suffix match (columns ending with column name)
+    ///
+    /// # Parameters
+    /// - `table_alias`: The table alias or name.
+    /// - `column_name`: The column name.
+    /// - `schema`: The joined schema to search.
+    ///
+    /// # Returns
+    /// The column index in the schema or an error if not found.
     pub fn resolve_column_ref_after_join(
         &self,
         table_alias: &str,
@@ -2875,6 +3037,18 @@ impl ExpressionParser {
         Err(error_msg)
     }
 
+    /// Parses an AT TIME ZONE expression.
+    ///
+    /// Validates that the timestamp expression returns a timestamp type
+    /// and the timezone expression returns a string type.
+    ///
+    /// # Parameters
+    /// - `timestamp`: The timestamp expression.
+    /// - `timezone`: The timezone string expression.
+    /// - `schema`: The schema context for column resolution.
+    ///
+    /// # Returns
+    /// A function expression representing AT_TIMEZONE or an error.
     fn parse_at_timezone(
         &self,
         timestamp: &Expr,
@@ -2977,6 +3151,16 @@ impl ExpressionParser {
         )))
     }
 
+    /// Parses a SET expression (SELECT, VALUES, UNION, etc.).
+    ///
+    /// Currently only SELECT expressions are supported in subqueries.
+    ///
+    /// # Parameters
+    /// - `set_expr`: The SET expression to parse.
+    /// - `_outer_schema`: The outer query's schema for correlated subqueries.
+    ///
+    /// # Returns
+    /// A subquery expression or an error for unsupported types.
     fn parse_setexpr(
         &self,
         set_expr: &SetExpr,
@@ -3044,6 +3228,16 @@ impl ExpressionParser {
         }
     }
 
+    /// Parses a subquery into a SubqueryExpression.
+    ///
+    /// Extracts the query body and delegates to `parse_setexpr`.
+    ///
+    /// # Parameters
+    /// - `query`: The SQL query to parse.
+    /// - `_outer_schema`: The outer query's schema (for correlated subqueries).
+    ///
+    /// # Returns
+    /// A subquery expression or an error.
     fn parse_subquery(&self, query: &Query, _outer_schema: &Schema) -> Result<Expression, String> {
         debug!("Parsing subquery: {:?}", query);
         // Extract the body of the query
@@ -3053,7 +3247,17 @@ impl ExpressionParser {
         self.parse_setexpr(body, _outer_schema)
     }
 
-    // Helper method to determine the subquery type and return type
+    /// Determines the type and return column for a subquery.
+    ///
+    /// Analyzes the SELECT projection to determine if this is a scalar
+    /// subquery (single aggregate) or an IN-list subquery (column list).
+    ///
+    /// # Parameters
+    /// - `select`: The SELECT statement to analyze.
+    /// - `schema`: The schema context for type inference.
+    ///
+    /// # Returns
+    /// A tuple of (SubqueryType, return_column) or an error.
     fn determine_subquery_type_and_return_type(
         &self,
         select: &Select,
@@ -3183,7 +3387,16 @@ impl ExpressionParser {
         ))
     }
 
-    /// Parse ORDER BY expressions with direction specifications
+    /// Parses ORDER BY expressions with sort direction specifications.
+    ///
+    /// Extracts both the expressions and their sort directions (ASC/DESC).
+    ///
+    /// # Parameters
+    /// - `order_exprs`: The ORDER BY expressions from the SQL AST.
+    /// - `schema`: The schema context for column resolution.
+    ///
+    /// # Returns
+    /// A vector of `OrderBySpec` containing expressions and directions.
     pub fn parse_order_by_specifications(
         &self,
         order_exprs: &[OrderByExpr],
@@ -3207,7 +3420,17 @@ impl ExpressionParser {
         Ok(specifications)
     }
 
-    /// Parse ORDER BY expressions (backward compatibility - returns just expressions with default ASC)
+    /// Parses ORDER BY expressions (backward compatibility).
+    ///
+    /// Returns just the expressions without direction information.
+    /// Use `parse_order_by_specifications` for full sort info.
+    ///
+    /// # Parameters
+    /// - `order_exprs`: The ORDER BY expressions from the SQL AST.
+    /// - `schema`: The schema context for column resolution.
+    ///
+    /// # Returns
+    /// A vector of parsed expressions (all assumed ASC).
     fn parse_order_by_expressions(
         &self,
         order_exprs: &[OrderByExpr],
@@ -3222,9 +3445,19 @@ impl ExpressionParser {
         Ok(expressions)
     }
 
-    /// Parse expression that can reference either projection aliases or original columns
-    /// This is useful for ORDER BY clauses that can reference both SELECT list aliases
-    /// and original column expressions
+    /// Parses an expression with fallback to original schema.
+    ///
+    /// Useful for ORDER BY clauses that can reference either SELECT list aliases
+    /// or original column names. First tries the projection schema, then falls
+    /// back to the original table schema.
+    ///
+    /// # Parameters
+    /// - `expr`: The expression to parse.
+    /// - `projection_schema`: Schema with projection aliases.
+    /// - `original_schema`: Original table schema.
+    ///
+    /// # Returns
+    /// The parsed expression or a combined error message if both attempts fail.
     pub fn parse_expression_with_fallback(
         &self,
         expr: &Expr,
@@ -3266,6 +3499,17 @@ impl ExpressionParser {
         }
     }
 
+    /// Parses function arguments into expressions.
+    ///
+    /// Handles unnamed arguments, wildcards (for COUNT(*)), and additional
+    /// clauses like ORDER BY and LIMIT within the function.
+    ///
+    /// # Parameters
+    /// - `args`: The function arguments from the SQL AST.
+    /// - `schema`: The schema context for expression parsing.
+    ///
+    /// # Returns
+    /// A vector of parsed argument expressions or an error.
     fn parse_function_arguments(
         &self,
         args: &FunctionArguments,
@@ -3336,6 +3580,18 @@ impl ExpressionParser {
         }
     }
 
+    /// Parses a SQL function call into the appropriate expression type.
+    ///
+    /// Classifies functions into scalar, aggregate, or window categories
+    /// and dispatches to the appropriate parser. Window functions are
+    /// identified by the presence of an OVER clause.
+    ///
+    /// # Parameters
+    /// - `func`: The function call from the SQL AST.
+    /// - `schema`: The schema context for argument parsing.
+    ///
+    /// # Returns
+    /// A Function, Aggregate, or Window expression as appropriate.
     fn parse_function(&self, func: &Function, schema: &Schema) -> Result<Expression, String> {
         debug!("Parsing function: {:?}", func);
         let function_name = func.name.to_string().to_uppercase();
@@ -3423,6 +3679,15 @@ impl ExpressionParser {
         }
     }
 
+    /// Parses a scalar function (UPPER, LOWER, SUBSTRING, etc.).
+    ///
+    /// # Parameters
+    /// - `func`: The function call from the SQL AST.
+    /// - `scalar_type`: The classified scalar function type.
+    /// - `schema`: The schema context for argument parsing.
+    ///
+    /// # Returns
+    /// A FunctionExpression with inferred return type.
     fn parse_scalar_function(
         &self,
         func: &Function,
@@ -3444,6 +3709,18 @@ impl ExpressionParser {
         )))
     }
 
+    /// Parses an aggregate function (COUNT, SUM, AVG, MIN, MAX, etc.).
+    ///
+    /// Validates that aggregate functions are not nested and that
+    /// COUNT(*) is handled specially as CountStar.
+    ///
+    /// # Parameters
+    /// - `func`: The function call from the SQL AST.
+    /// - `agg_type`: The classified aggregate function type.
+    /// - `schema`: The schema context for argument parsing.
+    ///
+    /// # Returns
+    /// An AggregateExpression or an error for invalid usage.
     fn parse_aggregate_function(
         &self,
         func: &Function,
@@ -3498,6 +3775,18 @@ impl ExpressionParser {
         )))
     }
 
+    /// Parses a window function (ROW_NUMBER, RANK, LEAD, LAG, etc.).
+    ///
+    /// Extracts the OVER clause specification including PARTITION BY
+    /// and ORDER BY components.
+    ///
+    /// # Parameters
+    /// - `func`: The function call from the SQL AST.
+    /// - `window_type`: The specific window function type.
+    /// - `schema`: The schema context for argument parsing.
+    ///
+    /// # Returns
+    /// A WindowExpression or an error if OVER clause is missing.
     fn parse_window_function(
         &self,
         func: &Function,
@@ -3553,6 +3842,16 @@ impl ExpressionParser {
         )))
     }
 
+    /// Parses a window specification (OVER clause).
+    ///
+    /// Extracts PARTITION BY and ORDER BY expressions from the window spec.
+    ///
+    /// # Parameters
+    /// - `spec`: The window specification from the SQL AST.
+    /// - `schema`: The schema context for expression parsing.
+    ///
+    /// # Returns
+    /// A tuple of (partition_by_exprs, order_by_exprs) or an error.
     fn parse_window_specification(&self, spec: &WindowType, schema: &Schema) -> WindowSpecResult {
         debug!("Parsing window specification: {:?}", spec);
         let mut partition_by = Vec::new();
@@ -3581,6 +3880,13 @@ impl ExpressionParser {
         Ok((partition_by, order_by))
     }
 
+    /// Infers the return type for a window function.
+    ///
+    /// # Parameters
+    /// - `function_name`: The window function name (uppercase).
+    ///
+    /// # Returns
+    /// A Column with the appropriate return type or an error for unknown functions.
     fn infer_window_return_type(&self, function_name: &str) -> Result<Column, String> {
         debug!(
             "Inferring window return type for function: {}",
@@ -3599,7 +3905,16 @@ impl ExpressionParser {
         }
     }
 
-    /// Helper method to check if an expression contains aggregate functions
+    /// Checks if an expression contains any aggregate functions.
+    ///
+    /// Recursively traverses the expression tree to detect nested aggregates,
+    /// which are not allowed in SQL.
+    ///
+    /// # Parameters
+    /// - `expr`: The expression to check.
+    ///
+    /// # Returns
+    /// `true` if the expression contains an aggregate, `false` otherwise.
     #[allow(clippy::only_used_in_recursion)]
     fn contains_aggregate(&self, expr: &Expression) -> bool {
         match expr {
@@ -3611,6 +3926,15 @@ impl ExpressionParser {
         }
     }
 
+    /// Infers the return type for a scalar function.
+    ///
+    /// # Parameters
+    /// - `func_name`: The function name.
+    /// - `scalar_type`: The classified scalar function type.
+    /// - `args`: The parsed function arguments.
+    ///
+    /// # Returns
+    /// A Column with the appropriate return type or an error.
     fn infer_scalar_return_type(
         &self,
         func_name: &str,
@@ -3642,6 +3966,21 @@ impl ExpressionParser {
         }
     }
 
+    /// Infers the return type for an aggregate function.
+    ///
+    /// Return types vary by function:
+    /// - COUNT: BigInt
+    /// - SUM: BigInt for integers, Decimal for decimals
+    /// - AVG: Decimal
+    /// - MIN/MAX: Same as argument type
+    /// - STDDEV/VARIANCE: Decimal
+    ///
+    /// # Parameters
+    /// - `func_name`: The function name (uppercase).
+    /// - `args`: The parsed function arguments.
+    ///
+    /// # Returns
+    /// A Column with the appropriate return type or an error.
     fn infer_aggregate_return_type(
         &self,
         func_name: &str,
@@ -3693,7 +4032,15 @@ impl ExpressionParser {
         }
     }
 
-    // Helper method to check if a function is COUNT(*)
+    /// Checks if a function call is COUNT(*).
+    ///
+    /// COUNT(*) is special because it counts rows rather than values.
+    ///
+    /// # Parameters
+    /// - `args`: The function arguments to check.
+    ///
+    /// # Returns
+    /// `true` if this is COUNT(*), `false` otherwise.
     fn is_count_star(&self, args: &FunctionArguments) -> bool {
         match args {
             FunctionArguments::List(arg_list) => {
@@ -3710,7 +4057,16 @@ impl ExpressionParser {
         }
     }
 
-    // Add a method to extract table name from TableObject
+    /// Extracts a table name from a TableObject.
+    ///
+    /// TableObjects can be either table names or table functions.
+    /// Only table names are currently supported.
+    ///
+    /// # Parameters
+    /// - `table`: The TableObject to extract from.
+    ///
+    /// # Returns
+    /// The table name or an error for table functions.
     pub fn extract_table_object_name(&self, table: &TableObject) -> Result<String, String> {
         debug!("Extracting table name from TableObject: {:?}", table);
         // Match on the TableObject enum to extract the ObjectName
@@ -3720,8 +4076,22 @@ impl ExpressionParser {
         }
     }
 
-    /// Replace aggregate functions in HAVING clause expressions with column references
-    /// to the pre-computed aggregate values from the aggregation output schema
+    /// Replaces aggregate functions with column references for HAVING clause evaluation.
+    ///
+    /// After aggregation, aggregate expressions need to be replaced with references
+    /// to the pre-computed aggregate columns. This enables the HAVING clause to
+    /// evaluate against the aggregation output.
+    ///
+    /// # Parameters
+    /// - `expr`: The HAVING clause expression.
+    /// - `aggregation_schema`: Schema of the aggregation output.
+    /// - `original_aggregates`: The original aggregate expressions.
+    ///
+    /// # Returns
+    /// The expression with aggregates replaced by column references.
+    ///
+    /// # Example
+    /// `HAVING COUNT(*) > 5` becomes `HAVING column_ref[agg_count] > 5`
     #[allow(clippy::only_used_in_recursion)]
     pub fn replace_aggregates_with_column_refs(
         &self,

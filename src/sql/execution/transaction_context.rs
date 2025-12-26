@@ -105,14 +105,46 @@ use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
 use std::sync::Arc;
 
+/// A convenience wrapper bundling transaction-related components for query execution.
+///
+/// Provides a unified handle to the current transaction, lock manager, and transaction
+/// manager. This context is passed through the executor tree during query execution
+/// to provide access to concurrency control infrastructure.
+///
+/// See the module-level documentation for architecture diagrams and detailed usage.
+///
+/// # Thread Safety
+///
+/// All components are wrapped in `Arc` for shared ownership. The context itself
+/// can be cloned and shared across executor threads safely.
 #[derive(Debug)]
 pub struct TransactionContext {
+    /// The current transaction being executed.
+    ///
+    /// Contains transaction ID, state, isolation level, and write set.
     transaction: Arc<Transaction>,
+
+    /// The lock manager for acquiring row and table locks.
+    ///
+    /// Used by executors to acquire locks before reading/writing tuples.
     lock_manager: Arc<LockManager>,
+
+    /// The transaction manager for lifecycle operations.
+    ///
+    /// Provides access to begin, commit, abort, and MVCC operations.
     transaction_manager: Arc<TransactionManager>,
 }
 
 impl TransactionContext {
+    /// Creates a new transaction context with the given components.
+    ///
+    /// # Parameters
+    /// - `transaction`: The transaction this context wraps.
+    /// - `lock_manager`: The lock manager for concurrency control.
+    /// - `transaction_manager`: The transaction manager for lifecycle operations.
+    ///
+    /// # Returns
+    /// A new `TransactionContext` ready for use during query execution.
     pub fn new(
         transaction: Arc<Transaction>,
         lock_manager: Arc<LockManager>,
@@ -125,28 +157,77 @@ impl TransactionContext {
         }
     }
 
+    /// Returns the ID of the current transaction.
+    ///
+    /// This is a convenience method that delegates to the underlying transaction.
+    ///
+    /// # Returns
+    /// The unique transaction ID.
     pub fn get_transaction_id(&self) -> TxnId {
         self.transaction.get_transaction_id()
     }
 
+    /// Returns a clone of the transaction `Arc`.
+    ///
+    /// Use this to access transaction state, isolation level, or other properties.
+    ///
+    /// # Returns
+    /// An `Arc<Transaction>` pointing to the same transaction.
     pub fn get_transaction(&self) -> Arc<Transaction> {
         self.transaction.clone()
     }
 
+    /// Returns a clone of the lock manager `Arc`.
+    ///
+    /// Use this to acquire or release locks on rows and tables.
+    ///
+    /// # Returns
+    /// An `Arc<LockManager>` pointing to the shared lock manager.
     pub fn get_lock_manager(&self) -> Arc<LockManager> {
         self.lock_manager.clone()
     }
 
+    /// Returns a clone of the transaction manager `Arc`.
+    ///
+    /// Use this for transaction lifecycle operations (commit, abort) or
+    /// MVCC-related queries (undo logs, version chains).
+    ///
+    /// # Returns
+    /// An `Arc<TransactionManager>` pointing to the shared transaction manager.
     pub fn get_transaction_manager(&self) -> Arc<TransactionManager> {
         self.transaction_manager.clone()
     }
 
-    /// Thread-safe method to append to write set
+    /// Records a write operation in the transaction's write set (thread-safe).
+    ///
+    /// The write set tracks all (table_oid, RID) pairs modified by this transaction.
+    /// This information is used for:
+    /// - Rolling back changes on abort
+    /// - Flushing dirty pages on commit
+    /// - MVCC visibility checks
+    ///
+    /// # Parameters
+    /// - `table_oid`: The OID of the table being modified.
+    /// - `rid`: The record ID of the tuple being modified.
+    ///
+    /// # Thread Safety
+    /// This method is safe to call from multiple threads concurrently.
+    /// Internal synchronization is handled by the `Transaction`.
     pub fn append_write_set_atomic(&self, table_oid: TableOidT, rid: RID) {
         self.get_transaction().append_write_set(table_oid, rid);
     }
 
-    /// Get all write operations performed in this transaction
+    /// Returns all write operations performed in this transaction.
+    ///
+    /// # Returns
+    /// A vector of (table_oid, RID) pairs representing all tuples modified
+    /// by this transaction. Each entry appears at most once (duplicates are
+    /// automatically filtered by the underlying `Transaction`).
+    ///
+    /// # Use Cases
+    /// - Commit: Flush pages containing these RIDs
+    /// - Abort: Undo changes to these tuples
+    /// - Debugging: Inspect transaction footprint
     pub fn get_write_set(&self) -> Vec<(TableOidT, RID)> {
         self.transaction.get_write_set()
     }

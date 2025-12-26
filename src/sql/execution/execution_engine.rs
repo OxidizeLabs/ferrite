@@ -178,15 +178,71 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
 
+/// Top-level coordinator for SQL statement execution.
+///
+/// The `ExecutionEngine` integrates parsing, planning, optimization, and execution
+/// into a unified interface for processing SQL queries and commands. It serves as
+/// the main entry point for all SQL operations in the database.
+///
+/// # Architecture
+///
+/// The engine follows a pipelined architecture:
+/// 1. **Parse**: SQL text → AST (via `sqlparser`)
+/// 2. **Plan**: AST → `LogicalPlan` (via `QueryPlanner`)
+/// 3. **Optimize**: `LogicalPlan` → optimized `LogicalPlan` (via `Optimizer`)
+/// 4. **Physical**: `LogicalPlan` → `PlanNode` (physical plan)
+/// 5. **Execute**: `PlanNode` → `Executor` tree → Results
+///
+/// # Thread Safety
+///
+/// The engine requires `&mut self` for execution (single-threaded per engine).
+/// Each connection typically owns its own `ExecutionEngine` instance, while
+/// shared components like `BufferPoolManager` and `Catalog` are `Arc`-wrapped.
+///
+/// # Transaction Support
+///
+/// The engine handles transaction lifecycle through `TransactionManagerFactory`:
+/// - `BEGIN` / `START TRANSACTION`: Creates new transaction
+/// - `COMMIT`: Writes WAL commit record, flushes, releases locks
+/// - `ROLLBACK`: Writes WAL abort record, undoes changes, releases locks
+/// - Transaction chaining with `AND CHAIN` clause is supported
 pub struct ExecutionEngine {
+    /// Query planner that converts SQL text into logical plans.
     planner: QueryPlanner,
+
+    /// Plan optimizer that applies transformation rules to improve query performance.
     optimizer: Optimizer,
+
+    /// Shared buffer pool for page I/O operations during execution.
     buffer_pool_manager: Arc<BufferPoolManager>,
+
+    /// Factory for creating and managing transactions with proper WAL integration.
     transaction_factory: Arc<TransactionManagerFactory>,
+
+    /// Write-ahead log manager for durability and crash recovery.
     wal_manager: Arc<WALManager>,
 }
 
 impl ExecutionEngine {
+    /// Creates a new execution engine with the provided components.
+    ///
+    /// # Arguments
+    ///
+    /// * `catalog` - Shared catalog for schema metadata lookup
+    /// * `buffer_pool_manager` - Buffer pool for page-level I/O operations
+    /// * `transaction_factory` - Factory for transaction lifecycle management
+    /// * `wal_manager` - Write-ahead log manager for durability
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let engine = ExecutionEngine::new(
+    ///     catalog.clone(),
+    ///     buffer_pool_manager.clone(),
+    ///     transaction_factory.clone(),
+    ///     wal_manager.clone(),
+    /// );
+    /// ```
     pub fn new(
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
@@ -202,7 +258,31 @@ impl ExecutionEngine {
         }
     }
 
-    /// Execute a SQL statement with the given context and writer
+    /// Executes a SQL statement with the given execution context.
+    ///
+    /// This is the primary entry point for SQL execution. The method parses the SQL,
+    /// creates a logical plan, optimizes it, converts to a physical plan, and executes
+    /// the resulting executor tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to execute
+    /// * `context` - Execution context containing transaction state and catalog access
+    /// * `writer` - Output destination for query results (CLI, network, etc.)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Statement executed successfully with results/modifications
+    /// * `Ok(false)` - Statement executed but no rows affected (e.g., UPDATE with no matches)
+    /// * `Err(DBError)` - Execution failed with a specific error
+    ///
+    /// # Statement Types
+    ///
+    /// Different statement types are handled differently:
+    /// - **DML** (INSERT/UPDATE/DELETE): Execute all, return affected row indicator
+    /// - **DDL** (CREATE/DROP/ALTER): Execute modification, return success
+    /// - **Query** (SELECT): Stream tuples to `ResultWriter`
+    /// - **Transaction** (BEGIN/COMMIT/ROLLBACK): Manage transaction state
     pub async fn execute_sql(
         &mut self,
         sql: &str,
@@ -216,7 +296,25 @@ impl ExecutionEngine {
         self.execute_plan(&plan, context, writer).await
     }
 
-    /// Prepare a SQL statement for execution
+    /// Prepares a SQL statement for execution by parsing, planning, and optimizing.
+    ///
+    /// This method performs the first three stages of the execution pipeline:
+    /// 1. **Syntax validation**: Checks for common SQL syntax errors
+    /// 2. **Logical planning**: Converts SQL to a logical plan tree
+    /// 3. **Optimization**: Applies optimization rules to the logical plan
+    /// 4. **Physical conversion**: Converts to a physical `PlanNode`
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to prepare
+    /// * `_context` - Execution context (currently unused, reserved for future parameterization)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(PlanNode)` - The optimized physical plan ready for execution
+    /// * `Err(DBError::SqlError)` - Syntax error in the SQL
+    /// * `Err(DBError::PlanError)` - Error during logical plan construction
+    /// * `Err(DBError::OptimizeError)` - Error during optimization
     fn prepare_sql(
         &mut self,
         sql: &str,
@@ -248,7 +346,35 @@ impl ExecutionEngine {
         Ok(physical_plan)
     }
 
-    /// Execute a physical plan
+    /// Executes a physical plan node and writes results to the provided writer.
+    ///
+    /// This method handles the final stage of query execution. It creates an
+    /// executor tree from the physical plan, initializes it, and pulls tuples
+    /// from the root executor. Different plan types are handled differently:
+    ///
+    /// # Plan Type Handling
+    ///
+    /// | Plan Type | Behavior |
+    /// |-----------|----------|
+    /// | `Insert/Update/Delete` | Execute all tuples, return affected indicator |
+    /// | `CreateTable/CreateIndex` | Execute DDL, return success |
+    /// | `StartTransaction` | Initialize new transaction, return success |
+    /// | `CommitTransaction` | Write WAL commit, flush, release locks |
+    /// | `RollbackTransaction` | Write WAL abort, undo changes, release locks |
+    /// | `CommandResult` | Execute utility command |
+    /// | Query plans | Stream tuples to `ResultWriter` |
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The physical plan node to execute
+    /// * `context` - Execution context with transaction and catalog access
+    /// * `writer` - Destination for query results
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Execution completed with results/modifications
+    /// * `Ok(false)` - Execution completed but no rows affected
+    /// * `Err(DBError)` - Execution failed
     async fn execute_plan(
         &self,
         plan: &PlanNode,
@@ -541,7 +667,21 @@ impl ExecutionEngine {
         }
     }
 
-    /// Create an executor for the given plan
+    /// Creates an executor tree for the given physical plan node.
+    ///
+    /// This method recursively converts a `PlanNode` tree into an `AbstractExecutor`
+    /// tree. Each plan node type has a corresponding executor type that implements
+    /// the Volcano-style iterator model (init/next pattern).
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The physical plan node to convert
+    /// * `context` - Execution context passed to all executors
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Box<dyn AbstractExecutor>)` - The root executor ready for iteration
+    /// * `Err(DBError::Execution)` - Failed to create executor (e.g., missing table)
     fn create_executor(
         &self,
         plan: &PlanNode,
@@ -562,7 +702,19 @@ impl ExecutionEngine {
         }
     }
 
-    /// Create a logical plan from SQL
+    /// Creates a logical plan from SQL text.
+    ///
+    /// Parses the SQL statement and constructs a logical plan tree that represents
+    /// the query's semantic structure. This is the first stage of query processing.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to parse and plan
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(LogicalPlan)` - The constructed logical plan
+    /// * `Err(DBError::PlanError)` - Parse or planning error
     fn create_logical_plan(&mut self, sql: &str) -> Result<LogicalPlan, DBError> {
         self.planner
             .create_logical_plan(sql)
@@ -570,7 +722,25 @@ impl ExecutionEngine {
             .map_err(DBError::PlanError)
     }
 
-    /// Optimize a logical plan into a physical plan
+    /// Optimizes a logical plan and converts it to a physical plan.
+    ///
+    /// Applies optimization rules (predicate pushdown, join reordering, etc.)
+    /// to the logical plan, then converts the optimized logical plan into
+    /// a physical `PlanNode` ready for execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan to optimize
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(PlanNode)` - The optimized physical plan
+    /// * `Err(DBError::OptimizeError)` - Optimization or conversion failed
+    ///
+    /// # Optimization Rules Applied
+    ///
+    /// - Nested loop join checks (via `EnableNljCheck`)
+    /// - Additional rules configured in the `Optimizer`
     fn optimize_plan(&self, plan: LogicalPlan) -> Result<PlanNode, DBError> {
         // Box the logical plan and get check options
         let boxed_plan = Box::new(plan);
@@ -589,8 +759,25 @@ impl ExecutionEngine {
             .map_err(DBError::OptimizeError)
     }
 
-    /// Prepare a SQL statement and validate syntax
-    /// Returns empty parameter types for now since we don't support parameters yet
+    /// Prepares a SQL statement for later execution, validating syntax and semantics.
+    ///
+    /// This method parses the SQL, validates its syntax, and creates a logical plan
+    /// to verify semantic correctness (table existence, column validity, etc.).
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to prepare
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TypeId>)` - Parameter types for the prepared statement (currently empty)
+    /// * `Err(DBError::SqlError)` - Syntax error or single statement requirement not met
+    /// * `Err(DBError::PlanError)` - Semantic error during plan construction
+    ///
+    /// # Note
+    ///
+    /// Parameterized queries are not yet fully implemented. This method currently
+    /// returns an empty parameter type vector.
     pub fn prepare_statement(&mut self, sql: &str) -> Result<Vec<TypeId>, DBError> {
         // Additional syntax validation for common errors
         let sql_lower = sql.to_lowercase();
@@ -618,7 +805,23 @@ impl ExecutionEngine {
         Ok(Vec::new())
     }
 
-    /// Execute a prepared statement (currently same as regular execute)
+    /// Executes a previously prepared statement with parameter values.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text (should match a prepared statement)
+    /// * `_params` - Parameter values to bind (currently unused)
+    /// * `context` - Execution context with transaction state
+    /// * `writer` - Output destination for query results
+    ///
+    /// # Returns
+    ///
+    /// Same as [`execute_sql`](Self::execute_sql).
+    ///
+    /// # Note
+    ///
+    /// Parameter binding is not yet implemented. This method currently delegates
+    /// to `execute_sql` and ignores the `params` argument.
     pub async fn execute_prepared_statement(
         &mut self,
         sql: &str,
@@ -630,6 +833,24 @@ impl ExecutionEngine {
         self.execute_sql(sql, context, writer).await
     }
 
+    /// Commits the current transaction, making all changes durable.
+    ///
+    /// This method performs the following steps:
+    /// 1. Retrieves the transaction from the context
+    /// 2. Writes a commit record to the WAL
+    /// 3. Updates the transaction's LSN
+    /// 4. Calls the transaction manager to finalize the commit
+    /// 5. Flushes dirty pages and releases locks
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_ctx` - The transaction context containing the transaction to commit
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Transaction committed successfully
+    /// * `Ok(false)` - Commit reported as unsuccessful by transaction manager
+    /// * `Err(DBError)` - Commit failed with error
     async fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Committing transaction {}", txn_ctx.get_transaction_id());
 
@@ -668,6 +889,30 @@ impl ExecutionEngine {
         }
     }
 
+    /// Chains a new transaction after commit/rollback when `AND CHAIN` is specified.
+    ///
+    /// Transaction chaining allows starting a new transaction immediately after
+    /// completing the current one, inheriting the same isolation level. This is
+    /// useful for batch operations that need transactional boundaries.
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_ctx` - The previous transaction context (used for isolation level)
+    /// * `exec_ctx` - The execution context to update with the new transaction
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - New transaction started and context updated
+    /// * `Ok(false)` - Chaining not requested or failed to start new transaction
+    /// * `Err(DBError)` - Error starting the new transaction
+    ///
+    /// # Behavior
+    ///
+    /// 1. Checks if chaining was requested via `AND CHAIN` clause
+    /// 2. Gets the isolation level from the completed transaction
+    /// 3. Starts a new transaction with the same isolation level
+    /// 4. Updates the execution context with the new transaction
+    /// 5. Resets the chain flag
     fn chain_transaction(
         &self,
         txn_ctx: Arc<TransactionContext>,
@@ -724,6 +969,24 @@ impl ExecutionEngine {
         }
     }
 
+    /// Aborts the current transaction, undoing all changes.
+    ///
+    /// This method performs the following steps:
+    /// 1. Retrieves the transaction from the context
+    /// 2. Writes an abort record to the WAL
+    /// 3. Updates the transaction's LSN
+    /// 4. Calls the transaction manager to perform the abort
+    /// 5. Undoes all changes made by the transaction
+    /// 6. Releases all locks held by the transaction
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_ctx` - The transaction context containing the transaction to abort
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Transaction aborted successfully
+    /// * `Err(DBError)` - Abort failed with error
     fn abort_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Aborting transaction {}", txn_ctx.get_transaction_id());
 

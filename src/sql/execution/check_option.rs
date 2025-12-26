@@ -100,45 +100,197 @@
 
 use std::collections::HashSet;
 
+/// Individual optimizer transformation flags.
+///
+/// Each variant represents a specific optimization pass that can be selectively
+/// enabled or disabled during query planning. The optimizer checks these flags
+/// to determine which transformations to apply to the logical plan.
+///
+/// # Discriminant Values
+///
+/// The enum variants have explicit discriminant values for potential serialization
+/// or debugging purposes:
+/// - `EnableNljCheck` = 0
+/// - `EnableTopnCheck` = 1
+/// - `EnablePushdownCheck` = 2 (implicit)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CheckOption {
+    /// Enables transformation of Nested Loop Joins to Index Joins.
+    ///
+    /// When enabled, the optimizer will attempt to convert expensive nested
+    /// loop joins into more efficient index-based joins when an appropriate
+    /// index exists on the join key.
     EnableNljCheck = 0,
+
+    /// Enables merging of Sort + Limit operations into TopN.
+    ///
+    /// When enabled, the optimizer combines a Sort operator followed by a
+    /// Limit operator into a single TopN operator, which is more efficient
+    /// as it only maintains the top N elements during sorting.
     EnableTopnCheck = 1,
+
+    /// Enables predicate pushdown optimization.
+    ///
+    /// When enabled, the optimizer pushes filter predicates as close to the
+    /// data source as possible, reducing the amount of data processed by
+    /// upstream operators.
     EnablePushdownCheck,
 }
 
+/// Set-based collection for managing optimizer transformation flags.
+///
+/// `CheckOptions` provides a convenient interface for enabling, disabling,
+/// and querying optimizer flags. It uses a `HashSet` internally for O(1)
+/// lookup performance.
+///
+/// # Default Behavior
+///
+/// A default `CheckOptions` instance has no optimizations enabled.
+/// Use [`add_check()`](Self::add_check) to enable specific optimizations.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let mut options = CheckOptions::new();
+///
+/// // Enable specific optimizations
+/// options.add_check(CheckOption::EnableNljCheck);
+/// options.add_check(CheckOption::EnableTopnCheck);
+///
+/// // Check if optimization is enabled
+/// if options.has_check(&CheckOption::EnableNljCheck) {
+///     // Apply NLJ to index join transformation
+/// }
+///
+/// // Disable an optimization
+/// options.remove_check(&CheckOption::EnableTopnCheck);
+/// ```
 #[derive(Default)]
 pub struct CheckOptions {
+    /// Set of currently enabled optimization flags.
     check_options_set: HashSet<CheckOption>,
 }
 
 impl CheckOptions {
+    /// Creates a new `CheckOptions` with no optimizations enabled.
+    ///
+    /// Equivalent to [`CheckOptions::default()`](Self::default).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let options = CheckOptions::new();
+    /// assert!(options.is_empty());
+    /// ```
     pub fn new() -> Self {
         Self {
             check_options_set: HashSet::new(),
         }
     }
 
+    /// Enables an optimization flag.
+    ///
+    /// If the flag is already enabled, this is a no-op (idempotent).
+    ///
+    /// # Arguments
+    ///
+    /// * `option` - The optimization flag to enable
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut options = CheckOptions::new();
+    /// options.add_check(CheckOption::EnableNljCheck);
+    /// assert!(options.has_check(&CheckOption::EnableNljCheck));
+    /// ```
     pub fn add_check(&mut self, option: CheckOption) {
         self.check_options_set.insert(option);
     }
 
+    /// Disables an optimization flag.
+    ///
+    /// If the flag is not currently enabled, this is a no-op.
+    ///
+    /// # Arguments
+    ///
+    /// * `option` - Reference to the optimization flag to disable
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut options = CheckOptions::new();
+    /// options.add_check(CheckOption::EnableNljCheck);
+    /// options.remove_check(&CheckOption::EnableNljCheck);
+    /// assert!(!options.has_check(&CheckOption::EnableNljCheck));
+    /// ```
     pub fn remove_check(&mut self, option: &CheckOption) {
         self.check_options_set.remove(option);
     }
 
+    /// Checks if an optimization flag is currently enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `option` - Reference to the optimization flag to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the optimization is enabled, `false` otherwise.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut options = CheckOptions::new();
+    /// options.add_check(CheckOption::EnableTopnCheck);
+    /// assert!(options.has_check(&CheckOption::EnableTopnCheck));
+    /// assert!(!options.has_check(&CheckOption::EnableNljCheck));
+    /// ```
     pub fn has_check(&self, option: &CheckOption) -> bool {
         self.check_options_set.contains(option)
     }
 
+    /// Returns `true` if no optimizations are enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let options = CheckOptions::new();
+    /// assert!(options.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.check_options_set.is_empty()
     }
 
+    /// Disables all optimization flags.
+    ///
+    /// After calling this method, [`is_empty()`](Self::is_empty) will return `true`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut options = CheckOptions::new();
+    /// options.add_check(CheckOption::EnableNljCheck);
+    /// options.add_check(CheckOption::EnableTopnCheck);
+    /// options.clear();
+    /// assert!(options.is_empty());
+    /// ```
     pub fn clear(&mut self) {
         self.check_options_set.clear();
     }
 
+    /// Returns `true` if any optimizations are enabled.
+    ///
+    /// This is the logical inverse of [`is_empty()`](Self::is_empty), indicating
+    /// that the optimizer should apply some transformations to the query plan.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut options = CheckOptions::new();
+    /// assert!(!options.is_modify());
+    /// options.add_check(CheckOption::EnableNljCheck);
+    /// assert!(options.is_modify());
+    /// ```
     pub fn is_modify(&self) -> bool {
         !self.check_options_set.is_empty()
     }
