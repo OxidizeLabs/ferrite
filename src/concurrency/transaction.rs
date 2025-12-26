@@ -184,58 +184,88 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
 
-/// Transaction state.
+/// Transaction state representing the current phase of a transaction's lifecycle.
+///
+/// See the module-level documentation for the state transition diagram.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransactionState {
+    /// Transaction is actively executing operations.
     Running,
+    /// Transaction encountered an error but hasn't been aborted yet.
     Tainted,
+    /// Transaction has successfully committed all changes.
     Committed,
+    /// Transaction has been rolled back; all changes are undone.
     Aborted,
+    /// Transaction is in the shrinking phase of 2PL (releasing locks).
     Shrinking,
+    /// Transaction is in the growing phase of 2PL (acquiring locks).
     Growing,
 }
 
-/// Transaction isolation level.
+/// Transaction isolation level controlling visibility and concurrency behavior.
+///
+/// Higher isolation levels provide stronger consistency guarantees but may
+/// reduce concurrency. See module-level documentation for visibility rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode, Default)]
 pub enum IsolationLevel {
+    /// Allows dirty reads; sees uncommitted changes from other transactions.
     ReadUncommitted,
+    /// Only sees committed data; default isolation level.
     #[default]
     ReadCommitted,
+    /// Snapshot at transaction start; prevents non-repeatable reads.
     RepeatableRead,
+    /// Full serializability; prevents phantom reads via predicate locking.
     Serializable,
+    /// MVCC snapshot isolation; sees a consistent snapshot at read timestamp.
     Snapshot,
 }
 
-/// Represents a link to a previous version of this tuple.
+/// Link to a previous version in the MVCC undo chain.
+///
+/// Each `UndoLink` points to an `UndoLog` entry stored in a transaction's
+/// undo buffer. The chain is traversed during visibility checks and rollback.
+///
+/// An invalid link (terminating the chain) has `prev_txn = INVALID_TXN_ID`.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct UndoLink {
-    /// Previous version can be found in which txn.
+    /// Transaction ID containing the previous version's undo log.
     pub prev_txn: TxnId,
-    /// The log index of the previous version in `prev_txn`.
+    /// Index of the undo log within that transaction's undo buffer.
     pub prev_log_idx: usize,
 }
 
-/// Represents an undo log entry.
+/// Undo log entry storing a previous tuple version for MVCC.
+///
+/// Undo logs form a chain linked by `prev_version`, enabling traversal
+/// to find versions visible to different transactions. They're also used
+/// during rollback to restore previous tuple states.
 #[derive(Debug)]
 pub struct UndoLog {
-    /// Whether this log is a deletion marker.
+    /// `true` if this log represents a deleted tuple (tombstone).
     pub is_deleted: bool,
-    /// The fields modified by this undo log.
+    /// Bitmask indicating which columns were modified.
+    /// `modified_fields[i] == true` means column `i` was changed.
     pub modified_fields: Vec<bool>,
-    /// The modified fields.
+    /// The tuple data for this version.
     pub tuple: Arc<Tuple>,
-    /// Timestamp of this undo log.
+    /// Commit timestamp of the transaction that created this version.
     pub ts: TimeStampOidT,
-    /// Undo log previous version.
+    /// Link to the next older version in the undo chain.
     pub prev_version: UndoLink,
-    /// Original RID for deleted tuples (used for restoring deleted tuples during rollback)
+    /// Original RID for delete operations (needed for rollback restoration).
+    /// Only set when `is_deleted == true`.
     pub original_rid: Option<RID>,
 }
 
 impl UndoLog {
-    /// Validates core invariants for undo logs:
+    /// Validates core invariants for undo logs (debug-only assertions).
+    ///
+    /// # Invariants
     /// - `modified_fields` length must match the tuple column count.
     /// - Deleted logs must carry the original RID so rollbacks can restore rows.
+    /// - Non-delete logs must not set `original_rid`.
     fn validate_invariants(
         is_deleted: bool,
         modified_fields: &[bool],
@@ -264,7 +294,20 @@ impl UndoLog {
         }
     }
 
-    /// Creates a new UndoLog entry
+    /// Creates a new undo log entry for an update operation.
+    ///
+    /// # Parameters
+    /// - `is_deleted`: Whether this version is a tombstone (should be `false`).
+    /// - `modified_fields`: Bitmask of which columns were modified.
+    /// - `tuple`: The previous tuple data before the update.
+    /// - `ts`: The timestamp of the transaction creating this log.
+    /// - `prev_version`: Link to the next older version in the chain.
+    ///
+    /// # Returns
+    /// A new `UndoLog` instance.
+    ///
+    /// # Panics (debug only)
+    /// Panics if `modified_fields.len() != tuple.get_column_count()`.
     pub fn new(
         is_deleted: bool,
         modified_fields: Vec<bool>,
@@ -283,7 +326,21 @@ impl UndoLog {
         }
     }
 
-    /// Creates a new UndoLog entry for a deleted tuple
+    /// Creates a new undo log entry for a delete operation.
+    ///
+    /// # Parameters
+    /// - `is_deleted`: Must be `true` for delete logs.
+    /// - `modified_fields`: Bitmask of columns (typically all `true` for deletes).
+    /// - `tuple`: The tuple data before deletion.
+    /// - `ts`: The timestamp of the deleting transaction.
+    /// - `prev_version`: Link to the next older version in the chain.
+    /// - `rid`: The original RID of the deleted tuple (required for rollback).
+    ///
+    /// # Returns
+    /// A new `UndoLog` instance with `original_rid` set.
+    ///
+    /// # Panics (debug only)
+    /// Panics if `is_deleted` is `false` or if invariants are violated.
     pub fn new_for_delete(
         is_deleted: bool,
         modified_fields: Vec<bool>,
@@ -309,6 +366,14 @@ impl UndoLog {
 }
 
 impl UndoLink {
+    /// Creates a new undo link pointing to a specific undo log.
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID containing the undo log.
+    /// - `log_idx`: The index of the undo log within that transaction's buffer.
+    ///
+    /// # Returns
+    /// A new `UndoLink` instance.
     pub fn new(txn_id: TxnId, log_idx: usize) -> Self {
         Self {
             prev_txn: txn_id,
@@ -316,13 +381,32 @@ impl UndoLink {
         }
     }
 
-    /// Checks if the undo link points to something.
+    /// Checks if this undo link points to a valid undo log.
+    ///
+    /// An invalid link (chain terminator) has `prev_txn == INVALID_TXN_ID`.
+    ///
+    /// # Returns
+    /// `true` if the link points to a valid undo log, `false` otherwise.
     pub fn is_valid(&self) -> bool {
         self.prev_txn != INVALID_TXN_ID && self.prev_log_idx != usize::MAX
     }
 }
 
 impl IsolationLevel {
+    /// Parses an isolation level from a string (case-insensitive).
+    ///
+    /// # Parameters
+    /// - `s`: The string to parse.
+    ///
+    /// # Returns
+    /// `Some(IsolationLevel)` if the string matches a known level, `None` otherwise.
+    ///
+    /// # Recognized Strings
+    /// - `"read uncommitted"` → `ReadUncommitted`
+    /// - `"read committed"` → `ReadCommitted`
+    /// - `"repeatable read"` → `RepeatableRead`
+    /// - `"serializable"` → `Serializable`
+    /// - `"snapshot"` or `"snapshot isolation"` → `Snapshot`
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "read uncommitted" => Some(IsolationLevel::ReadUncommitted),
@@ -335,21 +419,40 @@ impl IsolationLevel {
     }
 }
 
-/// Represents a transaction.
+/// Represents an active database transaction.
+///
+/// Transactions track state, timestamps, undo logs, and write sets to support
+/// ACID properties and multi-version concurrency control. See module-level
+/// documentation for lifecycle and visibility rules.
+///
+/// # Thread Safety
+///
+/// `Transaction` uses interior mutability (`RwLock`, `Mutex`) for thread-safe
+/// access to mutable state. Typically wrapped in `Arc` for shared ownership.
 #[derive(Debug)]
 pub struct Transaction {
-    // Immutable fields
+    // === Immutable fields (set at creation) ===
+    /// Unique identifier for this transaction.
     txn_id: TxnId,
+    /// Isolation level controlling visibility and concurrency.
     isolation_level: IsolationLevel,
+    /// ID of the thread that created this transaction.
     thread_id: thread::ThreadId,
 
-    // Mutable fields with interior mutability
+    // === Mutable fields with interior mutability ===
+    /// Current state in the transaction lifecycle.
     state: RwLock<TransactionState>,
+    /// Read timestamp (snapshot point for MVCC visibility).
     read_ts: RwLock<Timestamp>,
+    /// Commit timestamp (set when transaction commits).
     commit_ts: RwLock<Timestamp>,
+    /// Undo log buffer for rollback and version chain traversal.
     undo_logs: Mutex<Vec<Arc<UndoLog>>>,
+    /// Write set: maps table OID → set of modified RIDs.
     write_set: Mutex<HashMap<TableOidT, HashSet<RID>>>,
+    /// Scan predicates for serializable isolation (predicate locking).
     scan_predicates: Mutex<HashMap<u32, Vec<Arc<Expression>>>>,
+    /// Previous LSN for WAL chaining.
     prev_lsn: RwLock<Lsn>,
 }
 
@@ -408,15 +511,23 @@ impl Transaction {
         *self.state.read()
     }
 
+    /// Sets the transaction state.
+    ///
+    /// # Parameters
+    /// - `state`: The new state to set.
     pub fn set_state(&self, state: TransactionState) {
         *self.state.write() = state;
     }
 
-    /// Returns the read timestamp.
+    /// Returns the read timestamp (snapshot point for MVCC).
     pub fn read_ts(&self) -> Timestamp {
         *self.read_ts.read()
     }
 
+    /// Sets the read timestamp.
+    ///
+    /// # Parameters
+    /// - `ts`: The read timestamp to set.
     pub fn set_read_ts(&self, ts: Timestamp) {
         *self.read_ts.write() = ts;
     }
@@ -426,6 +537,10 @@ impl Transaction {
         *self.commit_ts.read()
     }
 
+    /// Sets the commit timestamp.
+    ///
+    /// # Parameters
+    /// - `ts`: The commit timestamp to set.
     pub fn set_commit_ts(&self, ts: Timestamp) {
         *self.commit_ts.write() = ts;
     }
@@ -505,13 +620,23 @@ impl Transaction {
         size
     }
 
-    /// Appends a write operation to the transaction's write set
+    /// Appends a write operation to the transaction's write set.
+    ///
+    /// The write set tracks all tuples modified by this transaction,
+    /// used for conflict detection and rollback.
+    ///
+    /// # Parameters
+    /// - `table_oid`: The OID of the table containing the modified tuple.
+    /// - `rid`: The record ID of the modified tuple.
     pub fn append_write_set(&self, table_oid: TableOidT, rid: RID) {
         let mut write_set = self.write_set.lock().unwrap();
         write_set.entry(table_oid).or_default().insert(rid);
     }
 
-    /// Gets all write operations performed in this transaction
+    /// Gets all write operations performed in this transaction.
+    ///
+    /// # Returns
+    /// A vector of `(table_oid, rid)` pairs representing all modified tuples.
     pub fn get_write_set(&self) -> Vec<(TableOidT, RID)> {
         let write_set = self.write_set.lock().unwrap();
         write_set
@@ -531,24 +656,57 @@ impl Transaction {
     }
 
     /// Sets the transaction state to tainted.
+    ///
+    /// A tainted transaction has encountered an error but hasn't been
+    /// explicitly aborted yet. It will typically be aborted soon.
     pub fn set_tainted(&self) {
         let mut state = self.state.write();
         *state = TransactionState::Tainted;
     }
 
+    /// Gets all scan predicates recorded by this transaction.
+    ///
+    /// Used for serializable isolation to detect phantom reads.
+    ///
+    /// # Returns
+    /// A map from table OID to the list of predicates scanned on that table.
     pub fn get_scan_predicates(&self) -> HashMap<u32, Vec<Arc<Expression>>> {
         self.scan_predicates.lock().unwrap().clone()
     }
 
+    /// Sets the previous LSN for WAL chaining.
+    ///
+    /// # Parameters
+    /// - `lsn`: The LSN of the previous log record for this transaction.
     pub fn set_prev_lsn(&self, lsn: Lsn) {
         *self.prev_lsn.write() = lsn;
     }
 
+    /// Gets the previous LSN for WAL chaining.
+    ///
+    /// # Returns
+    /// The LSN of the previous log record, or `INVALID_LSN` if none.
     pub fn get_prev_lsn(&self) -> Lsn {
         *self.prev_lsn.read()
     }
 
-    /// Commits the transaction and updates watermark
+    /// Commits the transaction and updates the watermark.
+    ///
+    /// This method:
+    /// 1. Obtains a commit timestamp from the watermark.
+    /// 2. Updates the watermark with the commit timestamp.
+    /// 3. Removes this transaction from the active transaction set.
+    /// 4. Sets the transaction state to `Committed`.
+    ///
+    /// # Parameters
+    /// - `watermark`: The watermark tracker to update.
+    ///
+    /// # Returns
+    /// The commit timestamp assigned to this transaction.
+    ///
+    /// # Note
+    /// If called on an already committed or aborted transaction, logs a
+    /// warning and returns the existing commit timestamp without changes.
     pub fn commit(&self, watermark: &mut Watermark) -> Timestamp {
         match self.get_state() {
             TransactionState::Committed => {
@@ -581,7 +739,15 @@ impl Transaction {
         commit_ts
     }
 
-    /// Begins the transaction and registers with watermark
+    /// Begins the transaction and registers with the watermark.
+    ///
+    /// This method:
+    /// 1. Obtains a read timestamp from the watermark.
+    /// 2. Registers this transaction as active in the watermark.
+    /// 3. Sets the transaction state to `Running`.
+    ///
+    /// # Parameters
+    /// - `watermark`: The watermark tracker to register with.
     pub fn begin(&mut self, watermark: &mut Watermark) {
         // Get read timestamp and register with watermark
         let read_ts = watermark.get_next_ts_and_register();
@@ -589,7 +755,21 @@ impl Transaction {
         self.set_state(TransactionState::Running);
     }
 
-    /// Aborts the transaction and updates watermark
+    /// Aborts the transaction and updates the watermark.
+    ///
+    /// This method:
+    /// 1. Removes this transaction from the active transaction set.
+    /// 2. Sets the transaction state to `Aborted`.
+    ///
+    /// Note: The actual rollback of changes (applying undo logs) is handled
+    /// by the `TransactionManager`, not this method.
+    ///
+    /// # Parameters
+    /// - `watermark`: The watermark tracker to update.
+    ///
+    /// # Note
+    /// If called on an already aborted or committed transaction, logs a
+    /// warning and returns without changes.
     pub fn abort(&self, watermark: &mut Watermark) {
         match self.get_state() {
             TransactionState::Aborted => {
@@ -614,7 +794,23 @@ impl Transaction {
         self.set_state(TransactionState::Aborted);
     }
 
-    /// Enhanced tuple visibility check that considers watermark
+    /// Checks if a tuple is visible to this transaction.
+    ///
+    /// Visibility rules depend on the transaction's isolation level:
+    ///
+    /// | Level            | Rule                                           |
+    /// |------------------|------------------------------------------------|
+    /// | ReadUncommitted  | `!deleted`                                     |
+    /// | ReadCommitted    | `(committed || own_txn) && !deleted`           |
+    /// | RepeatableRead   | `!deleted && (own || committed && ts ≤ read_ts)` |
+    /// | Serializable     | Same as RepeatableRead                         |
+    /// | Snapshot         | `is_visible_to(txn_id, read_ts)`               |
+    ///
+    /// # Parameters
+    /// - `meta`: The tuple metadata to check.
+    ///
+    /// # Returns
+    /// `true` if the tuple is visible to this transaction, `false` otherwise.
     pub fn is_tuple_visible(&self, meta: &TupleMeta) -> bool {
         let commit_ts_dbg = meta.get_commit_timestamp();
         let read_ts = *self.read_ts.read();
@@ -659,7 +855,12 @@ impl Transaction {
     }
 }
 
-/// Formatter implementation for `IsolationLevel`.
+/// Formats `IsolationLevel` as an uppercase SQL-style string.
+///
+/// # Example
+/// ```rust,ignore
+/// assert_eq!(IsolationLevel::ReadCommitted.to_string(), "READ_COMMITTED");
+/// ```
 impl fmt::Display for IsolationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {
@@ -673,7 +874,12 @@ impl fmt::Display for IsolationLevel {
     }
 }
 
-/// Formatter implementation for `TransactionState`.
+/// Formats `TransactionState` as an uppercase string.
+///
+/// # Example
+/// ```rust,ignore
+/// assert_eq!(TransactionState::Running.to_string(), "RUNNING");
+/// ```
 impl fmt::Display for TransactionState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = match self {

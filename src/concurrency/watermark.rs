@@ -147,21 +147,58 @@ use crate::common::config::Timestamp;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Tracks all read Timestamps.
+/// Tracks active transaction timestamps and maintains the low watermark.
+///
+/// The `Watermark` is a core component for MVCC garbage collection, tracking
+/// which transaction timestamps are still in use and computing the minimum
+/// timestamp that any active transaction might need to read.
+///
+/// See the module-level documentation for detailed architecture and usage examples.
+///
+/// # Thread Safety
+///
+/// The `next_ts` field uses `AtomicU64` for lock-free timestamp allocation.
+/// The `active_txns` and `watermark` fields require external synchronization
+/// (typically via `Mutex<Watermark>` or `RwLock<Watermark>`).
 #[derive(Debug)]
 pub struct Watermark {
-    /// Set of active transaction Timestamps
+    /// Set of currently active transaction timestamps.
+    ///
+    /// Each timestamp represents a transaction that has started but not yet
+    /// committed or aborted. Used to compute the minimum active timestamp.
     active_txns: HashSet<Timestamp>,
-    /// Low watermark:
-    /// - If there are active transactions, this is the minimum active read timestamp.
-    /// - If there are no active transactions, this is the next timestamp that would be assigned.
+    /// The low watermark value.
+    ///
+    /// - When `active_txns` is non-empty: the minimum timestamp in `active_txns`.
+    /// - When `active_txns` is empty: the next timestamp that would be assigned.
+    ///
+    /// Data with timestamps below this value is safe for garbage collection.
     watermark: Timestamp,
-    /// Next Timestamp to assign
+    /// Atomic counter for allocating monotonically increasing timestamps.
+    ///
+    /// Each call to `get_next_ts()` atomically increments this counter and
+    /// returns the previous value, ensuring unique timestamps across threads.
     next_ts: AtomicU64,
 }
 
 impl Watermark {
-    /// Creates a new Watermark with the given commit Timestamp.
+    /// Creates a new `Watermark` with initial state.
+    ///
+    /// The watermark is initialized with:
+    /// - Empty active transaction set
+    /// - Watermark value of 1 (first available timestamp)
+    /// - Next timestamp counter starting at 1
+    ///
+    /// # Returns
+    ///
+    /// A new `Watermark` instance ready for use.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let watermark = Watermark::new();
+    /// assert_eq!(watermark.get_watermark(), 1);
+    /// ```
     pub fn new() -> Self {
         let next_ts = AtomicU64::new(1); // Start from 1
         Self {
@@ -171,24 +208,75 @@ impl Watermark {
         }
     }
 
-    /// Gets the next available Timestamp
+    /// Atomically allocates and returns the next unique timestamp.
+    ///
+    /// This operation is lock-free and safe to call from multiple threads.
+    /// Each call returns a unique, monotonically increasing timestamp.
+    ///
+    /// # Returns
+    ///
+    /// A new unique `Timestamp` value.
+    ///
+    /// # Note
+    ///
+    /// This method only allocates a timestamp; it does not register the
+    /// transaction as active. Use [`get_next_ts_and_register`](Self::get_next_ts_and_register)
+    /// to both allocate and register in one step.
     pub fn get_next_ts(&self) -> Timestamp {
         Timestamp::from(self.next_ts.fetch_add(1, Ordering::SeqCst))
     }
 
-    /// Adds a transaction Timestamp to the active set
+    /// Registers a transaction timestamp as active.
+    ///
+    /// Adding a timestamp to the active set may lower the watermark if the
+    /// new timestamp is smaller than the current minimum.
+    ///
+    /// # Parameters
+    ///
+    /// - `ts`: The transaction timestamp to register.
+    ///
+    /// # Note
+    ///
+    /// Re-adding an already-registered timestamp is idempotent (no effect
+    /// beyond the initial insertion).
     pub fn add_txn(&mut self, ts: Timestamp) {
         self.active_txns.insert(ts);
         self.update_watermark();
     }
 
-    /// Removes a transaction Timestamp from the active set
+    /// Unregisters a transaction timestamp from the active set.
+    ///
+    /// Removing a timestamp may advance the watermark if the removed timestamp
+    /// was the minimum active timestamp.
+    ///
+    /// # Parameters
+    ///
+    /// - `ts`: The transaction timestamp to unregister.
+    ///
+    /// # Note
+    ///
+    /// Removing a non-existent timestamp is a no-op.
     pub fn remove_txn(&mut self, ts: Timestamp) {
         self.active_txns.remove(&ts);
         self.update_watermark();
     }
 
-    /// Updates the commit Timestamp for a transaction
+    /// Ensures the timestamp allocator stays ahead of a commit timestamp.
+    ///
+    /// When a transaction commits with a given timestamp, this method ensures
+    /// that future timestamp allocations will be strictly greater than that
+    /// commit timestamp. This maintains the invariant that commit timestamps
+    /// are always less than subsequently allocated read timestamps.
+    ///
+    /// # Parameters
+    ///
+    /// - `ts`: The commit timestamp to account for.
+    ///
+    /// # Implementation
+    ///
+    /// Uses a compare-and-swap loop to atomically update `next_ts` to
+    /// `max(next_ts, ts + 1)`. The operation is monotonic: `next_ts` never
+    /// decreases.
     pub fn update_commit_ts(&mut self, ts: Timestamp) {
         // Ensure the global timestamp allocator is always ahead of the latest commit timestamp.
         // This must be monotonic: we never move next_ts backwards.
@@ -208,12 +296,29 @@ impl Watermark {
         self.update_watermark();
     }
 
-    /// Gets the current watermark value
+    /// Returns the current low watermark value.
+    ///
+    /// The watermark represents the oldest timestamp that any active transaction
+    /// might still need to read. Data with timestamps strictly below this value
+    /// is safe for garbage collection.
+    ///
+    /// # Returns
+    ///
+    /// - If there are active transactions: the minimum active timestamp.
+    /// - If there are no active transactions: the next timestamp to be allocated.
     pub fn get_watermark(&self) -> Timestamp {
         self.watermark
     }
 
-    /// Updates the watermark based on active transactions
+    /// Recalculates the watermark based on current active transactions.
+    ///
+    /// This is called internally after any change to `active_txns` or `next_ts`
+    /// that might affect the watermark value.
+    ///
+    /// # Algorithm
+    ///
+    /// - If `active_txns` is empty: watermark = `next_ts`
+    /// - Otherwise: watermark = `min(active_txns)`
     fn update_watermark(&mut self) {
         if self.active_txns.is_empty() {
             self.watermark = Timestamp::from(self.next_ts.load(Ordering::SeqCst));
@@ -222,26 +327,77 @@ impl Watermark {
         }
     }
 
-    /// Gets the next available Timestamp and registers it as an active transaction
+    /// Atomically allocates a timestamp and registers it as an active transaction.
+    ///
+    /// This is the typical entry point for starting a new transaction. It combines
+    /// [`get_next_ts`](Self::get_next_ts) and [`add_txn`](Self::add_txn) into a
+    /// single operation.
+    ///
+    /// # Returns
+    ///
+    /// The allocated timestamp, which is now registered as active.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut watermark = Watermark::new();
+    /// let read_ts = watermark.get_next_ts_and_register();
+    /// // Transaction is now active with timestamp `read_ts`
+    /// ```
     pub fn get_next_ts_and_register(&mut self) -> Timestamp {
         let ts = self.get_next_ts();
         self.add_txn(ts);
         ts
     }
 
-    /// Removes a transaction and updates the watermark, returning the new watermark value
+    /// Unregisters a transaction and returns the updated watermark.
+    ///
+    /// This is the typical exit point for completing a transaction. It combines
+    /// [`remove_txn`](Self::remove_txn) and [`get_watermark`](Self::get_watermark)
+    /// into a single operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `ts`: The transaction timestamp to unregister.
+    ///
+    /// # Returns
+    ///
+    /// The watermark value after removing the transaction.
     pub fn unregister_txn(&mut self, ts: Timestamp) -> Timestamp {
         self.remove_txn(ts);
         self.get_watermark()
     }
 
-    /// Updates the commit Timestamp for a transaction and returns the new watermark
+    /// Updates the commit timestamp and returns the current watermark.
+    ///
+    /// Combines [`update_commit_ts`](Self::update_commit_ts) and
+    /// [`get_watermark`](Self::get_watermark) for convenience.
+    ///
+    /// # Parameters
+    ///
+    /// - `ts`: The commit timestamp to account for.
+    ///
+    /// # Returns
+    ///
+    /// The watermark value after the update.
     pub fn update_commit_ts_and_get_watermark(&mut self, ts: Timestamp) -> Timestamp {
         self.update_commit_ts(ts);
         self.get_watermark()
     }
 
-    /// Creates a clone of the watermark
+    /// Creates a deep clone of this watermark.
+    ///
+    /// The cloned watermark has the same active transactions, watermark value,
+    /// and next timestamp counter, but is fully independent from the original.
+    ///
+    /// # Returns
+    ///
+    /// A new `Watermark` instance with the same state.
+    ///
+    /// # Note
+    ///
+    /// The atomic `next_ts` is cloned by reading its current value; subsequent
+    /// modifications to either the original or clone do not affect the other.
     pub fn clone_watermark(&self) -> Self {
         Self {
             watermark: self.watermark,
@@ -252,6 +408,9 @@ impl Watermark {
 }
 
 impl Default for Watermark {
+    /// Returns a new `Watermark` with default initial state.
+    ///
+    /// Equivalent to [`Watermark::new()`](Watermark::new).
     fn default() -> Self {
         Watermark::new()
     }
