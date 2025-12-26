@@ -194,10 +194,15 @@ use std::hash::Hash;
 
 /// Record ID (RID) - identifies a record's physical location in a table.
 ///
+/// A RID consists of a page ID and slot number, together uniquely identifying
+/// the physical location of a tuple within a table heap.
+///
 /// See module-level documentation for details.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, Decode)]
 pub struct RID {
+    /// The page identifier within the table heap.
     page_id: PageId,
+    /// The slot index within the page's slot directory.
     slot_num: u32,
 }
 
@@ -289,12 +294,16 @@ impl RID {
     }
 }
 
+/// Formats the RID as `"page_id: <id> slot_num: <num>"`.
 impl fmt::Display for RID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "page_id: {} slot_num: {}", self.page_id, self.slot_num)
     }
 }
 
+/// Returns an invalid RID using [`INVALID_PAGE_ID`] and slot 0.
+///
+/// This sentinel value indicates an uninitialized or deleted record.
 impl Default for RID {
     fn default() -> Self {
         Self {

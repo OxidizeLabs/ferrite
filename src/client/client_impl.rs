@@ -223,18 +223,52 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 /// Represents a client's session with the database (server-side state).
+///
+/// Each connected client has an associated `ClientSession` that tracks
+/// their transaction state and session-level settings. This struct is
+/// maintained by the server to manage per-connection context.
 #[derive(Debug)]
 pub struct ClientSession {
+    /// Unique identifier for this session.
     pub id: u64,
+    /// The currently active transaction, if any.
     pub current_transaction: Option<Arc<TransactionContext>>,
+    /// The isolation level for transactions in this session.
     pub isolation_level: IsolationLevel,
 }
 
+/// Client for connecting to and communicating with a Ferrite database server.
+///
+/// Provides methods for executing SQL queries, preparing statements, and
+/// managing prepared statement lifecycle over a TCP connection.
+///
+/// # Thread Safety
+/// This struct is **NOT thread-safe**. Each task/thread should use its own
+/// `DatabaseClient` instance.
+///
+/// # Example
+/// ```rust,ignore
+/// let mut client = DatabaseClient::connect("127.0.0.1:5432").await?;
+/// let results = client.execute_query("SELECT * FROM users").await?;
+/// ```
 pub struct DatabaseClient {
+    /// The underlying TCP connection to the database server.
     stream: TcpStream,
 }
 
 impl DatabaseClient {
+    /// Establishes a TCP connection to the database server.
+    ///
+    /// # Parameters
+    /// - `addr`: The server address in `host:port` format (e.g., `"127.0.0.1:5432"`).
+    ///
+    /// # Returns
+    /// A connected `DatabaseClient` on success, or a [`DBError::Io`] on connection failure.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let client = DatabaseClient::connect("localhost:5432").await?;
+    /// ```
     pub async fn connect(addr: &str) -> Result<Self, DBError> {
         let stream = TcpStream::connect(addr)
             .await
@@ -242,6 +276,26 @@ impl DatabaseClient {
         Ok(Self { stream })
     }
 
+    /// Executes a SQL query and returns the results.
+    ///
+    /// This method sends the query directly to the server for execution.
+    /// For parameterized queries, use [`prepare_statement`](Self::prepare_statement)
+    /// followed by [`execute_statement`](Self::execute_statement) instead.
+    ///
+    /// # Parameters
+    /// - `query`: The SQL query string to execute.
+    ///
+    /// # Returns
+    /// [`QueryResults`] containing the result rows and metadata on success,
+    /// or a [`DBError`] on failure (network, syntax, or execution error).
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let results = client.execute_query("SELECT id, name FROM users").await?;
+    /// for row in &results.rows {
+    ///     println!("{:?}", row);
+    /// }
+    /// ```
     pub async fn execute_query(&mut self, query: &str) -> Result<QueryResults, DBError> {
         debug!("[Query] Executing: {}", query);
 
@@ -267,6 +321,29 @@ impl DatabaseClient {
         }
     }
 
+    /// Prepares a SQL statement for later execution with parameters.
+    ///
+    /// Prepared statements allow the query to be parsed and planned once,
+    /// then executed multiple times with different parameter values. This
+    /// improves performance for repeated queries and prevents SQL injection.
+    ///
+    /// Use `?` as parameter placeholders in the SQL string.
+    ///
+    /// # Parameters
+    /// - `sql`: The SQL query with `?` placeholders for parameters.
+    ///
+    /// # Returns
+    /// A tuple of `(stmt_id, param_types)` where:
+    /// - `stmt_id`: Handle for executing or closing the statement
+    /// - `param_types`: Expected types for each parameter placeholder
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let (stmt_id, types) = client
+    ///     .prepare_statement("SELECT * FROM users WHERE id = ?")
+    ///     .await?;
+    /// // types[0] will indicate the expected type for the `id` parameter
+    /// ```
     pub async fn prepare_statement(&mut self, sql: &str) -> Result<(u64, Vec<TypeId>), DBError> {
         let request = DatabaseRequest::Prepare(sql.to_string());
         self.send_request(&request).await?;
@@ -282,6 +359,26 @@ impl DatabaseClient {
         }
     }
 
+    /// Executes a previously prepared statement with the given parameters.
+    ///
+    /// The parameters are bound to the `?` placeholders in the order they
+    /// appear in the prepared SQL statement.
+    ///
+    /// # Parameters
+    /// - `stmt_id`: Statement handle returned by [`prepare_statement`](Self::prepare_statement).
+    /// - `params`: Values to bind to the statement's parameter placeholders.
+    ///
+    /// # Returns
+    /// [`QueryResults`] containing the result rows and metadata on success,
+    /// or a [`DBError`] on failure.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // After preparing: "SELECT * FROM users WHERE id = ? AND active = ?"
+    /// let results = client
+    ///     .execute_statement(stmt_id, vec![Value::Integer(42), Value::Boolean(true)])
+    ///     .await?;
+    /// ```
     pub async fn execute_statement(
         &mut self,
         stmt_id: u64,
@@ -298,6 +395,17 @@ impl DatabaseClient {
         }
     }
 
+    /// Closes a prepared statement and releases server-side resources.
+    ///
+    /// After closing, the `stmt_id` is no longer valid and should not be
+    /// used with [`execute_statement`](Self::execute_statement).
+    ///
+    /// # Parameters
+    /// - `stmt_id`: Statement handle returned by [`prepare_statement`](Self::prepare_statement).
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or a [`DBError`] if the statement doesn't exist
+    /// or a network error occurs.
     pub async fn close_statement(&mut self, stmt_id: u64) -> Result<(), DBError> {
         let request = DatabaseRequest::Close(stmt_id);
         self.send_request(&request).await?;
@@ -310,6 +418,9 @@ impl DatabaseClient {
         }
     }
 
+    /// Serializes and sends a request to the database server.
+    ///
+    /// Uses bincode for compact binary serialization over the TCP stream.
     async fn send_request(&mut self, request: &DatabaseRequest) -> Result<(), DBError> {
         debug!("[Network] Serializing request");
         let data = bincode::encode_to_vec(request, bincode::config::standard()).map_err(|e| {
@@ -324,6 +435,10 @@ impl DatabaseClient {
         })
     }
 
+    /// Receives and deserializes a response from the database server.
+    ///
+    /// Handles buffered reads to assemble the complete response, as data
+    /// may arrive in multiple TCP packets. Uses bincode for deserialization.
     async fn receive_response(&mut self) -> Result<DatabaseResponse, DBError> {
         let mut buffer = Vec::with_capacity(4096);
         let mut temp_buffer = [0u8; 4096];

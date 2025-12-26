@@ -315,47 +315,88 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Configuration options for DB instance.
+/// Configuration options for initializing a database instance.
+///
+/// All fields have sensible defaults via [`Default`]. Customize as needed
+/// for your deployment (e.g., larger buffer pool, different file paths).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct DBConfig {
+    /// Path to the database file (default: `"test.db"`).
     pub db_filename: String,
+    /// Path to the write-ahead log file (default: `"test.log"`).
     pub db_log_filename: String,
+    /// Number of pages in the buffer pool (default: `1024`).
     pub buffer_pool_size: usize,
+    /// Whether to enable write-ahead logging (default: `true`).
     pub enable_logging: bool,
+    /// Whether to auto-manage transaction lifecycle (default: `true`).
     pub enable_managed_transactions: bool,
+    /// The K parameter for LRU-K replacement policy (default: `10`).
     pub lru_k: usize,
+    /// Sample size for LRU-K eviction decisions (default: `7`).
     pub lru_sample_size: usize,
+    /// Whether to start the TCP server (default: `false`).
     pub server_enabled: bool,
+    /// Host address for the TCP server (default: `"127.0.0.1"`).
     pub server_host: String,
+    /// Port for the TCP server (default: `5432`).
     pub server_port: u16,
+    /// Maximum concurrent client connections (default: `100`).
     pub max_connections: u32,
+    /// Connection timeout in seconds (default: `30`).
     pub connection_timeout: u64,
 }
 
-/// Main struct representing the DB database instance with generic disk manager type
+/// The central database instance that orchestrates all subsystems.
+///
+/// `DBInstance` is the main entry point for interacting with the database.
+/// It initializes and coordinates storage, buffer management, catalog,
+/// transactions, recovery, and query execution components.
+///
+/// # Thread Safety
+/// This struct is `Clone` (all fields are `Arc`-wrapped) and safe to share
+/// across threads/tasks.
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct DBInstance {
+    /// Manages page caching and disk I/O.
     buffer_pool_manager: Arc<BufferPoolManager>,
+    /// Stores metadata about tables, indexes, and schemas.
     catalog: Arc<RwLock<Catalog>>,
+    /// Creates and manages transaction lifecycles.
     transaction_factory: Arc<TransactionManagerFactory>,
+    /// Parses, plans, optimizes, and executes SQL queries.
     execution_engine: Arc<Mutex<ExecutionEngine>>,
+    /// Manages write-ahead log persistence.
     log_manager: Arc<RwLock<LogManager>>,
+    /// High-level WAL operations for transaction logging.
     wal_manager: Arc<WALManager>,
+    /// Handles crash recovery (present only if recovery was performed).
     recovery_manager: Option<Arc<LogRecoveryManager>>,
+    /// Configuration used to initialize this instance.
     config: DBConfig,
+    /// Default result writer for output formatting.
     writer: Arc<Mutex<dyn ResultWriter>>,
+    /// Per-client session state for server mode.
     client_sessions: Arc<Mutex<HashMap<u64, ClientSession>>>,
+    /// Whether verbose debug logging is enabled.
     debug_mode: bool,
+    /// Cache of prepared statements by statement ID.
     prepared_statements: Arc<Mutex<HashMap<u64, PreparedStatement>>>,
+    /// Counter for generating unique prepared statement IDs.
     next_statement_id: Arc<Mutex<u64>>,
 }
 
-/// Add new struct for prepared statements
+/// Server-side representation of a prepared SQL statement.
+///
+/// Stores the original SQL and expected parameter types for validation
+/// when the statement is executed with bound parameters.
 #[derive(Clone)]
 struct PreparedStatement {
+    /// The original SQL query with `?` placeholders.
     sql: String,
+    /// Expected types for each parameter placeholder.
     parameter_types: Vec<TypeId>,
 }
 
@@ -379,7 +420,27 @@ impl Default for DBConfig {
 }
 
 impl DBInstance {
-    /// Creates a new DB instance with the given configuration
+    /// Creates and initializes a new database instance.
+    ///
+    /// This async constructor performs the full initialization sequence:
+    /// 1. Checks for existing database/log files
+    /// 2. Initializes storage (disk manager, buffer pool, LRU-K replacer)
+    /// 3. Initializes recovery components (log manager)
+    /// 4. Initializes transaction components (transaction manager, WAL)
+    /// 5. Initializes execution engine
+    /// 6. Runs crash recovery if applicable
+    /// 7. Rebuilds catalog from system tables
+    ///
+    /// # Parameters
+    /// - `config`: Configuration options for the database instance.
+    ///
+    /// # Returns
+    /// A fully initialized `DBInstance` on success, or a [`DBError`] if
+    /// initialization or recovery fails.
+    ///
+    /// # Recovery Behavior
+    /// Recovery is triggered only when both database and log files exist
+    /// and `enable_logging` is true in the configuration.
     pub async fn new(config: DBConfig) -> Result<Self, DBError> {
         // Check if database and log files already exist
         let db_file_exists = Path::new(&config.db_filename).exists();
@@ -481,7 +542,16 @@ impl DBInstance {
         })
     }
 
-    /// Creates an executor context for query execution
+    /// Creates an execution context for query execution.
+    ///
+    /// The execution context bundles the buffer pool, catalog, and transaction
+    /// context needed by executors during query processing.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction under which queries will execute.
+    ///
+    /// # Returns
+    /// An `Arc<ExecutionContext>` ready for use by the execution engine.
     pub fn make_executor_context(
         &self,
         txn: Arc<Transaction>,
@@ -497,7 +567,23 @@ impl DBInstance {
         )))
     }
 
-    /// Executes a SQL statement with the specified isolation level.
+    /// Executes a SQL statement with auto-commit semantics.
+    ///
+    /// A new transaction is started, the SQL is executed, and the transaction
+    /// is automatically committed on success or aborted on failure.
+    ///
+    /// # Parameters
+    /// - `sql`: The SQL statement to execute.
+    /// - `isolation_level`: Transaction isolation level for this statement.
+    /// - `writer`: Output destination for query results.
+    ///
+    /// # Returns
+    /// `Ok(true)` if execution and commit succeed, `Ok(false)` if execution
+    /// succeeds but commit fails, or `Err(DBError)` on execution failure.
+    ///
+    /// # Note
+    /// For explicit transaction control, use [`begin_transaction`](Self::begin_transaction)
+    /// and [`execute_transaction`](Self::execute_transaction) instead.
     pub async fn execute_sql(
         &self,
         sql: &str,
@@ -560,6 +646,19 @@ impl DBInstance {
     }
 
     /// Executes SQL within an existing transaction context.
+    ///
+    /// Unlike [`execute_sql`](Self::execute_sql), this method does not
+    /// auto-commit. The caller is responsible for committing or aborting
+    /// the transaction.
+    ///
+    /// # Parameters
+    /// - `sql`: The SQL statement to execute.
+    /// - `txn_ctx`: The transaction context to execute within.
+    /// - `writer`: Output destination for query results.
+    ///
+    /// # Returns
+    /// `Ok(true)` on success, `Ok(false)` on logical failure, or
+    /// `Err(DBError)` on execution error.
     pub async fn execute_transaction(
         &self,
         sql: &str,
@@ -577,6 +676,11 @@ impl DBInstance {
     }
 
     /// Displays all tables in the current database.
+    ///
+    /// Outputs a table with columns: Table ID, Table Name, Schema, and Rows.
+    ///
+    /// # Parameters
+    /// - `writer`: Output destination for the table listing.
     pub fn display_tables(&self, writer: &mut dyn ResultWriter) -> Result<(), DBError> {
         let catalog = self.catalog.read();
         let table_names = catalog.get_table_names();
@@ -617,7 +721,16 @@ impl DBInstance {
         Ok(())
     }
 
-    /// Returns information about a specific table.
+    /// Returns schema information about a specific table.
+    ///
+    /// # Parameters
+    /// - `table_name`: Name of the table to describe.
+    ///
+    /// # Returns
+    /// A confirmation string after displaying the table schema.
+    ///
+    /// # Panics
+    /// Panics if the table does not exist.
     pub fn get_table_info(&self, table_name: &str) -> Result<String, DBError> {
         let catalog = self.catalog.read();
         let table_info = catalog.get_table(table_name).unwrap();
@@ -662,11 +775,24 @@ impl DBInstance {
     }
 
     /// Begins a new transaction with the specified isolation level.
+    ///
+    /// # Parameters
+    /// - `isolation_level`: The isolation level for the new transaction.
+    ///
+    /// # Returns
+    /// A transaction context for use with [`execute_transaction`](Self::execute_transaction).
     pub fn begin_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
         self.transaction_factory.begin_transaction(isolation_level)
     }
 
     /// Commits the transaction with the specified ID.
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID to commit.
+    ///
+    /// # Returns
+    /// `Ok(())` on successful commit, or `Err(DBError)` if the transaction
+    /// is not found or commit fails.
     pub async fn commit_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
         let txn_manager = self.transaction_factory.get_transaction_manager();
 
@@ -688,6 +814,13 @@ impl DBInstance {
     }
 
     /// Aborts the transaction with the specified ID.
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID to abort.
+    ///
+    /// # Returns
+    /// `Ok(())` on successful abort, or `Err(DBError)` if the transaction
+    /// is not found.
     pub fn abort_transaction(&mut self, txn_id: u64) -> Result<(), DBError> {
         let txn_manager = self.transaction_factory.get_transaction_manager();
 
@@ -699,7 +832,23 @@ impl DBInstance {
         Ok(())
     }
 
-    /// Handles network queries
+    /// Handles a client request in server mode.
+    ///
+    /// Routes the request to the appropriate handler based on request type:
+    /// - `Query`: Execute SQL with auto-commit or within active transaction
+    /// - `BeginTransaction`: Start explicit transaction
+    /// - `Commit`: Commit active transaction
+    /// - `Rollback`: Abort active transaction
+    /// - `Prepare`: Create prepared statement
+    /// - `Execute`: Execute prepared statement with parameters
+    /// - `Close`: Deallocate prepared statement
+    ///
+    /// # Parameters
+    /// - `query`: The client request to process.
+    /// - `client_id`: The client's session identifier.
+    ///
+    /// # Returns
+    /// A `DatabaseResponse` containing results or error information.
     pub async fn handle_network_query(
         &self,
         query: DatabaseRequest,
@@ -814,6 +963,9 @@ impl DBInstance {
         }
     }
 
+    /// Executes a SQL query for a client session.
+    ///
+    /// Uses the session's active transaction if present, otherwise auto-commits.
     async fn handle_sql_query(
         &self,
         sql: String,
@@ -853,6 +1005,7 @@ impl DBInstance {
         }
     }
 
+    /// Starts an explicit transaction for a client session.
     fn handle_begin_transaction(
         &self,
         session: &mut ClientSession,
@@ -877,6 +1030,7 @@ impl DBInstance {
         Ok(DatabaseResponse::Results(QueryResults::empty()))
     }
 
+    /// Commits the active transaction for a client session.
     async fn handle_commit(
         &self,
         session: &mut ClientSession,
@@ -901,6 +1055,7 @@ impl DBInstance {
         }
     }
 
+    /// Aborts the active transaction for a client session.
     fn handle_rollback(&self, session: &mut ClientSession) -> Result<DatabaseResponse, DBError> {
         if let Some(txn_ctx) = session.current_transaction.take() {
             self.transaction_factory.abort_transaction(txn_ctx);
@@ -915,12 +1070,18 @@ impl DBInstance {
         }
     }
 
-    /// Add method to enable/disable debug output
+    /// Enables or disables verbose debug logging for client operations.
+    ///
+    /// # Parameters
+    /// - `enabled`: Whether to enable debug mode.
     pub fn set_debug_mode(&mut self, enabled: bool) {
         self.debug_mode = enabled;
     }
 
-    /// Add session management methods
+    /// Creates a new client session for server mode.
+    ///
+    /// # Parameters
+    /// - `client_id`: Unique identifier for the client connection.
     pub fn create_client_session(&self, client_id: u64) {
         let session = ClientSession {
             id: client_id,
@@ -934,6 +1095,12 @@ impl DBInstance {
         }
     }
 
+    /// Removes a client session and cleans up resources.
+    ///
+    /// Aborts any active transaction before removing the session.
+    ///
+    /// # Parameters
+    /// - `client_id`: The client session to remove.
     pub fn remove_client_session(&self, client_id: u64) {
         let mut sessions = self.client_sessions.lock();
         if let Some(session) = sessions.remove(&client_id) {
@@ -947,6 +1114,9 @@ impl DBInstance {
         }
     }
 
+    /// Executes a prepared statement with bound parameters.
+    ///
+    /// Validates parameter count and types before execution.
     async fn handle_execute_statement(
         &self,
         stmt_id: u64,
@@ -1027,6 +1197,7 @@ impl DBInstance {
         }
     }
 
+    /// Deallocates a prepared statement.
     fn handle_close_statement(
         &self,
         stmt_id: u64,
@@ -1048,6 +1219,7 @@ impl DBInstance {
         Ok(DatabaseResponse::Results(QueryResults::empty()))
     }
 
+    /// Executes a prepared statement within an existing transaction.
     async fn execute_prepared_statement(
         &self,
         sql: &str,
@@ -1067,6 +1239,7 @@ impl DBInstance {
             .await
     }
 
+    /// Executes a prepared statement with auto-commit semantics.
     async fn execute_prepared_statement_autocommit(
         &self,
         sql: &str,
@@ -1100,18 +1273,24 @@ impl DBInstance {
         }
     }
 
-    /// Checks if database and log files exist at the configured paths
+    /// Checks if database and log files exist at the configured paths.
+    ///
+    /// # Returns
+    /// A tuple `(db_exists, log_exists)` indicating file presence.
     pub fn files_exist(&self) -> (bool, bool) {
         let db_file_exists = Path::new(&self.config.db_filename).exists();
         let log_file_exists = Path::new(&self.config.db_log_filename).exists();
         (db_file_exists, log_file_exists)
     }
 
-    /// Gets the recovery manager if it exists
+    /// Returns the recovery manager if crash recovery was performed.
+    ///
+    /// Returns `None` for fresh databases or when logging is disabled.
     pub fn get_recovery_manager(&self) -> Option<&Arc<LogRecoveryManager>> {
         self.recovery_manager.as_ref()
     }
 
+    /// Returns a reference to the log manager.
     pub fn get_log_manager(&self) -> &Arc<RwLock<LogManager>> {
         &self.log_manager
     }
