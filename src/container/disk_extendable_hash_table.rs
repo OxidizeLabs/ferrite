@@ -194,18 +194,66 @@ use log::{debug, info};
 use std::sync::Arc;
 
 /// Implementation of an extendable hash table backed by a buffer pool manager.
-/// Non-unique keys are supported. Supports insert and delete. The table grows/shrinks
-/// dynamically as buckets become full/empty.
+///
+/// This structure provides a disk-based hash index that supports dynamic growth
+/// and shrinkage through bucket splitting and merging. Non-unique keys are supported.
+///
+/// See the module-level documentation for architecture details and usage examples.
+///
+/// # Thread Safety
+///
+/// The current implementation is **not thread-safe**. The `insert()` and `remove()`
+/// methods require `&mut self`. External synchronization (e.g., `RwLock`) is needed
+/// for concurrent access.
 pub struct DiskExtendableHashTable {
+    /// Reference to the buffer pool manager for page I/O operations.
     bpm: Arc<BufferPoolManager>,
+    /// Hash function used to compute bucket indices from keys.
     hash_fn: HashFunction<Value>,
+    /// Maximum depth for directory pages, limiting the number of buckets per directory.
+    /// The maximum number of buckets is `2^directory_max_depth`.
     directory_max_depth: u32,
+    /// Maximum number of entries a bucket can hold before requiring a split.
     bucket_max_size: u32,
+    /// Page ID of the header page, which is the root entry point for all lookups.
     header_page_id: PageId,
 }
 
 impl DiskExtendableHashTable {
-    /// Creates a new `DiskExtendableHashTable`.
+    /// Creates a new `DiskExtendableHashTable` with the specified configuration.
+    ///
+    /// This constructor allocates and initializes the header page, a single directory
+    /// page, and an initial empty bucket page. All directory entries in the header
+    /// initially point to the same directory page.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: A descriptive name for the hash table (used for logging).
+    /// - `bpm`: The buffer pool manager for page allocation and I/O.
+    /// - `hash_fn`: The hash function used to compute bucket indices from keys.
+    /// - `header_max_depth`: Maximum depth for the header, controlling the maximum
+    ///   number of directory pages (`2^header_max_depth`).
+    /// - `directory_max_depth`: Maximum depth for each directory, controlling the
+    ///   maximum number of buckets per directory (`2^directory_max_depth`).
+    /// - `bucket_max_size`: Maximum number of entries per bucket before splitting.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)`: The newly created hash table.
+    /// - `Err(String)`: An error message if page allocation fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let ht = DiskExtendableHashTable::new(
+    ///     "my_index".to_string(),
+    ///     bpm.clone(),
+    ///     HashFunction::new(),
+    ///     4,   // up to 16 directory pages
+    ///     4,   // up to 16 buckets per directory
+    ///     256, // 256 entries per bucket
+    /// )?;
+    /// ```
     pub fn new(
         name: String,
         bpm: Arc<BufferPoolManager>,
@@ -288,9 +336,33 @@ impl DiskExtendableHashTable {
         })
     }
 
+    /// Maximum number of retry attempts for insert operations.
+    ///
+    /// When a bucket is full and needs to be split, the insert operation retries
+    /// after splitting. This constant limits retries to prevent infinite loops
+    /// in pathological cases (e.g., many keys hashing to the same bucket).
     const MAX_INSERT_RETRIES: usize = 10;
 
-    /// Public insert API (uses a helper with retry count).
+    /// Inserts a key-value pair into the hash table.
+    ///
+    /// If the target bucket is full, this method automatically splits the bucket
+    /// and retries the insertion. The operation may fail if the maximum retry
+    /// limit is reached or if the bucket cannot be split (e.g., maximum depth).
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: The key to insert.
+    /// - `value`: The RID (record identifier) to associate with the key.
+    ///
+    /// # Returns
+    ///
+    /// - `true`: The key-value pair was successfully inserted.
+    /// - `false`: Insertion failed (bucket full and cannot split, or max retries exceeded).
+    ///
+    /// # Note
+    ///
+    /// Non-unique keys are supported. Inserting a duplicate key adds another entry
+    /// rather than updating the existing one.
     pub fn insert(&mut self, key: Value, value: RID) -> bool {
         debug!("Starting insert operation for key: {:?}", key);
         let mut attempt = 0;
@@ -362,7 +434,24 @@ impl DiskExtendableHashTable {
         }
     }
 
-    /// Gets the value associated with a key.
+    /// Looks up the value associated with a key.
+    ///
+    /// Traverses the header → directory → bucket chain to find the key.
+    /// For non-unique keys, returns the first matching entry found.
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: The key to look up.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(RID)`: The record identifier if the key is found.
+    /// - `None`: The key does not exist in the hash table.
+    ///
+    /// # Performance
+    ///
+    /// Average case O(1) with low load factor. Bucket lookup is O(n) where n
+    /// is the number of entries in the bucket.
     pub fn get_value(&self, key: &Value) -> Option<RID> {
         debug!("Get value called for key: {:?}", key);
         let hash = self.hash_fn.get_hash(key) as u32;
@@ -391,6 +480,22 @@ impl DiskExtendableHashTable {
     }
 
     /// Removes a key-value pair from the hash table.
+    ///
+    /// If the bucket becomes empty after removal, this method attempts to merge
+    /// it with a sibling bucket to reclaim space and reduce directory entries.
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: The key to remove.
+    ///
+    /// # Returns
+    ///
+    /// - `true`: The key was found and removed.
+    /// - `false`: The key was not found in the hash table.
+    ///
+    /// # Note
+    ///
+    /// For non-unique keys, this removes only the first matching entry.
     pub fn remove(&mut self, key: &Value) -> bool {
         debug!("Remove called for key: {:?}", key);
         let hash = self.hash_fn.get_hash(key) as u32;
@@ -442,7 +547,17 @@ impl DiskExtendableHashTable {
         removed
     }
 
-    // Helper functions
+    /// Fetches a directory page by its index in the header.
+    ///
+    /// # Parameters
+    ///
+    /// - `directory_index`: The index into the header's directory page ID array.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(PageGuard)`: The directory page if found.
+    /// - `None`: The header page couldn't be fetched, the index is invalid,
+    ///   or the directory page ID is `INVALID_PAGE_ID`.
     fn get_directory_page(
         &self,
         directory_index: usize,
@@ -460,6 +575,18 @@ impl DiskExtendableHashTable {
         }
     }
 
+    /// Fetches a bucket page by its directory and bucket indices.
+    ///
+    /// # Parameters
+    ///
+    /// - `directory_index`: The index of the directory page in the header.
+    /// - `bucket_index`: The index of the bucket within the directory.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(PageGuard)`: The bucket page if found.
+    /// - `None`: The directory or bucket page couldn't be fetched, or the
+    ///   bucket page ID is `INVALID_PAGE_ID`.
     fn get_bucket_page(
         &self,
         directory_index: usize,
@@ -476,7 +603,23 @@ impl DiskExtendableHashTable {
         }
     }
 
-    // New method: split_bucket_internal performs directory updates and re-distribution
+    /// Splits a full bucket into two buckets.
+    ///
+    /// This method handles the core bucket splitting logic:
+    /// 1. Creates a new bucket page.
+    /// 2. Increments the local depth of both buckets.
+    /// 3. Updates directory pointers to reference the new bucket.
+    /// 4. Redistributes entries between old and new buckets based on the new bit.
+    ///
+    /// # Parameters
+    ///
+    /// - `directory_index`: The index of the directory page containing the bucket.
+    /// - `bucket_index`: The index of the bucket to split.
+    ///
+    /// # Returns
+    ///
+    /// - `true`: The bucket was successfully split.
+    /// - `false`: Split failed (max depth reached, page allocation failed, etc.).
     fn split_bucket_internal(&mut self, directory_index: usize, bucket_index: usize) -> bool {
         debug!(
             "Splitting bucket for directory index {} and bucket index {}",
@@ -556,7 +699,21 @@ impl DiskExtendableHashTable {
         false
     }
 
-    // Add a new method to handle bucket merging
+    /// Attempts to merge an empty bucket with its sibling.
+    ///
+    /// When a bucket becomes empty after a removal, this method tries to merge
+    /// it with its sibling bucket (the bucket that differs only in the highest
+    /// bit of the local depth). If successful, the merged bucket page is deleted.
+    ///
+    /// # Parameters
+    ///
+    /// - `directory_index`: The index of the directory page containing the bucket.
+    /// - `bucket_index`: The index of the empty bucket to merge.
+    ///
+    /// # Returns
+    ///
+    /// - `true`: The bucket was successfully merged and deleted.
+    /// - `false`: Merge was not possible (no sibling, sibling not empty, etc.).
     fn merge_bucket(&mut self, directory_index: usize, bucket_index: usize) -> bool {
         let directory_page = match self.get_directory_page(directory_index) {
             Some(page) => page,
