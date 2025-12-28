@@ -127,8 +127,8 @@
 //!
 //! ## Thread Safety
 //!
-//! Individual pages are **not thread-safe**. Concurrent access must be protected
-//! by the caller, typically via `PageGuard` (which wraps pages in `Arc<RwLock<T>>`).
+//! Individual pages are **not thread-safe**. The caller must protect concurrent access,
+//! typically via `PageGuard` (which wraps pages in `Arc<RwLock<T>>`).
 //! The `PageTrait` requires `Send + Sync` to allow pages to be shared across
 //! threads when properly synchronized.
 
