@@ -208,12 +208,62 @@ use sqlparser::ast::RenameTableNameKind::{As, To};
 use sqlparser::ast::*;
 use std::sync::Arc;
 
+/// The main component for transforming SQL AST into logical plans.
+///
+/// `LogicalPlanBuilder` takes parsed SQL statements from `sqlparser` and converts them
+/// into [`LogicalPlan`] trees that represent the query's semantics without specifying
+/// execution strategies.
+///
+/// # Components
+///
+/// - [`ExpressionParser`]: Parses SQL expressions into internal [`Expression`] types
+/// - [`SchemaManager`]: Handles type conversion, schema construction, and validation
+///
+/// # Supported Statements
+///
+/// | Category | Statements |
+/// |----------|------------|
+/// | DML | `SELECT`, `INSERT`, `UPDATE`, `DELETE` |
+/// | DDL | `CREATE TABLE`, `CREATE INDEX`, `CREATE VIEW`, `DROP`, `ALTER` |
+/// | Transaction | `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT` |
+/// | Utility | `EXPLAIN`, `SHOW TABLES`, `SHOW DATABASES`, `USE` |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ferrite::sql::planner::plan_builder::LogicalPlanBuilder;
+///
+/// let catalog = Arc::new(RwLock::new(Catalog::new()));
+/// let builder = LogicalPlanBuilder::new(catalog);
+///
+/// // Parse and build a query plan
+/// let query = sqlparser::parser::Parser::parse_sql(
+///     &GenericDialect {},
+///     "SELECT * FROM users WHERE id = 1"
+/// )?;
+///
+/// if let Statement::Query(query) = &query[0] {
+///     let plan = builder.build_query_plan(query)?;
+///     println!("{}", plan.explain(0));
+/// }
+/// ```
 pub struct LogicalPlanBuilder {
+    /// Parser for converting SQL expressions to internal representation.
     pub expression_parser: ExpressionParser,
+    /// Manager for schema operations and type conversions.
     pub schema_manager: SchemaManager,
 }
 
 impl LogicalPlanBuilder {
+    /// Creates a new `LogicalPlanBuilder` with access to the given catalog.
+    ///
+    /// # Arguments
+    ///
+    /// * `catalog` - Shared reference to the database catalog for table/schema lookups
+    ///
+    /// # Returns
+    ///
+    /// A new `LogicalPlanBuilder` instance.
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         Self {
             expression_parser: ExpressionParser::new(Arc::clone(&catalog)),
@@ -221,6 +271,29 @@ impl LogicalPlanBuilder {
         }
     }
 
+    /// Builds a logical plan for a complete SQL query.
+    ///
+    /// Handles the full query structure including:
+    /// - Main query body (SELECT, VALUES, UPDATE, etc.)
+    /// - ORDER BY clause
+    /// - LIMIT and OFFSET clauses
+    /// - FETCH clause (SQL standard alternative to LIMIT)
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The parsed SQL query AST node
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Box<LogicalPlan>)` - The complete logical plan tree
+    /// - `Err(String)` - Error message if planning fails
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The query body type is unsupported
+    /// - LIMIT/OFFSET values are invalid
+    /// - Schema resolution fails
     pub fn build_query_plan(&self, query: &Query) -> Result<Box<LogicalPlan>, String> {
         // Start with the main query body
         let mut current_plan = match &*query.body {
@@ -367,10 +440,49 @@ impl LogicalPlanBuilder {
         Ok(current_plan)
     }
 
+    /// Builds a logical plan for a SELECT statement without ORDER BY.
+    ///
+    /// Convenience method that delegates to [`build_select_plan_with_order_by`]
+    /// with `None` for the ORDER BY clause.
+    ///
+    /// # Arguments
+    ///
+    /// * `select` - The parsed SELECT AST node
+    ///
+    /// # Returns
+    ///
+    /// The logical plan for the SELECT statement.
     pub fn build_select_plan(&self, select: &Select) -> Result<Box<LogicalPlan>, String> {
         self.build_select_plan_with_order_by(select, None)
     }
 
+    /// Builds a logical plan for a SELECT statement with optional ORDER BY.
+    ///
+    /// Processes all SELECT clauses in semantic order:
+    /// 1. FROM clause - creates table scans and joins
+    /// 2. WHERE clause - filters rows
+    /// 3. GROUP BY - groups rows for aggregation
+    /// 4. HAVING - filters groups
+    /// 5. SELECT - projects columns and expressions
+    /// 6. DISTINCT - removes duplicates
+    /// 7. ORDER BY - sorts results
+    /// 8. SORT BY - Hive-specific local sorting
+    ///
+    /// # Arguments
+    ///
+    /// * `select` - The parsed SELECT AST node
+    /// * `order_by` - Optional ORDER BY clause (may come from outer Query)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Box<LogicalPlan>)` - The complete SELECT plan tree
+    /// - `Err(String)` - Error if any clause processing fails
+    ///
+    /// # Special Cases
+    ///
+    /// - SELECT without FROM: Creates a single-row VALUES source
+    /// - Wildcard with aggregates: Returns an error
+    /// - ORDER BY on non-projected columns: Falls back to pre-projection schema
     pub fn build_select_plan_with_order_by(
         &self,
         select: &Select,
@@ -687,7 +799,27 @@ impl LogicalPlanBuilder {
         Ok(current_plan)
     }
 
-    /// Validates that all non-aggregate columns in SELECT are included in GROUP BY
+    /// Validates that all non-aggregate columns in SELECT are included in GROUP BY.
+    ///
+    /// SQL requires that any column in the SELECT list that is not inside an
+    /// aggregate function must appear in the GROUP BY clause.
+    ///
+    /// # Arguments
+    ///
+    /// * `select` - The SELECT statement being validated
+    /// * `group_by_exprs` - Expressions from the GROUP BY clause
+    /// * `schema` - Schema for column resolution
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` - If all non-aggregate columns are in GROUP BY
+    /// - `Err(String)` - Error message identifying the offending column
+    ///
+    /// # Example Error
+    ///
+    /// ```text
+    /// Column 'name' must appear in the GROUP BY clause or be used in an aggregate function
+    /// ```
     fn validate_group_by_clause(
         &self,
         select: &Select,
@@ -751,7 +883,27 @@ impl LogicalPlanBuilder {
         Ok(())
     }
 
-    // New helper method to build projection plan with a specific schema for expression parsing
+    /// Builds a projection plan using a specific schema for expression parsing.
+    ///
+    /// This is useful when the input plan's schema differs from the schema needed
+    /// for parsing expressions (e.g., after aggregation when referencing original columns).
+    ///
+    /// # Arguments
+    ///
+    /// * `projection` - List of SELECT items (columns, expressions, wildcards)
+    /// * `input_plan` - Child plan providing input rows
+    /// * `parse_schema` - Schema to use for resolving column references in expressions
+    ///
+    /// # Returns
+    ///
+    /// A projection plan node wrapping the input plan.
+    ///
+    /// # Special Handling
+    ///
+    /// - Aggregate input: Converts expressions to column references pointing to
+    ///   pre-computed aggregate values
+    /// - Wildcards: Expands to all columns from the input schema
+    /// - Aliased expressions: Uses the alias as the output column name
     pub fn build_projection_plan_with_schema(
         &self,
         projection: &[SelectItem],
@@ -981,6 +1133,18 @@ impl LogicalPlanBuilder {
         ))
     }
 
+    /// Builds a projection plan using the input plan's schema for parsing.
+    ///
+    /// Convenience method that uses the input plan's schema for expression parsing.
+    ///
+    /// # Arguments
+    ///
+    /// * `select_items` - List of SELECT items to project
+    /// * `input_plan` - Child plan providing input rows
+    ///
+    /// # Returns
+    ///
+    /// A projection plan node.
     pub fn build_projection_plan(
         &self,
         select_items: &[SelectItem],
@@ -991,6 +1155,29 @@ impl LogicalPlanBuilder {
         self.build_projection_plan_with_schema(select_items, input_plan, parse_schema)
     }
 
+    /// Builds a logical plan for CREATE TABLE.
+    ///
+    /// Processes the table definition including:
+    /// - Column definitions with types and constraints
+    /// - Table-level constraints (PRIMARY KEY, UNIQUE, FOREIGN KEY)
+    /// - IF NOT EXISTS handling
+    ///
+    /// # Arguments
+    ///
+    /// * `create_table` - The parsed CREATE TABLE AST node
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Box<LogicalPlan>)` - The CREATE TABLE plan
+    /// - `Err(String)` - Error if validation fails
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Table name is empty
+    /// - Table has no columns
+    /// - Table already exists (unless IF NOT EXISTS is specified)
+    /// - Column type conversion fails
     pub fn build_create_table_plan(
         &self,
         create_table: &CreateTable,
@@ -1054,7 +1241,23 @@ impl LogicalPlanBuilder {
         ))
     }
 
-    /// Process table-level constraints like PRIMARY KEY (col1, col2) and UNIQUE (col1, col2)
+    /// Processes table-level constraints and applies them to columns.
+    ///
+    /// Handles constraints defined at the table level (as opposed to column-level):
+    /// - `PRIMARY KEY (col1, col2)` - Sets primary key flag and NOT NULL
+    /// - `UNIQUE (col1, col2)` - Sets unique flag
+    /// - `FOREIGN KEY (col) REFERENCES table(col)` - Sets foreign key constraint
+    /// - `CHECK (expr)` - Logged as unsupported
+    ///
+    /// # Arguments
+    ///
+    /// * `constraints` - List of table-level constraints from the AST
+    /// * `columns` - Mutable slice of columns to apply constraints to
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` - If all constraints were processed successfully
+    /// - `Err(String)` - If a constraint references a non-existent column
     fn process_table_constraints(
         &self,
         constraints: &[TableConstraint],
@@ -1171,6 +1374,23 @@ impl LogicalPlanBuilder {
         Ok(())
     }
 
+    /// Builds a logical plan for CREATE INDEX.
+    ///
+    /// Creates an index on specified columns of an existing table.
+    /// Auto-generates an index name if not provided.
+    ///
+    /// # Arguments
+    ///
+    /// * `create_index` - The parsed CREATE INDEX AST node
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Box<LogicalPlan>)` - The CREATE INDEX plan
+    /// - `Err(String)` - Error if the table or columns don't exist
+    ///
+    /// # Index Name Generation
+    ///
+    /// If no name is provided, generates: `{table}_{columns}_idx`
     pub fn build_create_index_plan(
         &mut self,
         create_index: &CreateIndex,
@@ -1227,6 +1447,25 @@ impl LogicalPlanBuilder {
         }
     }
 
+    /// Prepares a join scan for multi-table FROM clauses.
+    ///
+    /// Processes all tables in the FROM clause, creating a tree of join nodes.
+    /// Multiple tables without explicit JOIN syntax are combined with CROSS JOIN.
+    ///
+    /// # Arguments
+    ///
+    /// * `select` - The SELECT statement with FROM clause to process
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Box<LogicalPlan>)` - The root of the join tree
+    /// - `Err(String)` - Error if FROM clause is missing or processing fails
+    ///
+    /// # Join Processing
+    ///
+    /// For each `TableWithJoins` in the FROM clause:
+    /// 1. Process the base table and its explicit JOINs via [`process_table_with_joins`]
+    /// 2. Combine with previous result using CROSS JOIN (implicit comma join)
     pub fn prepare_join_scan(&self, select: &Select) -> Result<Box<LogicalPlan>, String> {
         if select.from.is_empty() {
             return Err("FROM clause is required".to_string());
@@ -1264,6 +1503,32 @@ impl LogicalPlanBuilder {
         current_plan.ok_or_else(|| "Failed to create join plan".to_string())
     }
 
+    /// Processes a table and its explicit JOIN clauses.
+    ///
+    /// Handles the base table/subquery and chains all explicit JOINs onto it.
+    ///
+    /// # Supported Join Types
+    ///
+    /// - `INNER JOIN` / `JOIN`
+    /// - `LEFT [OUTER] JOIN`
+    /// - `RIGHT [OUTER] JOIN`
+    /// - `FULL [OUTER] JOIN`
+    /// - `CROSS JOIN`
+    /// - `LEFT/RIGHT SEMI JOIN`
+    /// - `LEFT/RIGHT ANTI JOIN`
+    ///
+    /// # Arguments
+    ///
+    /// * `table_with_joins` - A table factor with zero or more JOIN clauses
+    ///
+    /// # Returns
+    ///
+    /// The join tree with all explicit JOINs applied.
+    ///
+    /// # Errors
+    ///
+    /// - Only ON constraints are supported (not USING or NATURAL)
+    /// - APPLY and AS OF joins are not yet supported
     fn process_table_with_joins(
         &self,
         table_with_joins: &TableWithJoins,
@@ -1328,6 +1593,26 @@ impl LogicalPlanBuilder {
         Ok(current_plan)
     }
 
+    /// Processes a single table factor (table, subquery, or nested join).
+    ///
+    /// # Supported Table Factors
+    ///
+    /// - `Table` - Direct table reference with optional alias
+    /// - `Derived` - Subquery with optional alias
+    /// - `NestedJoin` - Parenthesized join expression
+    ///
+    /// # Arguments
+    ///
+    /// * `table_factor` - The table factor AST node
+    ///
+    /// # Returns
+    ///
+    /// A logical plan representing the table factor.
+    ///
+    /// # Alias Handling
+    ///
+    /// If an alias is provided, column names are prefixed with the alias
+    /// (e.g., `users AS u` -> columns become `u.id`, `u.name`).
     fn process_table_factor(&self, table_factor: &TableFactor) -> Result<Box<LogicalPlan>, String> {
         match table_factor {
             TableFactor::Table { name, alias, .. } => {
@@ -1414,6 +1699,19 @@ impl LogicalPlanBuilder {
         }
     }
 
+    /// Builds a simple table scan plan for a single table.
+    ///
+    /// Used when the FROM clause contains a single table without JOINs.
+    /// Handles table aliases by prefixing column names.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_with_joins` - The table reference (must be a simple table, not subquery)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Box<LogicalPlan>)` - A table scan plan
+    /// - `Err(String)` - Error if not a simple table reference
     fn build_table_scan(
         &self,
         table_with_joins: &TableWithJoins,
@@ -1448,8 +1746,29 @@ impl LogicalPlanBuilder {
         }
     }
 
-    // ---------- PRIORITY 1: TRANSACTION MANAGEMENT ----------
+    // ==================== TRANSACTION MANAGEMENT ====================
 
+    /// Builds a logical plan for START TRANSACTION / BEGIN.
+    ///
+    /// Parses transaction modes to determine isolation level and access mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `modes` - Transaction modes (isolation level, read/write)
+    /// * `begin` - Whether BEGIN keyword was used
+    /// * `transaction` - Transaction kind (TRANSACTION or WORK)
+    /// * `modifier` - Optional modifier (DEFERRED, IMMEDIATE, EXCLUSIVE)
+    /// * `statements` - Statements within a BEGIN...END block
+    /// * `exception_statements` - Exception handlers
+    /// * `has_end_keyword` - Whether END keyword is present
+    ///
+    /// # Supported Isolation Levels
+    ///
+    /// - READ UNCOMMITTED
+    /// - READ COMMITTED (default)
+    /// - REPEATABLE READ
+    /// - SERIALIZABLE
+    /// - SNAPSHOT
     pub fn build_start_transaction_plan(
         &self,
         modes: &Vec<TransactionMode>,
@@ -1522,57 +1841,92 @@ impl LogicalPlanBuilder {
         Ok(transaction_plan)
     }
 
+    /// Builds a logical plan for COMMIT.
+    ///
+    /// # Arguments
+    ///
+    /// * `chain` - If true, starts a new transaction after commit
+    /// * `end` - If true, ends a transaction block
+    /// * `modifier` - Optional transaction modifier
+    ///
+    /// # Returns
+    ///
+    /// A COMMIT plan node.
     pub fn build_commit_plan(
         &self,
         chain: &bool,
         end: &bool,
         modifier: &Option<TransactionModifier>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // Create the logical plan for committing a transaction
         debug!("Creating commit plan: chain={}, end={}", chain, end);
-
-        // Create a commit transaction plan
         let commit_plan = LogicalPlan::commit_transaction(*chain, *end, *modifier);
-
         Ok(commit_plan)
     }
 
+    /// Builds a logical plan for ROLLBACK.
+    ///
+    /// # Arguments
+    ///
+    /// * `chain` - If true, starts a new transaction after rollback
+    /// * `savepoint` - Optional savepoint to rollback to
+    ///
+    /// # Returns
+    ///
+    /// A ROLLBACK plan node.
     pub fn build_rollback_plan(
         &self,
         chain: &bool,
         savepoint: &Option<Ident>,
     ) -> Result<Box<LogicalPlan>, String> {
-        // Create the logical plan for rolling back a transaction
         debug!("Creating rollback plan: chain={}", chain);
-
-        // Create a rollback transaction plan
         let rollback_plan = LogicalPlan::rollback_transaction(*chain, savepoint.clone());
-
         Ok(rollback_plan)
     }
 
+    /// Builds a logical plan for SAVEPOINT.
+    ///
+    /// # Arguments
+    ///
+    /// * `stmt` - The savepoint identifier
+    ///
+    /// # Returns
+    ///
+    /// A SAVEPOINT plan node.
     pub fn build_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
-        // Create the logical plan for creating a savepoint
         debug!("Creating savepoint plan for: {}", stmt.value);
-
-        // Create a savepoint plan
         let savepoint_plan = LogicalPlan::savepoint(stmt.value.clone());
-
         Ok(savepoint_plan)
     }
 
+    /// Builds a logical plan for RELEASE SAVEPOINT.
+    ///
+    /// # Arguments
+    ///
+    /// * `stmt` - The savepoint identifier to release
+    ///
+    /// # Returns
+    ///
+    /// A RELEASE SAVEPOINT plan node.
     pub fn build_release_savepoint_plan(&self, stmt: &Ident) -> Result<Box<LogicalPlan>, String> {
-        // Create the logical plan for releasing a savepoint
         debug!("Creating release savepoint plan for: {}", stmt.value);
-
-        // Create a release savepoint plan
         let release_savepoint_plan = LogicalPlan::release_savepoint(stmt.value.clone());
-
         Ok(release_savepoint_plan)
     }
 
-    // ---------- PRIORITY 2: DDL OPERATIONS ----------
+    // ==================== DDL OPERATIONS ====================
 
+    /// Builds a logical plan for DROP (TABLE, INDEX, VIEW, etc.).
+    ///
+    /// # Arguments
+    ///
+    /// * `object_type` - Type of object ("TABLE", "INDEX", "VIEW", etc.)
+    /// * `if_exists` - If true, don't error when object doesn't exist
+    /// * `names` - Names of objects to drop
+    /// * `cascade` - If true, also drop dependent objects
+    ///
+    /// # Returns
+    ///
+    /// A DROP plan node.
     pub fn build_drop_plan(
         &self,
         object_type: String,
@@ -1580,18 +1934,24 @@ impl LogicalPlanBuilder {
         names: Vec<String>,
         cascade: bool,
     ) -> Result<Box<LogicalPlan>, String> {
-        // Create the logical plan for dropping objects
         debug!(
             "Creating drop plan for {} objects: {:?}",
             object_type, names
         );
-
-        // Create a drop plan using the static constructor
         let drop_plan = LogicalPlan::drop(object_type, if_exists, names, cascade);
-
         Ok(drop_plan)
     }
 
+    /// Builds a logical plan for CREATE SCHEMA.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema_name` - The schema name (may include authorization)
+    /// * `if_not_exists` - If true, don't error when schema exists
+    ///
+    /// # Returns
+    ///
+    /// A CREATE SCHEMA plan node.
     pub fn build_create_schema_plan(
         &self,
         schema_name: &SchemaName,
@@ -1623,6 +1983,18 @@ impl LogicalPlanBuilder {
         Ok(plan)
     }
 
+    /// Builds a logical plan for CREATE DATABASE.
+    ///
+    /// # Arguments
+    ///
+    /// * `db_name` - Name of the database to create
+    /// * `if_not_exists` - If true, don't error when database exists
+    /// * `location` - Optional storage location (currently ignored)
+    /// * `managed_location` - Optional managed location (currently ignored)
+    ///
+    /// # Returns
+    ///
+    /// A CREATE DATABASE plan node.
     pub fn build_create_database_plan(
         &self,
         db_name: &ObjectName,
@@ -1654,6 +2026,28 @@ impl LogicalPlanBuilder {
         Ok(plan)
     }
 
+    /// Builds a logical plan for ALTER TABLE.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the table to alter
+    /// * `_if_exists` - If true, don't error when table doesn't exist
+    /// * `only` - PostgreSQL ONLY keyword for inheritance
+    /// * `operations` - List of ALTER TABLE operations
+    /// * `location` - Hive-specific location setting
+    /// * `on_cluster` - ClickHouse-specific cluster setting
+    ///
+    /// # Supported Operations
+    ///
+    /// - ADD COLUMN
+    /// - DROP COLUMN
+    /// - RENAME COLUMN
+    /// - RENAME TABLE
+    /// - ALTER COLUMN
+    ///
+    /// # Returns
+    ///
+    /// An ALTER TABLE plan node.
     pub fn build_alter_table_plan(
         &self,
         name: &ObjectName,
@@ -1797,6 +2191,33 @@ impl LogicalPlanBuilder {
         Ok(plan)
     }
 
+    /// Builds a logical plan for CREATE VIEW.
+    ///
+    /// Creates a view by:
+    /// 1. Building a plan for the view's query to derive the schema
+    /// 2. Optionally applying custom column names
+    /// 3. Checking for IF NOT EXISTS condition
+    ///
+    /// # Arguments
+    ///
+    /// * `_or_alter` - CREATE OR ALTER syntax (currently ignored)
+    /// * `_or_replace` - CREATE OR REPLACE syntax (currently ignored)
+    /// * `materialized` - If true, create a materialized view (logged as unsupported)
+    /// * `name` - Name of the view
+    /// * `columns` - Optional custom column names for the view
+    /// * `query` - The view's defining query
+    /// * `if_not_exists` - If true, don't error when view exists
+    ///
+    /// # Returns
+    ///
+    /// A CREATE VIEW plan node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - View name is empty
+    /// - View already exists (without IF NOT EXISTS)
+    /// - Column count doesn't match query result
     pub fn build_create_view_plan(
         &self,
         _or_alter: &bool,
@@ -1888,6 +2309,24 @@ impl LogicalPlanBuilder {
         ))
     }
 
+    /// Builds a logical plan for ALTER VIEW.
+    ///
+    /// Modifies an existing view's definition.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the view to alter
+    /// * `columns` - Optional new column names
+    /// * `query` - The new view query definition
+    /// * `with_options` - SQL options for the view
+    ///
+    /// # Returns
+    ///
+    /// An ALTER VIEW plan node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the view doesn't exist or column count doesn't match.
     pub fn build_alter_view_plan(
         &self,
         name: &ObjectName,
@@ -2098,6 +2537,25 @@ impl LogicalPlanBuilder {
         Ok(LogicalPlan::alter_view(view_name, operation))
     }
 
+    /// Builds a logical plan for DELETE.
+    ///
+    /// Creates a plan that:
+    /// 1. Scans the target table
+    /// 2. Optionally filters rows based on WHERE clause
+    /// 3. Deletes matching rows
+    ///
+    /// # Arguments
+    ///
+    /// * `stmt` - The DELETE statement (must be Statement::Delete)
+    ///
+    /// # Returns
+    ///
+    /// A DELETE plan tree.
+    ///
+    /// # Errors
+    ///
+    /// - Only simple table deletes are supported (no JOINs)
+    /// - DELETE from multiple tables is not supported
     pub fn build_delete_plan(&self, stmt: &Statement) -> Result<Box<LogicalPlan>, String> {
         if let Statement::Delete(delete) = stmt {
             // Get table info
@@ -2181,8 +2639,26 @@ impl LogicalPlanBuilder {
         }
     }
 
-    // ---------- DATABASE INFORMATION ----------
+    // ==================== DATABASE INFORMATION ====================
 
+    /// Builds a logical plan for SHOW TABLES.
+    ///
+    /// # Arguments
+    ///
+    /// * `terse` - Show minimal information
+    /// * `history` - Include historical/deleted tables
+    /// * `extended` - Show extended information
+    /// * `full` - Show full table details
+    /// * `external` - Show only external tables
+    /// * `show_options` - Additional options (schema filter, LIKE pattern, etc.)
+    ///
+    /// # Returns
+    ///
+    /// A SHOW TABLES plan node.
+    ///
+    /// # Note
+    ///
+    /// Many options are logged as not fully implemented but the plan is still created.
     pub fn build_show_tables_plan(
         &self,
         terse: &bool,
@@ -2230,6 +2706,17 @@ impl LogicalPlanBuilder {
         ))
     }
 
+    /// Builds a logical plan for SHOW DATABASES.
+    ///
+    /// # Arguments
+    ///
+    /// * `terse` - Show minimal information
+    /// * `history` - Include historical/deleted databases
+    /// * `show_options` - Additional options (LIKE pattern, filters, limits)
+    ///
+    /// # Returns
+    ///
+    /// A SHOW DATABASES plan node.
     pub fn build_show_databases_plan(
         &self,
         terse: &bool,
@@ -2287,6 +2774,23 @@ impl LogicalPlanBuilder {
         Ok(plan)
     }
 
+    /// Builds a logical plan for SHOW COLUMNS (DESCRIBE).
+    ///
+    /// Extracts table and schema names from the show options.
+    ///
+    /// # Arguments
+    ///
+    /// * `extended` - Show extended column information
+    /// * `full` - Show full column details
+    /// * `show_options` - Options containing table name and optional schema
+    ///
+    /// # Returns
+    ///
+    /// A SHOW COLUMNS plan node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no table name is provided.
     pub fn build_show_columns_plan(
         &self,
         extended: &bool,
@@ -2427,6 +2931,27 @@ impl LogicalPlanBuilder {
         Ok(plan)
     }
 
+    /// Builds a logical plan for USE (switch database).
+    ///
+    /// Supports various USE variants:
+    /// - `USE database_name`
+    /// - `USE SCHEMA schema_name`
+    /// - `USE CATALOG catalog_name`
+    ///
+    /// # Arguments
+    ///
+    /// * `stmt` - The USE statement variant
+    ///
+    /// # Returns
+    ///
+    /// A USE plan node.
+    ///
+    /// # Errors
+    ///
+    /// - USE WAREHOUSE is not supported
+    /// - USE ROLE is not supported
+    /// - USE SECONDARY ROLES is not supported
+    /// - USE DEFAULT is not supported
     pub fn build_use_plan(&self, stmt: &Use) -> Result<Box<LogicalPlan>, String> {
         // Extract the database name from the Use statement based on its variant
         let db_name = match stmt {
@@ -2468,18 +2993,41 @@ impl LogicalPlanBuilder {
         Ok(LogicalPlan::use_db(db_name))
     }
 
-    // Add a helper method that directly creates the explain logical plan
+    /// Helper method to create an EXPLAIN logical plan wrapping an inner plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner_plan` - The plan to explain
+    ///
+    /// # Returns
+    ///
+    /// An EXPLAIN plan node wrapping the inner plan.
     fn create_explain_plan(&self, inner_plan: &LogicalPlan) -> Box<LogicalPlan> {
         let _schema = Schema::new(vec![]);
-        // Create the Explain plan node using the static constructor
         Box::new(LogicalPlan::new(
             LogicalPlanType::Explain {
                 plan: Box::new(inner_plan.clone()),
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Builds a logical plan for EXPLAIN.
+    ///
+    /// Wraps the inner statement's plan in an EXPLAIN node that will
+    /// display the plan structure without executing it.
+    ///
+    /// # Arguments
+    ///
+    /// * `explain` - The EXPLAIN statement containing the inner statement
+    ///
+    /// # Returns
+    ///
+    /// An EXPLAIN plan node.
+    ///
+    /// # Supported Inner Statements
+    ///
+    /// Currently only SELECT queries are supported in EXPLAIN.
     pub fn build_explain_plan(&self, explain: &Statement) -> Result<Box<LogicalPlan>, String> {
         if let Statement::Explain { statement, .. } = explain {
             let inner_plan = match statement.as_ref() {
@@ -2497,6 +3045,33 @@ impl LogicalPlanBuilder {
         }
     }
 
+    /// Builds a logical plan for INSERT.
+    ///
+    /// Supports:
+    /// - `INSERT INTO table VALUES (...)`
+    /// - `INSERT INTO table (col1, col2) VALUES (...)`
+    /// - `INSERT INTO table SELECT ...`
+    ///
+    /// # Arguments
+    ///
+    /// * `insert` - The parsed INSERT statement
+    ///
+    /// # Returns
+    ///
+    /// An INSERT plan tree with VALUES or SELECT as child.
+    ///
+    /// # Column Handling
+    ///
+    /// - If explicit columns are specified, creates a schema with only those columns
+    /// - If no columns specified, uses the full table schema
+    /// - Validates that source schema matches target schema
+    ///
+    /// # Errors
+    ///
+    /// - Table functions not supported
+    /// - Table must exist
+    /// - Column must exist if explicitly specified
+    /// - Schema compatibility check for INSERT ... SELECT
     pub fn build_insert_plan(&self, insert: &Insert) -> Result<Box<LogicalPlan>, String> {
         // Extract the table name from the table field
         let table_name = match &insert.table {
@@ -2568,6 +3143,32 @@ impl LogicalPlanBuilder {
         ))
     }
 
+    /// Builds a logical plan for UPDATE.
+    ///
+    /// Creates a plan that:
+    /// 1. Scans the target table
+    /// 2. Optionally filters rows based on WHERE clause
+    /// 3. Updates matching rows with new values
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - The target table
+    /// * `assignments` - List of SET column = value assignments
+    /// * `_from` - FROM clause for UPDATE (currently ignored)
+    /// * `selection` - Optional WHERE clause
+    /// * `_returning` - RETURNING clause (currently ignored)
+    /// * `_or` - SQLite ON CONFLICT (currently ignored)
+    /// * `_limit` - LIMIT clause (currently ignored)
+    ///
+    /// # Returns
+    ///
+    /// An UPDATE plan tree.
+    ///
+    /// # Errors
+    ///
+    /// - Only simple table updates supported (no JOINs)
+    /// - Tuple assignments not supported
+    /// - Column must exist in the table
     pub fn build_update_plan(
         &self,
         table: &TableWithJoins,
@@ -2666,6 +3267,22 @@ impl LogicalPlanBuilder {
         ))
     }
 
+    /// Builds a logical plan for inline VALUES.
+    ///
+    /// Converts literal row data into a VALUES plan node.
+    ///
+    /// # Arguments
+    ///
+    /// * `rows` - List of rows, each containing expressions for column values
+    /// * `schema` - Expected schema for the values (for validation and typing)
+    ///
+    /// # Returns
+    ///
+    /// A VALUES plan node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any row has a different number of columns than the schema.
     pub fn build_values_plan(
         &self,
         rows: &[Vec<Expr>],
