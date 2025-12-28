@@ -245,66 +245,266 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 use tokio::sync::RwLock;
 
-/// Page data with metadata
+/// Cached page data with associated metadata for cache management decisions.
+///
+/// `PageData` wraps the raw page bytes along with access tracking information
+/// used by the cache manager to make promotion, demotion, and eviction decisions.
+///
+/// # Memory Efficiency
+///
+/// The page data is stored in an `Arc<Vec<u8>>` to enable zero-copy sharing
+/// between cache tiers during promotions. When a page is promoted from cold
+/// to warm cache, only the `Arc` reference is cloned, not the underlying data.
+///
+/// # Fields
+///
+/// | Field           | Purpose                                              |
+/// |-----------------|------------------------------------------------------|
+/// | `data`          | The actual page bytes (shared via `Arc`)             |
+/// | `last_accessed` | Timestamp of most recent access (for LRU decisions)  |
+/// | `access_count`  | Total access count (for LFU and temperature)         |
+/// | `temperature`   | Current temperature classification                   |
 #[derive(Debug, Clone)]
 pub struct PageData {
+    /// The raw page data, wrapped in `Arc` for efficient sharing between cache tiers.
     pub data: Arc<Vec<u8>>,
+    /// Timestamp of the most recent access to this page.
     pub last_accessed: Instant,
+    /// Cumulative count of accesses to this page.
     pub access_count: u64,
+    /// Current temperature classification based on access patterns.
     pub temperature: DataTemperature,
 }
 
-/// Data temperature classification
+/// Temperature classification for cached pages based on access frequency.
+///
+/// The cache manager uses temperature to determine which cache tier a page
+/// belongs to and how aggressively it should be retained. Temperature is
+/// derived from access count thresholds.
+///
+/// # Temperature Thresholds
+///
+/// ```text
+/// Access Count    Temperature    Behavior
+/// ════════════════════════════════════════════════════════════════
+///     > 10          Hot          Retained in L1 (LRU-K), highest priority
+///    5 - 10         Warm         Retained in L2 (LFU), medium priority
+///    2 - 5          Cold         Stored in L3 (FIFO), standard eviction
+///     < 2           Frozen       First candidates for eviction
+/// ```
+///
+/// # Cache Tier Mapping
+///
+/// - `Hot` → L1 Hot Cache (LRU-K with K=2)
+/// - `Warm` → L2 Warm Cache (LFU)
+/// - `Cold` / `Frozen` → L3 Cold Cache (FIFO)
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataTemperature {
+    /// Frequently accessed page (access_count > 10). Stored in L1 hot cache.
     Hot,
+    /// Moderately accessed page (access_count 5-10). Stored in L2 warm cache.
     Warm,
+    /// Infrequently accessed page (access_count 2-5). Stored in L3 cold cache.
     Cold,
+    /// Rarely accessed page (access_count < 2). First eviction candidate.
     Frozen,
 }
 
-/// Access pattern classification
+/// Classification of page access patterns for prefetch optimization.
+///
+/// The prefetch engine uses access pattern classification to predict
+/// which pages are likely to be accessed next and adjust prefetch
+/// aggressiveness accordingly.
+///
+/// # Pattern Detection
+///
+/// ```text
+/// Pattern      Detection Method                 Prefetch Strategy
+/// ════════════════════════════════════════════════════════════════════════════
+/// Sequential   Page N → N+1 → N+2...            Prefetch next N pages
+/// Random       No discernible pattern           Minimal prefetching
+/// Temporal     Same pages accessed repeatedly   Prioritize recently accessed
+/// Spatial      Pages in same region accessed    Prefetch nearby pages
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum AccessPattern {
+    /// Linear page access (e.g., table scans). Triggers aggressive prefetching.
     Sequential,
+    /// Unpredictable access pattern (e.g., index lookups). Minimal prefetching.
     Random,
+    /// Pages accessed repeatedly over time (e.g., hot tuples). Retention priority.
     Temporal,
+    /// Pages in proximity accessed together (e.g., index leaves). Region prefetch.
     Spatial,
 }
 
-/// Metadata for hot/cold data separation
+/// Per-page metadata for hot/cold data separation and access tracking.
+///
+/// `HotColdMetadata` maintains detailed access statistics for each cached page,
+/// enabling intelligent cache tier placement and eviction decisions. This metadata
+/// is stored separately from the page data to allow efficient tracking even for
+/// pages not currently in cache.
+///
+/// # Usage
+///
+/// The cache manager updates this metadata on every page access:
+///
+/// 1. Increments `access_count`
+/// 2. Updates `last_accessed` timestamp
+/// 3. Recalculates `temperature` based on new access count
+/// 4. Updates `access_pattern` if pattern detection triggers
+///
+/// # Temperature Calculation
+///
+/// ```text
+/// access_count > 10  →  Hot
+/// access_count > 5   →  Warm
+/// access_count > 2   →  Cold
+/// access_count ≤ 2   →  Frozen
+/// ```
 #[derive(Debug)]
 pub struct HotColdMetadata {
+    /// Total number of times this page has been accessed.
     pub access_count: u64,
+    /// Timestamp of the most recent access.
     pub last_accessed: Instant,
+    /// Detected access pattern for this page.
     pub access_pattern: AccessPattern,
+    /// Current temperature classification derived from access_count.
     pub temperature: DataTemperature,
+    /// Whether the prefetch engine predicts this page will be reused soon.
     pub predicted_reuse: bool,
+    /// Size of the page data in bytes (for memory pressure calculations).
     pub size_bytes: usize,
 }
 
-/// Prefetch engine for predicting page access patterns
+/// Prefetch prediction engine for anticipating future page accesses.
+///
+/// The `PrefetchEngine` tracks page access sequences to predict which pages
+/// are likely to be accessed next. It employs two main prediction strategies:
+///
+/// # Prediction Strategies
+///
+/// ## 1. Sequential Prefetching
+///
+/// Detects linear access patterns (page N → N+1 → N+2) and prefetches
+/// the next `prefetch_distance` pages. This is highly effective for
+/// table scans and range queries.
+///
+/// ```text
+/// Access: [1, 2, 3, 4] → Predict: [5, 6, 7, 8] (distance=4)
+/// ```
+///
+/// ## 2. Pattern-Based Prefetching
+///
+/// Tracks historical page transitions and predicts based on learned patterns.
+/// Requires at least `sequential_threshold` observations before making predictions.
+///
+/// ```text
+/// Historical: Page 10 often followed by Page 25
+/// Access: 10 → Predict: 25
+/// ```
+///
+/// # Adaptive Behavior
+///
+/// The prefetch distance adapts based on prediction accuracy:
+///
+/// | Accuracy   | Distance Multiplier | Max Predictions |
+/// |------------|---------------------|-----------------|
+/// | > 70%      | 1.0×                | 12              |
+/// | 40-70%     | 0.7×                | 8               |
+/// | 20-40%     | 0.3×                | 4               |
+/// | < 20%      | 0.5× (default)      | 4               |
 #[derive(Debug)]
 pub struct PrefetchEngine {
+    /// Historical access sequences per page for pattern detection.
+    /// Maps page_id → list of pages accessed after this page.
     pub access_patterns: HashMap<PageId, Vec<PageId>>,
+    /// Minimum observations required before using pattern-based predictions.
     pub sequential_threshold: usize,
+    /// Base number of pages to prefetch ahead for sequential access.
     pub prefetch_distance: usize,
+    /// Accuracy percentage (0-100) stored atomically for thread-safe updates.
     pub accuracy_tracker: AtomicU64,
 }
 
-/// Admission controller for cache management
+/// Admission controller for regulating cache entry under memory pressure.
+///
+/// The `AdmissionController` acts as a gatekeeper for the cache, deciding
+/// whether new pages should be admitted based on current memory pressure
+/// and page characteristics. This prevents cache thrashing under load.
+///
+/// # Admission Policy
+///
+/// ```text
+/// Memory Pressure    Admission Rate    Behavior
+/// ════════════════════════════════════════════════════════════════
+///     0 - 50%           100%           Admit all pages freely
+///    51 - 70%            80%           Admit most pages
+///    71 - 85%            60%           Selective admission
+///    86 - 95%            40%           Very selective, reject large pages
+///     > 95%              20%           Emergency mode, critical only
+/// ```
+///
+/// # Large Page Handling
+///
+/// Pages larger than `2 × DB_PAGE_SIZE` are rejected when memory pressure
+/// exceeds 60%, preventing oversized pages from evicting many smaller pages.
+///
+/// # Reuse Prediction
+///
+/// Pages with recent access (< 60 seconds) or high access count (> 3)
+/// bypass admission rate limits, as they have proven reuse value.
 #[derive(Debug)]
 pub struct AdmissionController {
+    /// Current admission rate percentage (0-100). Atomic for thread-safe access.
     pub admission_rate: AtomicU64,
+    /// Current memory pressure percentage (0-100). Derived from cache utilization.
     pub memory_pressure: AtomicU64,
+    /// Maximum cache memory in bytes (for pressure calculations).
     pub max_memory: usize,
 }
 
-/// Deduplication engine for identifying duplicate pages
+/// Deduplication engine for identifying and avoiding storage of duplicate pages.
+///
+/// The `DeduplicationEngine` maintains a hash-based index of page content,
+/// allowing the cache manager to detect when a page has identical content
+/// to an already-cached page. This saves memory by avoiding redundant storage.
+///
+/// # Use Cases
+///
+/// Deduplication is particularly effective for:
+///
+/// - **Zero-filled pages**: Newly allocated but unused pages
+/// - **Repeated patterns**: Tables with repetitive data structures
+/// - **Backup/restore**: Pages read multiple times during recovery
+///
+/// # Hash Algorithm
+///
+/// Uses a simple rolling hash (multiply-add with factor 31) for performance.
+/// This provides reasonable collision resistance while being fast to compute.
+///
+/// # Statistics
+///
+/// The engine tracks:
+/// - `dedup_savings_bytes`: Total bytes saved by avoiding duplicates
+/// - `total_pages_processed`: Total pages checked for deduplication
+/// - Deduplication ratio: `savings / (total × page_size)`
+///
+/// # Example
+///
+/// ```text
+/// Page 1: [0, 0, 0, 0, ...] → hash=0x1234 → stored
+/// Page 2: [0, 0, 0, 0, ...] → hash=0x1234 → duplicate of Page 1, not stored
+/// Savings: 4096 bytes (one page)
+/// ```
 #[derive(Debug)]
 pub struct DeduplicationEngine {
+    /// Map from content hash to the canonical page ID storing that content.
     pub page_hashes: HashMap<u64, PageId>,
+    /// Cumulative bytes saved by deduplication.
     pub dedup_savings_bytes: AtomicUsize,
+    /// Total number of pages checked for deduplication.
     pub total_pages_processed: AtomicUsize,
 }
 
@@ -315,6 +515,7 @@ impl Default for DeduplicationEngine {
 }
 
 impl DeduplicationEngine {
+    /// Creates a new `DeduplicationEngine` with empty state.
     pub fn new() -> Self {
         Self {
             page_hashes: HashMap::new(),
@@ -323,6 +524,30 @@ impl DeduplicationEngine {
         }
     }
 
+    /// Checks if page content is a duplicate of an existing cached page.
+    ///
+    /// Computes a hash of the page data and checks against known hashes.
+    /// If a match is found (and it's not the same page), returns the existing
+    /// page ID and records the deduplication savings.
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id` - The page being checked
+    /// * `data` - The page content to check for duplicates
+    ///
+    /// # Returns
+    ///
+    /// * `Some(PageId)` - The existing page with identical content
+    /// * `None` - No duplicate found; this page's hash is now registered
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// if let Some(existing_id) = dedup.check_duplicate(new_page_id, &data) {
+    ///     // Skip storing; reference existing page instead
+    ///     println!("Page {} duplicates page {}", new_page_id, existing_id);
+    /// }
+    /// ```
     pub fn check_duplicate(&mut self, page_id: PageId, data: &[u8]) -> Option<PageId> {
         // In a real implementation, this would use a more sophisticated hashing algorithm
         // For this example, we'll use a simple hash
@@ -352,6 +577,15 @@ impl DeduplicationEngine {
         hash
     }
 
+    /// Returns deduplication statistics.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(savings_bytes, total_pages_processed, dedup_ratio)`:
+    ///
+    /// - `savings_bytes`: Total bytes saved by not storing duplicates
+    /// - `total_pages_processed`: Number of pages checked
+    /// - `dedup_ratio`: Fraction of bytes saved (`savings / (total × page_size)`)
     pub fn get_stats(&self) -> (usize, usize, f64) {
         let savings = self.dedup_savings_bytes.load(Ordering::Relaxed);
         let total = self.total_pages_processed.load(Ordering::Relaxed);
@@ -364,98 +598,308 @@ impl DeduplicationEngine {
     }
 }
 
-/// Cache statistics
+/// Comprehensive cache statistics for monitoring and tuning.
+///
+/// `CacheStatistics` provides a snapshot of cache health, including capacity
+/// utilization, hit ratios per tier, and operational metrics. Use these
+/// statistics to tune cache ratios and identify performance bottlenecks.
+///
+/// # Interpreting Statistics
+///
+/// ## Hit Ratio Analysis
+///
+/// ```text
+/// Tier        Good Ratio    Action if Low
+/// ════════════════════════════════════════════════════════════════
+/// Hot         > 80%         Increase hot_cache_ratio
+/// Warm        > 60%         Working set may exceed cache
+/// Cold        > 40%         Consider larger cold cache
+/// Overall     > 90%         Cache is performing well
+/// ```
+///
+/// ## Promotion/Demotion Balance
+///
+/// High promotion count with stable cache size indicates healthy tier movement.
+/// High demotion count may indicate memory pressure or thrashing.
+///
+/// ## Prefetch Accuracy
+///
+/// - `> 70%`: Excellent, increase prefetch distance
+/// - `40-70%`: Good, maintain current settings
+/// - `< 40%`: Consider reducing prefetch aggressiveness
 #[derive(Debug)]
 pub struct CacheStatistics {
+    /// Configured capacity of the hot cache (number of entries).
     pub hot_cache_size: usize,
+    /// Configured capacity of the warm cache (number of entries).
     pub warm_cache_size: usize,
+    /// Configured capacity of the cold cache (number of entries).
     pub cold_cache_size: usize,
+    /// Current number of entries in the hot cache.
     pub hot_cache_used: usize,
+    /// Current number of entries in the warm cache.
     pub warm_cache_used: usize,
+    /// Current number of entries in the cold cache.
     pub cold_cache_used: usize,
+    /// Fraction of total accesses served from hot cache (0.0-1.0).
     pub hot_cache_hit_ratio: f64,
+    /// Fraction of total accesses served from warm cache (0.0-1.0).
     pub warm_cache_hit_ratio: f64,
+    /// Fraction of total accesses served from cold cache (0.0-1.0).
     pub cold_cache_hit_ratio: f64,
+    /// Fraction of all accesses served from any cache tier (0.0-1.0).
     pub overall_hit_ratio: f64,
+    /// Total number of page promotions (cold→warm, warm→hot).
     pub promotion_count: u64,
+    /// Total number of pages evicted or demoted.
     pub demotion_count: u64,
+    /// Fraction of prefetch predictions that were subsequently accessed (0.0-1.0).
     pub prefetch_accuracy: f64,
 }
 
-/// Enhanced cache statistics using specialized trait functionality
+/// Extended cache statistics including algorithm-specific details.
+///
+/// `EnhancedCacheStatistics` augments the basic `CacheStatistics` with
+/// information about the specific eviction algorithms used in each tier.
+/// This is useful for debugging and understanding cache behavior.
+///
+/// # Algorithm Details
+///
+/// | Tier | Algorithm | Key Parameter           |
+/// |------|-----------|-------------------------|
+/// | Hot  | LRU-K     | K value (default: 2)    |
+/// | Warm | LFU       | Frequency counts        |
+/// | Cold | FIFO      | Insertion order         |
+///
+/// # LRU-K Explanation
+///
+/// The hot cache uses LRU-K (K=2 by default), which evicts the page with
+/// the largest backward K-distance. This resists scan pollution better
+/// than simple LRU because a page must be accessed K times before being
+/// considered "hot".
 #[derive(Debug)]
 pub struct EnhancedCacheStatistics {
+    /// Standard cache statistics.
     pub basic_stats: CacheStatistics,
+    /// The K value used by the LRU-K algorithm in the hot cache.
     pub lru_k_value: usize,
+    /// Name of the hot cache eviction algorithm (e.g., "LRU-K").
     pub hot_cache_algorithm: String,
+    /// Name of the warm cache eviction algorithm (e.g., "LFU").
     pub warm_cache_algorithm: String,
+    /// Name of the cold cache eviction algorithm (e.g., "FIFO").
     pub cold_cache_algorithm: String,
 }
 
-/// Detailed page access information
+/// Detailed access information for a specific cached page.
+///
+/// `PageAccessDetails` provides algorithm-specific information about a page's
+/// current cache status. The available fields depend on which cache tier
+/// the page resides in.
+///
+/// # Tier-Specific Information
+///
+/// ## Hot Cache (LRU-K)
+/// - `k_value`: The K parameter (typically 2)
+/// - `access_count`: Number of accesses recorded
+/// - `k_distance`: Backward K-distance used for eviction decisions
+/// - `eviction_rank`: Position in eviction order (lower = evicted sooner)
+///
+/// ## Warm Cache (LFU)
+/// - `access_count`: Frequency count for this page
+///
+/// ## Cold Cache (FIFO)
+/// - `eviction_rank`: Position in insertion order (older = evicted sooner)
+///
+/// # Example Usage
+///
+/// ```rust,ignore
+/// if let Some(details) = cache.get_page_access_details(page_id) {
+///     match details.algorithm.as_str() {
+///         "LRU-K" => {
+///             println!("Hot page with K-distance: {:?}", details.k_distance);
+///         },
+///         "LFU" => {
+///             println!("Warm page with frequency: {:?}", details.access_count);
+///         },
+///         "FIFO" => {
+///             println!("Cold page at rank: {:?}", details.eviction_rank);
+///         },
+///         _ => {}
+///     }
+/// }
+/// ```
 #[derive(Debug)]
 pub struct PageAccessDetails {
+    /// Cache tier containing this page ("Hot", "Warm", or "Cold").
     pub cache_level: String,
+    /// Eviction algorithm used for this tier ("LRU-K", "LFU", or "FIFO").
     pub algorithm: String,
+    /// K value for LRU-K (only set for hot cache pages).
     pub k_value: Option<usize>,
+    /// Access/frequency count (set for hot and warm cache pages).
     pub access_count: Option<u64>,
+    /// Backward K-distance for LRU-K eviction (only set for hot cache pages).
     pub k_distance: Option<u64>,
+    /// Position in eviction order (set for hot and cold cache pages).
     pub eviction_rank: Option<usize>,
+    /// Temperature classification of this page.
     pub temperature: DataTemperature,
 }
 
-/// Advanced multi-level cache manager with ML-based prefetching
+/// Multi-level cache manager with three-tier hot/warm/cold architecture.
+///
+/// The `CacheManager` is the primary L2 cache sitting between the `BufferPoolManager`
+/// (L1, semantic page cache) and the `AsyncDiskManager` (disk I/O). It reduces disk
+/// access latency by caching raw page bytes in a tiered structure optimized for
+/// different access patterns.
+///
+/// # Architecture
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────────────────┐
+/// │                           CacheManager                                  │
+/// │                                                                         │
+/// │  ┌─────────────────────────────────────────────────────────────────┐    │
+/// │  │ L1 Hot Cache (LRU-K, K=2)                                       │    │
+/// │  │ • ~20% of total cache (hot_cache_ratio)                         │    │
+/// │  │ • Pages accessed > 10 times                                     │    │
+/// │  │ • Resists scan pollution via backward K-distance                │    │
+/// │  └─────────────────────────────────────────────────────────────────┘    │
+/// │                              ▲ promote │ demote ▼                       │
+/// │  ┌─────────────────────────────────────────────────────────────────┐    │
+/// │  │ L2 Warm Cache (LFU)                                             │    │
+/// │  │ • ~30% of total cache (warm_cache_ratio)                        │    │
+/// │  │ • Pages accessed 5-10 times                                     │    │
+/// │  │ • Evicts least frequently used                                  │    │
+/// │  └─────────────────────────────────────────────────────────────────┘    │
+/// │                              ▲ promote │ demote ▼                       │
+/// │  ┌─────────────────────────────────────────────────────────────────┐    │
+/// │  │ L3 Cold Cache (FIFO)                                            │    │
+/// │  │ • ~50% of total cache (remainder)                               │    │
+/// │  │ • Entry point for new pages                                     │    │
+/// │  │ • Low-overhead FIFO for transient data                          │    │
+/// │  └─────────────────────────────────────────────────────────────────┘    │
+/// │                                                                         │
+/// │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────────┐    │
+/// │  │ PrefetchEngine  │ │ AdmissionCtrl   │ │ DeduplicationEngine     │    │
+/// │  │ • Sequential    │ │ • Memory press. │ │ • Hash-based detection  │    │
+/// │  │ • Pattern-based │ │ • Rate limiting │ │ • Saves duplicate bytes │    │
+/// │  └─────────────────┘ └─────────────────┘ └─────────────────────────┘    │
+/// └─────────────────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// # Thread Safety
+///
+/// All cache tiers use `Arc<RwLock<T>>` for thread-safe concurrent access.
+/// Non-blocking `try_read()`/`try_write()` is used to avoid contention.
+/// Atomic counters track statistics without locking.
+///
+/// # Key Operations
+///
+/// | Method                   | Description                                     |
+/// |--------------------------|-------------------------------------------------|
+/// | `get_page()`             | Retrieve page from cache (any tier)             |
+/// | `store_page()`           | Store page in appropriate tier                  |
+/// | `trigger_prefetch()`     | Get prefetch predictions for a page             |
+/// | `perform_maintenance()`  | Update pressure and trigger eviction            |
+/// | `get_cache_statistics()` | Get comprehensive cache health metrics          |
 #[derive(Debug)]
 pub struct CacheManager {
-    // L1: Hot page cache (fastest access) - LRU-K based
+    /// L1 Hot Cache: LRU-K based cache for frequently accessed pages.
+    /// Uses `Arc<Vec<u8>>` for efficient data sharing during promotions.
     hot_cache: Arc<RwLock<LRUKCache<PageId, Arc<Vec<u8>>>>>,
 
-    // L2: Warm page cache (medium access) - LFU based
+    /// L2 Warm Cache: LFU based cache for moderately accessed pages.
+    /// Stores full `PageData` including access metadata.
     warm_cache: Arc<RwLock<LFUCache<PageId, PageData>>>,
 
-    // L3: Cold page cache (background prefetch) - FIFO based
+    /// L3 Cold Cache: FIFO based cache for newly inserted pages.
+    /// Low overhead, ideal for one-time sequential scans.
     cold_cache: Arc<RwLock<FIFOCache<PageId, PageData>>>,
 
-    // Cache sizes
+    /// Configured capacity for hot cache (number of entries).
     hot_cache_size: usize,
+    /// Configured capacity for warm cache (number of entries).
     warm_cache_size: usize,
+    /// Configured capacity for cold cache (number of entries).
     cold_cache_size: usize,
 
-    // Predictive prefetching
+    /// Prefetch prediction engine for sequential and pattern-based prefetching.
     prefetch_engine: Arc<RwLock<PrefetchEngine>>,
 
-    // Cache admission control
+    /// Admission controller regulating cache entry under memory pressure.
     admission_controller: Arc<AdmissionController>,
 
-    // Hot/cold data separation
+    /// Per-page metadata for hot/cold classification and access tracking.
     hot_data_tracker: Arc<RwLock<HashMap<PageId, HotColdMetadata>>>,
 
-    // Deduplication engine
+    /// Deduplication engine for detecting and avoiding duplicate page storage.
     dedup_engine: Arc<RwLock<DeduplicationEngine>>,
 
-    // Cache statistics
+    /// Count of pages promoted to hotter tiers (cold→warm, warm→hot).
     promotion_count: AtomicU64,
+    /// Count of pages evicted or demoted.
     demotion_count: AtomicU64,
 
-    // Advanced statistics
+    /// Prefetch prediction accuracy (0-100 percentage, atomic).
     prefetch_accuracy: AtomicU64,
+    /// Count of pages saved by deduplication.
     dedup_savings: AtomicU64,
 
-    // Prefetch tracking
+    /// Active prefetch predictions with timestamps for accuracy tracking.
     prefetch_predictions: Arc<RwLock<HashMap<PageId, Instant>>>,
+    /// Count of prefetch predictions that were subsequently accessed.
     prefetch_hits: AtomicU64,
+    /// Total count of prefetch predictions made.
     prefetch_total: AtomicU64,
 
-    // Cache hit/miss tracking
+    /// Total cache hits across all tiers.
     cache_hits: AtomicU64,
+    /// Total cache misses.
     cache_misses: AtomicU64,
+    /// Hits specifically from hot cache.
     hot_cache_hits: AtomicU64,
+    /// Hits specifically from warm cache.
     warm_cache_hits: AtomicU64,
+    /// Hits specifically from cold cache.
     cold_cache_hits: AtomicU64,
 }
 
 impl CacheManager {
-    /// Creates a new cache manager
+    /// Creates a new `CacheManager` with the specified configuration.
+    ///
+    /// Initializes all three cache tiers with capacities derived from the config:
+    ///
+    /// - **Hot cache**: `cache_size_mb × hot_cache_ratio` (default 20%)
+    /// - **Warm cache**: `cache_size_mb × warm_cache_ratio` (default 30%)
+    /// - **Cold cache**: Remaining capacity (default 50%)
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Configuration containing cache size and ratio parameters
+    ///
+    /// # Configuration Parameters
+    ///
+    /// | Parameter           | Default | Description                          |
+    /// |---------------------|---------|--------------------------------------|
+    /// | `cache_size_mb`     | varies  | Total cache size in megabytes        |
+    /// | `hot_cache_ratio`   | 0.2     | Fraction allocated to hot cache      |
+    /// | `warm_cache_ratio`  | 0.3     | Fraction allocated to warm cache     |
+    /// | `prefetch_distance` | 4       | Pages to prefetch ahead              |
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = DiskManagerConfig {
+    ///     cache_size_mb: 128,      // 128 MB total
+    ///     hot_cache_ratio: 0.2,    // 25.6 MB for hot
+    ///     warm_cache_ratio: 0.3,   // 38.4 MB for warm
+    ///     prefetch_distance: 4,    // Prefetch 4 pages ahead
+    ///     ..Default::default()
+    /// };
+    /// let cache = CacheManager::new(&config);
+    /// ```
     pub fn new(config: &DiskManagerConfig) -> Self {
         let total_cache_mb = config.cache_size_mb;
         let hot_cache_size = (total_cache_mb as f64 * config.hot_cache_ratio) as usize;
@@ -517,12 +961,55 @@ impl CacheManager {
         }
     }
 
-    /// Attempts to get a page from any cache level
+    /// Retrieves a page from the cache if present.
+    ///
+    /// Searches all three cache tiers in order (hot → warm → cold) and returns
+    /// a copy of the page data if found. Cache hits trigger the following actions:
+    ///
+    /// # Cache Tier Behavior
+    ///
+    /// | Tier Found | Action                                          |
+    /// |------------|-------------------------------------------------|
+    /// | Hot        | Update LRU-K access history, return data        |
+    /// | Warm       | **Promote to hot**, update LFU count, return    |
+    /// | Cold       | **Promote to warm**, update access, return      |
+    /// | Miss       | Return `None`, caller must fetch from disk      |
+    ///
+    /// # Side Effects
+    ///
+    /// - Updates access pattern for prefetch learning
+    /// - Checks if this access was a prefetch hit (for accuracy tracking)
+    /// - Increments appropriate hit/miss counters
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id` - The page identifier to look up
+    ///
+    /// # Returns
+    ///
+    /// * `Some(Vec<u8>)` - A clone of the cached page data
+    /// * `None` - Page not found in any cache tier
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// if let Some(data) = cache.get_page(42) {
+    ///     // Process cached data
+    /// } else {
+    ///     // Fetch from disk and store in cache
+    ///     let data = disk.read_page(42)?;
+    ///     cache.store_page(42, data);
+    /// }
+    /// ```
     pub fn get_page(&self, page_id: PageId) -> Option<Vec<u8>> {
         self.get_page_internal(page_id, None)
     }
 
-    /// Internal method to get a page from any cache level
+    /// Internal implementation for page retrieval with optional metrics collection.
+    ///
+    /// This method contains the core cache lookup logic, searching tiers in order
+    /// and handling promotions. The metrics collector parameter allows integration
+    /// with the broader monitoring infrastructure.
     fn get_page_internal(
         &self,
         page_id: PageId,
@@ -614,7 +1101,29 @@ impl CacheManager {
         None
     }
 
-    /// Attempts to get a page from any cache level with enhanced monitoring
+    /// Retrieves a page from the cache with metrics collection.
+    ///
+    /// Identical to [`get_page()`](Self::get_page) but records cache operation
+    /// metrics (hit/miss, tier, migrations) to the provided `MetricsCollector`.
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id` - The page identifier to look up
+    /// * `metrics_collector` - Metrics collector for operation tracking
+    ///
+    /// # Recorded Metrics
+    ///
+    /// - Cache hit/miss per tier ("hot", "warm", "cold", "all")
+    /// - Cache migration events (promotions)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let metrics = MetricsCollector::new(&config);
+    /// if let Some(data) = cache.get_page_with_metrics(42, &metrics) {
+    ///     // Metrics recorded automatically
+    /// }
+    /// ```
     pub fn get_page_with_metrics(
         &self,
         page_id: PageId,
@@ -623,7 +1132,21 @@ impl CacheManager {
         self.get_page_internal(page_id, Some(metrics_collector))
     }
 
-    /// Records access pattern for prefetching engines
+    /// Records page access for prefetch pattern learning and temperature tracking.
+    ///
+    /// Called on every page access to update:
+    ///
+    /// 1. **Prefetch patterns**: Adds access to sequence history for pattern detection
+    /// 2. **Hot/cold metadata**: Updates access count, timestamp, and temperature
+    ///
+    /// # Temperature Update Rules
+    ///
+    /// ```text
+    /// access_count > 10  →  Hot
+    /// access_count > 5   →  Warm
+    /// access_count > 2   →  Cold
+    /// access_count ≤ 2   →  Frozen
+    /// ```
     fn record_access_pattern(&self, page_id: PageId) {
         // Update basic prefetch engine
         if let Ok(mut prefetch_engine) = self.prefetch_engine.try_write() {
@@ -659,7 +1182,44 @@ impl CacheManager {
         }
     }
 
-    /// Stores a page in the appropriate cache level
+    /// Stores a page in the appropriate cache tier.
+    ///
+    /// The page is placed in a tier based on its temperature classification:
+    ///
+    /// - **Hot** → L1 Hot Cache (LRU-K)
+    /// - **Warm** → L2 Warm Cache (LFU)
+    /// - **Cold/Frozen** → L3 Cold Cache (FIFO)
+    ///
+    /// # Admission Control
+    ///
+    /// Before storage, the page passes through admission control:
+    ///
+    /// 1. **Memory pressure check**: High pressure may reject the page
+    /// 2. **Reuse prediction**: Recent or frequently accessed pages bypass limits
+    /// 3. **Size check**: Large pages rejected under pressure (> 2× page size)
+    /// 4. **Deduplication**: Duplicate content detected and skipped
+    ///
+    /// # Memory Efficiency
+    ///
+    /// The page data is wrapped in `Arc<Vec<u8>>` for efficient sharing between
+    /// cache tiers during promotions without data copying.
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id` - The page identifier
+    /// * `data` - The page data to cache
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Store a page (enters cold cache by default)
+    /// cache.store_page(42, page_data);
+    ///
+    /// // Subsequent accesses promote to warmer tiers
+    /// for _ in 0..10 {
+    ///     cache.get_page(42);  // Eventually promoted to hot
+    /// }
+    /// ```
     pub fn store_page(&self, page_id: PageId, data: Vec<u8>) {
         // Check admission controller first
         if !self.should_admit_page(page_id, &data) {
@@ -728,7 +1288,27 @@ impl CacheManager {
         self.record_access_pattern(page_id);
     }
 
-    /// Determines whether a page should be admitted to the cache
+    /// Determines whether a page should be admitted to the cache.
+    ///
+    /// Implements the admission control policy based on memory pressure,
+    /// page characteristics, and access history.
+    ///
+    /// # Admission Rules
+    ///
+    /// 1. **High pressure (>80%) + low admission rate (<50%)**: Reject
+    /// 2. **Recent access (<60 seconds)**: Admit regardless of pressure
+    /// 3. **Frequent access (>3 times)**: Admit regardless of pressure
+    /// 4. **Pressure >60% + large page (>2× page size)**: Reject
+    /// 5. **Otherwise**: Admit
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id` - The page being considered for admission
+    /// * `data` - The page data (used for size checking)
+    ///
+    /// # Returns
+    ///
+    /// `true` if the page should be admitted, `false` to reject.
     fn should_admit_page(&self, page_id: PageId, data: &[u8]) -> bool {
         // Check memory pressure
         let memory_pressure = self
@@ -769,7 +1349,18 @@ impl CacheManager {
         true
     }
 
-    /// Determines the temperature of a page based on access patterns
+    /// Determines the temperature classification for a page.
+    ///
+    /// Looks up the page's metadata in the hot/cold tracker. If no metadata
+    /// exists (new page), defaults to `Cold`.
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id` - The page to classify
+    ///
+    /// # Returns
+    ///
+    /// The page's current `DataTemperature` (Hot, Warm, Cold, or Frozen).
     fn determine_data_temperature(&self, page_id: PageId) -> DataTemperature {
         if let Ok(tracker) = self.hot_data_tracker.try_read()
             && let Some(metadata) = tracker.get(&page_id)
@@ -781,7 +1372,48 @@ impl CacheManager {
         DataTemperature::Cold
     }
 
-    /// Predicts and returns pages that should be prefetched
+    /// Predicts pages likely to be accessed next for prefetching.
+    ///
+    /// Combines two prediction strategies:
+    ///
+    /// ## 1. Sequential Prefetching
+    ///
+    /// Prefetches the next N pages (N = prefetch_distance × accuracy_factor).
+    /// The distance adapts based on prediction accuracy:
+    ///
+    /// | Accuracy | Factor | Behavior                  |
+    /// |----------|--------|---------------------------|
+    /// | > 70%    | 1.0×   | Full prefetch distance    |
+    /// | 40-70%   | 0.7×   | Conservative prefetching  |
+    /// | 20-40%   | 0.3×   | Minimal prefetching       |
+    /// | < 20%    | 0.5×   | Default moderate          |
+    ///
+    /// ## 2. Pattern-Based Prefetching
+    ///
+    /// Only active when accuracy > 20%. Analyzes historical page transitions
+    /// to predict likely next pages. Requires at least `sequential_threshold`
+    /// observations for a page.
+    ///
+    /// # Arguments
+    ///
+    /// * `current_page` - The page just accessed
+    ///
+    /// # Returns
+    ///
+    /// A deduplicated, sorted list of page IDs to prefetch. Limited to:
+    /// - 12 pages if accuracy > 70%
+    /// - 8 pages if accuracy 40-70%
+    /// - 4 pages otherwise
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let pages_to_prefetch = cache.predict_prefetch_pages(42);
+    /// for page_id in pages_to_prefetch {
+    ///     // Asynchronously load into cache
+    ///     tokio::spawn(async move { disk.prefetch(page_id).await });
+    /// }
+    /// ```
     pub fn predict_prefetch_pages(&self, current_page: PageId) -> Vec<PageId> {
         let mut predicted_pages = Vec::new();
 
@@ -845,7 +1477,28 @@ impl CacheManager {
         predicted_pages
     }
 
-    /// Updates memory pressure based on current cache usage
+    /// Updates memory pressure and admission rate based on cache utilization.
+    ///
+    /// Calculates memory pressure as a percentage of total cache capacity used:
+    ///
+    /// ```text
+    /// pressure = (hot_used + warm_used + cold_used) / (hot_size + warm_size + cold_size) × 100
+    /// ```
+    ///
+    /// Based on the calculated pressure, adjusts the admission rate:
+    ///
+    /// | Pressure   | Admission Rate | Effect                    |
+    /// |------------|----------------|---------------------------|
+    /// | 0-50%      | 100%           | Admit all pages           |
+    /// | 51-70%     | 80%            | Slight restriction        |
+    /// | 71-85%     | 60%            | Selective admission       |
+    /// | 86-95%     | 40%            | Very selective            |
+    /// | > 95%      | 20%            | Emergency mode            |
+    ///
+    /// # Usage
+    ///
+    /// Call periodically (e.g., after batch operations) or before admission
+    /// decisions. Called automatically by `perform_maintenance()`.
     pub fn update_memory_pressure(&self) {
         let hot_used = if let Ok(cache) = self.hot_cache.try_read() {
             <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::len(&cache)
@@ -892,7 +1545,34 @@ impl CacheManager {
             .store(new_admission_rate, Ordering::Relaxed);
     }
 
-    /// Evicts pages from cache based on pressure and policies
+    /// Evicts pages from cache when memory pressure is high.
+    ///
+    /// Applies progressive eviction based on memory pressure levels:
+    ///
+    /// ## Pressure > 85%: Cold Cache Eviction
+    ///
+    /// Targets the cold cache first (least valuable tier). If usage exceeds
+    /// 2× target size, clears the entire cold cache.
+    ///
+    /// ## Pressure > 95%: Warm Cache Eviction
+    ///
+    /// Emergency mode: clears the warm cache if usage exceeds 2× target size.
+    /// This is a last resort to prevent memory exhaustion.
+    ///
+    /// # Eviction Strategy
+    ///
+    /// ```text
+    /// Pressure    Action
+    /// ════════════════════════════════════════════════════════
+    /// ≤ 85%       No eviction
+    /// 85-95%      Clear cold cache if > 2× target size
+    /// > 95%       Clear warm cache if > 2× target size
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// The hot cache is never directly evicted; it relies on its LRU-K
+    /// policy for natural eviction of less frequently accessed pages.
     pub fn evict_if_needed(&self) {
         let memory_pressure = self
             .admission_controller
@@ -942,7 +1622,34 @@ impl CacheManager {
         }
     }
 
-    /// Gets cache statistics
+    /// Returns comprehensive cache statistics for monitoring.
+    ///
+    /// Collects metrics from all cache tiers and operational counters:
+    ///
+    /// # Collected Statistics
+    ///
+    /// - **Capacity**: Configured size for each tier
+    /// - **Utilization**: Current entry count per tier
+    /// - **Hit ratios**: Per-tier and overall hit rates
+    /// - **Operations**: Promotion and demotion counts
+    /// - **Prefetch**: Prediction accuracy percentage
+    ///
+    /// # Side Effects
+    ///
+    /// Calls `update_memory_pressure()` to ensure pressure values are current.
+    ///
+    /// # Returns
+    ///
+    /// A `CacheStatistics` struct containing all metrics.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let stats = cache.get_cache_statistics();
+    /// println!("Overall hit ratio: {:.1}%", stats.overall_hit_ratio * 100.0);
+    /// println!("Hot cache usage: {}/{}", stats.hot_cache_used, stats.hot_cache_size);
+    /// println!("Prefetch accuracy: {:.1}%", stats.prefetch_accuracy * 100.0);
+    /// ```
     pub fn get_cache_statistics(&self) -> CacheStatistics {
         // First update memory pressure before getting statistics
         self.update_memory_pressure();
@@ -1019,7 +1726,39 @@ impl CacheManager {
         }
     }
 
-    /// Trigger prefetching for a given page (public interface)
+    /// Triggers prefetch prediction and records predictions for accuracy tracking.
+    ///
+    /// This is the public interface for prefetching. It:
+    ///
+    /// 1. Calls `predict_prefetch_pages()` to get predictions
+    /// 2. Records predictions in the tracking map for accuracy measurement
+    /// 3. Returns the list of pages to prefetch
+    ///
+    /// # Arguments
+    ///
+    /// * `current_page` - The page just accessed
+    ///
+    /// # Returns
+    ///
+    /// A list of page IDs predicted for prefetching.
+    ///
+    /// # Accuracy Tracking
+    ///
+    /// Each prediction is timestamped. When the predicted page is later accessed,
+    /// it's counted as a prefetch hit. Predictions older than 60 seconds are
+    /// cleaned up and count as misses.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let prefetch_pages = cache.trigger_prefetch(current_page_id);
+    /// for page_id in prefetch_pages {
+    ///     if cache.get_page(page_id).is_none() {
+    ///         // Load from disk in background
+    ///         disk_manager.prefetch(page_id);
+    ///     }
+    /// }
+    /// ```
     pub fn trigger_prefetch(&self, current_page: PageId) -> Vec<PageId> {
         let predicted_pages = self.predict_prefetch_pages(current_page);
 
@@ -1031,27 +1770,61 @@ impl CacheManager {
         predicted_pages
     }
 
-    /// Perform maintenance tasks like memory pressure updates and eviction
+    /// Performs routine maintenance tasks.
+    ///
+    /// Should be called periodically (e.g., every N operations or on a timer).
+    /// Performs:
+    ///
+    /// 1. **Memory pressure update**: Recalculates utilization and admission rate
+    /// 2. **Eviction check**: Clears caches if pressure exceeds thresholds
+    ///
+    /// # Usage
+    ///
+    /// ```rust,ignore
+    /// // Call after batch operations
+    /// for page_id in pages {
+    ///     cache.store_page(page_id, data);
+    /// }
+    /// cache.perform_maintenance();
+    ///
+    /// // Or on a timer
+    /// tokio::spawn(async move {
+    ///     loop {
+    ///         tokio::time::sleep(Duration::from_secs(10)).await;
+    ///         cache.perform_maintenance();
+    ///     }
+    /// });
+    /// ```
     pub fn perform_maintenance(&self) {
         self.update_memory_pressure();
         self.evict_if_needed();
     }
 
-    /// Get current memory pressure (0-100)
+    /// Returns the current memory pressure as a percentage (0-100).
+    ///
+    /// Memory pressure indicates how full the cache is relative to capacity.
+    /// Higher values trigger more aggressive admission control and eviction.
     pub fn get_memory_pressure(&self) -> u64 {
         self.admission_controller
             .memory_pressure
             .load(Ordering::Relaxed)
     }
 
-    /// Get current admission rate (0-100)
+    /// Returns the current admission rate as a percentage (0-100).
+    ///
+    /// The admission rate determines what fraction of page store requests
+    /// are accepted. Lower values indicate stricter admission control due
+    /// to high memory pressure.
     pub fn get_admission_rate(&self) -> u64 {
         self.admission_controller
             .admission_rate
             .load(Ordering::Relaxed)
     }
 
-    /// Check if a page access was a prefetch hit and update accuracy
+    /// Checks if a page access was a successful prefetch prediction.
+    ///
+    /// If the page was previously predicted (in `prefetch_predictions`),
+    /// it's counted as a hit and accuracy is updated.
     fn check_prefetch_hit(&self, page_id: PageId) {
         if let Ok(mut predictions) = self.prefetch_predictions.try_write()
             && predictions.remove(&page_id).is_some()
@@ -1062,7 +1835,10 @@ impl CacheManager {
         }
     }
 
-    /// Update prefetch accuracy based on hits vs total predictions
+    /// Updates the prefetch accuracy metric based on hit ratio.
+    ///
+    /// Calculates accuracy as: `(prefetch_hits / prefetch_total) × 100`
+    /// and stores it atomically for thread-safe access.
     fn update_prefetch_accuracy(&self) {
         let hits = self.prefetch_hits.load(Ordering::Relaxed);
         let total = self.prefetch_total.load(Ordering::Relaxed);
@@ -1074,7 +1850,11 @@ impl CacheManager {
         }
     }
 
-    /// Record prefetch predictions for accuracy tracking
+    /// Records prefetch predictions with timestamps for accuracy tracking.
+    ///
+    /// Each predicted page is stored with the current timestamp. When the page
+    /// is later accessed, it's removed and counted as a hit. Old predictions
+    /// (> 60 seconds) are cleaned up periodically.
     fn record_prefetch_predictions(&self, predicted_pages: &[PageId]) {
         if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
             let now = Instant::now();
@@ -1091,7 +1871,11 @@ impl CacheManager {
         self.cleanup_old_predictions();
     }
 
-    /// Clean up old prefetch predictions that are unlikely to be accessed
+    /// Removes stale prefetch predictions older than 60 seconds.
+    ///
+    /// Predictions that haven't been accessed within the timeout window
+    /// are considered misses and removed. This prevents unbounded growth
+    /// of the predictions map and keeps accuracy metrics meaningful.
     fn cleanup_old_predictions(&self) {
         if let Ok(mut predictions) = self.prefetch_predictions.try_write() {
             let now = Instant::now();
@@ -1109,12 +1893,38 @@ impl CacheManager {
         }
     }
 
-    /// Get current prefetch accuracy as a percentage (0-100)
+    /// Returns the current prefetch accuracy as a ratio (0.0-1.0).
+    ///
+    /// Accuracy measures how many prefetch predictions were actually accessed.
+    /// Higher accuracy indicates effective prediction algorithms.
+    ///
+    /// # Returns
+    ///
+    /// - `0.0`: No predictions hit (or no predictions made)
+    /// - `1.0`: All predictions were accessed
     pub fn get_prefetch_accuracy(&self) -> f64 {
         self.prefetch_accuracy.load(Ordering::Relaxed) as f64 / 100.0
     }
 
-    /// Get enhanced cache statistics using specialized trait functionality
+    /// Returns enhanced statistics including algorithm-specific details.
+    ///
+    /// Extends `get_cache_statistics()` with information about the eviction
+    /// algorithms used in each tier. Useful for debugging and understanding
+    /// cache behavior.
+    ///
+    /// # Returns
+    ///
+    /// An `EnhancedCacheStatistics` struct containing:
+    /// - All basic statistics from `get_cache_statistics()`
+    /// - LRU-K value (K parameter for hot cache)
+    /// - Algorithm names for each tier
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let stats = cache.get_enhanced_cache_statistics();
+    /// println!("Hot cache uses {} with K={}", stats.hot_cache_algorithm, stats.lru_k_value);
+    /// ```
     pub fn get_enhanced_cache_statistics(&self) -> EnhancedCacheStatistics {
         // Get LRU-K specific statistics from hot cache
         let lru_k_value = if let Ok(cache) = self.hot_cache.try_read() {
@@ -1137,7 +1947,20 @@ impl CacheManager {
         }
     }
 
-    /// Demonstrate specialized cache operations for maintenance
+    /// Performs maintenance with algorithm-specific diagnostics.
+    ///
+    /// Extends `perform_maintenance()` with logging of eviction candidates
+    /// from each cache tier:
+    ///
+    /// - **Cold (FIFO)**: Logs the oldest page (next to be evicted)
+    /// - **Warm (LFU)**: Logs the least frequently used page
+    /// - **Hot (LRU-K)**: Logs the LRU-K eviction candidate
+    ///
+    /// Useful for debugging cache behavior and understanding eviction patterns.
+    ///
+    /// # Note
+    ///
+    /// Logs at `trace` level to minimize performance impact in production.
     pub fn perform_specialized_maintenance(&self) {
         // Use FIFO-specific operations for cold cache
         if let Ok(cold_cache) = self.cold_cache.try_read()
@@ -1176,7 +1999,38 @@ impl CacheManager {
         self.perform_maintenance();
     }
 
-    /// Get detailed page access information using LRU-K specific functionality
+    /// Returns detailed access information for a specific cached page.
+    ///
+    /// Searches all cache tiers for the page and returns algorithm-specific
+    /// details about its cache status.
+    ///
+    /// # Tier-Specific Information
+    ///
+    /// | Tier | Algorithm | Available Details                          |
+    /// |------|-----------|---------------------------------------------|
+    /// | Hot  | LRU-K     | k_value, access_count, k_distance, rank    |
+    /// | Warm | LFU       | access_count (frequency)                   |
+    /// | Cold | FIFO      | eviction_rank (age rank)                   |
+    ///
+    /// # Arguments
+    ///
+    /// * `page_id` - The page to look up
+    ///
+    /// # Returns
+    ///
+    /// * `Some(PageAccessDetails)` - Details if the page is cached
+    /// * `None` - Page not found in any cache tier
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// if let Some(details) = cache.get_page_access_details(42) {
+    ///     println!("Page 42 is in {} cache", details.cache_level);
+    ///     if details.algorithm == "LRU-K" {
+    ///         println!("  K-distance: {:?}", details.k_distance);
+    ///     }
+    /// }
+    /// ```
     pub fn get_page_access_details(&self, page_id: PageId) -> Option<PageAccessDetails> {
         if let Ok(hot_cache) = self.hot_cache.try_read() {
             // Check if page is in hot cache and get LRU-K specific details
