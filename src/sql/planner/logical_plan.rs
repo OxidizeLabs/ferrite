@@ -263,13 +263,44 @@ thread_local! {
     static RECURSION_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
+/// Enumeration of all logical plan node types.
+///
+/// Each variant represents a specific database operation with its associated metadata.
+/// These are "logical" in that they describe *what* to do, not *how* to do it.
+/// The conversion to physical plans (which specify execution strategies) happens
+/// via the [`LogicalToPhysical`] trait.
+///
+/// # Categories
+///
+/// - **Scan Operations**: `TableScan`, `IndexScan`, `MockScan`
+/// - **DML Operations**: `Insert`, `Update`, `Delete`, `Values`
+/// - **Query Operations**: `Filter`, `Projection`, `Aggregate`, `Window`, `Distinct`
+/// - **Join Operations**: `NestedLoopJoin`, `NestedIndexJoin`, `HashJoin`
+/// - **Ordering**: `Sort`, `Limit`, `Offset`, `TopN`, `TopNPerGroup`
+/// - **DDL Operations**: `CreateTable`, `CreateIndex`, `Drop`, `AlterTable`, `CreateView`, `AlterView`
+/// - **Transaction Control**: `StartTransaction`, `Commit`, `Rollback`, `Savepoint`, `ReleaseSavepoint`
+/// - **Utility**: `ShowTables`, `ShowColumns`, `ShowDatabases`, `Use`, `Explain`
 #[derive(Debug, Clone)]
 pub enum LogicalPlanType {
+    /// Creates a new table with the specified schema.
+    ///
+    /// # Fields
+    /// - `schema`: The column definitions for the new table
+    /// - `table_name`: Name of the table to create
+    /// - `if_not_exists`: If true, don't error if table already exists
     CreateTable {
         schema: Schema,
         table_name: String,
         if_not_exists: bool,
     },
+    /// Creates a new index on an existing table.
+    ///
+    /// # Fields
+    /// - `schema`: Schema of the table being indexed
+    /// - `table_name`: Name of the table to index
+    /// - `index_name`: Name for the new index
+    /// - `key_attrs`: Column indices that form the index key
+    /// - `if_not_exists`: If true, don't error if index already exists
     CreateIndex {
         schema: Schema,
         table_name: String,
@@ -277,16 +308,41 @@ pub enum LogicalPlanType {
         key_attrs: Vec<usize>,
         if_not_exists: bool,
     },
+    /// A mock table scan for testing purposes.
+    ///
+    /// Returns predefined data without accessing actual storage.
+    /// Useful for unit testing query execution without database setup.
     MockScan {
         table_name: String,
         schema: Schema,
         table_oid: TableOidT,
     },
+    /// Sequential scan of an entire table.
+    ///
+    /// Reads all rows from the table in storage order.
+    /// This is the simplest but potentially slowest scan method for large tables.
+    ///
+    /// # Fields
+    /// - `table_name`: Name of the table to scan
+    /// - `schema`: Output schema (all columns from the table)
+    /// - `table_oid`: Object ID for the table in the catalog
     TableScan {
         table_name: String,
         schema: Schema,
         table_oid: TableOidT,
     },
+    /// Index-based scan using predicate keys.
+    ///
+    /// Uses an existing index to efficiently locate rows matching the predicate.
+    /// Much faster than sequential scan when selectivity is low.
+    ///
+    /// # Fields
+    /// - `table_name`: Name of the table being scanned
+    /// - `table_oid`: Object ID for the table
+    /// - `index_name`: Name of the index to use
+    /// - `index_oid`: Object ID for the index
+    /// - `schema`: Output schema
+    /// - `predicate_keys`: Key expressions used to probe the index
     IndexScan {
         table_name: String,
         table_oid: TableOidT,
@@ -295,6 +351,17 @@ pub enum LogicalPlanType {
         schema: Schema,
         predicate_keys: Vec<Arc<Expression>>,
     },
+    /// Filters rows based on a predicate expression.
+    ///
+    /// Only rows where the predicate evaluates to true are passed through.
+    /// Corresponds to the WHERE clause in SQL.
+    ///
+    /// # Fields
+    /// - `schema`: Input schema (used for predicate evaluation)
+    /// - `table_oid`: Object ID of the source table
+    /// - `table_name`: Name of the source table
+    /// - `predicate`: Boolean expression to evaluate for each row
+    /// - `output_schema`: Schema of output rows (same as input)
     Filter {
         schema: Schema,
         table_oid: TableOidT,
@@ -302,87 +369,237 @@ pub enum LogicalPlanType {
         predicate: Arc<Expression>,
         output_schema: Schema,
     },
+    /// Projects (selects) specific columns or computed expressions.
+    ///
+    /// Corresponds to the SELECT clause column list.
+    /// Can include column references, constants, and computed expressions.
+    ///
+    /// # Fields
+    /// - `expressions`: List of expressions to evaluate for each output row
+    /// - `schema`: Output schema (one column per expression)
+    /// - `column_mappings`: Maps output column positions to input column positions
+    ///   (only for simple column references, not computed expressions)
     Projection {
         expressions: Vec<Arc<Expression>>,
         schema: Schema,
         /// Maps output column positions to input column positions
         column_mappings: Vec<usize>,
     },
+    /// Inserts rows into a table.
+    ///
+    /// Takes input rows (typically from a `Values` node) and inserts them
+    /// into the specified table.
+    ///
+    /// # Fields
+    /// - `table_name`: Target table name
+    /// - `schema`: Schema of the target table
+    /// - `table_oid`: Object ID for the target table
     Insert {
         table_name: String,
         schema: Schema,
         table_oid: TableOidT,
     },
+    /// Deletes rows from a table.
+    ///
+    /// Removes rows that match the input (typically filtered) from the table.
+    ///
+    /// # Fields
+    /// - `table_name`: Target table name
+    /// - `schema`: Schema of the target table
+    /// - `table_oid`: Object ID for the target table
     Delete {
         table_name: String,
         schema: Schema,
         table_oid: TableOidT,
     },
+    /// Updates rows in a table.
+    ///
+    /// Modifies matching rows by applying the update expressions.
+    ///
+    /// # Fields
+    /// - `table_name`: Target table name
+    /// - `schema`: Schema of the target table
+    /// - `table_oid`: Object ID for the target table
+    /// - `update_expressions`: Expressions that compute new column values
     Update {
         table_name: String,
         schema: Schema,
         table_oid: TableOidT,
         update_expressions: Vec<Arc<Expression>>,
     },
+    /// Inline row values (e.g., from INSERT ... VALUES).
+    ///
+    /// Produces rows from literal expressions without reading from storage.
+    ///
+    /// # Fields
+    /// - `rows`: List of rows, each containing expressions for column values
+    /// - `schema`: Output schema matching the expression types
     Values {
         rows: Vec<Vec<Arc<Expression>>>,
         schema: Schema,
     },
+    /// Aggregation with optional grouping (GROUP BY).
+    ///
+    /// Groups input rows by the group-by expressions and computes
+    /// aggregate functions (SUM, COUNT, AVG, MIN, MAX, etc.) for each group.
+    ///
+    /// # Fields
+    /// - `group_by`: Expressions that define grouping (empty for global aggregation)
+    /// - `aggregates`: Aggregate function expressions to compute
+    /// - `schema`: Output schema (group-by columns + aggregate results)
     Aggregate {
         group_by: Vec<Arc<Expression>>,
         aggregates: Vec<Arc<Expression>>,
         schema: Schema,
     },
+    /// Nested loop join between two relations.
+    ///
+    /// For each row in the left relation, scans the entire right relation
+    /// looking for matches. Time complexity is O(n × m).
+    /// Best for small tables or when no index is available.
+    ///
+    /// # Fields
+    /// - `left_schema`: Schema of the left (outer) relation
+    /// - `right_schema`: Schema of the right (inner) relation
+    /// - `predicate`: Join condition expression
+    /// - `join_type`: Type of join (INNER, LEFT, RIGHT, FULL, CROSS)
     NestedLoopJoin {
         left_schema: Schema,
         right_schema: Schema,
         predicate: Arc<Expression>,
         join_type: JoinOperator,
     },
+    /// Nested loop join using an index on the inner relation.
+    ///
+    /// For each row in the left relation, uses an index to find matching
+    /// rows in the right relation. More efficient than plain nested loop
+    /// when the right side has a suitable index.
+    ///
+    /// # Fields
+    /// - `left_schema`: Schema of the left (outer) relation
+    /// - `right_schema`: Schema of the right (inner) relation
+    /// - `predicate`: Join condition expression
+    /// - `join_type`: Type of join (INNER, LEFT, RIGHT, FULL, CROSS)
     NestedIndexJoin {
         left_schema: Schema,
         right_schema: Schema,
         predicate: Arc<Expression>,
         join_type: JoinOperator,
     },
+    /// Hash-based equi-join between two relations.
+    ///
+    /// Builds a hash table from the smaller relation, then probes it
+    /// with rows from the larger relation. Very efficient for equi-joins
+    /// on large datasets. Time complexity is O(n + m).
+    ///
+    /// # Fields
+    /// - `left_schema`: Schema of the left (build) relation
+    /// - `right_schema`: Schema of the right (probe) relation
+    /// - `predicate`: Join condition (must be equality-based)
+    /// - `join_type`: Type of join (INNER, LEFT, RIGHT, FULL)
     HashJoin {
         left_schema: Schema,
         right_schema: Schema,
         predicate: Arc<Expression>,
         join_type: JoinOperator,
     },
+    /// Sorts input rows by one or more columns.
+    ///
+    /// Corresponds to the ORDER BY clause.
+    /// Supports ascending/descending order and NULLS FIRST/LAST.
+    ///
+    /// # Fields
+    /// - `sort_specifications`: Ordered list of sort keys with direction
+    /// - `schema`: Output schema (same as input)
     Sort {
         sort_specifications: Vec<OrderBySpec>,
         schema: Schema,
     },
-    Limit {
-        limit: usize,
-        schema: Schema,
-    },
-    Offset {
-        offset: usize,
-        schema: Schema,
-    },
-    Distinct {
-        schema: Schema,
-    },
+    /// Limits output to at most N rows.
+    ///
+    /// Corresponds to the LIMIT clause.
+    /// Returns the first `limit` rows from the input.
+    ///
+    /// # Fields
+    /// - `limit`: Maximum number of rows to return
+    /// - `schema`: Output schema (same as input)
+    Limit { limit: usize, schema: Schema },
+    /// Skips the first N rows from input.
+    ///
+    /// Corresponds to the OFFSET clause.
+    /// Often used with LIMIT for pagination.
+    ///
+    /// # Fields
+    /// - `offset`: Number of rows to skip
+    /// - `schema`: Output schema (same as input)
+    Offset { offset: usize, schema: Schema },
+    /// Removes duplicate rows from output.
+    ///
+    /// Corresponds to SELECT DISTINCT.
+    /// Compares all columns to identify duplicates.
+    ///
+    /// # Fields
+    /// - `schema`: Output schema (same as input)
+    Distinct { schema: Schema },
+    /// Combined sort and limit operation (optimization).
+    ///
+    /// More efficient than separate Sort + Limit nodes because it only
+    /// needs to track the top K elements, not sort the entire dataset.
+    /// Uses a heap-based algorithm with O(n log k) complexity.
+    ///
+    /// # Fields
+    /// - `k`: Number of top rows to return
+    /// - `sort_specifications`: Sort order to determine "top"
+    /// - `schema`: Output schema (same as input)
     TopN {
         k: usize,
         sort_specifications: Vec<OrderBySpec>,
         schema: Schema,
     },
+    /// Returns top N rows within each group.
+    ///
+    /// Useful for queries like "top 3 products per category".
+    /// Groups rows by the group expressions, then returns top K
+    /// rows within each group based on sort order.
+    ///
+    /// # Fields
+    /// - `k`: Number of top rows per group
+    /// - `sort_specifications`: Sort order to determine "top" within group
+    /// - `groups`: Expressions that define grouping
+    /// - `schema`: Output schema (same as input)
     TopNPerGroup {
         k: usize,
         sort_specifications: Vec<OrderBySpec>,
         groups: Vec<Arc<Expression>>,
         schema: Schema,
     },
+    /// Window function computation.
+    ///
+    /// Computes window functions (ROW_NUMBER, RANK, SUM OVER, etc.)
+    /// across partitions of the input data.
+    ///
+    /// # Fields
+    /// - `group_by`: ORDER BY expressions within each partition
+    /// - `aggregates`: Window function expressions to compute
+    /// - `partitions`: PARTITION BY expressions
+    /// - `schema`: Output schema (input columns + window function results)
     Window {
         group_by: Vec<Arc<Expression>>,
         aggregates: Vec<Arc<Expression>>,
         partitions: Vec<Arc<Expression>>,
         schema: Schema,
     },
+    /// Begins a new transaction.
+    ///
+    /// Corresponds to BEGIN, START TRANSACTION, or BEGIN TRANSACTION statements.
+    ///
+    /// # Fields
+    /// - `isolation_level`: Transaction isolation level (READ COMMITTED, SERIALIZABLE, etc.)
+    /// - `read_only`: If true, transaction cannot modify data
+    /// - `transaction_modifier`: Additional transaction modifiers (DEFERRED, IMMEDIATE, etc.)
+    /// - `statements`: Statements to execute within the transaction (for compound transactions)
+    /// - `exception_statements`: Exception handlers for the transaction
+    /// - `has_end_keyword`: Whether the transaction block uses END keyword
     StartTransaction {
         isolation_level: Option<IsolationLevel>,
         read_only: bool,
@@ -391,48 +608,119 @@ pub enum LogicalPlanType {
         exception_statements: Option<Vec<ExceptionWhen>>,
         has_end_keyword: bool,
     },
+    /// Commits the current transaction.
+    ///
+    /// Makes all changes in the transaction permanent.
+    ///
+    /// # Fields
+    /// - `chain`: If true, immediately starts a new transaction after commit
+    /// - `end`: If true, ends a transaction block
+    /// - `modifier`: Additional commit modifiers
     Commit {
         chain: bool,
         end: bool,
         modifier: Option<TransactionModifier>,
     },
+    /// Rolls back the current transaction.
+    ///
+    /// Undoes all changes made in the transaction.
+    ///
+    /// # Fields
+    /// - `chain`: If true, immediately starts a new transaction after rollback
+    /// - `savepoint`: If specified, rolls back only to the named savepoint
     Rollback {
         chain: bool,
         savepoint: Option<Ident>,
     },
-    Savepoint {
-        name: String,
-    },
-    ReleaseSavepoint {
-        name: String,
-    },
+    /// Creates a savepoint within a transaction.
+    ///
+    /// Savepoints allow partial rollbacks within a transaction.
+    ///
+    /// # Fields
+    /// - `name`: Name of the savepoint
+    Savepoint { name: String },
+    /// Releases (destroys) a savepoint.
+    ///
+    /// The savepoint and all savepoints created after it are removed.
+    ///
+    /// # Fields
+    /// - `name`: Name of the savepoint to release
+    ReleaseSavepoint { name: String },
+    /// Drops database objects.
+    ///
+    /// Corresponds to DROP TABLE, DROP INDEX, DROP VIEW, etc.
+    ///
+    /// # Fields
+    /// - `object_type`: Type of object ("TABLE", "INDEX", "VIEW", etc.)
+    /// - `if_exists`: If true, don't error if object doesn't exist
+    /// - `names`: Names of objects to drop
+    /// - `cascade`: If true, also drop dependent objects
     Drop {
-        object_type: String, // "TABLE", "INDEX", etc.
+        object_type: String,
         if_exists: bool,
         names: Vec<String>,
         cascade: bool,
     },
+    /// Creates a new schema (namespace).
+    ///
+    /// # Fields
+    /// - `schema_name`: Name of the schema to create
+    /// - `if_not_exists`: If true, don't error if schema already exists
     CreateSchema {
         schema_name: String,
         if_not_exists: bool,
     },
+    /// Creates a new database.
+    ///
+    /// # Fields
+    /// - `db_name`: Name of the database to create
+    /// - `if_not_exists`: If true, don't error if database already exists
     CreateDatabase {
         db_name: String,
         if_not_exists: bool,
     },
+    /// Modifies an existing table's structure.
+    ///
+    /// Corresponds to ALTER TABLE statements.
+    ///
+    /// # Fields
+    /// - `table_name`: Name of the table to alter
+    /// - `operation`: Description of the alteration ("ADD COLUMN", "DROP COLUMN", etc.)
     AlterTable {
         table_name: String,
-        operation: String, // "ADD COLUMN", "DROP COLUMN", etc.
+        operation: String,
     },
+    /// Creates a view (stored query).
+    ///
+    /// # Fields
+    /// - `view_name`: Name of the view to create
+    /// - `schema`: Schema of the view's output
+    /// - `if_not_exists`: If true, don't error if view already exists
     CreateView {
         view_name: String,
         schema: Schema,
         if_not_exists: bool,
     },
+    /// Modifies an existing view.
+    ///
+    /// # Fields
+    /// - `view_name`: Name of the view to alter
+    /// - `operation`: Description of the alteration
     AlterView {
         view_name: String,
         operation: String,
     },
+    /// Lists tables in a schema/database.
+    ///
+    /// Corresponds to SHOW TABLES statement.
+    ///
+    /// # Fields
+    /// - `schema_name`: Optional schema to list tables from
+    /// - `terse`: If true, show minimal information
+    /// - `history`: If true, include historical/deleted tables
+    /// - `extended`: If true, show extended information
+    /// - `full`: If true, show full table details
+    /// - `external`: If true, show external tables only
     ShowTables {
         schema_name: Option<String>,
         terse: bool,
@@ -441,35 +729,150 @@ pub enum LogicalPlanType {
         full: bool,
         external: bool,
     },
-    ShowDatabases {
-        terse: bool,
-        history: bool,
-    },
+    /// Lists available databases.
+    ///
+    /// Corresponds to SHOW DATABASES statement.
+    ///
+    /// # Fields
+    /// - `terse`: If true, show minimal information
+    /// - `history`: If true, include historical/deleted databases
+    ShowDatabases { terse: bool, history: bool },
+    /// Lists columns in a table.
+    ///
+    /// Corresponds to SHOW COLUMNS or DESCRIBE statement.
+    ///
+    /// # Fields
+    /// - `table_name`: Name of the table to describe
+    /// - `schema_name`: Optional schema containing the table
+    /// - `extended`: If true, show extended column information
+    /// - `full`: If true, show full column details
     ShowColumns {
         table_name: String,
         schema_name: Option<String>,
         extended: bool,
         full: bool,
     },
-    Use {
-        db_name: String,
-    },
-    Explain {
-        plan: Box<LogicalPlan>, // The plan being explained
-    },
+    /// Switches the current database context.
+    ///
+    /// Corresponds to USE statement.
+    ///
+    /// # Fields
+    /// - `db_name`: Name of the database to switch to
+    Use { db_name: String },
+    /// Shows the execution plan for a query.
+    ///
+    /// Corresponds to EXPLAIN statement.
+    /// Wraps another plan and displays its structure without executing it.
+    ///
+    /// # Fields
+    /// - `plan`: The logical plan to explain
+    Explain { plan: Box<LogicalPlan> },
 }
 
+/// Trait for converting logical plans to physical execution plans.
+///
+/// This trait defines the transformation from high-level logical operations
+/// (what to compute) to concrete physical operators (how to compute it).
+///
+/// # Implementation Notes
+///
+/// The default implementation in [`LogicalPlan`] uses an iterative (non-recursive)
+/// approach via [`PlanConverter`] to avoid stack overflow on deep plan trees.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ferrite::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
+///
+/// let logical_plan = LogicalPlan::table_scan("users".to_string(), schema, 1);
+/// let physical_plan = logical_plan.to_physical_plan()?;
+/// // physical_plan is now a SeqScanPlanNode ready for execution
+/// ```
 pub trait LogicalToPhysical {
+    /// Converts this logical plan to a physical execution plan.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(PlanNode)`: The physical plan ready for execution
+    /// - `Err(String)`: An error message if conversion fails
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - A join node has insufficient children
+    /// - Join key extraction fails
+    /// - An unsupported window function type is encountered
+    /// - A cycle is detected in the plan tree
     fn to_physical_plan(&self) -> Result<PlanNode, String>;
 }
 
+/// A logical plan node representing a database operation.
+///
+/// `LogicalPlan` forms a tree structure where each node contains:
+/// - A [`LogicalPlanType`] describing the operation and its parameters
+/// - A list of child plans that provide input data
+///
+/// # Tree Structure
+///
+/// Logical plans form a tree where data flows from leaves (scans) to root:
+///
+/// ```text
+///              Projection (root)
+///                   │
+///                 Filter
+///                   │
+///              TableScan (leaf)
+/// ```
+///
+/// # Creating Plans
+///
+/// Use the static constructor methods to build plan trees:
+///
+/// ```rust,ignore
+/// // Build: SELECT name FROM users WHERE age > 21
+/// let scan = LogicalPlan::table_scan("users".to_string(), schema.clone(), 1);
+/// let filter = LogicalPlan::filter(schema.clone(), "users".to_string(), 1, predicate, scan);
+/// let projection = LogicalPlan::project(expressions, output_schema, filter);
+/// ```
+///
+/// # Schema Propagation
+///
+/// Each plan node can report its output schema via [`get_schema()`](LogicalPlan::get_schema).
+/// This is used for type checking and to build physical plans with correct schemas.
+///
+/// # Thread Safety
+///
+/// `LogicalPlan` is `Clone` and can be shared across threads.
+/// Expression references use `Arc<Expression>` for shared ownership.
 #[derive(Debug, Clone)]
 pub struct LogicalPlan {
+    /// The type of operation this node performs with its parameters.
     pub plan_type: LogicalPlanType,
+    /// Child plans that provide input data to this node.
+    /// Empty for leaf nodes (scans, values).
     pub children: Vec<Box<LogicalPlan>>,
 }
 
 impl LogicalPlan {
+    /// Creates a new logical plan node.
+    ///
+    /// # Arguments
+    ///
+    /// * `plan_type` - The type of operation this node performs
+    /// * `children` - Child plans that provide input data
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let plan = LogicalPlan::new(
+    ///     LogicalPlanType::TableScan {
+    ///         table_name: "users".to_string(),
+    ///         schema: schema,
+    ///         table_oid: 1,
+    ///     },
+    ///     vec![], // No children for a scan
+    /// );
+    /// ```
     pub fn new(plan_type: LogicalPlanType, children: Vec<Box<LogicalPlan>>) -> Self {
         Self {
             plan_type,
@@ -477,7 +880,29 @@ impl LogicalPlan {
         }
     }
 
-    /// Returns a string representation of the logical plan tree
+    /// Returns a human-readable string representation of the logical plan tree.
+    ///
+    /// Produces an indented tree structure showing all nodes and their parameters.
+    /// Useful for debugging and for EXPLAIN queries.
+    ///
+    /// # Arguments
+    ///
+    /// * `depth` - Current indentation depth (typically 0 for root)
+    ///
+    /// # Returns
+    ///
+    /// A formatted string showing the plan tree structure.
+    ///
+    /// # Example Output
+    ///
+    /// ```text
+    /// → Filter
+    ///    Predicate: age > 21
+    ///    Table: users
+    ///    Schema: (id: INTEGER, name: VARCHAR, age: INTEGER)
+    ///   → TableScan: users
+    ///      Schema: (id: INTEGER, name: VARCHAR, age: INTEGER)
+    /// ```
     pub fn explain(&self, depth: usize) -> String {
         let indent_str = "  ".repeat(depth);
         let mut result = String::new();
@@ -967,6 +1392,17 @@ impl LogicalPlan {
         result
     }
 
+    /// Creates a CREATE TABLE logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Column definitions for the new table
+    /// * `table_name` - Name of the table to create
+    /// * `if_not_exists` - If true, don't error when table already exists
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn create_table(schema: Schema, table_name: String, if_not_exists: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateTable {
@@ -978,6 +1414,19 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a CREATE INDEX logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Schema of the table being indexed
+    /// * `table_name` - Name of the table to index
+    /// * `index_name` - Name for the new index
+    /// * `key_attrs` - Column indices that form the index key
+    /// * `if_not_exists` - If true, don't error when index already exists
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn create_index(
         schema: Schema,
         table_name: String,
@@ -997,6 +1446,17 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a sequential table scan logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table to scan
+    /// * `schema` - Schema of the table (defines output columns)
+    /// * `table_oid` - Catalog object ID for the table
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn table_scan(table_name: String, schema: Schema, table_oid: u64) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::TableScan {
@@ -1008,6 +1468,22 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a filter logical plan.
+    ///
+    /// Filters rows from the input plan based on a predicate expression.
+    /// Only rows where the predicate evaluates to true pass through.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Schema of the input/output (unchanged by filter)
+    /// * `table_name` - Name of the source table
+    /// * `table_oid` - Catalog object ID for the table
+    /// * `predicate` - Boolean expression to filter rows
+    /// * `input` - Child plan providing input rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn filter(
         schema: Schema,
         table_name: String,
@@ -1027,6 +1503,23 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a projection logical plan.
+    ///
+    /// Projects (selects) specific columns or computes new expressions
+    /// from the input rows. Corresponds to the SELECT clause column list.
+    ///
+    /// Automatically computes column mappings from output to input positions
+    /// for simple column references.
+    ///
+    /// # Arguments
+    ///
+    /// * `expressions` - Expressions to evaluate for each output column
+    /// * `schema` - Output schema (one column per expression)
+    /// * `input` - Child plan providing input rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn project(
         expressions: Vec<Arc<Expression>>,
         schema: Schema,
@@ -1080,6 +1573,18 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates an INSERT logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the target table
+    /// * `schema` - Schema of the target table
+    /// * `table_oid` - Catalog object ID for the table
+    /// * `input` - Child plan providing rows to insert (typically a Values node)
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn insert(
         table_name: String,
         schema: Schema,
@@ -1096,10 +1601,39 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a VALUES logical plan for inline row data.
+    ///
+    /// Produces rows from literal expressions without accessing storage.
+    /// Typically used as input to INSERT statements.
+    ///
+    /// # Arguments
+    ///
+    /// * `rows` - List of rows, each containing expressions for column values
+    /// * `schema` - Output schema matching the expression types
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn values(rows: Vec<Vec<Arc<Expression>>>, schema: Schema) -> Box<Self> {
         Box::new(Self::new(LogicalPlanType::Values { rows, schema }, vec![]))
     }
 
+    /// Creates an aggregation logical plan.
+    ///
+    /// Groups rows by the group-by expressions and computes aggregate
+    /// functions for each group. If group_by is empty, computes a single
+    /// global aggregate over all input rows.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_by` - Expressions that define grouping (empty for global aggregation)
+    /// * `aggregates` - Aggregate function expressions (SUM, COUNT, AVG, etc.)
+    /// * `schema` - Output schema (group-by columns + aggregate results)
+    /// * `input` - Child plan providing input rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn aggregate(
         group_by: Vec<Arc<Expression>>,
         aggregates: Vec<Arc<Expression>>,
@@ -1116,6 +1650,23 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates an index scan logical plan.
+    ///
+    /// Uses an index to efficiently locate rows matching the predicate keys.
+    /// Much faster than sequential scan for selective queries.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table to scan
+    /// * `table_oid` - Catalog object ID for the table
+    /// * `index_name` - Name of the index to use
+    /// * `index_oid` - Catalog object ID for the index
+    /// * `schema` - Output schema
+    /// * `predicate_keys` - Key expressions to probe the index
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn index_scan(
         table_name: String,
         table_oid: TableOidT,
@@ -1137,6 +1688,20 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a mock scan logical plan for testing.
+    ///
+    /// Returns predefined data without accessing actual storage.
+    /// Useful for unit testing query execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the mock table
+    /// * `schema` - Schema of the mock table
+    /// * `table_oid` - Mock object ID
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn mock_scan(table_name: String, schema: Schema, table_oid: TableOidT) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::MockScan {
@@ -1148,6 +1713,21 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a DELETE logical plan.
+    ///
+    /// Removes rows from the table that are provided by the input plan.
+    /// The input is typically a filter that selects rows to delete.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the target table
+    /// * `schema` - Schema of the target table
+    /// * `table_oid` - Catalog object ID for the table
+    /// * `input` - Child plan providing rows to delete
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn delete(
         table_name: String,
         schema: Schema,
@@ -1164,6 +1744,22 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates an UPDATE logical plan.
+    ///
+    /// Modifies rows from the table that are provided by the input plan.
+    /// The update expressions compute new values for the modified columns.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the target table
+    /// * `schema` - Schema of the target table
+    /// * `table_oid` - Catalog object ID for the table
+    /// * `update_expressions` - Expressions that compute new column values
+    /// * `input` - Child plan providing rows to update
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn update(
         table_name: String,
         schema: Schema,
@@ -1182,6 +1778,23 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a nested loop join logical plan.
+    ///
+    /// For each row in the left relation, scans the entire right relation
+    /// looking for matches. Simple but O(n × m) complexity.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_schema` - Schema of the left (outer) relation
+    /// * `right_schema` - Schema of the right (inner) relation
+    /// * `predicate` - Join condition expression
+    /// * `join_type` - Type of join (INNER, LEFT, RIGHT, FULL, CROSS)
+    /// * `left_child` - Plan providing left relation rows
+    /// * `right_child` - Plan providing right relation rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with two children.
     pub fn nested_loop_join(
         left_schema: Schema,
         right_schema: Schema,
@@ -1201,6 +1814,24 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a nested index join logical plan.
+    ///
+    /// For each row in the left relation, uses an index to find matching
+    /// rows in the right relation. More efficient than nested loop when
+    /// the right side has a suitable index.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_schema` - Schema of the left (outer) relation
+    /// * `right_schema` - Schema of the right (inner) relation
+    /// * `predicate` - Join condition expression
+    /// * `join_type` - Type of join (INNER, LEFT, RIGHT, FULL, CROSS)
+    /// * `left` - Plan providing left relation rows
+    /// * `right` - Plan providing right relation rows (should have index)
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with two children.
     pub fn nested_index_join(
         left_schema: Schema,
         right_schema: Schema,
@@ -1220,6 +1851,23 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a hash join logical plan.
+    ///
+    /// Builds a hash table from the left relation, then probes it with rows
+    /// from the right relation. Very efficient for equi-joins: O(n + m).
+    ///
+    /// # Arguments
+    ///
+    /// * `left_schema` - Schema of the left (build) relation
+    /// * `right_schema` - Schema of the right (probe) relation
+    /// * `predicate` - Join condition (must be equality-based)
+    /// * `join_type` - Type of join (INNER, LEFT, RIGHT, FULL)
+    /// * `left` - Plan providing left relation rows (used to build hash table)
+    /// * `right` - Plan providing right relation rows (used to probe)
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with two children.
     pub fn hash_join(
         left_schema: Schema,
         right_schema: Schema,
@@ -1239,6 +1887,20 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a sort logical plan.
+    ///
+    /// Sorts input rows by the specified columns in the given order.
+    /// Corresponds to the ORDER BY clause.
+    ///
+    /// # Arguments
+    ///
+    /// * `sort_specifications` - Ordered list of sort keys with direction (ASC/DESC)
+    /// * `schema` - Output schema (same as input)
+    /// * `input` - Child plan providing rows to sort
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn sort(
         sort_specifications: Vec<OrderBySpec>,
         schema: Schema,
@@ -1253,7 +1915,20 @@ impl LogicalPlan {
         ))
     }
 
-    /// Create a sort plan with expressions (defaults to ASC order) for backward compatibility
+    /// Creates a sort plan with expressions, defaulting to ASC order.
+    ///
+    /// Convenience method for backward compatibility. Converts expressions
+    /// to OrderBySpec with ascending order.
+    ///
+    /// # Arguments
+    ///
+    /// * `sort_expressions` - Expressions to sort by
+    /// * `schema` - Output schema
+    /// * `input` - Child plan providing rows to sort
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn sort_with_expressions(
         sort_expressions: Vec<Arc<Expression>>,
         schema: Schema,
@@ -1272,6 +1947,20 @@ impl LogicalPlan {
         Self::sort(sort_specifications, schema, input)
     }
 
+    /// Creates a LIMIT logical plan.
+    ///
+    /// Returns at most `limit` rows from the input.
+    /// Corresponds to the LIMIT clause.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum number of rows to return
+    /// * `schema` - Output schema (same as input)
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn limit(limit: usize, schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Limit { limit, schema },
@@ -1279,6 +1968,20 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates an OFFSET logical plan.
+    ///
+    /// Skips the first `offset` rows from the input.
+    /// Corresponds to the OFFSET clause. Often used with LIMIT for pagination.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset` - Number of rows to skip
+    /// * `schema` - Output schema (same as input)
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn offset(offset: usize, schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Offset { offset, schema },
@@ -1286,10 +1989,38 @@ impl LogicalPlan {
         ))
     }
 
+    /// Creates a DISTINCT logical plan.
+    ///
+    /// Removes duplicate rows based on all columns.
+    /// Corresponds to SELECT DISTINCT.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Output schema (same as input)
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn distinct(schema: Schema, input: Box<LogicalPlan>) -> Box<Self> {
         Box::new(Self::new(LogicalPlanType::Distinct { schema }, vec![input]))
     }
 
+    /// Creates a TopN logical plan (optimized sort + limit).
+    ///
+    /// More efficient than separate Sort + Limit because it only tracks
+    /// the top K elements using a heap. O(n log k) complexity.
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - Number of top rows to return
+    /// * `sort_specifications` - Sort order determining "top"
+    /// * `schema` - Output schema (same as input)
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn top_n(
         k: usize,
         sort_specifications: Vec<OrderBySpec>,
@@ -1306,7 +2037,20 @@ impl LogicalPlan {
         ))
     }
 
-    /// Create a TopN plan with expressions (defaults to ASC order) for backward compatibility
+    /// Creates a TopN plan with expressions, defaulting to ASC order.
+    ///
+    /// Convenience method for backward compatibility.
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - Number of top rows to return
+    /// * `sort_expressions` - Expressions to sort by
+    /// * `schema` - Output schema
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn top_n_with_expressions(
         k: usize,
         sort_expressions: Vec<Arc<Expression>>,
@@ -1326,6 +2070,22 @@ impl LogicalPlan {
         Self::top_n(k, sort_specifications, schema, input)
     }
 
+    /// Creates a TopNPerGroup logical plan.
+    ///
+    /// Returns the top K rows within each group. Useful for queries like
+    /// "top 3 products per category by sales".
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - Number of top rows per group
+    /// * `sort_specifications` - Sort order determining "top" within each group
+    /// * `groups` - Expressions that define grouping
+    /// * `schema` - Output schema (same as input)
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn top_n_per_group(
         k: usize,
         sort_specifications: Vec<OrderBySpec>,
@@ -1344,7 +2104,21 @@ impl LogicalPlan {
         ))
     }
 
-    /// Create a TopNPerGroup plan with expressions (defaults to ASC order) for backward compatibility
+    /// Creates a TopNPerGroup plan with expressions, defaulting to ASC order.
+    ///
+    /// Convenience method for backward compatibility.
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - Number of top rows per group
+    /// * `sort_expressions` - Expressions to sort by
+    /// * `groups` - Expressions that define grouping
+    /// * `schema` - Output schema
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn top_n_per_group_with_expressions(
         k: usize,
         sort_expressions: Vec<Arc<Expression>>,
@@ -1365,6 +2139,22 @@ impl LogicalPlan {
         Self::top_n_per_group(k, sort_specifications, groups, schema, input)
     }
 
+    /// Creates a window function logical plan.
+    ///
+    /// Computes window functions (ROW_NUMBER, RANK, SUM OVER, etc.)
+    /// across partitions of the input data.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_by` - ORDER BY expressions within each partition
+    /// * `aggregates` - Window function expressions to compute
+    /// * `partitions` - PARTITION BY expressions
+    /// * `schema` - Output schema (input columns + window results)
+    /// * `input` - Child plan providing rows
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node with one child.
     pub fn window(
         group_by: Vec<Arc<Expression>>,
         aggregates: Vec<Arc<Expression>>,
@@ -1383,6 +2173,15 @@ impl LogicalPlan {
         ))
     }
 
+    /// Returns the output schema of this plan node.
+    ///
+    /// The schema describes the columns that this node produces.
+    /// For join nodes, this merges the schemas of both sides.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(Schema)` - The output schema for query-producing nodes
+    /// - `None` - For utility nodes that don't produce query results
     pub fn get_schema(&self) -> Option<Schema> {
         match &self.plan_type {
             LogicalPlanType::CreateTable { schema, .. } => Some(schema.clone()),
@@ -1558,8 +2357,24 @@ impl LogicalPlan {
         }
     }
 
-    // ---------- PRIORITY 1: TRANSACTION MANAGEMENT ----------
+    // ==================== TRANSACTION MANAGEMENT ====================
 
+    /// Creates a START TRANSACTION logical plan.
+    ///
+    /// Begins a new database transaction with the specified options.
+    ///
+    /// # Arguments
+    ///
+    /// * `isolation_level` - Transaction isolation level (READ COMMITTED, SERIALIZABLE, etc.)
+    /// * `read_only` - If true, transaction cannot modify data
+    /// * `transaction_modifier` - Additional modifiers (DEFERRED, IMMEDIATE, etc.)
+    /// * `statements` - Statements to execute within the transaction block
+    /// * `exception_statements` - Exception handlers for error conditions
+    /// * `has_end_keyword` - Whether the block uses END keyword
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn start_transaction(
         isolation_level: Option<IsolationLevel>,
         read_only: bool,
@@ -1577,10 +2392,23 @@ impl LogicalPlan {
                 exception_statements,
                 has_end_keyword,
             },
-            vec![], // No children for transaction control statements
+            vec![],
         ))
     }
 
+    /// Creates a COMMIT logical plan.
+    ///
+    /// Commits the current transaction, making all changes permanent.
+    ///
+    /// # Arguments
+    ///
+    /// * `chain` - If true, immediately starts a new transaction after commit
+    /// * `end` - If true, ends a transaction block
+    /// * `modifier` - Additional commit modifiers
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn commit_transaction(
         chain: bool,
         end: bool,
@@ -1592,33 +2420,80 @@ impl LogicalPlan {
                 end,
                 modifier,
             },
-            vec![], // No children for transaction control statements
+            vec![],
         ))
     }
 
+    /// Creates a ROLLBACK logical plan.
+    ///
+    /// Rolls back the current transaction, undoing all changes.
+    /// Can optionally roll back only to a named savepoint.
+    ///
+    /// # Arguments
+    ///
+    /// * `chain` - If true, immediately starts a new transaction after rollback
+    /// * `savepoint` - If specified, rolls back only to this savepoint
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn rollback_transaction(chain: bool, savepoint: Option<Ident>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::Rollback { chain, savepoint },
-            vec![], // No children for transaction control statements
+            vec![],
         ))
     }
 
+    /// Creates a SAVEPOINT logical plan.
+    ///
+    /// Establishes a named savepoint within the current transaction.
+    /// Allows partial rollback to this point.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the savepoint to create
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn savepoint(name: String) -> Box<Self> {
-        Box::new(Self::new(
-            LogicalPlanType::Savepoint { name },
-            vec![], // No children
-        ))
+        Box::new(Self::new(LogicalPlanType::Savepoint { name }, vec![]))
     }
 
+    /// Creates a RELEASE SAVEPOINT logical plan.
+    ///
+    /// Destroys a savepoint and all savepoints created after it.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the savepoint to release
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn release_savepoint(name: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ReleaseSavepoint { name },
-            vec![], // No children
+            vec![],
         ))
     }
 
-    // ---------- PRIORITY 2: DDL OPERATIONS ----------
+    // ==================== DDL OPERATIONS ====================
 
+    /// Creates a DROP logical plan.
+    ///
+    /// Drops database objects (tables, indexes, views, etc.).
+    ///
+    /// # Arguments
+    ///
+    /// * `object_type` - Type of object ("TABLE", "INDEX", "VIEW", etc.)
+    /// * `if_exists` - If true, don't error when object doesn't exist
+    /// * `names` - Names of objects to drop
+    /// * `cascade` - If true, also drop dependent objects
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn drop(
         object_type: String,
         if_exists: bool,
@@ -1632,40 +2507,81 @@ impl LogicalPlan {
                 names,
                 cascade,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates a CREATE SCHEMA logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema_name` - Name of the schema to create
+    /// * `if_not_exists` - If true, don't error when schema already exists
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn create_schema(schema_name: String, if_not_exists: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateSchema {
                 schema_name,
                 if_not_exists,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates a CREATE DATABASE logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `db_name` - Name of the database to create
+    /// * `if_not_exists` - If true, don't error when database already exists
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn create_database(db_name: String, if_not_exists: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateDatabase {
                 db_name,
                 if_not_exists,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates an ALTER TABLE logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table to alter
+    /// * `operation` - Description of the alteration (e.g., "ADD COLUMN email VARCHAR")
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn alter_table(table_name: String, operation: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::AlterTable {
                 table_name,
                 operation,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates a CREATE VIEW logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `view_name` - Name of the view to create
+    /// * `schema` - Output schema of the view
+    /// * `if_not_exists` - If true, don't error when view already exists
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn create_view(view_name: String, schema: Schema, if_not_exists: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::CreateView {
@@ -1673,22 +2589,41 @@ impl LogicalPlan {
                 schema,
                 if_not_exists,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates an ALTER VIEW logical plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `view_name` - Name of the view to alter
+    /// * `operation` - Description of the alteration
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn alter_view(view_name: String, operation: String) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::AlterView {
                 view_name,
                 operation,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
-    // ---------- PRIORITY 3: DATABASE INFORMATION ----------
+    // ==================== DATABASE INFORMATION ====================
 
+    /// Creates a SHOW TABLES logical plan with default options.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema_name` - Optional schema to filter tables
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn show_tables(schema_name: Option<String>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowTables {
@@ -1699,11 +2634,24 @@ impl LogicalPlan {
                 full: false,
                 external: false,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
-    // Add a new constructor method that takes all options
+    /// Creates a SHOW TABLES logical plan with all options.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema_name` - Optional schema to filter tables
+    /// * `terse` - Show minimal information
+    /// * `history` - Include historical/deleted tables
+    /// * `extended` - Show extended information
+    /// * `full` - Show full table details
+    /// * `external` - Show only external tables
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn show_tables_with_options(
         schema_name: Option<String>,
         terse: bool,
@@ -1721,27 +2669,52 @@ impl LogicalPlan {
                 full,
                 external,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates a SHOW DATABASES logical plan with default options.
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn show_databases() -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowDatabases {
                 terse: false,
                 history: false,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates a SHOW DATABASES logical plan with options.
+    ///
+    /// # Arguments
+    ///
+    /// * `terse` - Show minimal information
+    /// * `history` - Include historical/deleted databases
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn show_databases_with_options(terse: bool, history: bool) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowDatabases { terse, history },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates a SHOW COLUMNS logical plan with default options.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table to describe
+    /// * `schema_name` - Optional schema containing the table
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn show_columns(table_name: String, schema_name: Option<String>) -> Box<Self> {
         Box::new(Self::new(
             LogicalPlanType::ShowColumns {
@@ -1750,17 +2723,37 @@ impl LogicalPlan {
                 extended: false,
                 full: false,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 
+    /// Creates a USE (database) logical plan.
+    ///
+    /// Switches the current database context.
+    ///
+    /// # Arguments
+    ///
+    /// * `db_name` - Name of the database to switch to
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn use_db(db_name: String) -> Box<Self> {
-        Box::new(Self::new(
-            LogicalPlanType::Use { db_name },
-            vec![], // No children
-        ))
+        Box::new(Self::new(LogicalPlanType::Use { db_name }, vec![]))
     }
 
+    /// Creates a SHOW COLUMNS logical plan with all options.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table to describe
+    /// * `schema_name` - Optional schema containing the table
+    /// * `extended` - Show extended column information
+    /// * `full` - Show full column details
+    ///
+    /// # Returns
+    ///
+    /// A boxed logical plan node (leaf node with no children).
     pub fn show_columns_with_options(
         table_name: String,
         schema_name: Option<String>,
@@ -1774,21 +2767,54 @@ impl LogicalPlan {
                 extended,
                 full,
             },
-            vec![], // No children
+            vec![],
         ))
     }
 }
 
-/// A struct to handle the conversion from logical plans to physical plans
-/// using an iterative approach to avoid stack overflows
+/// Iterative converter from logical plans to physical plans.
+///
+/// Uses an explicit stack-based approach to convert plan trees, avoiding
+/// stack overflow on deep plans that could occur with recursion.
+///
+/// # Algorithm
+///
+/// The converter performs a post-order traversal:
+/// 1. Push the root onto the stack
+/// 2. While the stack is not empty:
+///    - Pop a node
+///    - If all children are processed: convert the node, store result
+///    - Otherwise: push node back, push unprocessed children
+/// 3. Return the result for the root node
+///
+/// # Cycle Detection
+///
+/// The converter tracks visited nodes to detect cycles in the plan tree.
+/// If a cycle is detected, an error is returned.
+///
+/// # Thread Safety
+///
+/// `PlanConverter` is not thread-safe and should only be used within
+/// a single thread during plan conversion.
 struct PlanConverter<'a> {
+    /// Stack of nodes to process (simulates recursion)
     stack: Vec<&'a LogicalPlan>,
+    /// Cached results for processed nodes (keyed by memory address)
     results: HashMap<usize, Result<PlanNode, String>>,
+    /// Nodes currently being processed (for cycle detection)
     visited: HashSet<usize>,
 }
 
 impl<'a> PlanConverter<'a> {
-    /// Create a new PlanConverter with the root node
+    /// Creates a new PlanConverter initialized with the root node.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - The root logical plan node to convert
+    ///
+    /// # Returns
+    ///
+    /// A new PlanConverter ready to perform conversion.
     fn new(root: &'a LogicalPlan) -> Self {
         let mut converter = Self {
             stack: Vec::new(),
@@ -1799,7 +2825,22 @@ impl<'a> PlanConverter<'a> {
         converter
     }
 
-    /// Convert the logical plan to a physical plan using an iterative approach
+    /// Converts the logical plan tree to a physical plan.
+    ///
+    /// Uses an iterative post-order traversal to convert all nodes.
+    /// Children are converted before their parents.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(PlanNode)` - The physical plan for the root node
+    /// - `Err(String)` - An error if conversion fails
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The stack is empty (no plan to convert)
+    /// - A cycle is detected in the plan tree
+    /// - Any node conversion fails
     fn convert(&mut self) -> Result<PlanNode, String> {
         // Store the root node ID at the beginning
         if self.stack.is_empty() {
@@ -1844,7 +2885,18 @@ impl<'a> PlanConverter<'a> {
         }
     }
 
-    /// Check if all children of a node have been processed
+    /// Checks if all children of a node have been successfully processed.
+    ///
+    /// A child is considered processed if its result exists in the cache
+    /// and is not an error.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The node whose children to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if all children have been successfully converted, `false` otherwise.
     fn are_all_children_processed(&self, node: &'a LogicalPlan) -> bool {
         // If the node has no children, return true immediately
         if node.children.is_empty() {
@@ -1867,7 +2919,14 @@ impl<'a> PlanConverter<'a> {
         all_children_processed
     }
 
-    /// Push all unprocessed children of a node onto the stack
+    /// Pushes unprocessed children onto the stack for later processing.
+    ///
+    /// Children are pushed in reverse order so they are processed left-to-right.
+    /// Detects cycles by checking if a child is already being visited.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The node whose children to push
     fn push_unprocessed_children(&mut self, node: &'a LogicalPlan) {
         // If the node has no children, return immediately
         if node.children.is_empty() {
@@ -1895,7 +2954,15 @@ impl<'a> PlanConverter<'a> {
         }
     }
 
-    /// Get all processed child plans for a node
+    /// Retrieves the converted physical plans for all children of a node.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The node whose child plans to retrieve
+    ///
+    /// # Returns
+    ///
+    /// A vector of physical plans for each successfully converted child.
     fn get_child_plans(&self, node: &'a LogicalPlan) -> Vec<PlanNode> {
         // If the node has no children, return an empty vector immediately
         if node.children.is_empty() {
@@ -1914,7 +2981,19 @@ impl<'a> PlanConverter<'a> {
         child_plans
     }
 
-    /// Convert a single node to a physical plan
+    /// Converts a single logical plan node to its physical equivalent.
+    ///
+    /// This method handles the type-specific conversion logic for each
+    /// [`LogicalPlanType`] variant.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The logical plan node to convert
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(PlanNode)` - The corresponding physical plan node
+    /// - `Err(String)` - An error if conversion fails
     fn convert_node(&self, node: &'a LogicalPlan) -> Result<PlanNode, String> {
         let child_plans = self.get_child_plans(node);
 
@@ -2479,7 +3558,20 @@ impl<'a> PlanConverter<'a> {
     }
 }
 
+/// Implementation of logical-to-physical plan conversion for [`LogicalPlan`].
+///
+/// Uses [`PlanConverter`] for iterative (non-recursive) conversion to avoid
+/// stack overflow on deep plan trees.
 impl LogicalToPhysical for LogicalPlan {
+    /// Converts this logical plan to a physical execution plan.
+    ///
+    /// Creates a [`PlanConverter`] and performs iterative conversion of the
+    /// entire plan tree, starting from the leaves and working up to the root.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(PlanNode)` - The physical plan ready for execution
+    /// - `Err(String)` - Error message if conversion fails
     fn to_physical_plan(&self) -> Result<PlanNode, String> {
         // Use the PlanConverter to convert the logical plan to a physical plan
         let mut converter = PlanConverter::new(self);
@@ -2487,64 +3579,60 @@ impl LogicalToPhysical for LogicalPlan {
     }
 }
 
+/// Display implementation for [`LogicalPlan`].
+///
+/// Outputs a pretty-printed debug representation of the plan tree.
+/// For human-readable query plan output, use [`LogicalPlan::explain()`] instead.
 impl Display for LogicalPlan {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:#?}", self)
     }
 }
 
-/*
- * extract_join_keys - Extract and fix join key expressions from a join predicate
- *
- * Implementation Plan:
- *
- * 1. OVERVIEW:
- *    - Purpose: Extract key columns from join predicates and create a fixed version
- *      with proper tuple indices (0 for left table, 1 for right table)
- *    - Input: A join predicate expression (typically column equality comparison)
- *    - Output: Three-tuple containing:
- *      a. Vector of left table key expressions (with tuple_index=0)
- *      b. Vector of right table key expressions (with tuple_index=1)
- *      c. Fixed predicate expression with correct tuple indices for execution
- *
- * 2. ALGORITHM STEPS:
- *    a. Initialize empty vectors for left keys, right keys, and fixed predicates
- *    b. Match on expression type:
- *       - For ComparisonExpression:
- *         > Verify it's an equality comparison (error if not)
- *         > Extract the two sides of the comparison
- *         > Verify both sides are ColumnRefExpressions (error if not)
- *         > Create new column references with tuple_index 0 for left, 1 for right
- *         > Special handling for "d.id": set column_index to 0 (first column in dept table)
- *         > Create a fixed comparison with the new column references
- *         > Add to respective key vectors and fixed predicate list
- *       - For LogicExpression:
- *         > Verify it's an AND expression (error if not)
- *         > Recursively extract keys from each child predicate
- *         > Combine the results into a single predicate with AND
- *       - For other expressions:
- *         > Return error - only equality comparisons and AND expressions supported
- *
- * 3. SPECIAL CASES:
- *    a. Column name matching:
- *       - When the column name contains "d.id", fix column_index to 0
- *       - This handles the specific case in the join_operations test
- *
- * 4. ERROR HANDLING:
- *    a. Return errors for:
- *       - Non-equality comparisons
- *       - Non-column reference operands
- *       - Unsupported expression types (not comparison or AND logic)
- *
- * 5. COMBINING MULTIPLE PREDICATES:
- *    a. For multiple predicates from AND expressions:
- *       - Combine fixed predicates using LogicExpression with LogicType::And
- *       - Ensure the children reference is properly set
- *
- * 6. RETURN VALUE:
- *    a. Return Ok((left_keys, right_keys, fixed_predicate)) on success
- *    b. Return Err(error_message) on failure with descriptive message
- */
+/// Extracts and normalizes join key expressions from a join predicate.
+///
+/// This function analyzes a join predicate (typically from an ON clause) and:
+/// 1. Extracts the key columns from each side of the join
+/// 2. Normalizes tuple indices (left=0, right=1) for the executor
+/// 3. Returns a fixed predicate suitable for join execution
+///
+/// # Arguments
+///
+/// * `predicate` - The join predicate expression (equality comparison or AND of equalities)
+///
+/// # Returns
+///
+/// A `Result` containing a tuple of:
+/// - `Vec<Arc<Expression>>` - Left table key expressions (tuple_index=0)
+/// - `Vec<Arc<Expression>>` - Right table key expressions (tuple_index=1)
+/// - `Arc<Expression>` - Fixed predicate with normalized tuple indices
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The predicate is not an equality comparison
+/// - Comparison operands are not column references
+/// - Logic expressions use OR instead of AND
+/// - The expression type is unsupported
+///
+/// # Supported Predicates
+///
+/// - Simple equality: `a.id = b.id`
+/// - Compound AND: `a.id = b.id AND a.name = b.name`
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // For predicate: employees.dept_id = departments.id
+/// let (left_keys, right_keys, fixed_pred) = extract_join_keys(&predicate)?;
+/// // left_keys[0] has tuple_index=0, column for employees.dept_id
+/// // right_keys[0] has tuple_index=1, column for departments.id
+/// ```
+///
+/// # Special Cases
+///
+/// When the right column name is exactly "d.id", the column index is
+/// normalized to 0 (handles specific test case for department joins).
 fn extract_join_keys(
     predicate: &Arc<Expression>,
 ) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>, Arc<Expression>), String> {
@@ -2658,7 +3746,27 @@ fn extract_join_keys(
     }
 }
 
-// Helper function to extract table alias from schema
+/// Extracts the predominant table alias from a schema.
+///
+/// Analyzes column names in the schema to find table aliases/prefixes.
+/// Returns the most frequently occurring alias (if columns use `table.column` naming).
+///
+/// # Arguments
+///
+/// * `schema` - The schema to analyze
+///
+/// # Returns
+///
+/// - `Some(String)` - The most common table alias found
+/// - `None` - If no columns use `table.column` naming convention
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Schema with columns: ["users.id", "users.name", "orders.id"]
+/// let alias = extract_table_alias_from_schema(&schema);
+/// assert_eq!(alias, Some("users".to_string())); // "users" appears twice
+/// ```
 fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
     // Create a map to count occurrences of each alias
     let mut alias_counts = HashMap::new();
