@@ -96,8 +96,10 @@ async fn setup_mode(db_path: &str, log_path: &str) -> Result<(), Box<dyn std::er
     .await?;
 
     // Ensure the system catalog/table metadata reaches disk even though this example exits immediately.
-    // (In tests, the async runtime stays alive longer; in a short-lived process we flush explicitly.)
-    db.get_buffer_pool_manager().flush_all_pages_async().await;
+    // (Writes may be buffered inside the async disk manager; use the durable flush helper.)
+    db.get_buffer_pool_manager()
+        .flush_all_pages_durable()
+        .await?;
 
     println!("[evidence] setup complete");
     Ok(())

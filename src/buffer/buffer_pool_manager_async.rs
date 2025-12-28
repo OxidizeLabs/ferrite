@@ -861,6 +861,23 @@ impl BufferPoolManager {
         trace!("Finished flushing all pages");
     }
 
+    /// Flushes all pages **and** forces the disk manager to flush buffered writes.
+    ///
+    /// The buffer pool flush methods (`flush_page*` / `flush_all_pages*`) write pages via the
+    /// async disk manager, which may internally buffer/coalesce writes for performance.
+    ///
+    /// For short-lived processes (examples, tools) and for “evidence” demos where we want
+    /// the on-disk files to reflect the latest state *immediately*, this method provides a
+    /// stronger guarantee by explicitly calling `AsyncDiskManager::flush()`.
+    pub async fn flush_all_pages_durable(&self) -> Result<(), String> {
+        self.flush_all_pages_async().await;
+        self.disk_manager
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush disk manager: {e}"))?;
+        Ok(())
+    }
+
     /// Allocates a new page ID.
     ///
     /// # Returns
