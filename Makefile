@@ -30,7 +30,7 @@ RESET := \033[0m
 
 .PHONY: all build release test test-unit test-integration bench \
         server client cli run clean fmt lint check doc \
-        install-tools setup-hooks help
+        install-tools setup-hooks evidence-crash-recovery help
 
 # ============================================================================
 # Default Target
@@ -207,6 +207,15 @@ doc-private:
 	$(CARGO) doc --no-deps --document-private-items
 
 # ============================================================================
+# Evidence Targets (Reproducible Demos)
+# ============================================================================
+
+## Run crash-recovery evidence demo (simulates crash, restarts, verifies)
+evidence-crash-recovery:
+	@echo "$(CYAN)Running crash-recovery evidence demo...$(RESET)"
+	bash ./scripts/crash_recovery_evidence.sh
+
+# ============================================================================
 # Cleanup Targets
 # ============================================================================
 
@@ -351,4 +360,6 @@ help:
 	@echo "  make audit          Check for vulnerabilities"
 	@echo "  make outdated       Check for outdated deps"
 	@echo ""
-
+	@echo "$(GREEN)Evidence:$(RESET)"
+	@echo "  make evidence-crash-recovery  Simulate crash + verify WAL recovery"
+	@echo ""
