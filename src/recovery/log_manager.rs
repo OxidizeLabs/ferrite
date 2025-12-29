@@ -167,7 +167,7 @@
 //! - LSN counters use `AtomicU64` for lock-free updates
 //! - Log records are sent via bounded `mpsc` channel (backpressure at 1000)
 //! - Flush thread runs as a tokio task, joined on shutdown
-//! - `block_in_place` used for sync/async boundary in tokio runtime
+//! - Separate OS threads used for sync/async boundary to support both single and multi-threaded runtimes
 //!
 //! ## Failure Handling
 //!
@@ -189,7 +189,6 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
-use tokio::task::block_in_place;
 use tokio::time::timeout;
 
 /// Coordinates Write-Ahead Logging (WAL) for durability and crash recovery.
@@ -426,13 +425,17 @@ impl LogManager {
 
         let task_handle = self.state.flush_thread.lock().take();
 
-        // Join the task if we got a valid handle
+        // Join the task if we got a valid handle.
+        // Use a separate OS thread to avoid block_in_place limitation with single-threaded runtime.
         if let Some(handle) = task_handle {
-            block_in_place(|| {
-                if let Err(e) = self.runtime_handle.block_on(handle) {
-                    error!("Flush task panicked or cancelled: {:?}", e);
-                }
-            });
+            let runtime_handle = self.runtime_handle.clone();
+            let join_result = std::thread::spawn(move || runtime_handle.block_on(handle)).join();
+
+            match join_result {
+                Ok(Ok(())) => {},
+                Ok(Err(e)) => error!("Flush task panicked or cancelled: {:?}", e),
+                Err(_) => error!("Thread panicked while joining flush task"),
+            }
         }
     }
 
@@ -450,14 +453,24 @@ impl LogManager {
         // Set the LSN in the log record - now thread-safe with interior mutability
         log_record.set_lsn(lsn);
 
-        // Send log record to processing queue
-        let record_to_send = log_record.clone();
-        block_in_place(|| {
-            if let Err(e) = self.state.sender.blocking_send(record_to_send) {
-                error!("Failed to queue log record: {}", e);
-                // Consider implementing retry logic or returning an error
+        // Send log record to processing queue using try_send with retry.
+        // This approach works with both single-threaded and multi-threaded Tokio runtimes,
+        // avoiding the block_in_place limitation that requires multi-threaded runtime.
+        let mut record_to_send = log_record.clone();
+        loop {
+            match self.state.sender.try_send(record_to_send) {
+                Ok(()) => break,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(returned)) => {
+                    // Channel is full, wait briefly and retry
+                    record_to_send = returned;
+                    thread::sleep(Duration::from_micros(100));
+                },
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    error!("Failed to queue log record: channel closed");
+                    break;
+                },
             }
-        });
+        }
 
         // For commit records, ensure durability by waiting for buffer to be flushed
         if log_record.is_commit() {
@@ -467,21 +480,20 @@ impl LogManager {
 
             // Wait for buffer to be flushed (observe persistent_lsn ≥ lsn).
             // persistent_lsn is initialized to INVALID_LSN, which must be treated as "nothing flushed yet".
-            block_in_place(|| {
-                while {
-                    let persisted = self.state.persistent_lsn.load(Ordering::SeqCst);
-                    persisted == INVALID_LSN || persisted < lsn
-                } {
-                    if self.state.stop_flag.load(Ordering::SeqCst) {
-                        error!(
-                            "Log flush thread stopped while waiting for commit LSN {} to persist",
-                            lsn
-                        );
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(1));
+            // This spin-wait loop is synchronous and doesn't require block_in_place.
+            while {
+                let persisted = self.state.persistent_lsn.load(Ordering::SeqCst);
+                persisted == INVALID_LSN || persisted < lsn
+            } {
+                if self.state.stop_flag.load(Ordering::SeqCst) {
+                    error!(
+                        "Log flush thread stopped while waiting for commit LSN {} to persist",
+                        lsn
+                    );
+                    break;
                 }
-            });
+                thread::sleep(Duration::from_millis(1));
+            }
 
             debug!("Commit record with LSN {} has been flushed", lsn);
         }
@@ -559,9 +571,16 @@ impl LogManager {
     /// # Returns
     /// An optional LogRecord if reading and parsing was successful
     pub async fn read_log_record_async(&self, offset: u64) -> Option<LogRecord> {
+        Self::read_log_record_static(Arc::clone(&self.state.disk_manager), offset).await
+    }
+
+    /// Static helper for reading log records, used by both async and sync wrappers.
+    async fn read_log_record_static(
+        disk_manager: Arc<AsyncDiskManager>,
+        offset: u64,
+    ) -> Option<LogRecord> {
         debug!("Reading log record from offset {}", offset);
 
-        let disk_manager = Arc::clone(&self.state.disk_manager);
         match disk_manager.read_log(offset).await {
             Ok(bytes) => match LogRecord::from_bytes(&bytes) {
                 Ok(record) => {
@@ -591,8 +610,8 @@ impl LogManager {
     /// Reads a log record from disk at the specified offset (synchronous version).
     ///
     /// This is a blocking wrapper around [`read_log_record_async`](Self::read_log_record_async).
-    /// It handles both cases: running on a tokio runtime (uses `block_in_place`)
-    /// or running outside a runtime (uses the stored runtime handle).
+    /// It handles both cases: running on a tokio runtime (uses a separate OS thread)
+    /// or running outside a runtime (uses the stored runtime handle directly).
     ///
     /// # Parameters
     ///
@@ -603,9 +622,16 @@ impl LogManager {
     /// - `Some(LogRecord)`: If reading and parsing succeeded.
     /// - `None`: If the offset is invalid or parsing failed.
     pub fn read_log_record(&self, offset: u64) -> Option<LogRecord> {
-        // If we're already on a Tokio runtime, block in place to avoid nested runtime errors.
+        // If we're already on a Tokio runtime, spawn a separate OS thread to avoid
+        // block_in_place limitation with single-threaded runtime.
         if Handle::try_current().is_ok() {
-            block_in_place(|| Handle::current().block_on(self.read_log_record_async(offset)))
+            let runtime_handle = self.runtime_handle.clone();
+            let disk_manager = Arc::clone(&self.state.disk_manager);
+            std::thread::spawn(move || {
+                runtime_handle.block_on(Self::read_log_record_static(disk_manager, offset))
+            })
+            .join()
+            .unwrap_or(None)
         } else {
             self.runtime_handle
                 .block_on(self.read_log_record_async(offset))
