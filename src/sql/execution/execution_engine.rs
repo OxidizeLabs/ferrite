@@ -885,18 +885,57 @@ impl ExecutionEngine {
         transaction.set_prev_lsn(lsn);
 
         // Attempt to commit
-        match txn_manager
-            .commit(transaction, self.buffer_pool_manager.clone())
-            .await
-        {
-            true => {
-                debug!("Transaction committed successfully");
-                Ok(true)
-            },
-            false => {
-                debug!("Transaction commit failed");
-                Ok(false)
-            },
+        let commit_result = txn_manager
+            .commit(transaction.clone(), self.buffer_pool_manager.clone())
+            .await;
+
+        if commit_result {
+            // Buffer dirty pages to the disk manager's write buffer.
+            // This ensures metrics are recorded even if actual disk I/O is deferred.
+            let mut pages_to_flush = std::collections::HashSet::new();
+            for (_table_oid, rid) in transaction.get_write_set() {
+                pages_to_flush.insert(rid.get_page_id());
+            }
+            for page_id in pages_to_flush {
+                if let Err(e) = self.buffer_pool_manager.flush_page_async(page_id).await {
+                    error!(
+                        "Failed to flush page {} during transaction commit: {}",
+                        page_id, e
+                    );
+                    return Err(DBError::Io(format!(
+                        "Failed to flush page during commit: {}",
+                        e
+                    )));
+                }
+            }
+
+            // Force disk flush based on fsync policy.
+            // - OnFlush/PerWrite: Synchronously flush to disk for durability
+            // - Periodic/Never: Rely on background flush thread and WAL for recovery
+            let disk_manager = self.buffer_pool_manager.get_disk_manager();
+            let config = disk_manager.get_config();
+            let should_force_flush = matches!(
+                config.fsync_policy,
+                crate::storage::disk::async_disk::config::FsyncPolicy::OnFlush
+                    | crate::storage::disk::async_disk::config::FsyncPolicy::PerWrite
+            );
+
+            if should_force_flush && let Err(e) = disk_manager.flush().await {
+                error!(
+                    "Failed to flush disk manager during transaction commit: {}",
+                    e
+                );
+                return Err(DBError::Io(format!(
+                    "Failed to flush disk during commit: {}",
+                    e
+                )));
+            }
+
+            debug!("Transaction committed successfully");
+            Ok(true)
+        } else {
+            debug!("Transaction commit failed");
+            Ok(false)
         }
     }
 
