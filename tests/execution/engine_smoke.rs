@@ -3,7 +3,7 @@ use crate::common::tempdb::{cleanup_temp_artifacts, new_temp_db};
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn engine_smoke_ddl_dml_select() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -34,7 +34,7 @@ async fn engine_smoke_ddl_dml_select() {
     cleanup_temp_artifacts();
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn engine_smoke_aggregations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -64,7 +64,7 @@ async fn engine_smoke_aggregations() {
     cleanup_temp_artifacts();
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn engine_smoke_joins() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

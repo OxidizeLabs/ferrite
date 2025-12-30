@@ -3,7 +3,7 @@ use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_basic_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -67,7 +67,7 @@ async fn test_delete_basic_operations() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_with_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -139,7 +139,7 @@ async fn test_delete_with_conditions() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_no_rows_affected() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -180,7 +180,7 @@ async fn test_delete_no_rows_affected() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_all_rows() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -298,7 +298,7 @@ async fn test_delete_in_transaction() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_with_complex_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -345,7 +345,7 @@ async fn test_delete_with_complex_conditions() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_error_cases() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -395,7 +395,7 @@ async fn test_delete_error_cases() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_with_foreign_key_constraints() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -487,7 +487,7 @@ async fn test_delete_with_foreign_key_constraints() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_with_subqueries() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -574,7 +574,7 @@ async fn test_delete_with_subqueries() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_performance_bulk_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -673,7 +673,7 @@ async fn test_delete_performance_bulk_operations() {
     println!("Complex condition delete: {:?}", complex_delete_duration);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_with_join_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

@@ -4,7 +4,7 @@ use ferrite::catalog::schema::Schema;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::{Val, Value};
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_simple() {
     let mut ctx = TestContext::new("test_case_when_simple").await;
 
@@ -88,7 +88,7 @@ async fn test_case_when_simple() {
     assert_eq!(results, expected, "Results don't match expected values");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_with_subquery() {
     let mut ctx = TestContext::new("test_case_when_with_subquery").await;
 
@@ -368,7 +368,7 @@ async fn test_case_when_with_subquery() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_basic() {
     let mut ctx = TestContext::new("test_case_when_basic").await;
 
@@ -415,7 +415,7 @@ async fn test_case_when_basic() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_multiple_conditions() {
     let mut ctx = TestContext::new("test_case_when_multiple_conditions").await;
 
@@ -483,7 +483,7 @@ async fn test_case_when_multiple_conditions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_with_null_values() {
     let mut ctx = TestContext::new("test_case_when_with_null_values").await;
 
@@ -535,7 +535,7 @@ async fn test_case_when_with_null_values() {
     // NULL handling behavior may vary by implementation
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_with_aggregations() {
     let mut ctx = TestContext::new("test_case_when_with_aggregations").await;
 
@@ -583,7 +583,7 @@ async fn test_case_when_with_aggregations() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_with_arithmetic() {
     let mut ctx = TestContext::new("test_case_when_with_arithmetic").await;
 
@@ -630,7 +630,7 @@ async fn test_case_when_with_arithmetic() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_nested() {
     let mut ctx = TestContext::new("test_case_when_nested").await;
 
@@ -678,7 +678,7 @@ async fn test_case_when_nested() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_different_data_types() {
     let mut ctx = TestContext::new("test_case_when_different_data_types").await;
 
@@ -739,7 +739,7 @@ async fn test_case_when_different_data_types() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_with_in_clause() {
     let mut ctx = TestContext::new("test_case_when_with_in_clause").await;
 
@@ -786,7 +786,7 @@ async fn test_case_when_with_in_clause() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_edge_cases() {
     let mut ctx = TestContext::new("test_case_when_edge_cases").await;
 
@@ -838,7 +838,7 @@ async fn test_case_when_edge_cases() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_performance() {
     let mut ctx = TestContext::new("test_case_when_performance").await;
 

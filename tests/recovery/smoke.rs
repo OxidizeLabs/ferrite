@@ -4,7 +4,7 @@ use ferrite::common::db_instance::{DBConfig, DBInstance};
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recovery_smoke_reopen_triggers_recovery() {
     init_test_logger();
     let cfg: DBConfig = temp_db_config();

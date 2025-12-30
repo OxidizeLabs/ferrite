@@ -6,7 +6,7 @@ use ferrite::concurrency::transaction::IsolationLevel;
 /// Test suite for join operations covering all join types and edge cases
 /// Migrated from src/sql/execution/execution_engine.rs join_tests module
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_join_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -97,7 +97,7 @@ async fn test_join_operations() {
     assert!(success, "Join with WHERE condition query execution failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_right_join_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -163,7 +163,7 @@ async fn test_right_join_operations() {
     assert!(success, "Right join with ORDER BY failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_full_outer_join_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -218,7 +218,7 @@ async fn test_full_outer_join_operations() {
     assert!(success, "Full outer join query execution failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore] // Marked as ignore in original implementation
 async fn test_cross_join_operations() {
     init_test_logger();
@@ -283,7 +283,7 @@ async fn test_cross_join_operations() {
     assert!(success, "Implicit cross join query execution failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_self_join_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -331,7 +331,7 @@ async fn test_self_join_operations() {
     assert!(success, "Colleagues self join query execution failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_multiple_table_joins() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -412,7 +412,7 @@ async fn test_multiple_table_joins() {
     assert!(success, "Three-table join with aggregation failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_join_with_complex_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -476,7 +476,7 @@ async fn test_join_with_complex_conditions() {
     assert!(success, "Join with amount comparison failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_join_performance_with_large_dataset() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -540,7 +540,7 @@ async fn test_join_performance_with_large_dataset() {
     assert!(success, "Large dataset join query execution failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_join_with_null_handling() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -604,7 +604,7 @@ async fn test_join_with_null_handling() {
     assert!(success, "Left join with NULL values failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn basic_inner_join() {
     // Keep the original simple test for compatibility
     init_test_logger();

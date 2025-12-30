@@ -3,7 +3,7 @@ use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_update_delete_basic() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -54,7 +54,7 @@ async fn insert_update_delete_basic() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_values_and_multirow() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -105,7 +105,7 @@ async fn insert_values_and_multirow() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_with_column_lists() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -162,7 +162,7 @@ async fn insert_with_column_lists() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_null_and_defaults() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -288,7 +288,7 @@ async fn insert_with_select_and_transactions() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_basic_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -339,7 +339,7 @@ async fn test_insert_basic_operations() {
     assert!(ok, "Select operation failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_column_specification() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -401,7 +401,7 @@ async fn test_insert_with_column_specification() {
     assert!(ok, "Select after column-specific inserts failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_explicit_null_values() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -463,7 +463,7 @@ async fn test_insert_with_explicit_null_values() {
     assert!(ok, "Select with NULL values failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_implicit_null_values() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -503,7 +503,7 @@ async fn test_insert_with_implicit_null_values() {
     assert!(ok, "Select with NULL values failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_different_data_types() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -565,7 +565,7 @@ async fn test_insert_with_different_data_types() {
     assert!(ok, "Select all data types failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_select_statement() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -660,7 +660,7 @@ async fn test_insert_with_select_statement() {
     assert!(ok, "INSERT with SELECT and column specification failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_expressions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -864,7 +864,7 @@ async fn test_insert_transaction_behavior() {
     assert!(ok, "Final count query failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_error_cases() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -959,7 +959,7 @@ async fn test_insert_error_cases() {
     assert!(ok, "Count query should work even after errors");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_large_batch() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -1012,7 +1012,7 @@ async fn test_insert_large_batch() {
     assert!(ok, "Sample select failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_default_values() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -1076,7 +1076,7 @@ async fn test_insert_with_default_values() {
     assert!(ok, "Select after default inserts failed");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_foreign_key_relationships() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -1433,7 +1433,7 @@ async fn test_insert_concurrent_transactions() {
     println!("Concurrent transactions test completed successfully");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_with_computed_columns() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
