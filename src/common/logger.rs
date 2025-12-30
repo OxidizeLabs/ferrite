@@ -10,11 +10,11 @@ pub fn initialize_logger() {
         let mut builder = Builder::new();
 
         builder
-            .filter_level(LevelFilter::Debug)
-            .filter_module("ferrite", LevelFilter::Debug)
-            .filter_module("ferrite::buffer", LevelFilter::Debug)
-            .filter_module("ferrite::storage", LevelFilter::Debug)
-            .filter_module("ferrite::concurrency", LevelFilter::Debug)
+            .filter_level(LevelFilter::Info)
+            .filter_module("ferrite", LevelFilter::Info)
+            .filter_module("ferrite::buffer", LevelFilter::Info)
+            .filter_module("ferrite::storage", LevelFilter::Info)
+            .filter_module("ferrite::concurrency", LevelFilter::Info)
             .filter_module("ferrite::recovery", LevelFilter::Info)
             .filter_module("rustyline", LevelFilter::Info)
             .format_timestamp_millis()
