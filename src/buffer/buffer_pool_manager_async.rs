@@ -108,21 +108,20 @@
 //! | `flush_page(page_id)`         | Write dirty page to disk                          | O(1) + I/O |
 //! | `flush_page_async(page_id)`   | Async version, non-blocking                       | O(1)       |
 //! | `delete_page(page_id)`        | Remove page from pool (must be unpinned)          | O(1)       |
-//! | `flush_all_pages()`           | Flush all dirty pages                             | O(n) + I/O |
+//! | `flush_all_pages_async()`     | Flush all dirty pages                             | O(n) + I/O |
 //!
-//! ## Async Operations
+//! ## Async I/O Operations
 //!
-//! This BPM provides both sync and async variants for I/O operations:
+//! All I/O operations are async for optimal performance:
 //!
-//! | Sync (Deprecated)             | Async (Preferred)                    |
-//! |-------------------------------|--------------------------------------|
-//! | `flush_page()`                | `flush_page_async()`                 |
-//! | `flush_dirty_pages_batch()`   | `flush_dirty_pages_batch_async()`    |
-//! | `get_health_status()`         | `get_health_status_async()`          |
-//! | `health_check()`              | `health_check_async()`               |
-//!
-//! The sync variants use `futures::executor::block_on` internally and are deprecated.
-//! Prefer async variants for better performance and non-blocking behavior.
+//! | Method                        | Description                                       |
+//! |-------------------------------|---------------------------------------------------|
+//! | `flush_page_async()`          | Flush a single page to disk                       |
+//! | `flush_all_pages_async()`     | Flush all pages to disk                           |
+//! | `flush_all_pages_durable()`   | Flush all pages and sync to disk                  |
+//! | `flush_dirty_pages_batch_async()` | Batch flush of dirty pages                    |
+//! | `get_health_status_async()`   | Get comprehensive health status                   |
+//! | `health_check_async()`        | Quick health check                                |
 //!
 //! ## Concurrency
 //!
@@ -799,51 +798,6 @@ impl BufferPoolManager {
         self.write_page_to_disk_async(page_id, &page).await
     }
 
-    /// Flushes a page with the given page ID to disk.
-    ///
-    /// # Parameters
-    /// - `page_id`: The ID of the page to flush.
-    ///
-    /// # Returns
-    /// `Ok(())` if the page was successfully flushed, `Err(String)` otherwise.
-    pub fn flush_page(&self, page_id: PageId) -> Result<(), String> {
-        trace!("Flushing page {} to disk", page_id);
-
-        let page_table = self.page_table.read();
-        let frame_id = page_table
-            .get(&page_id)
-            .ok_or_else(|| format!("Page {} not found in page table", page_id))?;
-        let frame_id = *frame_id;
-        drop(page_table);
-
-        let pages = self.pages.read();
-        let page = pages
-            .get(frame_id as usize)
-            .and_then(|p| p.as_ref())
-            .ok_or_else(|| format!("Page {} not found in pages array", page_id))?
-            .clone();
-        drop(pages);
-
-        self.write_page_to_disk(page_id, &page)
-    }
-
-    /// Flushes all pages to disk.
-    pub fn flush_all_pages(&self) {
-        trace!("Flushing all pages to disk");
-
-        let page_table = self.page_table.read();
-        let page_ids: Vec<PageId> = page_table.keys().cloned().collect();
-        drop(page_table);
-
-        for page_id in page_ids {
-            if let Err(e) = self.flush_page(page_id) {
-                error!("Failed to flush page {}: {}", page_id, e);
-            }
-        }
-
-        trace!("Finished flushing all pages");
-    }
-
     /// Flushes all pages to disk asynchronously.
     pub async fn flush_all_pages_async(&self) {
         trace!("Flushing all pages to disk");
@@ -1030,7 +984,7 @@ impl BufferPoolManager {
 
         if let Some(page) = page_to_flush {
             trace!("Flushing dirty page {} before eviction", old_page_id);
-            if let Err(e) = self.write_page_to_disk(old_page_id, &page) {
+            if let Err(e) = self.write_page_to_disk_sync(old_page_id, &page) {
                 error!(
                     "Failed to flush page {} during eviction: {}",
                     old_page_id, e
@@ -1267,19 +1221,15 @@ impl BufferPoolManager {
         Ok(())
     }
 
-    /// DEPRECATED: Use write_page_to_disk_async instead
+    /// Internal sync version of write_page_to_disk for eviction paths.
     ///
-    /// This method is kept for backward compatibility but will be removed.
-    /// It still blocks on async operations which defeats the purpose of async I/O.
-    fn write_page_to_disk(
+    /// This is used during page eviction which happens in sync contexts (e.g., `fetch_page`).
+    /// It uses `block_on` internally but is necessary to maintain the sync API for page fetching.
+    fn write_page_to_disk_sync(
         &self,
         page_id: PageId,
         page: &Arc<RwLock<dyn PageTrait>>,
     ) -> Result<(), String> {
-        warn!(
-            "DEPRECATED: write_page_to_disk still uses blocking sync wrapper. Use write_page_to_disk_async instead for better performance."
-        );
-
         // Prepare data for writing
         let data_buffer = {
             let page_guard = page.read();
@@ -1288,7 +1238,7 @@ impl BufferPoolManager {
             data
         };
 
-        // PERFORMANCE BOTTLENECK: This still blocks async operations!
+        // Use block_on for sync eviction path
         let result = futures::executor::block_on(async {
             self.disk_manager.write_page(page_id, data_buffer).await
         });
@@ -1302,7 +1252,7 @@ impl BufferPoolManager {
         }
 
         trace!(
-            "Successfully wrote page {} to disk with cache coordination",
+            "Successfully wrote page {} to disk (sync eviction path)",
             page_id
         );
         Ok(())
@@ -1655,16 +1605,6 @@ impl BufferPoolManager {
         }
     }
 
-    /// DEPRECATED: Use get_health_status_async instead
-    ///
-    /// This method blocks on async operations which defeats the purpose of async I/O.
-    pub fn get_health_status(&self) -> BufferPoolHealthStatus {
-        warn!(
-            "DEPRECATED: get_health_status still uses blocking sync wrapper. Use get_health_status_async instead for better performance."
-        );
-        futures::executor::block_on(self.get_health_status_async())
-    }
-
     /// Gets performance metrics from the async disk manager.
     ///
     /// Returns a snapshot of I/O statistics including read/write latencies,
@@ -1686,17 +1626,6 @@ impl BufferPoolManager {
             .map_err(|e| format!("Failed to sync to disk: {}", e))
     }
 
-    /// DEPRECATED: Use flush_dirty_pages_batch_async instead
-    ///
-    /// This method blocks on async operations which defeats the purpose of async I/O.
-    /// Use flush_dirty_pages_batch_async for better performance.
-    pub fn flush_dirty_pages_batch(&self, max_pages: usize) -> Result<usize, String> {
-        warn!(
-            "DEPRECATED: flush_dirty_pages_batch still uses blocking sync wrapper. Use flush_dirty_pages_batch_async instead for better performance."
-        );
-        futures::executor::block_on(self.flush_dirty_pages_batch_async(max_pages))
-    }
-
     /// Returns a reference to the underlying async disk manager.
     ///
     /// This allows direct access to the disk manager for advanced operations
@@ -1714,16 +1643,6 @@ impl BufferPoolManager {
     /// `true` if the system is healthy, `false` otherwise.
     pub async fn health_check_async(&self) -> bool {
         self.get_health_status_async().await.overall_healthy
-    }
-
-    /// DEPRECATED: Use health_check_async instead
-    ///
-    /// This method blocks on async operations which defeats the purpose of async I/O.
-    pub fn health_check(&self) -> bool {
-        warn!(
-            "DEPRECATED: health_check still uses blocking sync wrapper. Use health_check_async instead for better performance."
-        );
-        self.get_health_status().overall_healthy
     }
 
     /// Executes an async operation with proper error handling and logging
@@ -2071,7 +1990,7 @@ mod tests {
         let bpm = ctx.bpm();
 
         // Fresh buffer pool should be healthy
-        assert!(bpm.health_check());
+        assert!(bpm.health_check_async().await);
 
         // After some operations, should still be healthy
         for i in 0..3 {
@@ -2089,7 +2008,7 @@ mod tests {
                 .expect("Failed to flush page");
         }
 
-        assert!(bpm.health_check());
+        assert!(bpm.health_check_async().await);
     }
 
     #[tokio::test]
@@ -2115,7 +2034,8 @@ mod tests {
 
         // Flush in batch
         let flushed_count = bpm
-            .flush_dirty_pages_batch(3)
+            .flush_dirty_pages_batch_async(3)
+            .await
             .expect("Failed to batch flush");
         assert!(flushed_count <= 3);
         assert!(flushed_count > 0);

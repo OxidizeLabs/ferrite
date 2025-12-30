@@ -579,7 +579,8 @@ mod tests {
             };
 
             // Force a flush to ensure data is written to disk
-            bpm.flush_page(header_page_id)
+            bpm.flush_page_async(header_page_id)
+                .await
                 .expect("Failed to flush page");
 
             // Fetch and verify the header page
