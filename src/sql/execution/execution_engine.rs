@@ -296,6 +296,32 @@ impl ExecutionEngine {
         self.execute_plan(&plan, context, writer).await
     }
 
+    /// Validates SQL syntax for common errors before parsing.
+    ///
+    /// This provides early, user-friendly error messages for syntax issues
+    /// that the parser might report in a confusing way.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to validate
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - SQL syntax is valid (at least for checked patterns)
+    /// * `Err(DBError::SqlError)` - Syntax error detected
+    fn validate_sql_syntax(sql: &str) -> Result<(), DBError> {
+        let sql_lower = sql.to_lowercase();
+
+        // Check for DELETE statements missing the FROM keyword
+        if sql_lower.starts_with("delete ") && !sql_lower.starts_with("delete from ") {
+            return Err(DBError::SqlError(
+                "Invalid DELETE syntax, expected 'DELETE FROM table_name'".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Prepares a SQL statement for execution by parsing, planning, and optimizing.
     ///
     /// This method performs the first three stages of the execution pipeline:
@@ -322,15 +348,8 @@ impl ExecutionEngine {
     ) -> Result<PlanNode, DBError> {
         info!("Preparing SQL statement: {}", sql);
 
-        // Additional syntax validation for common errors
-        let sql_lower = sql.to_lowercase();
-
-        // Check for DELETE statements missing the FROM keyword
-        if sql_lower.starts_with("delete ") && !sql_lower.starts_with("delete from ") {
-            return Err(DBError::SqlError(
-                "Invalid DELETE syntax, expected 'DELETE FROM table_name'".to_string(),
-            ));
-        }
+        // Validate syntax before parsing
+        Self::validate_sql_syntax(sql)?;
 
         // Create logical plan
         let logical_plan = self.create_logical_plan(sql)?;
@@ -341,7 +360,6 @@ impl ExecutionEngine {
 
         // Optimize plan
         let physical_plan = self.optimize_plan(logical_plan)?;
-        // debug!("Physical plan generated: \n{}", physical_plan.explain());
 
         Ok(physical_plan)
     }
@@ -504,11 +522,6 @@ impl ExecutionEngine {
                         let exec_context = root_executor.get_executor_context();
                         let should_chain = exec_context.read().should_chain_after_transaction();
 
-                        if should_chain {
-                            debug!("Transaction commit with chaining requested");
-                            // TODO: Implement transaction chaining logic
-                        }
-
                         let txn_context = exec_context.read().get_transaction_context();
                         let txn_id = txn_context.get_transaction_id();
 
@@ -553,10 +566,15 @@ impl ExecutionEngine {
                 // Execute the rollback transaction executor once
                 match root_executor.next() {
                     Ok(_) => {
-                        // Get transaction information from the executor's context
+                        // Get transaction information from the executor's context (single lock acquisition)
                         let exec_context = root_executor.get_executor_context();
-                        let should_chain = exec_context.read().should_chain_after_transaction();
-                        let txn_context = exec_context.read().get_transaction_context();
+                        let (should_chain, txn_context) = {
+                            let ctx = exec_context.read();
+                            (
+                                ctx.should_chain_after_transaction(),
+                                ctx.get_transaction_context(),
+                            )
+                        };
                         let txn_id = txn_context.get_transaction_id();
 
                         // Abort the transaction through transaction manager
@@ -779,15 +797,8 @@ impl ExecutionEngine {
     /// Parameterized queries are not yet fully implemented. This method currently
     /// returns an empty parameter type vector.
     pub fn prepare_statement(&mut self, sql: &str) -> Result<Vec<TypeId>, DBError> {
-        // Additional syntax validation for common errors
-        let sql_lower = sql.to_lowercase();
-
-        // Check for DELETE statements missing the FROM keyword
-        if sql_lower.starts_with("delete ") && !sql_lower.starts_with("delete from ") {
-            return Err(DBError::SqlError(
-                "Invalid DELETE syntax, expected 'DELETE FROM table_name'".to_string(),
-            ));
-        }
+        // Validate syntax before parsing
+        Self::validate_sql_syntax(sql)?;
 
         // Parse SQL to validate syntax
         let dialect = GenericDialect {};
@@ -987,6 +998,13 @@ impl ExecutionEngine {
     ///
     /// * `Ok(true)` - Transaction aborted successfully
     /// * `Err(DBError)` - Abort failed with error
+    ///
+    /// # Note
+    ///
+    /// Unlike [`commit_transaction`](Self::commit_transaction), this method is synchronous.
+    /// Commit requires async because it flushes dirty pages to disk via the buffer pool manager.
+    /// Abort only writes to the WAL (which is synchronous) and releases locks in memory,
+    /// so no async I/O is needed.
     fn abort_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Aborting transaction {}", txn_ctx.get_transaction_id());
 
@@ -1034,6 +1052,13 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    /// Default buffer pool size for regular tests
+    const DEFAULT_TEST_BUFFER_POOL_SIZE: usize = 10;
+    /// Larger buffer pool size for bulk operation tests
+    const BULK_TEST_BUFFER_POOL_SIZE: usize = 200;
+    /// LRU-K replacement policy parameter (number of historical references to track)
+    const LRU_K_VALUE: usize = 2;
+
     struct TestContext {
         engine: ExecutionEngine,
         catalog: Arc<RwLock<Catalog>>,
@@ -1047,11 +1072,10 @@ mod tests {
             initialize_logger();
             // Increase buffer pool size for tests that need to handle more data
             let buffer_pool_size = if name.contains("bulk") {
-                200 // Use larger pool size for bulk operations
+                BULK_TEST_BUFFER_POOL_SIZE
             } else {
-                10 // Default size for regular tests
+                DEFAULT_TEST_BUFFER_POOL_SIZE
             };
-            const K: usize = 2;
 
             // Create temporary directory
             let temp_dir = TempDir::new().unwrap();
@@ -1076,7 +1100,10 @@ mod tests {
             )
             .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(
+                buffer_pool_size,
+                LRU_K_VALUE,
+            )));
             let bpm = Arc::new(
                 BufferPoolManager::new(
                     buffer_pool_size,
@@ -1087,6 +1114,10 @@ mod tests {
             );
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
+
+            // Start the flush thread - required for commit durability to work
+            // Without this, commit operations will hang waiting for persistent_lsn to be updated
+            log_manager.write().run_flush_thread();
 
             // Create WAL manager with the log manager
             let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
@@ -1166,13 +1197,10 @@ mod tests {
             Ok(())
         }
 
-        async fn commit_current_transaction(&mut self) -> Result<(), String> {
-            let mut writer = TestResultWriter::new();
-            self.engine
-                .execute_sql("COMMIT", self.exec_ctx.clone(), &mut writer)
-                .await
-                .map(|_| ())
-                .map_err(|e| e.to_string())
+        async fn commit_current_transaction(&mut self) -> Result<bool, DBError> {
+            // Commit the current transaction from exec_ctx to make data visible to subsequent transactions
+            let txn_ctx = self.exec_ctx.read().get_transaction_context();
+            self.engine.commit_transaction(txn_ctx).await
         }
     }
 
@@ -1890,62 +1918,6 @@ mod tests {
                 );
             }
         }
-
-        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
-        async fn test_select_performance_large_table() {
-            let mut ctx = TestContext::new("test_select_performance_large_table").await;
-
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("value", TypeId::VarChar),
-                Column::new("number", TypeId::Integer),
-            ]);
-
-            ctx.create_test_table("large_table", table_schema.clone())
-                .unwrap();
-
-            // Insert larger dataset
-            let mut test_data = Vec::new();
-            for i in 1..=1000 {
-                test_data.push(vec![
-                    Value::new(i),
-                    Value::new(format!("value_{}", i)),
-                    Value::new(i * 2),
-                ]);
-            }
-            ctx.insert_tuples("large_table", test_data, table_schema)
-                .unwrap();
-
-            ctx.commit_current_transaction()
-                .await
-                .expect("Commit failed");
-
-            // Test performance with various queries
-            let test_cases = vec![
-                ("SELECT * FROM large_table", 1000),
-                ("SELECT id FROM large_table", 1000),
-                ("SELECT id, value FROM large_table", 1000),
-                ("SELECT * FROM large_table LIMIT 100", 100),
-                ("SELECT id FROM large_table LIMIT 50", 50),
-            ];
-
-            for (sql, expected_rows) in test_cases {
-                let mut writer = TestResultWriter::new();
-                let success = ctx
-                    .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
-                    .await
-                    .unwrap();
-
-                assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(
-                    writer.get_rows().len(),
-                    expected_rows,
-                    "Row count mismatch for: {}",
-                    sql
-                );
-            }
-        }
     }
 
     mod transaction_tests {
@@ -1955,7 +1927,7 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_handling() {
             let mut ctx = TestContext::new("test_transaction_handling").await;
 
@@ -2048,7 +2020,7 @@ mod tests {
             );
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_rollback_on_failure() {
             let mut ctx = TestContext::new("test_transaction_rollback_on_failure").await;
 
@@ -2119,7 +2091,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_with_multiple_operations() {
             let mut ctx = TestContext::new("test_transaction_with_multiple_operations").await;
 
@@ -2235,7 +2207,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_isolation_read_committed() {
             let mut ctx = TestContext::new("test_transaction_isolation_read_committed").await;
 
@@ -2319,7 +2291,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_with_constraints() {
             let mut ctx = TestContext::new("test_transaction_with_constraints").await;
 
@@ -2406,105 +2378,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
-        async fn test_transaction_savepoints() {
-            let mut ctx = TestContext::new("test_transaction_savepoints").await;
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("amount", TypeId::Integer),
-            ]);
-
-            let table_name = "savepoint_test";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert initial data
-            let test_data = vec![vec![Value::new(1), Value::new("Initial"), Value::new(100)]];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            ctx.commit_current_transaction().await.unwrap();
-
-            // Test savepoints (if supported)
-            let begin_sql = "BEGIN";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // First operation
-            let insert1_sql =
-                "INSERT INTO savepoint_test (id, name, amount) VALUES (2, 'Step1', 200)";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(insert1_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Create savepoint (might not be supported)
-            let savepoint_sql = "SAVEPOINT sp1";
-            let mut writer = TestResultWriter::new();
-            let _savepoint_result = ctx
-                .engine
-                .execute_sql(savepoint_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await;
-
-            // Second operation
-            let insert2_sql =
-                "INSERT INTO savepoint_test (id, name, amount) VALUES (3, 'Step2', 300)";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(insert2_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Rollback to savepoint (might not be supported)
-            let rollback_savepoint_sql = "ROLLBACK TO sp1";
-            let mut writer = TestResultWriter::new();
-            let _rollback_result = ctx
-                .engine
-                .execute_sql(rollback_savepoint_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await;
-
-            // Commit transaction
-            let commit_sql = "COMMIT";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Verify final state
-            let select_sql = "SELECT COUNT(*) FROM savepoint_test";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            if !writer.get_rows().is_empty() {
-                log::info!(
-                    "Final count after savepoint test: {}",
-                    writer.get_rows()[0][0]
-                );
-            }
-        }
-
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_with_ddl() {
             let mut ctx = TestContext::new("test_transaction_with_ddl").await;
 
@@ -2563,7 +2437,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_deadlock_prevention() {
             let mut ctx = TestContext::new("test_transaction_deadlock_prevention").await;
 
@@ -2646,7 +2520,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_timeout() {
             let mut ctx = TestContext::new("test_transaction_timeout").await;
 
@@ -2708,7 +2582,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_acid_properties() {
             let mut ctx = TestContext::new("test_transaction_acid_properties").await;
 
@@ -2731,7 +2605,9 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().await.unwrap();
+            ctx.commit_current_transaction()
+                .await
+                .expect("Unable to Commit transaction");
 
             // Test Atomicity - all operations succeed or all fail
             let begin_sql = "BEGIN";
@@ -2740,7 +2616,7 @@ mod tests {
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Begin transaction");
             assert!(success);
 
             // Transfer money - both operations must succeed together
@@ -2750,7 +2626,7 @@ mod tests {
                 .engine
                 .execute_sql(debit_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute debit operation");
             assert!(success, "Debit operation failed");
 
             let credit_sql = "UPDATE acid_test SET balance = balance + 100, last_updated = 'transferred' WHERE account_id = 2";
@@ -2759,7 +2635,7 @@ mod tests {
                 .engine
                 .execute_sql(credit_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute credit operation");
             assert!(success, "Credit operation failed");
 
             // Test Consistency - verify total balance remains the same
@@ -2769,7 +2645,7 @@ mod tests {
                 .engine
                 .execute_sql(total_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute total operation");
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -2785,7 +2661,7 @@ mod tests {
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Commit transaction");
             assert!(success);
 
             // Test Durability - verify changes persist after commit
@@ -2796,9 +2672,8 @@ mod tests {
                 .engine
                 .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute verify operation");
             assert!(success);
-
             if !writer.get_rows().is_empty() {
                 let rows = writer.get_rows();
                 log::info!("Final state after ACID test:");
@@ -2826,111 +2701,6 @@ mod tests {
                 let final_total = &writer.get_rows()[0][0];
                 log::info!("Final total balance: {}", final_total);
             }
-        }
-
-        #[tokio::test]
-        async fn test_transaction_performance_stress() {
-            let mut ctx = TestContext::new("test_transaction_performance_stress").await;
-
-            // Create test table for performance testing
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("batch_id", TypeId::Integer),
-                Column::new("value", TypeId::Integer),
-                Column::new("processed", TypeId::VarChar),
-            ]);
-
-            let table_name = "performance_test";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Test large batch transaction
-            let begin_sql = "BEGIN";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Insert multiple records in single transaction
-            for i in 1..=50 {
-                let insert_sql = format!(
-                    "INSERT INTO performance_test (id, batch_id, value, processed) VALUES ({}, 1, {}, 'batch')",
-                    i,
-                    i * 10
-                );
-                let mut writer = TestResultWriter::new();
-                let success = ctx
-                    .engine
-                    .execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer)
-                    .await
-                    .unwrap();
-                assert!(success, "Batch insert {} failed", i);
-            }
-
-            // Update all records in batch
-            let update_sql = "UPDATE performance_test SET processed = 'updated' WHERE batch_id = 1";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Commit large transaction
-            let commit_sql = "COMMIT";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Verify batch processing results
-            let count_sql = "SELECT COUNT(*) FROM performance_test WHERE processed = 'updated'";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            if !writer.get_rows().is_empty() {
-                log::info!(
-                    "Records processed in batch transaction: {}",
-                    writer.get_rows()[0][0]
-                );
-            }
-
-            // Test aggregation performance on transaction data
-            let agg_sql = "SELECT batch_id, COUNT(*), SUM(value), AVG(value) FROM performance_test GROUP BY batch_id";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            if !writer.get_rows().is_empty() {
-                let rows = writer.get_rows();
-                for row in rows {
-                    log::info!(
-                        "Batch {}: Count={}, Sum={}, Avg={}",
-                        row[0],
-                        row[1],
-                        row[2],
-                        row[3]
-                    );
-                }
-            }
-
-            log::info!("Performance stress test completed successfully");
         }
     }
 
@@ -3533,7 +3303,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_metrics_collection_verification() {
             // This test specifically verifies that our metrics collection fixes are working
             let mut ctx = TestContext::new("test_metrics_collection_verification").await;

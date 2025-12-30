@@ -400,7 +400,7 @@ async fn create_table_and_complex_queries() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_transaction_safety() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

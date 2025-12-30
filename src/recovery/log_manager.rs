@@ -179,7 +179,7 @@
 use crate::common::config::{INVALID_LSN, Lsn};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::AsyncDiskManager;
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use parking_lot::Mutex;
 use std::io;
 use std::sync::Arc;
@@ -282,6 +282,7 @@ impl LogManager {
     /// This method must be called before any `append_log_record` calls that
     /// include commit records, otherwise commit durability waiting will hang.
     pub fn run_flush_thread(&mut self) {
+        info!("Starting log flush thread");
         let state = Arc::clone(&self.state);
         let mut receiver = self
             .receiver

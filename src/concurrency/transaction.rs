@@ -638,11 +638,12 @@ impl Transaction {
     /// # Returns
     /// A vector of `(table_oid, rid)` pairs representing all modified tuples.
     pub fn get_write_set(&self) -> Vec<(TableOidT, RID)> {
-        let write_set = self.write_set.lock().unwrap();
-        write_set
+        let write_set_guard = self.write_set.lock().expect("write_set lock poisoned");
+        let write_set = write_set_guard
             .iter()
             .flat_map(|(&table_oid, rids)| rids.iter().map(move |&rid| (table_oid, rid)))
-            .collect()
+            .collect();
+        write_set
     }
 
     /// Appends a scan predicate.

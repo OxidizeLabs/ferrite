@@ -46,6 +46,8 @@ impl ConcurrentTestContext {
         );
 
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
+        // Start the flush thread - required for commit durability to work
+        log_manager.write().run_flush_thread();
         let transaction_manager = Arc::new(TransactionManager::new());
 
         let catalog = Arc::new(RwLock::new(Catalog::new(

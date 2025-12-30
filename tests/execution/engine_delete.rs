@@ -220,7 +220,7 @@ async fn test_delete_all_rows() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_delete_in_transaction() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

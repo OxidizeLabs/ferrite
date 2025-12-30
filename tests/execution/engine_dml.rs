@@ -219,7 +219,7 @@ async fn insert_null_and_defaults() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_with_select_and_transactions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
