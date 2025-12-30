@@ -205,40 +205,70 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Parameters for creating a catalog with existing data
+/// Parameters for creating a catalog with existing data.
+///
+/// This struct is used when bootstrapping a catalog from persisted state,
+/// such as during database recovery or when loading from a snapshot.
 pub struct CatalogCreationParams {
+    /// The buffer pool manager backing all tables.
     pub bpm: Arc<BufferPoolManager>,
+    /// The next available index OID.
     pub next_index_oid: IndexOidT,
+    /// The next available table OID.
     pub next_table_oid: TableOidT,
+    /// Mapping from table OIDs to table metadata.
     pub tables: HashMap<TableOidT, TableInfo>,
+    /// Mapping from index OIDs to index info and B+ tree instances.
     pub indexes: HashMap<IndexOidT, (Arc<IndexInfo>, Arc<RwLock<BPlusTree>>)>,
+    /// Mapping from table names to table OIDs.
     pub table_names: HashMap<String, TableOidT>,
+    /// Mapping from index names to index OIDs.
     pub index_names: HashMap<String, IndexOidT>,
+    /// The transaction manager for coordinating transactions.
     pub txn_manager: Arc<TransactionManager>,
 }
 
-/// Parameters for creating an index
+/// Parameters for creating a new index.
+///
+/// Encapsulates all the information needed to define an index on a table.
 pub struct IndexCreationParams {
+    /// The name of the index.
     pub index_name: String,
+    /// The name of the table to index.
     pub table_name: String,
+    /// The schema of the index key (subset of table columns).
     pub key_schema: Schema,
+    /// Column indices that form the index key.
     pub key_attrs: Vec<usize>,
+    /// Size of the index key in bytes.
     pub key_size: usize,
+    /// Whether the index enforces uniqueness.
     pub unique: bool,
+    /// The type of index (e.g., B+ tree, hash).
     pub index_type: IndexType,
 }
 
-/// The Catalog is a non-persistent catalog that is designed for
-/// use by executors within the DBMS execution engine. It handles
-/// database creation, database lookup, table creation, table lookup,
-/// index creation, and index lookup.
+/// The Catalog is the central metadata repository for the DBMS.
+///
+/// It manages database creation and lookup, table creation and lookup,
+/// index creation and lookup, and maintains system catalog tables for
+/// persistence. The in-memory maps are rebuilt from system catalog
+/// tables on startup.
+///
+/// See the module-level documentation for architecture details.
 #[derive(Debug)]
 pub struct Catalog {
+    /// The buffer pool manager backing all tables.
     bpm: Arc<BufferPoolManager>,
+    /// Mapping from database names to database instances.
     databases: HashMap<String, Database>,
+    /// The currently selected database (for SQL context).
     current_database: Option<String>,
+    /// System catalog tables (`__tables`, `__indexes`).
     system: SystemCatalogTables,
+    /// Schemas for system catalog tables.
     system_schemas: SystemCatalogSchemas,
+    /// The transaction manager for coordinating transactions.
     txn_manager: Arc<TransactionManager>,
 }
 
@@ -261,7 +291,20 @@ impl Catalog {
         )
     }
 
-    /// For backward compatibility - constructs a catalog with existing data
+    /// Constructs a catalog with existing data for recovery or migration.
+    ///
+    /// This method creates a catalog pre-populated with tables and indexes,
+    /// typically used when restoring from a persisted state.
+    ///
+    /// # Parameters
+    /// - `bpm`: The buffer pool manager backing tables
+    /// - `next_index_oid`: The next available index OID
+    /// - `next_table_oid`: The next available table OID
+    /// - `tables`: Existing table metadata
+    /// - `indexes`: Existing index info and B+ trees
+    /// - `table_names`: Table name to OID mapping
+    /// - `index_names`: Index name to OID mapping
+    /// - `txn_manager`: The transaction manager
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_existing_data(
         bpm: Arc<BufferPoolManager>,
@@ -448,7 +491,22 @@ impl Catalog {
         self.get_current_database()?.get_table_by_oid(table_oid)
     }
 
-    /// Creates a new index in the current database, populates existing data of the table, and returns its metadata.
+    /// Creates a new index in the current database and returns its metadata.
+    ///
+    /// The index is populated with existing data from the table and recorded
+    /// in the system catalog for persistence.
+    ///
+    /// # Parameters
+    /// - `index_name`: Name of the new index
+    /// - `table_name`: Name of the table to index
+    /// - `key_schema`: Schema of the index key columns
+    /// - `key_attrs`: Column indices that form the index key
+    /// - `key_size`: Size of the index key in bytes
+    /// - `unique`: Whether the index enforces uniqueness
+    /// - `index_type`: Type of index to create (B+ tree, hash, etc.)
+    ///
+    /// # Returns
+    /// A tuple of (IndexInfo, BPlusTree) if successful, None otherwise.
     #[allow(clippy::too_many_arguments)]
     pub fn create_index(
         &mut self,
@@ -490,12 +548,26 @@ impl Catalog {
         result
     }
 
+    /// Gets all indexes for a table in the current database.
+    ///
+    /// # Parameters
+    /// - `table_name`: The name of the table
+    ///
+    /// # Returns
+    /// A vector of references to index info for all indexes on the table.
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&Arc<IndexInfo>> {
         self.get_current_database()
             .map(|db| db.get_table_indexes(table_name))
             .unwrap_or_default()
     }
 
+    /// Gets an index by its OID in the current database.
+    ///
+    /// # Parameters
+    /// - `index_oid`: The OID of the index
+    ///
+    /// # Returns
+    /// A tuple of (IndexInfo, BPlusTree) if found, None otherwise.
     pub fn get_index_by_index_oid(
         &self,
         index_oid: IndexOidT,
@@ -504,6 +576,15 @@ impl Catalog {
             .get_index_by_index_oid(index_oid)
     }
 
+    /// Adds an index to the current database's in-memory tracking.
+    ///
+    /// This is used internally after index creation to ensure the index
+    /// is accessible via lookup methods.
+    ///
+    /// # Parameters
+    /// - `index_oid`: The OID of the index
+    /// - `index_info`: Metadata about the index
+    /// - `btree`: The B+ tree backing the index
     pub fn add_index(
         &mut self,
         index_oid: IndexOidT,
@@ -525,6 +606,13 @@ impl Catalog {
             .unwrap_or_default()
     }
 
+    /// Gets the schema for a table in the current database.
+    ///
+    /// # Parameters
+    /// - `table_name`: The name of the table
+    ///
+    /// # Returns
+    /// The table's schema if found, None otherwise.
     pub fn get_table_schema(&self, table_name: &str) -> Option<Schema> {
         self.get_current_database()?.get_table_schema(table_name)
     }
@@ -534,14 +622,32 @@ impl Catalog {
         self.bpm.clone()
     }
 
+    /// Gets the table heap for a table in the current database.
+    ///
+    /// # Parameters
+    /// - `table_name`: The name of the table
+    ///
+    /// # Returns
+    /// The table's heap storage if found, None otherwise.
     pub fn get_table_heap(&self, table_name: &str) -> Option<Arc<TableHeap>> {
         self.get_current_database()?.get_table_heap(table_name)
     }
 
+    /// Gets the columns for a table in the current database.
+    ///
+    /// # Parameters
+    /// - `table_name`: The name of the table
+    ///
+    /// # Returns
+    /// A vector of columns if the table is found, None otherwise.
     pub fn get_table_columns(&self, table_name: &str) -> Option<Vec<Column>> {
         self.get_current_database()?.get_table_columns(table_name)
     }
 
+    /// Gets all table names in the current database.
+    ///
+    /// # Returns
+    /// A vector of table names in the current database.
     pub fn get_all_tables(&self) -> Vec<String> {
         self.get_current_database()
             .map(|db| db.get_all_tables())
@@ -596,6 +702,9 @@ impl Catalog {
         }
     }
 
+    /// Converts a system catalog row to a TableInfo object.
+    ///
+    /// Deserializes the schema from the row and reopens the table heap.
     fn row_to_table_info(&self, row: &TableCatalogRow) -> Option<TableInfo> {
         let (schema, _): (Schema, usize) =
             match decode_from_slice::<Schema, _>(&row.schema_bin, storage_bincode_config()) {
@@ -626,6 +735,10 @@ impl Catalog {
 }
 
 impl Catalog {
+    /// Records a table in the system catalog (`__tables`).
+    ///
+    /// Serializes the schema and inserts a row into the system tables heap
+    /// for persistence.
     fn record_system_table(&self, table_info: &TableInfo, schema: &Schema) {
         let encoded_schema =
             bincode::encode_to_vec(schema, crate::common::config::storage_bincode_config())
@@ -652,6 +765,10 @@ impl Catalog {
         );
     }
 
+    /// Records an index in the system catalog (`__indexes`).
+    ///
+    /// Serializes the key schema and inserts a row into the system indexes
+    /// heap for persistence.
     fn record_system_index(
         &self,
         index_oid: IndexOidT,
@@ -727,13 +844,23 @@ mod tests {
     use parking_lot::RwLock;
     use tempfile::TempDir;
 
+    /// Test context for catalog tests.
+    ///
+    /// Creates an isolated test environment with a temporary directory,
+    /// buffer pool manager, and transaction manager.
     pub struct TestContext {
+        /// The buffer pool manager for the test.
         bpm: Arc<BufferPoolManager>,
+        /// The transaction manager for the test.
         txn_manager: Arc<TransactionManager>,
+        /// Temporary directory (dropped after test).
         _temp_dir: TempDir,
     }
 
     impl TestContext {
+        /// Creates a new test context with the given name.
+        ///
+        /// The name is used to create unique database and log file names.
         pub async fn new(name: &str) -> Self {
             initialize_logger();
             const BUFFER_POOL_SIZE: usize = 10;
@@ -776,10 +903,12 @@ mod tests {
             }
         }
 
+        /// Returns a clone of the buffer pool manager.
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
             Arc::clone(&self.bpm)
         }
 
+        /// Returns a clone of the transaction manager.
         pub fn txn_manager(&self) -> Arc<TransactionManager> {
             Arc::clone(&self.txn_manager)
         }

@@ -14,6 +14,7 @@ impl Default for TimestampType {
 }
 
 impl TimestampType {
+    /// Creates a new `TimestampType` instance.
     pub fn new() -> Self {
         TimestampType
     }

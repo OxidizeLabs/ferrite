@@ -5,7 +5,7 @@ use ferrite::catalog::schema::Schema;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 // #[ignore = "Causes stack overflow in the logical plan to physical plan conversion"]
 async fn test_order_by() {
     let mut ctx = TestContext::new("test_order_by").await;
@@ -87,7 +87,7 @@ async fn test_order_by() {
     println!("Test completed successfully");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_desc() {
     let mut ctx = TestContext::new("test_order_by_desc").await;
 
@@ -134,7 +134,7 @@ async fn test_order_by_desc() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_multiple_columns() {
     let mut ctx = TestContext::new("test_order_by_multiple_columns").await;
 
@@ -185,7 +185,7 @@ async fn test_order_by_multiple_columns() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_with_null_values() {
     let mut ctx = TestContext::new("test_order_by_with_null_values").await;
 
@@ -233,7 +233,7 @@ async fn test_order_by_with_null_values() {
     // NULL handling behavior may vary by implementation
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_with_expressions() {
     let mut ctx = TestContext::new("test_order_by_with_expressions").await;
 
@@ -278,7 +278,7 @@ async fn test_order_by_with_expressions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_with_limit() {
     let mut ctx = TestContext::new("test_order_by_with_limit").await;
 
@@ -324,7 +324,7 @@ async fn test_order_by_with_limit() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_with_offset() {
     let mut ctx = TestContext::new("test_order_by_with_offset").await;
 
@@ -370,7 +370,7 @@ async fn test_order_by_with_offset() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_different_data_types() {
     let mut ctx = TestContext::new("test_order_by_different_data_types").await;
 
@@ -431,7 +431,7 @@ async fn test_order_by_different_data_types() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_with_aggregation() {
     let mut ctx = TestContext::new("test_order_by_with_aggregation").await;
 
@@ -478,7 +478,7 @@ async fn test_order_by_with_aggregation() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_edge_cases() {
     let mut ctx = TestContext::new("test_order_by_edge_cases").await;
 
@@ -529,7 +529,7 @@ async fn test_order_by_edge_cases() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_order_by_performance() {
     let mut ctx = TestContext::new("test_order_by_performance").await;
 

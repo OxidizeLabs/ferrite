@@ -12,6 +12,7 @@ impl Default for SmallIntType {
 }
 
 impl SmallIntType {
+    /// Creates a new `SmallIntType` instance.
     pub fn new() -> Self {
         SmallIntType
     }

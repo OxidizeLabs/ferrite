@@ -12,6 +12,7 @@ impl Default for DecimalType {
 }
 
 impl DecimalType {
+    /// Creates a new `DecimalType` instance.
     pub fn new() -> Self {
         DecimalType
     }

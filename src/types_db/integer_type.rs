@@ -13,6 +13,7 @@ impl Default for IntegerType {
 }
 
 impl IntegerType {
+    /// Creates a new `IntegerType` instance.
     pub fn new() -> Self {
         IntegerType
     }

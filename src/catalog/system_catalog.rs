@@ -172,18 +172,31 @@ use bincode::{Decode, Encode};
 use log::debug;
 use std::sync::Arc;
 
-/// Reserved OIDs for system catalog tables.
+/// Reserved OID for the `__tables` system catalog table.
 pub const SYS_TABLES_OID: TableOidT = 1;
+
+/// Reserved OID for the `__indexes` system catalog table.
 pub const SYS_INDEXES_OID: TableOidT = 2;
+
+/// Reserved OID for the `__dbs` system catalog table.
 pub const SYS_DATABASES_OID: TableOidT = 3;
+
+/// Reserved OID for the `__columns` system catalog table.
 pub const SYS_COLUMNS_OID: TableOidT = 4;
 
-/// Minimum set of catalog schemas used to persist metadata.
+/// Schema definitions for all system catalog tables.
+///
+/// These schemas define the structure of the internal metadata tables
+/// used to persist catalog information across database restarts.
 #[derive(Debug)]
 pub struct SystemCatalogSchemas {
+    /// Schema for `__tables`: stores table metadata (OID, name, page bounds, serialized schema).
     pub tables: Schema,
+    /// Schema for `__indexes`: stores index metadata (OID, name, table ref, uniqueness, key info).
     pub indexes: Schema,
+    /// Schema for `__dbs`: stores database metadata (OID, name).
     pub databases: Schema,
+    /// Schema for `__columns`: stores column metadata (table ref, name, position, type, length, PK flag).
     pub columns: Schema,
 }
 
@@ -194,6 +207,13 @@ impl Default for SystemCatalogSchemas {
 }
 
 impl SystemCatalogSchemas {
+    /// Creates a new set of system catalog schemas.
+    ///
+    /// Each schema defines the column structure for a system catalog table:
+    /// - `__tables`: table_oid, table_name, first_page_id, last_page_id, schema_bin
+    /// - `__indexes`: index_oid, index_name, table_oid, unique, index_type, key_attrs, key_schema_bin
+    /// - `__dbs`: db_oid, db_name
+    /// - `__columns`: table_oid, column_name, ordinal, column_type, column_len, is_pk
     pub fn new() -> Self {
         let tables = Schema::new(vec![
             Column::new("table_oid", TypeId::BigInt),
@@ -236,17 +256,29 @@ impl SystemCatalogSchemas {
     }
 }
 
-/// Serializable representation of a catalog table row for tables.
+/// Serializable representation of a row in the `__tables` system catalog.
+///
+/// This struct provides bidirectional conversion between in-memory
+/// table metadata and the tuple format stored in the system catalog heap.
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct TableCatalogRow {
+    /// Unique object identifier for the table.
     pub table_oid: TableOidT,
+    /// Name of the table (e.g., "users", "orders").
     pub table_name: String,
+    /// Page ID of the first page in the table's heap.
     pub first_page_id: PageId,
+    /// Page ID of the last page in the table's heap.
     pub last_page_id: PageId,
+    /// Bincode-serialized [`Schema`] for the table.
     pub schema_bin: Vec<u8>,
 }
 
 impl TableCatalogRow {
+    /// Converts this row to a vector of values for insertion into `__tables`.
+    ///
+    /// The values are ordered to match the `__tables` schema:
+    /// `[table_oid, table_name, first_page_id, last_page_id, schema_bin]`
     pub fn to_values(&self) -> Vec<Value> {
         vec![
             Value::new(self.table_oid as i64),
@@ -257,6 +289,13 @@ impl TableCatalogRow {
         ]
     }
 
+    /// Reconstructs a `TableCatalogRow` from a tuple scanned from `__tables`.
+    ///
+    /// # Parameters
+    /// - `tuple`: A tuple from the `__tables` heap.
+    ///
+    /// # Returns
+    /// `Some(TableCatalogRow)` if all fields can be extracted, `None` otherwise.
     pub fn from_tuple(tuple: &crate::storage::table::tuple::Tuple) -> Option<Self> {
         let oid = value_to_i64(&tuple.get_value(0))? as TableOidT;
         let name = value_to_string(&tuple.get_value(1))?;
@@ -273,18 +312,35 @@ impl TableCatalogRow {
     }
 }
 
+/// Serializable representation of a row in the `__indexes` system catalog.
+///
+/// This struct provides conversion between in-memory index metadata and
+/// the tuple format stored in the system catalog heap.
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct IndexCatalogRow {
+    /// Unique object identifier for the index.
     pub index_oid: IndexOidT,
+    /// Name of the index (e.g., "users_pk", "orders_date_idx").
     pub index_name: String,
+    /// OID of the table this index is built on.
     pub table_oid: TableOidT,
+    /// Whether the index enforces uniqueness.
     pub unique: bool,
+    /// Index type enum value (e.g., B+ tree, hash).
     pub index_type: i32,
+    /// Column indices from the table schema that form the index key.
     pub key_attrs: Vec<usize>,
+    /// Bincode-serialized [`Schema`] for the index key.
     pub key_schema_bin: Vec<u8>,
 }
 
 impl IndexCatalogRow {
+    /// Converts this row to a vector of values for insertion into `__indexes`.
+    ///
+    /// The values are ordered to match the `__indexes` schema:
+    /// `[index_oid, index_name, table_oid, unique, index_type, key_attrs, key_schema_bin]`
+    ///
+    /// The `key_attrs` field is serialized using bincode before storage.
     pub fn to_values(&self) -> Vec<Value> {
         let key_attrs_bin =
             bincode::encode_to_vec(&self.key_attrs, storage_bincode_config()).unwrap_or_default();
@@ -300,6 +356,10 @@ impl IndexCatalogRow {
     }
 }
 
+/// Extracts an `i64` from a [`Value`], coercing numeric types.
+///
+/// Handles `BigInt`, `Integer`, `SmallInt`, `TinyInt`, `Decimal`, `Float`,
+/// `Boolean` (as 0/1), and string types (via parsing).
 fn value_to_i64(value: &Value) -> Option<i64> {
     match value.get_val() {
         Val::BigInt(v) => Some(*v),
@@ -314,6 +374,9 @@ fn value_to_i64(value: &Value) -> Option<i64> {
     }
 }
 
+/// Extracts a `String` from a [`Value`].
+///
+/// Handles `VarLen`, `ConstLen`, `JSON`, `UUID`, and `Binary` (via UTF-8 decode).
 fn value_to_string(value: &Value) -> Option<String> {
     match value.get_val() {
         Val::VarLen(s) | Val::ConstLen(s) | Val::JSON(s) | Val::UUID(s) => Some(s.clone()),
@@ -322,6 +385,9 @@ fn value_to_string(value: &Value) -> Option<String> {
     }
 }
 
+/// Extracts a `Vec<u8>` from a [`Value`].
+///
+/// Handles `Binary` directly and string types (via UTF-8 encoding).
 fn value_to_binary(value: &Value) -> Option<Vec<u8>> {
     match value.get_val() {
         Val::Binary(b) => Some(b.clone()),
@@ -330,16 +396,38 @@ fn value_to_binary(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
-/// Holds the system catalog table infos for reuse.
+/// Runtime container for system catalog table instances.
+///
+/// Each field holds a [`TableInfo`] backed by a [`TableHeap`] for storing
+/// system metadata. These tables are bootstrapped during database initialization
+/// and used for catalog persistence and recovery.
 #[derive(Debug)]
 pub struct SystemCatalogTables {
+    /// `__tables` system table: stores metadata about user-created tables.
     pub tables: Arc<TableInfo>,
+    /// `__indexes` system table: stores metadata about indexes.
     pub indexes: Arc<TableInfo>,
+    /// `__dbs` system table: stores metadata about databases.
     pub databases: Arc<TableInfo>,
+    /// `__columns` system table: stores metadata about table columns.
     pub columns: Arc<TableInfo>,
 }
 
 impl SystemCatalogTables {
+    /// Bootstraps the system catalog tables during database initialization.
+    ///
+    /// Creates the four core system catalog tables (`__tables`, `__indexes`,
+    /// `__dbs`, `__columns`) with their schemas and backing heap storage.
+    /// Each table is assigned a reserved OID (1-4).
+    ///
+    /// # Parameters
+    /// - `bpm`: The buffer pool manager for allocating pages.
+    ///
+    /// # Returns
+    /// A new `SystemCatalogTables` with initialized table heaps.
+    ///
+    /// # Panics
+    /// Panics if table heap creation fails (e.g., buffer pool exhausted).
     pub fn bootstrap(
         bpm: Arc<crate::buffer::buffer_pool_manager_async::BufferPoolManager>,
     ) -> Self {

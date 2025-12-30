@@ -46,6 +46,8 @@ impl ConcurrentTestContext {
         );
 
         let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
+        // Start the flush thread - required for commit durability to work
+        log_manager.write().run_flush_thread();
         let transaction_manager = Arc::new(TransactionManager::new());
 
         let catalog = Arc::new(RwLock::new(Catalog::new(
@@ -104,7 +106,7 @@ impl ConcurrentTestContext {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_inserts() {
     let ctx = Arc::new(ConcurrentTestContext::new("concurrent_inserts").await);
     ctx.setup_test_table().await.unwrap();
@@ -180,7 +182,7 @@ async fn test_concurrent_inserts() {
     ctx.transaction_factory.commit_transaction(txn_ctx).await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_updates() {
     let ctx = Arc::new(ConcurrentTestContext::new("concurrent_updates").await);
     ctx.setup_test_table().await.unwrap();
@@ -257,7 +259,7 @@ async fn test_concurrent_updates() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_deadlock_detection() {
     let ctx = Arc::new(ConcurrentTestContext::new("deadlock_detection").await);
     ctx.setup_test_table().await.unwrap();

@@ -122,10 +122,17 @@ pub struct LRUKReplacer {
     evictable_frames: ParkingMutex<VecDeque<FrameId>>,
 }
 
+/// Internal tracking data for a single frame in the LRU-K replacer.
+///
+/// This struct maintains the access history needed for the LRU-K eviction
+/// algorithm and tracks whether the frame is eligible for eviction.
 #[derive(Debug, Clone)]
 struct FrameEntry {
+    /// Total number of accesses to this frame (may exceed K).
     access_count: usize,
+    /// Timestamps of the K most recent accesses (bounded deque).
     access_history: VecDeque<u64>,
+    /// Whether the frame is eligible for eviction (unpinned).
     is_evictable: bool,
 }
 
@@ -344,6 +351,14 @@ impl LRUKReplacer {
         self.size
     }
 
+    /// Returns the K value used for the LRU-K replacement policy.
+    ///
+    /// The K value determines how many recent accesses are tracked per frame.
+    /// Higher K values favor frequently-accessed pages over recently-accessed ones.
+    ///
+    /// # Returns
+    ///
+    /// The K value (typically 2 for database systems).
     pub fn get_k(&self) -> usize {
         self.k
     }

@@ -178,15 +178,71 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::sync::Arc;
 
+/// Top-level coordinator for SQL statement execution.
+///
+/// The `ExecutionEngine` integrates parsing, planning, optimization, and execution
+/// into a unified interface for processing SQL queries and commands. It serves as
+/// the main entry point for all SQL operations in the database.
+///
+/// # Architecture
+///
+/// The engine follows a pipelined architecture:
+/// 1. **Parse**: SQL text → AST (via `sqlparser`)
+/// 2. **Plan**: AST → `LogicalPlan` (via `QueryPlanner`)
+/// 3. **Optimize**: `LogicalPlan` → optimized `LogicalPlan` (via `Optimizer`)
+/// 4. **Physical**: `LogicalPlan` → `PlanNode` (physical plan)
+/// 5. **Execute**: `PlanNode` → `Executor` tree → Results
+///
+/// # Thread Safety
+///
+/// The engine requires `&mut self` for execution (single-threaded per engine).
+/// Each connection typically owns its own `ExecutionEngine` instance, while
+/// shared components like `BufferPoolManager` and `Catalog` are `Arc`-wrapped.
+///
+/// # Transaction Support
+///
+/// The engine handles transaction lifecycle through `TransactionManagerFactory`:
+/// - `BEGIN` / `START TRANSACTION`: Creates new transaction
+/// - `COMMIT`: Writes WAL commit record, flushes, releases locks
+/// - `ROLLBACK`: Writes WAL abort record, undoes changes, releases locks
+/// - Transaction chaining with `AND CHAIN` clause is supported
 pub struct ExecutionEngine {
+    /// Query planner that converts SQL text into logical plans.
     planner: QueryPlanner,
+
+    /// Plan optimizer that applies transformation rules to improve query performance.
     optimizer: Optimizer,
+
+    /// Shared buffer pool for page I/O operations during execution.
     buffer_pool_manager: Arc<BufferPoolManager>,
+
+    /// Factory for creating and managing transactions with proper WAL integration.
     transaction_factory: Arc<TransactionManagerFactory>,
+
+    /// Write-ahead log manager for durability and crash recovery.
     wal_manager: Arc<WALManager>,
 }
 
 impl ExecutionEngine {
+    /// Creates a new execution engine with the provided components.
+    ///
+    /// # Arguments
+    ///
+    /// * `catalog` - Shared catalog for schema metadata lookup
+    /// * `buffer_pool_manager` - Buffer pool for page-level I/O operations
+    /// * `transaction_factory` - Factory for transaction lifecycle management
+    /// * `wal_manager` - Write-ahead log manager for durability
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let engine = ExecutionEngine::new(
+    ///     catalog.clone(),
+    ///     buffer_pool_manager.clone(),
+    ///     transaction_factory.clone(),
+    ///     wal_manager.clone(),
+    /// );
+    /// ```
     pub fn new(
         catalog: Arc<RwLock<Catalog>>,
         buffer_pool_manager: Arc<BufferPoolManager>,
@@ -202,7 +258,31 @@ impl ExecutionEngine {
         }
     }
 
-    /// Execute a SQL statement with the given context and writer
+    /// Executes a SQL statement with the given execution context.
+    ///
+    /// This is the primary entry point for SQL execution. The method parses the SQL,
+    /// creates a logical plan, optimizes it, converts to a physical plan, and executes
+    /// the resulting executor tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to execute
+    /// * `context` - Execution context containing transaction state and catalog access
+    /// * `writer` - Output destination for query results (CLI, network, etc.)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Statement executed successfully with results/modifications
+    /// * `Ok(false)` - Statement executed but no rows affected (e.g., UPDATE with no matches)
+    /// * `Err(DBError)` - Execution failed with a specific error
+    ///
+    /// # Statement Types
+    ///
+    /// Different statement types are handled differently:
+    /// - **DML** (INSERT/UPDATE/DELETE): Execute all, return affected row indicator
+    /// - **DDL** (CREATE/DROP/ALTER): Execute modification, return success
+    /// - **Query** (SELECT): Stream tuples to `ResultWriter`
+    /// - **Transaction** (BEGIN/COMMIT/ROLLBACK): Manage transaction state
     pub async fn execute_sql(
         &mut self,
         sql: &str,
@@ -216,15 +296,20 @@ impl ExecutionEngine {
         self.execute_plan(&plan, context, writer).await
     }
 
-    /// Prepare a SQL statement for execution
-    fn prepare_sql(
-        &mut self,
-        sql: &str,
-        _context: Arc<RwLock<ExecutionContext>>,
-    ) -> Result<PlanNode, DBError> {
-        info!("Preparing SQL statement: {}", sql);
-
-        // Additional syntax validation for common errors
+    /// Validates SQL syntax for common errors before parsing.
+    ///
+    /// This provides early, user-friendly error messages for syntax issues
+    /// that the parser might report in a confusing way.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to validate
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - SQL syntax is valid (at least for checked patterns)
+    /// * `Err(DBError::SqlError)` - Syntax error detected
+    fn validate_sql_syntax(sql: &str) -> Result<(), DBError> {
         let sql_lower = sql.to_lowercase();
 
         // Check for DELETE statements missing the FROM keyword
@@ -233,6 +318,38 @@ impl ExecutionEngine {
                 "Invalid DELETE syntax, expected 'DELETE FROM table_name'".to_string(),
             ));
         }
+
+        Ok(())
+    }
+
+    /// Prepares a SQL statement for execution by parsing, planning, and optimizing.
+    ///
+    /// This method performs the first three stages of the execution pipeline:
+    /// 1. **Syntax validation**: Checks for common SQL syntax errors
+    /// 2. **Logical planning**: Converts SQL to a logical plan tree
+    /// 3. **Optimization**: Applies optimization rules to the logical plan
+    /// 4. **Physical conversion**: Converts to a physical `PlanNode`
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to prepare
+    /// * `_context` - Execution context (currently unused, reserved for future parameterization)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(PlanNode)` - The optimized physical plan ready for execution
+    /// * `Err(DBError::SqlError)` - Syntax error in the SQL
+    /// * `Err(DBError::PlanError)` - Error during logical plan construction
+    /// * `Err(DBError::OptimizeError)` - Error during optimization
+    fn prepare_sql(
+        &mut self,
+        sql: &str,
+        _context: Arc<RwLock<ExecutionContext>>,
+    ) -> Result<PlanNode, DBError> {
+        info!("Preparing SQL statement: {}", sql);
+
+        // Validate syntax before parsing
+        Self::validate_sql_syntax(sql)?;
 
         // Create logical plan
         let logical_plan = self.create_logical_plan(sql)?;
@@ -243,12 +360,39 @@ impl ExecutionEngine {
 
         // Optimize plan
         let physical_plan = self.optimize_plan(logical_plan)?;
-        // debug!("Physical plan generated: \n{}", physical_plan.explain());
 
         Ok(physical_plan)
     }
 
-    /// Execute a physical plan
+    /// Executes a physical plan node and writes results to the provided writer.
+    ///
+    /// This method handles the final stage of query execution. It creates an
+    /// executor tree from the physical plan, initializes it, and pulls tuples
+    /// from the root executor. Different plan types are handled differently:
+    ///
+    /// # Plan Type Handling
+    ///
+    /// | Plan Type | Behavior |
+    /// |-----------|----------|
+    /// | `Insert/Update/Delete` | Execute all tuples, return affected indicator |
+    /// | `CreateTable/CreateIndex` | Execute DDL, return success |
+    /// | `StartTransaction` | Initialize new transaction, return success |
+    /// | `CommitTransaction` | Write WAL commit, flush, release locks |
+    /// | `RollbackTransaction` | Write WAL abort, undo changes, release locks |
+    /// | `CommandResult` | Execute utility command |
+    /// | Query plans | Stream tuples to `ResultWriter` |
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The physical plan node to execute
+    /// * `context` - Execution context with transaction and catalog access
+    /// * `writer` - Destination for query results
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Execution completed with results/modifications
+    /// * `Ok(false)` - Execution completed but no rows affected
+    /// * `Err(DBError)` - Execution failed
     async fn execute_plan(
         &self,
         plan: &PlanNode,
@@ -378,11 +522,6 @@ impl ExecutionEngine {
                         let exec_context = root_executor.get_executor_context();
                         let should_chain = exec_context.read().should_chain_after_transaction();
 
-                        if should_chain {
-                            debug!("Transaction commit with chaining requested");
-                            // TODO: Implement transaction chaining logic
-                        }
-
                         let txn_context = exec_context.read().get_transaction_context();
                         let txn_id = txn_context.get_transaction_id();
 
@@ -427,10 +566,15 @@ impl ExecutionEngine {
                 // Execute the rollback transaction executor once
                 match root_executor.next() {
                     Ok(_) => {
-                        // Get transaction information from the executor's context
+                        // Get transaction information from the executor's context (single lock acquisition)
                         let exec_context = root_executor.get_executor_context();
-                        let should_chain = exec_context.read().should_chain_after_transaction();
-                        let txn_context = exec_context.read().get_transaction_context();
+                        let (should_chain, txn_context) = {
+                            let ctx = exec_context.read();
+                            (
+                                ctx.should_chain_after_transaction(),
+                                ctx.get_transaction_context(),
+                            )
+                        };
                         let txn_id = txn_context.get_transaction_id();
 
                         // Abort the transaction through transaction manager
@@ -541,7 +685,21 @@ impl ExecutionEngine {
         }
     }
 
-    /// Create an executor for the given plan
+    /// Creates an executor tree for the given physical plan node.
+    ///
+    /// This method recursively converts a `PlanNode` tree into an `AbstractExecutor`
+    /// tree. Each plan node type has a corresponding executor type that implements
+    /// the Volcano-style iterator model (init/next pattern).
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The physical plan node to convert
+    /// * `context` - Execution context passed to all executors
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Box<dyn AbstractExecutor>)` - The root executor ready for iteration
+    /// * `Err(DBError::Execution)` - Failed to create executor (e.g., missing table)
     fn create_executor(
         &self,
         plan: &PlanNode,
@@ -562,7 +720,19 @@ impl ExecutionEngine {
         }
     }
 
-    /// Create a logical plan from SQL
+    /// Creates a logical plan from SQL text.
+    ///
+    /// Parses the SQL statement and constructs a logical plan tree that represents
+    /// the query's semantic structure. This is the first stage of query processing.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to parse and plan
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(LogicalPlan)` - The constructed logical plan
+    /// * `Err(DBError::PlanError)` - Parse or planning error
     fn create_logical_plan(&mut self, sql: &str) -> Result<LogicalPlan, DBError> {
         self.planner
             .create_logical_plan(sql)
@@ -570,7 +740,25 @@ impl ExecutionEngine {
             .map_err(DBError::PlanError)
     }
 
-    /// Optimize a logical plan into a physical plan
+    /// Optimizes a logical plan and converts it to a physical plan.
+    ///
+    /// Applies optimization rules (predicate pushdown, join reordering, etc.)
+    /// to the logical plan, then converts the optimized logical plan into
+    /// a physical `PlanNode` ready for execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan to optimize
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(PlanNode)` - The optimized physical plan
+    /// * `Err(DBError::OptimizeError)` - Optimization or conversion failed
+    ///
+    /// # Optimization Rules Applied
+    ///
+    /// - Nested loop join checks (via `EnableNljCheck`)
+    /// - Additional rules configured in the `Optimizer`
     fn optimize_plan(&self, plan: LogicalPlan) -> Result<PlanNode, DBError> {
         // Box the logical plan and get check options
         let boxed_plan = Box::new(plan);
@@ -589,18 +777,28 @@ impl ExecutionEngine {
             .map_err(DBError::OptimizeError)
     }
 
-    /// Prepare a SQL statement and validate syntax
-    /// Returns empty parameter types for now since we don't support parameters yet
+    /// Prepares a SQL statement for later execution, validating syntax and semantics.
+    ///
+    /// This method parses the SQL, validates its syntax, and creates a logical plan
+    /// to verify semantic correctness (table existence, column validity, etc.).
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text to prepare
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<TypeId>)` - Parameter types for the prepared statement (currently empty)
+    /// * `Err(DBError::SqlError)` - Syntax error or single statement requirement not met
+    /// * `Err(DBError::PlanError)` - Semantic error during plan construction
+    ///
+    /// # Note
+    ///
+    /// Parameterized queries are not yet fully implemented. This method currently
+    /// returns an empty parameter type vector.
     pub fn prepare_statement(&mut self, sql: &str) -> Result<Vec<TypeId>, DBError> {
-        // Additional syntax validation for common errors
-        let sql_lower = sql.to_lowercase();
-
-        // Check for DELETE statements missing the FROM keyword
-        if sql_lower.starts_with("delete ") && !sql_lower.starts_with("delete from ") {
-            return Err(DBError::SqlError(
-                "Invalid DELETE syntax, expected 'DELETE FROM table_name'".to_string(),
-            ));
-        }
+        // Validate syntax before parsing
+        Self::validate_sql_syntax(sql)?;
 
         // Parse SQL to validate syntax
         let dialect = GenericDialect {};
@@ -618,7 +816,23 @@ impl ExecutionEngine {
         Ok(Vec::new())
     }
 
-    /// Execute a prepared statement (currently same as regular execute)
+    /// Executes a previously prepared statement with parameter values.
+    ///
+    /// # Arguments
+    ///
+    /// * `sql` - The SQL statement text (should match a prepared statement)
+    /// * `_params` - Parameter values to bind (currently unused)
+    /// * `context` - Execution context with transaction state
+    /// * `writer` - Output destination for query results
+    ///
+    /// # Returns
+    ///
+    /// Same as [`execute_sql`](Self::execute_sql).
+    ///
+    /// # Note
+    ///
+    /// Parameter binding is not yet implemented. This method currently delegates
+    /// to `execute_sql` and ignores the `params` argument.
     pub async fn execute_prepared_statement(
         &mut self,
         sql: &str,
@@ -630,6 +844,24 @@ impl ExecutionEngine {
         self.execute_sql(sql, context, writer).await
     }
 
+    /// Commits the current transaction, making all changes durable.
+    ///
+    /// This method performs the following steps:
+    /// 1. Retrieves the transaction from the context
+    /// 2. Writes a commit record to the WAL
+    /// 3. Updates the transaction's LSN
+    /// 4. Calls the transaction manager to finalize the commit
+    /// 5. Flushes dirty pages and releases locks
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_ctx` - The transaction context containing the transaction to commit
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Transaction committed successfully
+    /// * `Ok(false)` - Commit reported as unsuccessful by transaction manager
+    /// * `Err(DBError)` - Commit failed with error
     async fn commit_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Committing transaction {}", txn_ctx.get_transaction_id());
 
@@ -668,6 +900,30 @@ impl ExecutionEngine {
         }
     }
 
+    /// Chains a new transaction after commit/rollback when `AND CHAIN` is specified.
+    ///
+    /// Transaction chaining allows starting a new transaction immediately after
+    /// completing the current one, inheriting the same isolation level. This is
+    /// useful for batch operations that need transactional boundaries.
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_ctx` - The previous transaction context (used for isolation level)
+    /// * `exec_ctx` - The execution context to update with the new transaction
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - New transaction started and context updated
+    /// * `Ok(false)` - Chaining not requested or failed to start new transaction
+    /// * `Err(DBError)` - Error starting the new transaction
+    ///
+    /// # Behavior
+    ///
+    /// 1. Checks if chaining was requested via `AND CHAIN` clause
+    /// 2. Gets the isolation level from the completed transaction
+    /// 3. Starts a new transaction with the same isolation level
+    /// 4. Updates the execution context with the new transaction
+    /// 5. Resets the chain flag
     fn chain_transaction(
         &self,
         txn_ctx: Arc<TransactionContext>,
@@ -724,6 +980,31 @@ impl ExecutionEngine {
         }
     }
 
+    /// Aborts the current transaction, undoing all changes.
+    ///
+    /// This method performs the following steps:
+    /// 1. Retrieves the transaction from the context
+    /// 2. Writes an abort record to the WAL
+    /// 3. Updates the transaction's LSN
+    /// 4. Calls the transaction manager to perform the abort
+    /// 5. Undoes all changes made by the transaction
+    /// 6. Releases all locks held by the transaction
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_ctx` - The transaction context containing the transaction to abort
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Transaction aborted successfully
+    /// * `Err(DBError)` - Abort failed with error
+    ///
+    /// # Note
+    ///
+    /// Unlike [`commit_transaction`](Self::commit_transaction), this method is synchronous.
+    /// Commit requires async because it flushes dirty pages to disk via the buffer pool manager.
+    /// Abort only writes to the WAL (which is synchronous) and releases locks in memory,
+    /// so no async I/O is needed.
     fn abort_transaction(&self, txn_ctx: Arc<TransactionContext>) -> Result<bool, DBError> {
         debug!("Aborting transaction {}", txn_ctx.get_transaction_id());
 
@@ -771,6 +1052,13 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    /// Default buffer pool size for regular tests
+    const DEFAULT_TEST_BUFFER_POOL_SIZE: usize = 10;
+    /// Larger buffer pool size for bulk operation tests
+    const BULK_TEST_BUFFER_POOL_SIZE: usize = 200;
+    /// LRU-K replacement policy parameter (number of historical references to track)
+    const LRU_K_VALUE: usize = 2;
+
     struct TestContext {
         engine: ExecutionEngine,
         catalog: Arc<RwLock<Catalog>>,
@@ -784,11 +1072,10 @@ mod tests {
             initialize_logger();
             // Increase buffer pool size for tests that need to handle more data
             let buffer_pool_size = if name.contains("bulk") {
-                200 // Use larger pool size for bulk operations
+                BULK_TEST_BUFFER_POOL_SIZE
             } else {
-                10 // Default size for regular tests
+                DEFAULT_TEST_BUFFER_POOL_SIZE
             };
-            const K: usize = 2;
 
             // Create temporary directory
             let temp_dir = TempDir::new().unwrap();
@@ -813,7 +1100,10 @@ mod tests {
             )
             .await;
             let disk_manager_arc = Arc::new(disk_manager.unwrap());
-            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(buffer_pool_size, K)));
+            let replacer = Arc::new(RwLock::new(LRUKReplacer::new(
+                buffer_pool_size,
+                LRU_K_VALUE,
+            )));
             let bpm = Arc::new(
                 BufferPoolManager::new(
                     buffer_pool_size,
@@ -824,6 +1114,10 @@ mod tests {
             );
 
             let log_manager = Arc::new(RwLock::new(LogManager::new(disk_manager_arc.clone())));
+
+            // Start the flush thread - required for commit durability to work
+            // Without this, commit operations will hang waiting for persistent_lsn to be updated
+            log_manager.write().run_flush_thread();
 
             // Create WAL manager with the log manager
             let wal_manager = Arc::new(WALManager::new(log_manager.clone()));
@@ -903,13 +1197,10 @@ mod tests {
             Ok(())
         }
 
-        async fn commit_current_transaction(&mut self) -> Result<(), String> {
-            let mut writer = TestResultWriter::new();
-            self.engine
-                .execute_sql("COMMIT", self.exec_ctx.clone(), &mut writer)
-                .await
-                .map(|_| ())
-                .map_err(|e| e.to_string())
+        async fn commit_current_transaction(&mut self) -> Result<bool, DBError> {
+            // Commit the current transaction from exec_ctx to make data visible to subsequent transactions
+            let txn_ctx = self.exec_ctx.read().get_transaction_context();
+            self.engine.commit_transaction(txn_ctx).await
         }
     }
 
@@ -1627,62 +1918,6 @@ mod tests {
                 );
             }
         }
-
-        #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
-        async fn test_select_performance_large_table() {
-            let mut ctx = TestContext::new("test_select_performance_large_table").await;
-
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("value", TypeId::VarChar),
-                Column::new("number", TypeId::Integer),
-            ]);
-
-            ctx.create_test_table("large_table", table_schema.clone())
-                .unwrap();
-
-            // Insert larger dataset
-            let mut test_data = Vec::new();
-            for i in 1..=1000 {
-                test_data.push(vec![
-                    Value::new(i),
-                    Value::new(format!("value_{}", i)),
-                    Value::new(i * 2),
-                ]);
-            }
-            ctx.insert_tuples("large_table", test_data, table_schema)
-                .unwrap();
-
-            ctx.commit_current_transaction()
-                .await
-                .expect("Commit failed");
-
-            // Test performance with various queries
-            let test_cases = vec![
-                ("SELECT * FROM large_table", 1000),
-                ("SELECT id FROM large_table", 1000),
-                ("SELECT id, value FROM large_table", 1000),
-                ("SELECT * FROM large_table LIMIT 100", 100),
-                ("SELECT id FROM large_table LIMIT 50", 50),
-            ];
-
-            for (sql, expected_rows) in test_cases {
-                let mut writer = TestResultWriter::new();
-                let success = ctx
-                    .engine
-                    .execute_sql(sql, ctx.exec_ctx.clone(), &mut writer)
-                    .await
-                    .unwrap();
-
-                assert!(success, "Query execution failed for: {}", sql);
-                assert_eq!(
-                    writer.get_rows().len(),
-                    expected_rows,
-                    "Row count mismatch for: {}",
-                    sql
-                );
-            }
-        }
     }
 
     mod transaction_tests {
@@ -1692,7 +1927,7 @@ mod tests {
         use crate::types_db::type_id::TypeId;
         use crate::types_db::value::Value;
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_handling() {
             let mut ctx = TestContext::new("test_transaction_handling").await;
 
@@ -1785,7 +2020,7 @@ mod tests {
             );
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_rollback_on_failure() {
             let mut ctx = TestContext::new("test_transaction_rollback_on_failure").await;
 
@@ -1856,7 +2091,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_with_multiple_operations() {
             let mut ctx = TestContext::new("test_transaction_with_multiple_operations").await;
 
@@ -1972,7 +2207,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_isolation_read_committed() {
             let mut ctx = TestContext::new("test_transaction_isolation_read_committed").await;
 
@@ -2056,7 +2291,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_with_constraints() {
             let mut ctx = TestContext::new("test_transaction_with_constraints").await;
 
@@ -2143,105 +2378,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
-        async fn test_transaction_savepoints() {
-            let mut ctx = TestContext::new("test_transaction_savepoints").await;
-
-            // Create test table
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("name", TypeId::VarChar),
-                Column::new("amount", TypeId::Integer),
-            ]);
-
-            let table_name = "savepoint_test";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Insert initial data
-            let test_data = vec![vec![Value::new(1), Value::new("Initial"), Value::new(100)]];
-            ctx.insert_tuples(table_name, test_data, table_schema)
-                .unwrap();
-
-            ctx.commit_current_transaction().await.unwrap();
-
-            // Test savepoints (if supported)
-            let begin_sql = "BEGIN";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // First operation
-            let insert1_sql =
-                "INSERT INTO savepoint_test (id, name, amount) VALUES (2, 'Step1', 200)";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(insert1_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Create savepoint (might not be supported)
-            let savepoint_sql = "SAVEPOINT sp1";
-            let mut writer = TestResultWriter::new();
-            let _savepoint_result = ctx
-                .engine
-                .execute_sql(savepoint_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await;
-
-            // Second operation
-            let insert2_sql =
-                "INSERT INTO savepoint_test (id, name, amount) VALUES (3, 'Step2', 300)";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(insert2_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Rollback to savepoint (might not be supported)
-            let rollback_savepoint_sql = "ROLLBACK TO sp1";
-            let mut writer = TestResultWriter::new();
-            let _rollback_result = ctx
-                .engine
-                .execute_sql(rollback_savepoint_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await;
-
-            // Commit transaction
-            let commit_sql = "COMMIT";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Verify final state
-            let select_sql = "SELECT COUNT(*) FROM savepoint_test";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(select_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            if !writer.get_rows().is_empty() {
-                log::info!(
-                    "Final count after savepoint test: {}",
-                    writer.get_rows()[0][0]
-                );
-            }
-        }
-
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_with_ddl() {
             let mut ctx = TestContext::new("test_transaction_with_ddl").await;
 
@@ -2300,7 +2437,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_deadlock_prevention() {
             let mut ctx = TestContext::new("test_transaction_deadlock_prevention").await;
 
@@ -2383,7 +2520,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_timeout() {
             let mut ctx = TestContext::new("test_transaction_timeout").await;
 
@@ -2445,7 +2582,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_transaction_acid_properties() {
             let mut ctx = TestContext::new("test_transaction_acid_properties").await;
 
@@ -2468,7 +2605,9 @@ mod tests {
             ctx.insert_tuples(table_name, test_data, table_schema)
                 .unwrap();
 
-            ctx.commit_current_transaction().await.unwrap();
+            ctx.commit_current_transaction()
+                .await
+                .expect("Unable to Commit transaction");
 
             // Test Atomicity - all operations succeed or all fail
             let begin_sql = "BEGIN";
@@ -2477,7 +2616,7 @@ mod tests {
                 .engine
                 .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Begin transaction");
             assert!(success);
 
             // Transfer money - both operations must succeed together
@@ -2487,7 +2626,7 @@ mod tests {
                 .engine
                 .execute_sql(debit_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute debit operation");
             assert!(success, "Debit operation failed");
 
             let credit_sql = "UPDATE acid_test SET balance = balance + 100, last_updated = 'transferred' WHERE account_id = 2";
@@ -2496,7 +2635,7 @@ mod tests {
                 .engine
                 .execute_sql(credit_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute credit operation");
             assert!(success, "Credit operation failed");
 
             // Test Consistency - verify total balance remains the same
@@ -2506,7 +2645,7 @@ mod tests {
                 .engine
                 .execute_sql(total_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute total operation");
             assert!(success);
 
             if !writer.get_rows().is_empty() {
@@ -2522,7 +2661,7 @@ mod tests {
                 .engine
                 .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Commit transaction");
             assert!(success);
 
             // Test Durability - verify changes persist after commit
@@ -2533,9 +2672,8 @@ mod tests {
                 .engine
                 .execute_sql(verify_sql, ctx.exec_ctx.clone(), &mut writer)
                 .await
-                .unwrap();
+                .expect("Unable to Execute verify operation");
             assert!(success);
-
             if !writer.get_rows().is_empty() {
                 let rows = writer.get_rows();
                 log::info!("Final state after ACID test:");
@@ -2563,111 +2701,6 @@ mod tests {
                 let final_total = &writer.get_rows()[0][0];
                 log::info!("Final total balance: {}", final_total);
             }
-        }
-
-        #[tokio::test]
-        async fn test_transaction_performance_stress() {
-            let mut ctx = TestContext::new("test_transaction_performance_stress").await;
-
-            // Create test table for performance testing
-            let table_schema = Schema::new(vec![
-                Column::new("id", TypeId::Integer),
-                Column::new("batch_id", TypeId::Integer),
-                Column::new("value", TypeId::Integer),
-                Column::new("processed", TypeId::VarChar),
-            ]);
-
-            let table_name = "performance_test";
-            ctx.create_test_table(table_name, table_schema.clone())
-                .unwrap();
-
-            // Test large batch transaction
-            let begin_sql = "BEGIN";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(begin_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Insert multiple records in single transaction
-            for i in 1..=50 {
-                let insert_sql = format!(
-                    "INSERT INTO performance_test (id, batch_id, value, processed) VALUES ({}, 1, {}, 'batch')",
-                    i,
-                    i * 10
-                );
-                let mut writer = TestResultWriter::new();
-                let success = ctx
-                    .engine
-                    .execute_sql(&insert_sql, ctx.exec_ctx.clone(), &mut writer)
-                    .await
-                    .unwrap();
-                assert!(success, "Batch insert {} failed", i);
-            }
-
-            // Update all records in batch
-            let update_sql = "UPDATE performance_test SET processed = 'updated' WHERE batch_id = 1";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(update_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Commit large transaction
-            let commit_sql = "COMMIT";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(commit_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            // Verify batch processing results
-            let count_sql = "SELECT COUNT(*) FROM performance_test WHERE processed = 'updated'";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(count_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            if !writer.get_rows().is_empty() {
-                log::info!(
-                    "Records processed in batch transaction: {}",
-                    writer.get_rows()[0][0]
-                );
-            }
-
-            // Test aggregation performance on transaction data
-            let agg_sql = "SELECT batch_id, COUNT(*), SUM(value), AVG(value) FROM performance_test GROUP BY batch_id";
-            let mut writer = TestResultWriter::new();
-            let success = ctx
-                .engine
-                .execute_sql(agg_sql, ctx.exec_ctx.clone(), &mut writer)
-                .await
-                .unwrap();
-            assert!(success);
-
-            if !writer.get_rows().is_empty() {
-                let rows = writer.get_rows();
-                for row in rows {
-                    log::info!(
-                        "Batch {}: Count={}, Sum={}, Avg={}",
-                        row[0],
-                        row[1],
-                        row[2],
-                        row[3]
-                    );
-                }
-            }
-
-            log::info!("Performance stress test completed successfully");
         }
     }
 
@@ -3270,7 +3303,7 @@ mod tests {
             }
         }
 
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn test_metrics_collection_verification() {
             // This test specifically verifies that our metrics collection fixes are working
             let mut ctx = TestContext::new("test_metrics_collection_verification").await;

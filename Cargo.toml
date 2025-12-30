@@ -4,7 +4,7 @@ description = "Ferrite: a Rust DBMS built on proven database techniques with mem
 version = "0.1.0"
 authors = ["Thomas Korrison <ferrite.db@gmail.com>"]
 edition = "2024"
-license = "Apache-2.0"
+license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/ferritedb/ferrite"
 keywords = ["database", "dbms", "rust", "sql", "storage-engine"]
@@ -39,7 +39,7 @@ zstd = "0.13"
 
 # User interface
 colored = "3.0"
-rustyline = "17.0.0"
+rustyline = "17.0"
 clap = { version = "4.5", features = ["derive"] }
 
 # Async runtime and concurrency
@@ -162,4 +162,3 @@ mocking = ["dep:mockall"]
 # Development and testing features
 dev = ["server", "mocking"]
 full = ["cli", "client", "server"]
-

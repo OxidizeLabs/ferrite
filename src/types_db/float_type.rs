@@ -13,6 +13,7 @@ impl Default for FloatType {
 }
 
 impl FloatType {
+    /// Creates a new `FloatType` instance.
     pub fn new() -> Self {
         FloatType
     }

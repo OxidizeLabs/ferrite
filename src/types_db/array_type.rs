@@ -13,6 +13,7 @@ impl Default for ArrayType {
 }
 
 impl ArrayType {
+    /// Creates a new `ArrayType` instance.
     pub fn new() -> Self {
         ArrayType
     }

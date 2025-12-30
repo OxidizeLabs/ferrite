@@ -284,6 +284,7 @@ impl TupleMeta {
         self.deleted
     }
 
+    /// Sets the deleted status for this tuple version.
     pub fn set_deleted(&mut self, deleted: bool) {
         self.deleted = deleted;
     }
@@ -448,11 +449,9 @@ impl<'de, C> bincode::BorrowDecode<'de, C> for Tuple {
 
 impl PartialEq for Tuple {
     fn eq(&self, other: &Self) -> bool {
-        // First compare RIDs for efficiency (avoid value comparisons if RIDs differ).
-        if self.rid != other.rid {
-            return false;
-        }
-
+        // Compare only values, not RIDs. RID is a location identifier (page_id + slot_num)
+        // that is not part of the tuple's logical identity. Two tuples with the same values
+        // are equal regardless of where they are stored.
         self.values == other.values
     }
 }
@@ -598,6 +597,7 @@ impl Tuple {
         Ok(())
     }
 
+    /// Returns a cloned vector of all values in the tuple.
     pub fn get_values(&self) -> Vec<Value> {
         self.values.clone()
     }
@@ -607,6 +607,7 @@ impl Tuple {
         &self.values
     }
 
+    /// Returns a mutable reference to the values vector for in-place modification.
     pub fn get_values_mut(&mut self) -> &mut Vec<Value> {
         &mut self.values
     }

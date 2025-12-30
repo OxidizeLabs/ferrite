@@ -13,6 +13,7 @@ impl Default for IntervalType {
 }
 
 impl IntervalType {
+    /// Creates a new `IntervalType` instance.
     pub fn new() -> Self {
         IntervalType
     }

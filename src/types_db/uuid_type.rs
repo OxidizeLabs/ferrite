@@ -13,6 +13,7 @@ impl Default for UUIDType {
 }
 
 impl UUIDType {
+    /// Creates a new `UUIDType` instance.
     pub fn new() -> Self {
         UUIDType
     }

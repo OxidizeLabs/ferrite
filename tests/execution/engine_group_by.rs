@@ -56,7 +56,7 @@ impl ResultWriter for TestResultWriter {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 // #[ignore]
 async fn test_group_by_column_names() {
     init_test_logger();
@@ -131,7 +131,7 @@ async fn test_group_by_column_names() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_aggregates() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -221,7 +221,7 @@ async fn test_group_by_aggregates() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_single_column() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -269,7 +269,7 @@ async fn test_group_by_single_column() {
     assert_eq!(schema.get_columns()[1].get_name(), "item_count");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_multiple_columns() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -322,7 +322,7 @@ async fn test_group_by_multiple_columns() {
     assert_eq!(schema.get_columns()[3].get_name(), "avg_budget");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_with_where_clause() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -375,7 +375,7 @@ async fn test_group_by_with_where_clause() {
     assert_eq!(schema.get_columns()[2].get_name(), "avg_price");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_with_having_clause() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -428,7 +428,7 @@ async fn test_group_by_with_having_clause() {
     assert_eq!(schema.get_columns()[2].get_name(), "avg_score");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_with_order_by() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -476,7 +476,7 @@ async fn test_group_by_with_order_by() {
     assert_eq!(schema.get_columns()[1].get_name(), "total_sales");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_with_null_values() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -528,7 +528,7 @@ async fn test_group_by_with_null_values() {
     assert_eq!(schema.get_columns()[2].get_name(), "non_null_values");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_all_aggregation_functions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -580,7 +580,7 @@ async fn test_group_by_all_aggregation_functions() {
     assert_eq!(schema.get_columns()[5].get_name(), "max_val");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_empty_table() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -690,7 +690,7 @@ async fn test_group_by_performance_large_dataset() {
     assert_eq!(schema.get_columns()[4].get_name(), "total_value");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_group_by_distinct_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

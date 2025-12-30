@@ -12,10 +12,12 @@ impl Default for BooleanType {
 }
 
 impl BooleanType {
+    /// Creates a new `BooleanType` instance.
     pub fn new() -> Self {
         BooleanType
     }
 
+    /// Returns the minimum value for the boolean type.
     pub fn get_min_value(type_id: TypeId) -> Value {
         if type_id != TypeId::Boolean {
             panic!("Invalid type for min value");
@@ -23,6 +25,7 @@ impl BooleanType {
         Value::from(false)
     }
 
+    /// Returns the maximum value for the boolean type.
     pub fn get_max_value(type_id: TypeId) -> Value {
         if type_id != TypeId::Boolean {
             panic!("Invalid type for max value");

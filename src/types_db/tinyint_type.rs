@@ -12,6 +12,7 @@ impl Default for TinyIntType {
 }
 
 impl TinyIntType {
+    /// Creates a new `TinyIntType` instance.
     pub fn new() -> Self {
         TinyIntType
     }

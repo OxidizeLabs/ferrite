@@ -3,7 +3,7 @@ use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_basic_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -46,7 +46,7 @@ async fn create_index_basic_operations() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_composite_indexes() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -86,7 +86,7 @@ async fn create_index_composite_indexes() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_unique_index() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -117,7 +117,7 @@ async fn create_unique_index() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_different_data_types() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -163,7 +163,7 @@ async fn create_index_different_data_types() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_naming_conventions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -194,7 +194,7 @@ async fn create_index_naming_conventions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_error_cases() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -287,7 +287,7 @@ async fn create_index_error_cases() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_on_populated_table() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -331,7 +331,7 @@ async fn create_index_on_populated_table() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_in_transaction() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -412,7 +412,7 @@ async fn create_index_in_transaction() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_if_not_exists() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -473,7 +473,7 @@ async fn create_index_if_not_exists() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_index_multiple_tables() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

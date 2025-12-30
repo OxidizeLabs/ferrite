@@ -170,175 +170,129 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, thread};
 
-/// \[LOCK_NOTE\]
+/// Lock modes for multi-granularity locking protocol.
 ///
-/// # General Behavior
-/// - Both `lock_table` and `lock_row` are blocking methods; they should wait until the lock is granted and then return.
-/// - If the transaction was aborted in the meantime, do not grant the lock and return `false`.
-///
-/// # Multiple Transactions
-/// - `LockManager` should maintain a queue for each resource; locks should be granted to transactions in a FIFO manner.
-/// - If there are multiple compatible lock requests, all should be granted at the same time as long as FIFO is honored.
-///
-/// # Supported Lock Modes
-/// - Table locking should support all lock modes.
-/// - Row locking should not support Intention locks. Attempting this should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `ATTEMPTED_INTENTION_LOCK_ON_ROW`.
-///
-/// # Isolation Level
-/// Depending on the isolation level, a transaction should attempt to take locks:
-/// - Only if required, AND
-/// - Only if allowed
-///
-/// For instance:
-/// - S/IS/SIX locks are not required under `READ_UNCOMMITTED`, and any such attempt should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `LOCK_SHARED_ON_READ_UNCOMMITTED`.
-/// - X/IX locks on rows are not allowed if the `TransactionState` is `SHRINKING`, and any such attempt should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `LOCK_ON_SHRINKING`.
-///
-/// ## Repeatable Read
-/// - The transaction is required to take all locks.
-/// - All locks are allowed in the `GROWING` state.
-/// - No locks are allowed in the `SHRINKING` state.
-///
-/// ## Read Committed
-/// - The transaction is required to take all locks.
-/// - All locks are allowed in the `GROWING` state.
-/// - Only IS and S locks are allowed in the `SHRINKING` state.
-///
-/// ## Read Uncommitted
-/// - The transaction is required to take only IX and X locks.
-/// - X and IX locks are allowed in the `GROWING` state.
-/// - S, IS, and SIX locks are never allowed.
-///
-/// ## Lock Compatibility Matrix
-///
-/// |     | IS  | IX  | S   | SIX | X   |
-/// |-----|-----|-----|-----|-----|-----|
-/// | IS  | Y   | Y   | Y   | Y   | N   |
-/// | IX  | Y   | Y   | N   | N   | N   |
-/// | S   | Y   | N   | Y   | N   | N   |
-/// | SIX | Y   | N   | N   | N   | N   |
-/// | X   | N   | N   | N   | N   | N   |
-///
-/// # Multilevel Locking
-/// While locking rows, `lock` should ensure that the transaction has an appropriate lock on the table which the row belongs to. For instance, if an exclusive lock is attempted on a row, the transaction must hold either X, IX, or SIX on the table. If such a lock does not exist on the table, `lock` should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `TABLE_LOCK_NOT_PRESENT`.
-///
-/// # Lock Upgrade
-/// Calling `lock` on a resource that is already locked should have the following behavior:
-/// - If the requested lock mode is the same as that of the lock presently held, `lock` should return `true` since it already has the lock.
-/// - If the requested lock mode is different, `lock` should upgrade the lock held by the transaction.
-///
-/// The lock upgrade should follow these general steps:
-/// 1. Check the precondition of the upgrade.
-/// 2. Drop the current lock, reserve the upgrade position.
-/// 3. Wait to get the new lock granted.
-///
-/// A lock request being upgraded should be prioritized over other waiting lock requests on the same resource.
-///
-/// Only the following transitions are allowed during an upgrade:
-/// - IS -> [S, X, IX, SIX]
-/// - S -> [X, SIX]
-/// - IX -> [X, SIX]
-/// - SIX -> \[X\]
-///
-/// Any other upgrade is considered incompatible, and such an attempt should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `INCOMPATIBLE_UPGRADE`.
-///
-/// Furthermore, only one transaction should be allowed to upgrade its lock on a given resource. Multiple concurrent lock upgrades on the same resource should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `UPGRADE_CONFLICT`.
-///
-/// # Bookkeeping
-/// If a lock is granted to a transaction, the lock manager should update its lock sets appropriately (check `transaction.rs`).
-///
-/// Consider which type of lock to directly apply on the table when implementing the executor later.
-/// \[UNLOCK_NOTE\]
-///
-/// # General Behavior
-/// - Both `unlock_table` and `unlock_row` should release the lock on the resource and return.
-/// - Both should ensure that the transaction currently holds a lock on the resource it is attempting to unlock. If not, `LockManager` should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `ATTEMPTED_UNLOCK_BUT_NO_LOCK_HELD`.
-///
-/// Additionally, unlocking a table should only be allowed if the transaction does not hold locks on any row on that table. If the transaction holds locks on rows of the table, `unlock` should set the `TransactionState` as `ABORTED` and throw a `TransactionAbortException` with `TABLE_UNLOCKED_BEFORE_UNLOCKING_ROWS`.
-///
-/// Finally, unlocking a resource should also grant any new lock requests for the resource (if possible).
-///
-/// # Transaction State Update
-/// `Unlock` should update the transaction state appropriately (depending upon the isolation level). Only unlocking S or X locks changes the transaction state.
-///
-/// ## Repeatable Read
-/// - Unlocking S/X locks should set the transaction state to `SHRINKING`.
-///
-/// ## Read Committed
-/// - Unlocking X locks should set the transaction state to `SHRINKING`.
-/// - Unlocking S locks does not affect the transaction state.
-///
-/// ## Read Uncommitted
-/// - Unlocking X locks should set the transaction state to `SHRINKING`.
-/// - S locks are not permitted under `READ_UNCOMMITTED`. The behavior upon unlocking an S lock under this isolation level is undefined.
-///
-/// # Bookkeeping
-/// After a resource is unlocked, the lock manager should update the transaction's lock sets appropriately (check `transaction.rs`).
-
+/// These modes define the type of access a transaction requests on a resource.
+/// See the module-level documentation for the compatibility matrix.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LockMode {
+    /// Read lock - compatible with other Shared locks.
     Shared,
+    /// Write lock - incompatible with all other lock modes.
     Exclusive,
+    /// Intent to acquire Shared lock on a descendant resource.
     IntentionShared,
+    /// Intent to acquire Exclusive lock on a descendant resource.
     IntentionExclusive,
+    /// Shared lock on this resource with intent for Exclusive on descendants.
     SharedIntentionExclusive,
 }
 
-/// Structure to hold a lock request.
-/// This could be a lock request on a table OR a row.
-/// For table lock requests, the `rid` attribute would be unused.
+/// A single lock request for a table or row resource.
+///
+/// For table lock requests, `rid` is `None`. For row lock requests,
+/// `rid` contains the specific row identifier.
 #[derive(Debug)]
 pub struct LockRequest {
+    /// Transaction ID of the requesting transaction.
     txn_id: TxnId,
+    /// The requested lock mode (S, X, IS, IX, SIX).
     lock_mode: LockMode,
+    /// Table OID this lock request is for.
     oid: TableOidT,
+    /// Row ID if this is a row lock, `None` for table locks.
     rid: Option<RID>,
+    /// Whether this lock request has been granted.
     granted: bool,
 }
 
-/// Structure to hold lock requests for the same resource (table or row).
+/// FIFO queue of lock requests for a single resource (table or row).
+///
+/// Manages lock granting, compatibility checking, and upgrade prioritization
+/// for all transactions requesting access to a specific resource.
 #[derive(Debug)]
 pub struct LockRequestQueue {
+    /// FIFO queue of pending and granted lock requests.
     request_queue: VecDeque<Arc<Mutex<LockRequest>>>,
+    /// Condition variable for blocking transactions waiting for locks.
     cv: Arc<Condvar>,
+    /// Transaction ID currently upgrading its lock, or `INVALID_TXN_ID` if none.
     upgrading: TxnId,
 }
 
+/// Tracks all locks held by a single transaction.
+///
+/// Used for efficient lock release during transaction commit/abort
+/// and for enforcing multi-level locking protocol constraints.
 #[derive(Clone, Debug)]
 struct TxnLockState {
+    /// Set of table OIDs this transaction holds locks on.
     table_locks: HashSet<TableOidT>,
+    /// Set of (table OID, row RID) pairs this transaction holds locks on.
     row_locks: HashSet<(TableOidT, RID)>,
 }
 
-// 1. Deadlock Detection Component
+/// Detects deadlocks using a waits-for graph with background cycle detection.
+///
+/// Maintains a directed graph where edges represent "transaction A waits for
+/// transaction B". A background thread periodically runs DFS to detect cycles.
+/// When a cycle is found, the transaction with the highest ID is selected
+/// for abortion.
 #[derive(Debug)]
 pub struct DeadlockDetector {
+    /// Waits-for graph: maps waiting transaction to transactions it's waiting for.
     waits_for: Arc<Mutex<HashMap<TxnId, Vec<TxnId>>>>,
+    /// Most recently detected deadlock victim (transaction to abort).
     latest_abort_txn: Arc<Mutex<Option<TxnId>>>,
+    /// Flag to enable/disable background detection thread.
     enable_detection: Arc<AtomicBool>,
+    /// Handle to the background detection thread.
     detection_thread: Option<thread::JoinHandle<()>>,
 }
 
-// 2. Lock State Manager - Handles all lock state tracking and management
+/// Manages all lock state: lock queues and per-transaction lock sets.
+///
+/// Provides thread-safe access to table and row lock queues, and tracks
+/// which locks each transaction holds for efficient release operations.
 #[derive(Debug)]
 pub struct LockStateManager {
+    /// Maps table OID to its lock request queue.
     table_lock_map: Mutex<HashMap<TableOidT, Arc<Mutex<LockRequestQueue>>>>,
+    /// Maps row RID to its lock request queue.
     row_locks: Mutex<HashMap<RID, Arc<Mutex<LockRequestQueue>>>>,
+    /// Maps transaction ID to its current lock holdings.
     txn_lock_sets: Mutex<HashMap<TxnId, TxnLockState>>,
 }
 
-// 3. Lock Validator
+/// Validates lock requests against isolation level and transaction state rules.
+///
+/// Ensures that lock requests comply with the strict 2PL protocol and
+/// isolation level constraints (e.g., READ UNCOMMITTED cannot acquire S locks).
 #[derive(Debug)]
 pub struct LockValidator {}
 
-// 4. Lock Compatibility Checker
+/// Implements the lock compatibility matrix.
+///
+/// Determines whether two lock modes can be held simultaneously by different
+/// transactions on the same resource.
 #[derive(Debug)]
 pub struct LockCompatibilityChecker;
 
-// Main LockManager that orchestrates the components
+/// Main lock manager that coordinates all locking operations.
+///
+/// Orchestrates deadlock detection, lock state management, and validation
+/// to provide strict two-phase locking with multi-level granularity.
+///
+/// # Thread Safety
+/// This struct is `Send` and `Sync`. All internal state is protected by
+/// `parking_lot::Mutex` and `Condvar`.
 #[derive(Debug)]
 pub struct LockManager {
+    /// Background deadlock detection using waits-for graph.
     deadlock_detector: DeadlockDetector,
+    /// Manages all lock queues and transaction lock sets.
     lock_state_manager: LockStateManager,
+    /// Validates requests against isolation level and state rules.
     lock_validator: LockValidator,
 }
 
@@ -541,6 +495,7 @@ impl Default for DeadlockDetector {
 }
 
 impl DeadlockDetector {
+    /// Creates a new deadlock detector (detection thread not started).
     pub fn new() -> Self {
         Self {
             waits_for: Arc::new(Mutex::new(HashMap::new())),
@@ -550,16 +505,22 @@ impl DeadlockDetector {
         }
     }
 
+    /// Adds an edge to the waits-for graph: t1 waits for t2.
     pub fn add_edge(&self, t1: TxnId, t2: TxnId) {
         let mut waits_for = self.waits_for.lock();
         waits_for.entry(t1).or_default().push(t2);
     }
 
+    /// Removes all outgoing edges from transaction t1.
     pub fn remove_edge(&self, t1: TxnId) {
         let mut waits_for = self.waits_for.lock();
         waits_for.remove(&t1);
     }
 
+    /// Starts the background deadlock detection thread.
+    ///
+    /// The thread runs DFS every 50ms to detect cycles. When a cycle is
+    /// found, the transaction with the highest ID is marked for abortion.
     pub fn start_detection(&mut self) {
         self.enable_detection.store(true, Ordering::SeqCst);
 
@@ -588,19 +549,25 @@ impl DeadlockDetector {
         }));
     }
 
+    /// Returns and clears the latest transaction selected for deadlock abortion.
     pub fn get_and_clear_abort_txn(&self) -> Option<TxnId> {
         let mut latest = self.latest_abort_txn.lock();
         latest.take()
     }
 
-    /// Checks if there is a cycle in the waits-for graph
-    /// Returns true if a cycle is found and sets abort_txn to the transaction to abort
+    /// Checks if there is a cycle in the waits-for graph.
+    ///
+    /// # Parameters
+    /// - `abort_txn`: Set to the transaction ID to abort if a cycle is found.
+    ///
+    /// # Returns
+    /// `true` if a deadlock cycle was detected, `false` otherwise.
     pub fn has_cycle(&self, abort_txn: &mut TxnId) -> bool {
         let waits_for = self.waits_for.lock();
         Self::find_cycle_in_graph(&waits_for, abort_txn)
     }
 
-    /// Helper function to find cycles in the waits-for graph using DFS
+    /// Finds cycles in the waits-for graph using depth-first search.
     fn find_cycle_in_graph(waits_for: &HashMap<TxnId, Vec<TxnId>>, abort_txn: &mut TxnId) -> bool {
         let mut visited = HashSet::new();
         let mut path = Vec::new();
@@ -667,6 +634,7 @@ impl Default for LockStateManager {
 }
 
 impl LockStateManager {
+    /// Creates a new lock state manager with empty lock maps.
     pub fn new() -> Self {
         Self {
             table_lock_map: Mutex::new(HashMap::new()),
@@ -675,7 +643,10 @@ impl LockStateManager {
         }
     }
 
-    /// Attempts to grant a table lock
+    /// Attempts to grant a table lock to a transaction.
+    ///
+    /// # Returns
+    /// `true` if the lock was granted, `false` if it must wait.
     pub fn grant_table_lock(&self, txn_id: TxnId, lock_mode: LockMode, oid: TableOidT) -> bool {
         let mut table_locks = self.table_lock_map.lock();
         let queue = table_locks
@@ -706,7 +677,10 @@ impl LockStateManager {
         granted
     }
 
-    /// Attempts to grant a row lock
+    /// Attempts to grant a row lock to a transaction.
+    ///
+    /// # Returns
+    /// `true` if the lock was granted, `false` if it must wait.
     pub fn grant_row_lock(&self, txn_id: TxnId, lock_mode: LockMode, rid: RID) -> bool {
         let mut row_locks = self.row_locks.lock();
         let queue = row_locks
@@ -893,6 +867,9 @@ impl LockStateManager {
 }
 
 impl LockCompatibilityChecker {
+    /// Checks if two lock modes are compatible (can be held simultaneously).
+    ///
+    /// See module-level documentation for the full compatibility matrix.
     pub fn are_compatible(l1: LockMode, l2: LockMode) -> bool {
         match (l1, l2) {
             // IS is compatible with IS, IX, S, SIX
@@ -938,10 +915,16 @@ impl Default for LockValidator {
 }
 
 impl LockValidator {
+    /// Creates a new lock validator.
     pub fn new() -> Self {
         Self {}
     }
 
+    /// Validates a lock request against isolation level and transaction state.
+    ///
+    /// # Returns
+    /// `Ok(())` if the request is valid, `Err(LockError)` with the specific
+    /// violation reason otherwise.
     pub fn validate_lock_request(
         &self,
         txn: &Transaction,
@@ -1029,6 +1012,7 @@ impl Default for LockManager {
 }
 
 impl LockManager {
+    /// Creates a new lock manager and starts deadlock detection.
     pub fn new() -> Self {
         let mut detector = DeadlockDetector::new();
         detector.start_detection();
@@ -1040,7 +1024,19 @@ impl LockManager {
         }
     }
 
-    /// Attempts to acquire a table lock.
+    /// Attempts to acquire a table lock (blocking).
+    ///
+    /// Validates the request against isolation level rules, checks compatibility
+    /// with existing locks, and updates the waits-for graph if blocking is needed.
+    ///
+    /// # Parameters
+    /// - `txn`: The requesting transaction.
+    /// - `lock_mode`: The requested lock mode.
+    /// - `oid`: The table OID to lock.
+    ///
+    /// # Returns
+    /// `Ok(true)` if lock was granted, `Ok(false)` if transaction was aborted
+    /// (e.g., deadlock victim), or `Err(LockError)` on validation failure.
     pub fn lock_table(
         &self,
         txn: Arc<Transaction>,
@@ -1096,6 +1092,15 @@ impl LockManager {
         Ok(granted)
     }
 
+    /// Releases a table lock held by a transaction.
+    ///
+    /// Fails if the transaction doesn't hold the lock or still holds row locks
+    /// on this table. Updates transaction state based on isolation level.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction releasing the lock.
+    /// - `lock_mode`: The lock mode being released.
+    /// - `oid`: The table OID to unlock.
     pub fn unlock_table(
         &self,
         txn: Arc<Transaction>,
@@ -1159,6 +1164,19 @@ impl LockManager {
         Ok(true)
     }
 
+    /// Attempts to acquire a row lock (blocking).
+    ///
+    /// Requires an appropriate table lock to already be held (IS/S/SIX for S,
+    /// IX/SIX/X for X). Intention locks are not allowed on rows.
+    ///
+    /// # Parameters
+    /// - `txn`: The requesting transaction.
+    /// - `lock_mode`: The requested lock mode (S or X only).
+    /// - `oid`: The table OID containing the row.
+    /// - `rid`: The row ID to lock.
+    ///
+    /// # Returns
+    /// `Ok(true)` if granted, `Ok(false)` if aborted, or `Err(LockError)`.
     pub fn lock_row(
         &self,
         txn: Arc<Transaction>,
@@ -1245,6 +1263,15 @@ impl LockManager {
         Ok(granted)
     }
 
+    /// Releases a row lock held by a transaction.
+    ///
+    /// Updates transaction state based on isolation level and lock mode.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction releasing the lock.
+    /// - `lock_mode`: The lock mode being released.
+    /// - `oid`: The table OID containing the row.
+    /// - `rid`: The row ID to unlock.
     pub fn unlock_row(
         &self,
         txn: Arc<Transaction>,
@@ -1300,6 +1327,7 @@ impl LockManager {
         Ok(true)
     }
 
+    /// Releases all locks from all transactions (for testing/reset).
     pub fn unlock_all(&self) -> Result<bool, LockError> {
         // 1. Get all lock sets
         let mut txn_locks = self.lock_state_manager.txn_lock_sets.lock();
@@ -1333,6 +1361,9 @@ impl LockManager {
         self.lock_state_manager.force_release_txn(txn_id)
     }
 
+    /// Checks if this transaction was selected as a deadlock victim.
+    ///
+    /// If so, sets the transaction state to Aborted and returns `Ok(true)`.
     pub fn check_deadlock(&self, txn: Arc<Transaction>) -> Result<bool, LockError> {
         if let Some(abort_txn) = self.deadlock_detector.get_and_clear_abort_txn()
             && abort_txn == txn.get_transaction_id()
@@ -1343,7 +1374,9 @@ impl LockManager {
         Ok(false)
     }
 
-    /// Returns a string representation of the current lock manager state
+    /// Returns a debug string showing current lock manager state.
+    ///
+    /// Useful for debugging lock contention and transaction states.
     pub fn debug_state(&self) -> String {
         let mut output = String::new();
 

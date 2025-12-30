@@ -194,27 +194,74 @@ use std::sync::{Arc, Mutex};
 /// Trait for writing query results in a tabular format.
 ///
 /// Implementations handle different output targets (CLI, network, etc.).
+/// All implementations must be thread-safe (`Send + Sync`).
 pub trait ResultWriter: Send + Sync {
+    /// Sets the column headers for the result set.
+    ///
+    /// Must be called before [`write_row`](Self::write_row) to establish
+    /// the schema for the result table.
     fn write_schema_header(&mut self, headers: Vec<String>);
+
+    /// Writes a row of values to the result set.
+    ///
+    /// Values are formatted using their default string representation.
     fn write_row(&mut self, values: Vec<Value>);
+
+    /// Writes a row of values with schema-aware formatting.
+    ///
+    /// Uses column type information from the schema to format values
+    /// appropriately (e.g., decimal precision, date formatting).
     fn write_row_with_schema(&mut self, values: Vec<Value>, schema: &Schema);
+
+    /// Writes an informational or status message.
+    ///
+    /// Messages are typically displayed after the result table
+    /// (e.g., "3 rows returned", "Table created").
     fn write_message(&mut self, message: &str);
 }
 
+/// Result writer that produces pretty-printed tables for terminal output.
+///
+/// Uses the `prettytable` crate to render box-drawing character tables
+/// with bold headers. The table is automatically printed when the writer
+/// is dropped.
+///
+/// # Thread Safety
+/// Uses `Arc<Mutex<>>` for interior mutability, making it safe to share
+/// across threads (though typically used single-threaded).
 #[derive(Default)]
 pub struct CliResultWriter {
+    /// The underlying prettytable being built (lazily initialized).
     table: Arc<Mutex<Option<Table>>>,
+    /// Column headers for the result set.
     headers: Arc<Mutex<Vec<String>>>,
 }
 
-// New result writer for network responses
+/// Result writer that collects results for network transmission.
+///
+/// Accumulates column names, rows, and messages into a structure that
+/// can be converted to [`QueryResults`] for serialization and transmission
+/// to database clients.
+///
+/// # Example
+/// ```rust,ignore
+/// let mut writer = NetworkResultWriter::new();
+/// writer.write_schema_header(vec!["id".to_string(), "name".to_string()]);
+/// writer.write_row(vec![Value::from(1), Value::from("Alice")]);
+/// let results = writer.into_results();
+/// // results can now be serialized and sent over the network
+/// ```
 pub struct NetworkResultWriter {
+    /// Column names for the result set header.
     column_names: Vec<String>,
+    /// Accumulated data rows.
     rows: Vec<Vec<Value>>,
+    /// Informational messages (e.g., "2 rows affected").
     messages: Vec<String>,
 }
 
 impl NetworkResultWriter {
+    /// Creates a new empty network result writer.
     pub(crate) fn new() -> Self {
         Self {
             column_names: Vec::new(),
@@ -223,6 +270,10 @@ impl NetworkResultWriter {
         }
     }
 
+    /// Consumes the writer and returns a [`QueryResults`] for serialization.
+    ///
+    /// This transfers ownership of the collected data into the result structure
+    /// for transmission to the client.
     pub(crate) fn into_results(self) -> QueryResults {
         QueryResults {
             column_names: self.column_names,
@@ -233,6 +284,10 @@ impl NetworkResultWriter {
 }
 
 impl CliResultWriter {
+    /// Creates a new CLI result writer.
+    ///
+    /// The writer starts with no table; it is lazily created when rows
+    /// are written.
     pub fn new() -> Self {
         Self {
             table: Arc::new(Mutex::new(None)),
@@ -240,6 +295,10 @@ impl CliResultWriter {
         }
     }
 
+    /// Ensures the internal table is initialized.
+    ///
+    /// Creates the prettytable with box-drawing format and sets headers
+    /// if they have been provided.
     fn ensure_table(&mut self) {
         if self.table.lock().unwrap().is_none() {
             let mut table = Table::new();
@@ -336,6 +395,10 @@ impl ResultWriter for NetworkResultWriter {
     }
 }
 
+/// Automatically prints the table when the writer goes out of scope.
+///
+/// This ensures that any accumulated rows are displayed even if
+/// `write_message` was not called.
 impl Drop for CliResultWriter {
     fn drop(&mut self) {
         // Print any remaining table

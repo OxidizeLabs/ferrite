@@ -18,6 +18,7 @@ pub struct CharType {
 }
 
 impl CharType {
+    /// Creates a new `CharType` instance with the specified fixed length.
     pub fn new(length: usize) -> Self {
         CharType { length }
     }

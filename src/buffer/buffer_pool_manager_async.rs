@@ -218,27 +218,47 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // Type aliases for complex types
+
+/// Type alias for the collection of page frames in the buffer pool.
+///
+/// Each frame may optionally contain a page (represented as a trait object).
 type PageCollection = Arc<RwLock<Vec<Option<Arc<RwLock<dyn PageTrait>>>>>>;
+
+/// Type alias for the page table mapping page IDs to their frame locations.
 type PageTable = Arc<RwLock<HashMap<PageId, FrameId>>>;
 
 /// The `BufferPoolManager` is responsible for managing the buffer pool,
 /// including fetching and unpinning pages, and handling page replacement.
-/// This version integrates with the new AsyncAsyncDiskManager for better performance
-/// and implements coordinated caching to avoid duplication.
+///
+/// This version integrates with the `AsyncDiskManager` for better performance
+/// and implements coordinated two-level caching to avoid duplication.
+///
+/// See the module-level documentation for architecture details.
 pub struct BufferPoolManager {
+    /// Maximum number of frames in the buffer pool.
     pool_size: usize,
+    /// Atomic counter for generating unique page IDs.
     next_page_id: AtomicU64,
+    /// Collection of page frames (L1 cache).
     pages: PageCollection,
+    /// Mapping from page IDs to frame IDs.
     page_table: PageTable,
+    /// LRU-K replacement policy for eviction decisions.
     replacer: Arc<RwLock<LRUKReplacer>>,
+    /// List of unoccupied frame IDs available for new pages.
     free_list: Arc<RwLock<Vec<FrameId>>>,
+    /// Async disk manager for I/O operations (L2 cache + storage).
     disk_manager: Arc<AsyncDiskManager>,
-    // Cache coordination settings
+    /// Whether to use the disk manager's read cache (L2).
     use_disk_manager_cache: bool,
+    /// Whether to bypass disk cache for pinned pages.
     bypass_disk_cache_for_pinned: bool,
 }
 
-// Implement Debug manually
+/// Manual Debug implementation that excludes the `pages` field.
+///
+/// The pages collection contains trait objects which don't implement Debug,
+/// so we skip it in the debug output.
 impl Debug for BufferPoolManager {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BufferPoolManager")
@@ -254,7 +274,18 @@ impl Debug for BufferPoolManager {
 }
 
 impl BufferPoolManager {
-    /// Creates a new `BufferPoolManager` with enhanced async disk manager integration.
+    /// Creates a new `BufferPoolManager` with the default cache configuration.
+    ///
+    /// This constructor enables disk manager caching and disables bypassing the disk cache
+    /// for pinned pages. For custom cache configuration, use [`new_with_cache_config`].
+    ///
+    /// # Parameters
+    /// - `pool_size`: Number of frames in the buffer pool
+    /// - `disk_manager`: Shared async disk manager for I/O operations
+    /// - `replacer`: LRU-K replacer for page eviction decisions
+    ///
+    /// # Returns
+    /// A new `BufferPoolManager` instance or an error string on failure.
     pub fn new(
         pool_size: usize,
         disk_manager: Arc<AsyncDiskManager>,
@@ -263,7 +294,20 @@ impl BufferPoolManager {
         Self::new_with_cache_config(pool_size, disk_manager, replacer, true, false)
     }
 
-    /// Creates a new `BufferPoolManager` with cache coordination configuration.
+    /// Creates a new `BufferPoolManager` with custom cache coordination configuration.
+    ///
+    /// This allows fine-grained control over how the buffer pool interacts with the
+    /// async disk manager's cache layer.
+    ///
+    /// # Parameters
+    /// - `pool_size`: Number of frames in the buffer pool
+    /// - `disk_manager`: Shared async disk manager for I/O operations
+    /// - `replacer`: LRU-K replacer for page eviction decisions
+    /// - `use_disk_manager_cache`: Whether to use the disk manager's read cache
+    /// - `bypass_disk_cache_for_pinned`: Whether to skip disk cache for pinned pages
+    ///
+    /// # Returns
+    /// A new `BufferPoolManager` instance or an error string on failure.
     pub fn new_with_cache_config(
         pool_size: usize,
         disk_manager: Arc<AsyncDiskManager>,
@@ -293,7 +337,29 @@ impl BufferPoolManager {
         })
     }
 
-    /// Creates a new buffer pool manager with enhanced disk manager configuration
+    /// Creates a new buffer pool manager with enhanced disk manager configuration.
+    ///
+    /// This is the recommended constructor for production use. It creates both the
+    /// async disk manager and LRU-K replacer internally with the provided configuration.
+    ///
+    /// # Parameters
+    /// - `pool_size`: Number of frames in the buffer pool
+    /// - `db_file_path`: Path to the database file
+    /// - `log_file_path`: Path to the write-ahead log file
+    /// - `config`: Configuration options for the async disk manager
+    ///
+    /// # Returns
+    /// A new `BufferPoolManager` instance or an error string on failure.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// let bpm = BufferPoolManager::new_with_config(
+    ///     100,
+    ///     "data.db".to_string(),
+    ///     "data.log".to_string(),
+    ///     DiskManagerConfig::default(),
+    /// ).await?;
+    /// ```
     pub async fn new_with_config(
         pool_size: usize,
         db_file_path: String,
@@ -317,16 +383,31 @@ impl BufferPoolManager {
         Self::new(pool_size, disk_manager, replacer)
     }
 
-    /// Returns the size of the buffer pool.
+    /// Returns the size of the buffer pool (number of frames).
+    ///
+    /// This is the maximum number of pages that can be held in memory simultaneously.
     pub fn get_pool_size(&self) -> usize {
         self.pool_size
     }
 
-    /// Returns the pages in the buffer pool.
+    /// Returns a clone of the page collection.
+    ///
+    /// The returned collection contains all frames in the buffer pool, where each
+    /// frame may or may not contain a page. Use this for inspection or debugging.
+    ///
+    /// # Note
+    /// This returns an `Arc`-wrapped collection, so modifications are shared.
     pub fn get_pages(&self) -> PageCollection {
         self.pages.clone()
     }
 
+    /// Returns a clone of the page table mapping page IDs to frame IDs.
+    ///
+    /// The page table tracks which pages are currently in the buffer pool and
+    /// their corresponding frame locations.
+    ///
+    /// # Note
+    /// This returns an `Arc`-wrapped map, so modifications are shared.
     pub fn get_page_table(&self) -> Arc<RwLock<HashMap<PageId, FrameId>>> {
         self.page_table.clone()
     }
@@ -780,6 +861,23 @@ impl BufferPoolManager {
         trace!("Finished flushing all pages");
     }
 
+    /// Flushes all pages **and** forces the disk manager to flush buffered writes.
+    ///
+    /// The buffer pool flush methods (`flush_page*` / `flush_all_pages*`) write pages via the
+    /// async disk manager, which may internally buffer/coalesce writes for performance.
+    ///
+    /// For short-lived processes (examples, tools) and for “evidence” demos where we want
+    /// the on-disk files to reflect the latest state *immediately*, this method provides a
+    /// stronger guarantee by explicitly calling `AsyncDiskManager::flush()`.
+    pub async fn flush_all_pages_durable(&self) -> Result<(), String> {
+        self.flush_all_pages_async().await;
+        self.disk_manager
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush disk manager: {e}"))?;
+        Ok(())
+    }
+
     /// Allocates a new page ID.
     ///
     /// # Returns
@@ -846,18 +944,30 @@ impl BufferPoolManager {
         Ok(())
     }
 
-    /// Returns the size of the free list.
+    /// Returns the number of frames currently available in the free list.
+    ///
+    /// A higher number indicates more available capacity for new pages without
+    /// requiring eviction.
     pub fn get_free_list_size(&self) -> usize {
         self.free_list.read().len()
     }
 
-    /// Returns a read guard to the replacer.
+    /// Returns a read guard to the LRU-K replacer.
+    ///
+    /// This allows inspection of the replacer's internal state for debugging
+    /// or monitoring purposes.
+    ///
+    /// # Returns
+    /// A read guard wrapped in `Option` (always `Some` in current implementation).
     pub fn get_replacer(&self) -> Option<RwLockReadGuard<'_, LRUKReplacer>> {
         Some(self.replacer.read())
     }
 
-    // Private helper methods
+    // =========================================================================
+    // Private Helper Methods
+    // =========================================================================
 
+    /// Looks up the frame ID for a given page ID in the page table.
     fn get_frame_id(&self, page_id: PageId) -> Result<FrameId, DeletePageError> {
         let page_table = self.page_table.read();
         page_table
@@ -866,11 +976,13 @@ impl BufferPoolManager {
             .ok_or(DeletePageError::PageNotFound(page_id))
     }
 
+    /// Removes a page entry from the page table.
     fn remove_page_from_table(&self, page_id: PageId) {
         let mut page_table = self.page_table.write();
         page_table.remove(&page_id);
     }
 
+    /// Resets a frame by clearing its page content.
     fn reset_frame(&self, frame_id: FrameId) -> Result<(), DeletePageError> {
         let mut pages = self.pages.write();
         if let Some(page_slot) = pages.get_mut(frame_id as usize) {
@@ -881,6 +993,7 @@ impl BufferPoolManager {
         }
     }
 
+    /// Evicts the page in the specified frame if it exists and is unpinned.
     fn evict_page_if_necessary(&self, frame_id: FrameId) {
         let pages = self.pages.read();
         if let Some(Some(page)) = pages.get(frame_id as usize) {
@@ -902,6 +1015,7 @@ impl BufferPoolManager {
         }
     }
 
+    /// Evicts a page from the specified frame, flushing to disk if dirty.
     fn evict_old_page(&self, frame_id: FrameId, old_page_id: PageId) {
         // Check if page is dirty and flush if necessary
         let page_to_flush = {
@@ -941,6 +1055,10 @@ impl BufferPoolManager {
         );
     }
 
+    /// Gets an available frame, either from the free list or by evicting a page.
+    ///
+    /// This method first checks the free list for unused frames. If none are
+    /// available, it uses the LRU-K replacer to select a victim for eviction.
     fn get_available_frame(&self) -> Option<FrameId> {
         // Try to get a frame from the free list first
         {
@@ -1004,10 +1122,14 @@ impl BufferPoolManager {
         None
     }
 
+    /// Allocates and returns the next available page ID atomically.
     fn allocate_page_id(&self) -> PageId {
         self.next_page_id.fetch_add(1, Ordering::SeqCst)
     }
 
+    /// Creates a new typed page with default initialization.
+    ///
+    /// Sets initial pin count to 1, marks as clean, and writes the page type byte.
     fn create_typed_page<T: Page>(&self, page_id: PageId) -> Arc<RwLock<T>> {
         let mut page = T::new(page_id);
 
@@ -1029,6 +1151,9 @@ impl BufferPoolManager {
         Arc::new(RwLock::new(page))
     }
 
+    /// Creates a new typed page using a custom constructor function.
+    ///
+    /// Sets initial pin count to 1, marks as clean, and writes the page type byte.
     fn create_typed_page_with_constructor<T: Page, F>(
         &self,
         page_id: PageId,
@@ -1057,6 +1182,10 @@ impl BufferPoolManager {
         Arc::new(RwLock::new(page))
     }
 
+    /// Updates internal metadata after placing a page in a frame.
+    ///
+    /// This updates the pages array, page table, and replacer state to reflect
+    /// the new page-to-frame mapping.
     fn update_page_metadata<P: PageTrait + 'static>(
         &self,
         frame_id: FrameId,
@@ -1090,9 +1219,20 @@ impl BufferPoolManager {
         );
     }
 
-    /// Writes a page to disk with proper cache coordination
+    /// Writes a page to disk asynchronously with proper cache coordination.
     ///
-    /// PERFORMANCE OPTIMIZATION: Now truly async - no more blocking on async operations!
+    /// This is the recommended method for persisting page data. It uses native async
+    /// I/O for optimal performance and marks the page as clean after successful write.
+    ///
+    /// # Parameters
+    /// - `page_id`: The ID of the page to write
+    /// - `page`: Reference to the page trait object
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or an error message describing the failure.
+    ///
+    /// # Performance
+    /// This method is truly async and does not block on I/O operations.
     pub async fn write_page_to_disk_async(
         &self,
         page_id: PageId,
@@ -1168,6 +1308,9 @@ impl BufferPoolManager {
         Ok(())
     }
 
+    /// Retrieves a page from the buffer pool without type checking or guard creation.
+    ///
+    /// This is an internal helper that returns the raw page trait object if present.
     fn get_page_internal(&self, page_id: PageId) -> Option<Arc<RwLock<dyn PageTrait>>> {
         let page_table = self.page_table.read();
         let frame_id = page_table.get(&page_id)?;
@@ -1176,7 +1319,18 @@ impl BufferPoolManager {
         pages[*frame_id as usize].clone()
     }
 
-    /// Enhanced batch page loading for better performance
+    /// Loads multiple pages in batch for improved I/O performance.
+    ///
+    /// This method optimizes disk access by batching read operations. Pages already
+    /// in memory are returned immediately, while missing pages are loaded from disk
+    /// in a single batch operation.
+    ///
+    /// # Parameters
+    /// - `page_ids`: Vector of page IDs to load
+    ///
+    /// # Returns
+    /// A vector of optional page guards, maintaining the same order as input.
+    /// `None` entries indicate pages that could not be loaded.
     pub async fn load_pages_batch<T: Page + 'static>(
         self: &Arc<Self>,
         page_ids: Vec<PageId>,
@@ -1284,7 +1438,16 @@ impl BufferPoolManager {
         Some(PageGuard::new(typed_page, page_id, Some(unpinner)))
     }
 
-    /// Enhanced batch flush using async disk manager
+    /// Flushes multiple dirty pages to disk in a single batch operation.
+    ///
+    /// This method collects dirty pages and writes them using the async disk manager's
+    /// batch write capability for improved I/O efficiency.
+    ///
+    /// # Parameters
+    /// - `max_pages`: Maximum number of dirty pages to flush in this batch
+    ///
+    /// # Returns
+    /// The number of pages successfully flushed, or an error message.
     pub async fn flush_dirty_pages_batch_async(&self, max_pages: usize) -> Result<usize, String> {
         trace!(
             "Starting async batch flush of up to {} dirty pages",
@@ -1502,14 +1665,20 @@ impl BufferPoolManager {
         futures::executor::block_on(self.get_health_status_async())
     }
 
-    /// Gets disk manager metrics
+    /// Gets performance metrics from the async disk manager.
+    ///
+    /// Returns a snapshot of I/O statistics including read/write latencies,
+    /// throughput, and operation counts.
     pub fn get_disk_metrics(
         &self,
     ) -> crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot {
         self.disk_manager.get_metrics()
     }
 
-    /// Forces a full sync to disk
+    /// Forces a full sync of all pending writes to disk.
+    ///
+    /// This ensures that all data in the disk manager's write buffer is
+    /// durably persisted to storage. Use before shutdown or at checkpoints.
     pub async fn sync_to_disk(&self) -> Result<(), String> {
         self.disk_manager
             .sync()
@@ -1528,12 +1697,21 @@ impl BufferPoolManager {
         futures::executor::block_on(self.flush_dirty_pages_batch_async(max_pages))
     }
 
-    /// Gets the async disk manager for direct access
+    /// Returns a reference to the underlying async disk manager.
+    ///
+    /// This allows direct access to the disk manager for advanced operations
+    /// such as custom I/O patterns or metrics collection.
     pub fn get_disk_manager(&self) -> Arc<AsyncDiskManager> {
         Arc::clone(&self.disk_manager)
     }
 
-    /// Performs a health check on the buffer pool (async)
+    /// Performs an asynchronous health check on the buffer pool.
+    ///
+    /// This checks both the buffer pool's internal state and the disk manager's
+    /// health status.
+    ///
+    /// # Returns
+    /// `true` if the system is healthy, `false` otherwise.
     pub async fn health_check_async(&self) -> bool {
         self.get_health_status_async().await.overall_healthy
     }
@@ -1618,7 +1796,14 @@ impl BufferPoolManager {
         }
     }
 
-    /// Gracefully shuts down with proper async disk manager cleanup
+    /// Gracefully shuts down the buffer pool manager.
+    ///
+    /// This method ensures all dirty pages are flushed, syncs to disk, and
+    /// properly shuts down the async disk manager. Always call this before
+    /// dropping the buffer pool manager in production.
+    ///
+    /// # Returns
+    /// `Ok(())` on successful shutdown, or an error message describing the failure.
     pub async fn shutdown(&mut self) -> Result<(), String> {
         info!("Shutting down BufferPoolManager");
 
@@ -1642,33 +1827,60 @@ impl BufferPoolManager {
     }
 }
 
-/// Health status information for the buffer pool
+/// Health status information for the buffer pool and disk manager.
+///
+/// This struct provides a comprehensive snapshot of the buffer pool's operational
+/// state, including cache efficiency and I/O performance metrics.
 #[derive(Debug, Clone)]
 pub struct BufferPoolHealthStatus {
+    /// Whether the overall system (buffer pool + disk manager) is healthy.
     pub overall_healthy: bool,
+    /// Whether the async disk manager is functioning correctly.
     pub disk_manager_healthy: bool,
+    /// Whether the buffer pool's internal state is consistent.
     pub buffer_pool_healthy: bool,
+    /// Percentage of buffer pool frames currently in use (0-100).
     pub pool_utilization: f64,
+    /// Ratio of cache hits to total cache accesses (0.0-1.0).
     pub cache_hit_ratio: f64,
+    /// Total number of cache hits since startup.
     pub cache_hits: u64,
+    /// Total number of cache misses since startup.
     pub cache_misses: u64,
+    /// Average read latency in nanoseconds.
     pub avg_read_latency_ns: u64,
+    /// Average write latency in nanoseconds.
     pub avg_write_latency_ns: u64,
+    /// Current I/O throughput in megabytes per second.
     pub io_throughput_mb_per_sec: f64,
 }
 
-/// Cache coordination statistics
+/// Statistics for cache coordination between BPM (L1) and AsyncDiskManager (L2).
+///
+/// This struct provides insight into how effectively the two-level cache
+/// architecture is performing.
 #[derive(Debug, Clone)]
 pub struct CacheCoordinationStats {
+    /// Whether the disk manager's cache layer is enabled.
     pub use_disk_manager_cache: bool,
+    /// Whether pinned pages bypass the disk cache.
     pub bypass_disk_cache_for_pinned: bool,
+    /// Percentage of buffer pool frames currently in use (0-100).
     pub bpm_pool_utilization: f64,
+    /// Total disk cache hits (L2 layer).
     pub disk_cache_hits: u64,
+    /// Total disk cache misses (L2 layer).
     pub disk_cache_misses: u64,
+    /// Disk cache hit ratio (0.0-1.0).
     pub disk_cache_hit_ratio: f64,
+    /// Combined efficiency of both cache layers (0-100).
     pub total_cache_efficiency: f64,
 }
 
+/// Manual Clone implementation that creates a shallow copy with shared state.
+///
+/// All `Arc`-wrapped fields share state with the original. The `next_page_id`
+/// counter is copied as a new atomic with the current value.
 impl Clone for BufferPoolManager {
     fn clone(&self) -> Self {
         Self {
@@ -1685,9 +1897,15 @@ impl Clone for BufferPoolManager {
     }
 }
 
+/// Implementation of `PageUnpinner` trait for automatic page unpinning via `PageGuard`.
+///
+/// This allows `PageGuard` to call back into the BPM when the guard is dropped,
+/// ensuring proper pin count management and replacer updates.
 impl PageUnpinner for BufferPoolManager {
+    /// Unpins a page when its guard is dropped.
+    ///
+    /// Delegates to the BPM's internal unpin logic with `AccessType::Unknown`.
     fn unpin_page(&self, page_id: PageId, is_dirty: bool) -> bool {
-        // Delegate to the BPM's unpin logic so the replacer gets updated.
         self.unpin_page(page_id, is_dirty, AccessType::Unknown)
     }
 }
@@ -1699,12 +1917,21 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    /// Test context for async buffer pool manager tests.
+    ///
+    /// Creates an isolated test environment with a temporary directory and
+    /// pre-configured buffer pool manager.
     struct AsyncTestContext {
+        /// The buffer pool manager under test.
         bpm: Arc<BufferPoolManager>,
+        /// Temporary directory (dropped after test).
         _temp_dir: TempDir,
     }
 
     impl AsyncTestContext {
+        /// Creates a new test context with the given name.
+        ///
+        /// The name is used to create unique database and log file names.
         pub async fn new(name: &str) -> Self {
             const BUFFER_POOL_SIZE: usize = 5;
 
@@ -1738,6 +1965,7 @@ mod tests {
             }
         }
 
+        /// Returns a clone of the buffer pool manager for use in tests.
         pub fn bpm(&self) -> Arc<BufferPoolManager> {
             self.bpm.clone()
         }

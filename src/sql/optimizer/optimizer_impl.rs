@@ -176,16 +176,72 @@ use std::sync::Arc;
 // Additional imports for constraint index creation
 use crate::storage::index::IndexType;
 
+/// Rule-based query optimizer that transforms logical plans into more efficient forms.
+///
+/// The optimizer applies a sequence of optimization phases to reduce query execution
+/// cost before physical plan generation. Each phase targets specific optimization
+/// opportunities.
+///
+/// # Optimization Phases
+///
+/// | Phase | Name | Description |
+/// |-------|------|-------------|
+/// | 0 | Constraint Indexes | Auto-create indexes for PK/UNIQUE/FK |
+/// | 1 | Index Scan + Pruning | Replace table scans; remove no-op nodes |
+/// | 2 | Rewrite Rules | Predicate pushdown, projection merging |
+/// | 3 | Join Optimization | Convert NLJ to HashJoin (if enabled) |
+/// | 4 | Sort+Limit → TopN | Use heap-based TopN (if enabled) |
+///
+/// # Thread Safety
+///
+/// Uses `Arc<RwLock<Catalog>>` for safe concurrent catalog access.
+/// Read lock for lookups, write lock for index creation.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let optimizer = Optimizer::new(catalog.clone());
+/// let check_options = Arc::new(CheckOptions::default());
+/// let optimized_plan = optimizer.optimize(logical_plan, check_options)?;
+/// ```
 pub struct Optimizer {
+    /// Shared catalog for schema lookups and index creation.
     catalog: Arc<RwLock<Catalog>>,
 }
 
 impl Optimizer {
+    /// Creates a new optimizer with access to the given catalog.
+    ///
+    /// # Arguments
+    ///
+    /// * `catalog` - Shared catalog for schema and index information
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
         Self { catalog }
     }
 
-    /// Main entry point for optimization
+    /// Main entry point for query optimization.
+    ///
+    /// Applies all enabled optimization phases to the logical plan, then
+    /// validates the result before returning.
+    ///
+    /// # Arguments
+    ///
+    /// * `logical_plan` - The unoptimized logical plan from the planner
+    /// * `check_options` - Flags controlling which optimizations to apply
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Box<LogicalPlan>)` - The optimized logical plan
+    /// * `Err(DBError)` - If optimization or validation fails
+    ///
+    /// # Phases Applied
+    ///
+    /// 1. **Constraint Indexes** (always): Create indexes for constraints
+    /// 2. **Index Scan** (always): Convert table scans to index scans
+    /// 3. **Early Pruning** (always): Remove empty projections, true filters
+    /// 4. **Rewrite Rules** (always): Predicate pushdown, projection merge
+    /// 5. **Join Optimization** (if `EnableNljCheck`): NLJ → HashJoin
+    /// 6. **TopN Optimization** (if `EnableTopnCheck`): Sort+Limit → TopN
     pub fn optimize(
         &self,
         logical_plan: Box<LogicalPlan>,
@@ -242,13 +298,29 @@ impl Optimizer {
         Ok(plan)
     }
 
-    /// Phase 0: Constraint index creation (PERFORMANCE OPTIMIZATION)
+    /// Phase 0: Automatically creates indexes for constraint validation.
     ///
-    /// Automatically creates indexes for constraint validation to replace O(n) table scans
-    /// with O(log n) index lookups. Creates indexes for:
-    /// - PRIMARY KEY constraints (composite or single column)
-    /// - UNIQUE constraints (individual columns)
-    /// - FOREIGN KEY constraints (referencing columns)
+    /// Replaces O(n) table scans with O(log n) B+ tree index lookups for
+    /// constraint checking during INSERT/UPDATE operations.
+    ///
+    /// # Indexes Created
+    ///
+    /// | Constraint Type | Index Name Format | Unique? |
+    /// |-----------------|-------------------|---------|
+    /// | PRIMARY KEY | `{table}_pk_idx` | Yes |
+    /// | UNIQUE | `{table}_{col}_unique_idx` | Yes |
+    /// | FOREIGN KEY | `{table}_{col}_fk_idx` | No |
+    /// | Referenced Column | `{table}_{col}_ref_idx` | No |
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan to analyze for constraint opportunities
+    ///
+    /// # Behavior
+    ///
+    /// - For `CreateTable`: Creates indexes for all constraints in the schema
+    /// - For `TableScan`: Creates missing constraint indexes for existing tables
+    /// - Recursively processes child nodes
     fn create_constraint_indexes(&self, plan: &mut Box<LogicalPlan>) -> Result<(), DBError> {
         trace!("Analyzing plan for constraint index creation opportunities");
 
@@ -287,7 +359,15 @@ impl Optimizer {
         Ok(())
     }
 
-    /// Creates constraint indexes for a specific table
+    /// Creates all constraint indexes for a specific table.
+    ///
+    /// Iterates through the schema to find constraints and creates appropriate
+    /// B+ tree indexes. Logs success/failure for each index creation.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table to create indexes for
+    /// * `schema` - Table schema containing column definitions and constraints
     fn create_table_constraint_indexes(
         &self,
         table_name: &str,
@@ -418,7 +498,19 @@ impl Optimizer {
         Ok(())
     }
 
-    /// Checks if a table needs constraint indexes (i.e., they don't already exist)
+    /// Determines if a table is missing any constraint indexes.
+    ///
+    /// Checks for the existence of PRIMARY KEY, UNIQUE, and FOREIGN KEY
+    /// indexes using the standard naming convention.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_name` - Name of the table to check
+    /// * `schema` - Table schema with constraint definitions
+    ///
+    /// # Returns
+    ///
+    /// `true` if any expected constraint index is missing.
     fn needs_constraint_indexes(&self, table_name: &str, schema: &Schema) -> bool {
         let catalog = self.catalog.read();
         let existing_indexes = catalog.get_table_indexes(table_name);
@@ -471,7 +563,22 @@ impl Optimizer {
         false
     }
 
-    /// Ensures that referenced columns in foreign key relationships have indexes
+    /// Creates an index on a referenced column for foreign key validation.
+    ///
+    /// When a FOREIGN KEY references another table's column, this method
+    /// ensures the referenced column has an index for efficient lookup
+    /// during constraint validation.
+    ///
+    /// # Arguments
+    ///
+    /// * `catalog` - Write-locked catalog for index creation
+    /// * `referenced_table` - Name of the table being referenced
+    /// * `referenced_column` - Name of the column being referenced
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Index created or already exists
+    /// * `Err` - Referenced table doesn't exist
     fn ensure_referenced_column_index(
         &self,
         catalog: &mut parking_lot::RwLockWriteGuard<Catalog>,
@@ -530,7 +637,19 @@ impl Optimizer {
         Ok(())
     }
 
-    /// Phase 1: Index scan optimization
+    /// Phase 1: Converts table scans to index scans where beneficial.
+    ///
+    /// Examines each `TableScan` node and checks if an index exists on the
+    /// first projected column. If so, converts to an `IndexScan` for more
+    /// efficient data access.
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan to optimize
+    ///
+    /// # Returns
+    ///
+    /// The plan with table scans converted to index scans where applicable.
     fn apply_index_scan_optimization(
         &self,
         plan: Box<LogicalPlan>,
@@ -604,6 +723,7 @@ impl Optimizer {
         }
     }
 
+    /// Recursively applies index scan optimization to child nodes.
     fn apply_index_scan_to_children(
         &self,
         mut plan: Box<LogicalPlan>,
@@ -617,7 +737,19 @@ impl Optimizer {
         Ok(plan)
     }
 
-    /// Phase 1: Early pruning and simplification
+    /// Phase 1: Removes unnecessary nodes from the plan tree.
+    ///
+    /// Applies the following simplifications:
+    /// - **Empty Projection**: Removes projections with no expressions
+    /// - **True Filter**: Removes filters with constant `true` predicates
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan to simplify
+    ///
+    /// # Returns
+    ///
+    /// The simplified plan with unnecessary nodes removed.
     fn apply_early_pruning(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
         trace!("Applying early pruning to plan node: {:?}", plan.plan_type);
 
@@ -654,7 +786,19 @@ impl Optimizer {
         }
     }
 
-    /// Phase 2: Apply rewrite rules
+    /// Phase 2: Applies algebraic rewrite rules to optimize the plan.
+    ///
+    /// Implements the following transformations:
+    /// - **Predicate Pushdown**: Moves filter predicates closer to data sources
+    /// - **Projection Merging**: Combines consecutive projection nodes
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan to rewrite
+    ///
+    /// # Returns
+    ///
+    /// The rewritten plan with optimizations applied.
     fn apply_rewrite_rules(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
         match &plan.plan_type {
             LogicalPlanType::Filter {
@@ -691,7 +835,23 @@ impl Optimizer {
         }
     }
 
-    /// Phase 3: Join optimization
+    /// Phase 3: Optimizes join operations for better performance.
+    ///
+    /// Converts nested loop joins to hash joins when beneficial:
+    /// - Equi-joins with equality predicates
+    /// - Large input relations that justify hash table overhead
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan containing join nodes
+    ///
+    /// # Returns
+    ///
+    /// The plan with optimized join operators.
+    ///
+    /// # Note
+    ///
+    /// Only applied when `CheckOption::EnableNljCheck` is set.
     fn optimize_joins(&self, mut plan: Box<LogicalPlan>) -> Result<Box<LogicalPlan>, DBError> {
         match &plan.plan_type {
             LogicalPlanType::NestedLoopJoin {
@@ -729,7 +889,29 @@ impl Optimizer {
         }
     }
 
-    /// Phase 4: Sort and limit optimization
+    /// Phase 4: Optimizes Sort + Limit patterns into TopN operators.
+    ///
+    /// Replaces a full sort followed by a limit with a heap-based TopN:
+    ///
+    /// ```text
+    /// Before: Limit(10) → Sort(score DESC) → Scan
+    /// After:  TopN(k=10, score DESC) → Scan
+    ///
+    /// Complexity: O(n log n) → O(n log k)
+    /// Memory:     O(n)       → O(k)
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The logical plan to optimize
+    ///
+    /// # Returns
+    ///
+    /// The plan with Sort+Limit converted to TopN where applicable.
+    ///
+    /// # Note
+    ///
+    /// Only applied when `CheckOption::EnableTopnCheck` is set.
     fn optimize_sort_and_limit(
         &self,
         mut plan: Box<LogicalPlan>,
@@ -759,6 +941,7 @@ impl Optimizer {
         }
     }
 
+    /// Recursively applies early pruning to child nodes.
     fn apply_early_pruning_to_children(
         &self,
         mut plan: Box<LogicalPlan>,
@@ -771,6 +954,7 @@ impl Optimizer {
         Ok(plan)
     }
 
+    /// Recursively applies rewrite rules to child nodes.
     fn apply_rewrite_rules_to_children(
         &self,
         mut plan: Box<LogicalPlan>,
@@ -783,6 +967,7 @@ impl Optimizer {
         Ok(plan)
     }
 
+    /// Recursively applies join optimization to child nodes.
     fn optimize_joins_children(
         &self,
         mut plan: Box<LogicalPlan>,
@@ -795,6 +980,7 @@ impl Optimizer {
         Ok(plan)
     }
 
+    /// Recursively applies sort/limit optimization to child nodes.
     fn optimize_sort_and_limit_children(
         &self,
         mut plan: Box<LogicalPlan>,
@@ -807,7 +993,20 @@ impl Optimizer {
         Ok(plan)
     }
 
-    // Helper methods for specific optimizations
+    /// Pushes a filter predicate as close to the data source as possible.
+    ///
+    /// Implements predicate pushdown by recursively moving the filter down
+    /// through the plan tree. When encountering another filter, combines
+    /// predicates using AND.
+    ///
+    /// # Arguments
+    ///
+    /// * `predicate` - The filter predicate to push down
+    /// * `child` - The child plan to push the predicate into
+    ///
+    /// # Returns
+    ///
+    /// A new plan with the predicate pushed as close to the source as possible.
     fn push_down_predicate(
         &self,
         predicate: Arc<Expression>,
@@ -869,6 +1068,25 @@ impl Optimizer {
         }
     }
 
+    /// Attempts to merge consecutive projection nodes.
+    ///
+    /// When two projections are stacked, this method tries to combine them
+    /// into a single projection by rewriting the outer expressions in terms
+    /// of the inner ones.
+    ///
+    /// # Arguments
+    ///
+    /// * `expressions` - Expressions from the outer projection
+    /// * `child` - The child plan (potentially another projection)
+    ///
+    /// # Returns
+    ///
+    /// A merged projection or the original structure if merging isn't beneficial.
+    ///
+    /// # Note
+    ///
+    /// Full projection merging logic is TODO - currently returns the child as-is
+    /// if it's a projection.
     fn merge_projections(
         &self,
         expressions: Vec<Arc<Expression>>,
@@ -915,6 +1133,24 @@ impl Optimizer {
         }
     }
 
+    /// Determines whether to convert a nested loop join to a hash join.
+    ///
+    /// Evaluates the join predicate to decide if hash join would be more
+    /// efficient than nested loop join.
+    ///
+    /// # Factors Considered
+    ///
+    /// - Is the join predicate an equality comparison?
+    /// - Are input relations large enough to justify hash table overhead?
+    /// - Are statistics available about input cardinalities?
+    ///
+    /// # Returns
+    ///
+    /// `true` if hash join should be used, `false` to keep nested loop join.
+    ///
+    /// # Note
+    ///
+    /// Currently always returns `false` - full implementation is TODO.
     fn should_use_hash_join(&self, _predicate: &Expression) -> bool {
         // TODO: Implement logic to determine if hash join would be beneficial
         // Consider factors like:
@@ -924,7 +1160,25 @@ impl Optimizer {
         false
     }
 
-    /// Validation
+    /// Validates the optimized plan for correctness.
+    ///
+    /// Performs post-optimization validation to ensure the plan is executable:
+    ///
+    /// | Node Type | Validation |
+    /// |-----------|------------|
+    /// | `TableScan` | Table exists in catalog |
+    /// | `NestedLoopJoin` | Has predicate (if NLJ check enabled) |
+    /// | `TopN` | k > 0 and has sort specifications |
+    ///
+    /// # Arguments
+    ///
+    /// * `plan` - The optimized plan to validate
+    /// * `check_options` - Flags controlling which validations to apply
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Plan is valid
+    /// * `Err(DBError)` - Validation failed
     fn validate_plan(
         &self,
         plan: &LogicalPlan,

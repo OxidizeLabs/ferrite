@@ -3,7 +3,8 @@ use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_count_aggregation() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -63,7 +64,8 @@ async fn test_count_aggregation() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_sum_aggregation() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -113,7 +115,8 @@ async fn test_sum_aggregation() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_avg_aggregation() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -163,7 +166,8 @@ async fn test_avg_aggregation() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_min_max_aggregation() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -223,7 +227,8 @@ async fn test_min_max_aggregation() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_aggregation_with_group_by() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -293,7 +298,8 @@ async fn test_aggregation_with_group_by() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_aggregation_with_null_values() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -363,7 +369,8 @@ async fn test_aggregation_with_null_values() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_aggregation_on_empty_table() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -409,7 +416,8 @@ async fn test_aggregation_on_empty_table() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+
 async fn test_complex_aggregation_scenarios() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -469,7 +477,7 @@ async fn test_complex_aggregation_scenarios() {
     .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_aggregation_performance() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -516,7 +524,7 @@ async fn test_aggregation_performance() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aggregations_and_group_by() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

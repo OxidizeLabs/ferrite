@@ -11,6 +11,7 @@ impl Default for BigIntType {
 }
 
 impl BigIntType {
+    /// Creates a new `BigIntType` instance.
     pub fn new() -> Self {
         BigIntType
     }

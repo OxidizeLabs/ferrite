@@ -14,6 +14,7 @@ impl Default for VarCharType {
 }
 
 impl VarCharType {
+    /// Creates a new `VarCharType` instance.
     pub fn new() -> Self {
         VarCharType
     }

@@ -4,7 +4,7 @@ use ferrite::catalog::schema::Schema;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_row_number_window_function() {
     let mut ctx = TestContext::new("test_row_number_window_function").await;
 
@@ -85,7 +85,7 @@ async fn test_row_number_window_function() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_rank_window_functions() {
     let mut ctx = TestContext::new("test_rank_window_functions").await;
 
@@ -140,7 +140,7 @@ async fn test_rank_window_functions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_window_functions_with_partition() {
     let mut ctx = TestContext::new("test_window_functions_with_partition").await;
 
@@ -233,7 +233,7 @@ async fn test_window_functions_with_partition() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_lag_lead_window_functions() {
     let mut ctx = TestContext::new("test_lag_lead_window_functions").await;
 
@@ -288,7 +288,7 @@ async fn test_lag_lead_window_functions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_first_last_value_window_functions() {
     let mut ctx = TestContext::new("test_first_last_value_window_functions").await;
 
@@ -370,7 +370,7 @@ async fn test_first_last_value_window_functions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_aggregation_window_functions() {
     let mut ctx = TestContext::new("test_aggregation_window_functions").await;
 
@@ -427,7 +427,7 @@ async fn test_aggregation_window_functions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_window_frames() {
     let mut ctx = TestContext::new("test_window_frames").await;
 
@@ -481,7 +481,7 @@ async fn test_window_frames() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ntile_window_function() {
     let mut ctx = TestContext::new("test_ntile_window_function").await;
 
@@ -538,7 +538,7 @@ async fn test_ntile_window_function() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_percent_rank_window_functions() {
     let mut ctx = TestContext::new("test_percent_rank_window_functions").await;
 
@@ -593,7 +593,7 @@ async fn test_percent_rank_window_functions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_complex_window_queries() {
     let mut ctx = TestContext::new("test_complex_window_queries").await;
 
@@ -696,7 +696,7 @@ async fn test_complex_window_queries() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_window_functions_edge_cases() {
     let mut ctx = TestContext::new("test_window_functions_edge_cases").await;
 

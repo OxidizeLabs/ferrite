@@ -3,7 +3,7 @@ use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn select_basic_projection() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -51,7 +51,7 @@ async fn select_basic_projection() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn select_where_order_by() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -97,7 +97,7 @@ async fn select_where_order_by() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn select_projection_and_expressions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -161,7 +161,7 @@ async fn select_projection_and_expressions() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn select_distinct_rows() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -236,7 +236,7 @@ async fn select_distinct_rows() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn select_order_by_full_dataset() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -291,7 +291,7 @@ async fn select_order_by_full_dataset() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn select_order_by_age_desc_limit() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

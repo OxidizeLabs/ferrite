@@ -1,16 +1,62 @@
+//! # Hash Function Utilities
+//!
+//! This module provides hash function implementations for use in hash-based
+//! data structures like the extendable hash table. It uses the XXH3 algorithm
+//! from the `xxhash-rust` crate for fast, high-quality hashing.
+//!
+//! ## Components
+//!
+//! - [`HashFunction`]: A generic hash function wrapper that handles common types.
+//! - [`Xxh3Hasher`]: A [`Hasher`] implementation wrapping XXH3 for use with Rust's
+//!   standard `Hash` trait.
+
 use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use xxhash_rust::xxh3::Xxh3;
 
-// Custom hasher struct to wrap Xxh3 hasher
+/// A [`Hasher`] implementation wrapping the XXH3 algorithm.
+///
+/// This struct adapts the `Xxh3` hasher to implement Rust's standard [`Hasher`]
+/// trait, enabling use with types that implement [`Hash`].
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use std::hash::{Hash, Hasher};
+/// use crate::container::hash_function::Xxh3Hasher;
+///
+/// let mut hasher = Xxh3Hasher::default();
+/// "hello".hash(&mut hasher);
+/// let hash = hasher.finish();
+/// ```
 #[derive(Default)]
 pub struct Xxh3Hasher {
+    /// The underlying XXH3 hasher from the `xxhash-rust` crate.
     hasher: Xxh3,
 }
 
-/// Represents a hash function for a given key type.
+/// A generic hash function for computing hash values from keys.
+///
+/// This struct provides optimized hashing for common types (`i32`, `u32`, `String`, `&str`)
+/// with a fallback to the standard [`Hash`] trait for other types. It uses the XXH3
+/// algorithm internally for fast, high-quality hash values.
+///
+/// # Type Parameters
+///
+/// - `K`: The key type to hash. Must implement `Any + Hash + 'static`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use crate::container::hash_function::HashFunction;
+///
+/// let hash_fn = HashFunction::<i32>::new();
+/// let hash = hash_fn.get_hash(&42);
+/// println!("Hash of 42: {}", hash);
+/// ```
 pub struct HashFunction<K> {
+    /// Phantom data to carry the key type without storing it.
     _marker: PhantomData<K>,
 }
 
@@ -18,6 +64,9 @@ impl<K> Default for HashFunction<K>
 where
     K: Any + Hash + 'static,
 {
+    /// Returns a new `HashFunction` instance.
+    ///
+    /// Equivalent to calling [`HashFunction::new()`].
     fn default() -> Self {
         Self::new()
     }
@@ -65,10 +114,23 @@ where
 }
 
 impl Hasher for Xxh3Hasher {
+    /// Finalizes the hash computation and returns the resulting hash value.
+    ///
+    /// Note: This clones the internal hasher to compute the digest, allowing
+    /// the hasher to continue accumulating data after this call.
+    ///
+    /// # Returns
+    ///
+    /// The 64-bit XXH3 hash value.
     fn finish(&self) -> u64 {
         self.hasher.clone().digest()
     }
 
+    /// Writes bytes to the hasher, updating its internal state.
+    ///
+    /// # Parameters
+    ///
+    /// - `bytes`: The byte slice to incorporate into the hash.
     fn write(&mut self, bytes: &[u8]) {
         self.hasher.update(bytes);
     }

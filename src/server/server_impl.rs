@@ -217,14 +217,43 @@ use tokio::runtime::Runtime;
 
 /// Handle for managing the database server lifecycle.
 ///
-/// See module-level documentation for details.
+/// Encapsulates the TCP server, its Tokio runtime, and provides methods
+/// for starting and gracefully shutting down the server.
+///
+/// See the module-level documentation for architecture diagrams and examples.
+///
+/// # Thread Safety
+///
+/// The server spawns a dedicated thread for the accept loop and uses
+/// `spawn_blocking` for each connection handler. The `DBInstance` is
+/// `Arc`-wrapped and safely shared across all connection handlers.
 pub struct ServerHandle {
+    /// The TCP port the server listens on.
     port: u16,
+    /// The Tokio runtime that powers async operations.
+    ///
+    /// Wrapped in `Option` to allow taking ownership during shutdown.
     runtime: Option<Runtime>,
+    /// Handle to the server thread for joining on shutdown.
+    ///
+    /// `None` until `start()` is called.
     join_handle: Option<JoinHandle<()>>,
 }
 
 impl ServerHandle {
+    /// Creates a new server handle for the specified port.
+    ///
+    /// Initializes the Tokio runtime but does not start accepting connections.
+    /// Call [`start()`](Self::start) to begin listening.
+    ///
+    /// # Parameters
+    /// - `port`: The TCP port to listen on.
+    ///
+    /// # Returns
+    /// A new `ServerHandle` ready to be started.
+    ///
+    /// # Panics
+    /// Panics if the Tokio runtime fails to initialize.
     pub fn new(port: u16) -> Self {
         Self {
             port,
@@ -233,6 +262,23 @@ impl ServerHandle {
         }
     }
 
+    /// Starts the server and begins accepting connections.
+    ///
+    /// Spawns a dedicated thread that runs the TCP accept loop. Each incoming
+    /// connection is handled in a separate blocking task via `spawn_blocking`.
+    ///
+    /// # Parameters
+    /// - `db`: The database instance to use for query execution. This is cloned
+    ///   (via `Arc`) for each connection.
+    ///
+    /// # Returns
+    /// - `Ok(())`: Server started successfully.
+    /// - `Err(...)`: Failed to start (e.g., port already in use).
+    ///
+    /// # Notes
+    /// - Binds to `127.0.0.1` (localhost only) for security.
+    /// - Prints "Server listening on 127.0.0.1:{port}" on success.
+    /// - Connection errors are logged to stderr but don't crash the server.
     pub fn start(&mut self, db: Arc<DBInstance>) -> Result<(), Box<dyn std::error::Error>> {
         let port = self.port;
         let runtime = self.runtime.as_ref().unwrap();
@@ -270,6 +316,20 @@ impl ServerHandle {
         Ok(())
     }
 
+    /// Shuts down the server gracefully.
+    ///
+    /// Performs a two-phase shutdown:
+    /// 1. Shuts down the Tokio runtime with a 10-second timeout, allowing
+    ///    pending requests to complete.
+    /// 2. Joins the server thread to ensure clean termination.
+    ///
+    /// # Returns
+    /// - `Ok(())`: Server shut down successfully.
+    ///
+    /// # Notes
+    /// - Safe to call multiple times (subsequent calls are no-ops).
+    /// - Pending connections have up to 10 seconds to complete.
+    /// - After timeout, remaining tasks are forcibly cancelled.
     pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_timeout(Duration::from_secs(10));

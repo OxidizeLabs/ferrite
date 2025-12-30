@@ -56,7 +56,7 @@ impl ResultWriter for TestResultWriter {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_clause() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -139,7 +139,7 @@ async fn test_where_clause() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_comparison_operators() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -241,7 +241,7 @@ async fn test_where_comparison_operators() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_string_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -328,7 +328,7 @@ async fn test_where_string_operations() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_null_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -417,7 +417,7 @@ async fn test_where_null_conditions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_complex_boolean_logic() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -521,7 +521,7 @@ async fn test_where_complex_boolean_logic() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_in_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -638,7 +638,7 @@ async fn test_where_in_conditions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_between_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -758,7 +758,7 @@ async fn test_where_between_conditions() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_like_patterns() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -878,7 +878,7 @@ async fn test_where_like_patterns() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_date_time_comparisons() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -996,7 +996,7 @@ async fn test_where_date_time_comparisons() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_edge_cases_and_errors() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -1104,7 +1104,7 @@ async fn test_where_edge_cases_and_errors() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_where_subquery_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

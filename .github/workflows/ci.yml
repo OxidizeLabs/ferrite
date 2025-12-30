@@ -79,11 +79,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # Benchmarks (only on main branch)
+  # Benchmarks (only on the master branch)
   bench:
     name: Benchmarks
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

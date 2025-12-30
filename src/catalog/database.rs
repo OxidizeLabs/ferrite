@@ -532,6 +532,7 @@ impl Database {
         self.get_index_by_index_oid(index_oid)
     }
 
+    /// Returns all indexes associated with the specified table.
     pub fn get_table_indexes(&self, table_name: &str) -> Vec<&Arc<IndexInfo>> {
         if !self.table_names.contains_key(table_name) {
             return Vec::new();
@@ -544,6 +545,7 @@ impl Database {
             .collect()
     }
 
+    /// Returns an index by its OID.
     pub fn get_index_by_index_oid(
         &self,
         index_oid: IndexOidT,
@@ -551,6 +553,7 @@ impl Database {
         self.indexes.get(&index_oid).cloned()
     }
 
+    /// Adds an index to this database.
     pub fn add_index(
         &mut self,
         index_oid: IndexOidT,
@@ -584,6 +587,7 @@ impl Database {
         }
     }
 
+    /// Returns the schema for the specified table.
     pub fn get_table_schema(&self, table_name: &str) -> Option<Schema> {
         self.table_names.get(table_name).and_then(|&table_oid| {
             self.tables
@@ -597,6 +601,7 @@ impl Database {
         self.bpm.clone()
     }
 
+    /// Returns the table info for the specified table name.
     fn get_table_info_by_name(&self, table_name: &str) -> Option<Arc<TableInfo>> {
         let table_oid = self.table_names.get(table_name)?;
         self.tables
@@ -604,16 +609,19 @@ impl Database {
             .map(|info| Arc::new(info.clone()))
     }
 
+    /// Returns the table heap for the specified table.
     pub fn get_table_heap(&self, table_name: &str) -> Option<Arc<TableHeap>> {
         let table_info = self.get_table_info_by_name(table_name)?;
         Some(table_info.get_table_heap())
     }
 
+    /// Returns the columns for the specified table.
     pub fn get_table_columns(&self, table_name: &str) -> Option<Vec<Column>> {
         let schema = self.get_table_schema(table_name)?;
         Some(schema.get_columns().to_vec())
     }
 
+    /// Returns all table names in this database.
     pub fn get_all_tables(&self) -> Vec<String> {
         self.table_names.keys().cloned().collect()
     }

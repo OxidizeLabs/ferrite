@@ -167,7 +167,7 @@
 //! - LSN counters use `AtomicU64` for lock-free updates
 //! - Log records are sent via bounded `mpsc` channel (backpressure at 1000)
 //! - Flush thread runs as a tokio task, joined on shutdown
-//! - `block_in_place` used for sync/async boundary in tokio runtime
+//! - Separate OS threads used for sync/async boundary to support both single and multi-threaded runtimes
 //!
 //! ## Failure Handling
 //!
@@ -179,7 +179,7 @@
 use crate::common::config::{INVALID_LSN, Lsn};
 use crate::recovery::log_record::LogRecord;
 use crate::storage::disk::async_disk::AsyncDiskManager;
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use parking_lot::Mutex;
 use std::io;
 use std::sync::Arc;
@@ -189,23 +189,55 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
-use tokio::task::block_in_place;
 use tokio::time::timeout;
 
-/// LogManager maintains a separate thread awakened whenever the log buffer is full or whenever a timeout
-/// happens. When the thread is awakened, the log buffer's content is written into the disk log file.
+/// Coordinates Write-Ahead Logging (WAL) for durability and crash recovery.
+///
+/// The `LogManager` maintains a background flush thread that periodically writes
+/// log records to disk, ensuring committed transactions are durable before
+/// returning control to the caller. See the module-level documentation for
+/// architecture details and usage examples.
+///
+/// # Thread Safety
+///
+/// - LSN counters use `AtomicU64` for lock-free updates
+/// - Log records are sent via a bounded `mpsc` channel (backpressure at 1000)
+/// - The flush thread runs as a tokio task, joined on shutdown
 pub struct LogManager {
+    /// Shared state containing LSN counters, disk manager, and channel sender.
     state: Arc<LogManagerState>,
+    /// Handle to the tokio runtime for spawning the flush task.
     runtime_handle: Handle,
+    /// Receiver end of the log record channel, consumed by the flush thread.
+    ///
+    /// Wrapped in `Mutex<Option<...>>` to allow one-time extraction when
+    /// starting the flush thread.
     receiver: Mutex<Option<mpsc::Receiver<Arc<LogRecord>>>>,
 }
 
+/// Internal shared state for the `LogManager`.
+///
+/// This struct holds all state that needs to be accessed by both the main
+/// log manager methods and the background flush thread.
 struct LogManagerState {
+    /// Monotonically increasing counter for assigning LSNs to new log records.
+    ///
+    /// Each call to `append_log_record` atomically increments this counter.
     next_lsn: AtomicU64,
+    /// Highest LSN that has been durably written to disk.
+    ///
+    /// Updated by the flush thread after successful disk writes and syncs.
+    /// Commit operations block until `persistent_lsn >= commit_lsn`.
     persistent_lsn: AtomicU64,
+    /// Handle to the background flush task for joining on shutdown.
     flush_thread: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Flag to signal the flush thread to stop.
+    ///
+    /// Set to `true` during shutdown or on critical disk write failures.
     stop_flag: AtomicBool,
+    /// Async disk manager for writing log records to the WAL file.
     disk_manager: Arc<AsyncDiskManager>,
+    /// Sender end of the bounded channel for queuing log records.
     sender: mpsc::Sender<Arc<LogRecord>>,
 }
 
@@ -235,8 +267,22 @@ impl LogManager {
         }
     }
 
-    /// Runs the flush thread which writes the log buffer's content to the disk.
+    /// Starts the background flush thread.
+    ///
+    /// The flush thread periodically (every 10ms) drains queued log records
+    /// and writes them to disk. It also performs immediate flushes when commit
+    /// records are encountered to ensure transaction durability.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called more than once (the receiver can only be taken once).
+    ///
+    /// # Note
+    ///
+    /// This method must be called before any `append_log_record` calls that
+    /// include commit records, otherwise commit durability waiting will hang.
     pub fn run_flush_thread(&mut self) {
+        info!("Starting log flush thread");
         let state = Arc::clone(&self.state);
         let mut receiver = self
             .receiver
@@ -302,7 +348,23 @@ impl LogManager {
         *self.state.flush_thread.lock() = Some(task_handle);
     }
 
-    /// Perform a flush of the records to disk and update the persistent LSN
+    /// Writes a batch of log records to disk and updates the persistent LSN.
+    ///
+    /// This method is called by the flush thread to durably persist queued records.
+    /// After successful writes and sync, `persistent_lsn` is updated to `max_lsn`,
+    /// unblocking any callers waiting on commit durability.
+    ///
+    /// # Parameters
+    ///
+    /// - `state`: Shared state containing the disk manager and LSN counters.
+    /// - `records`: The batch of log records to write.
+    /// - `max_lsn`: The highest LSN in the batch (used to update `persistent_lsn`).
+    /// - `flush_reason`: A descriptive string for logging (e.g., "periodic", "shutdown").
+    ///
+    /// # Error Handling
+    ///
+    /// If a disk write fails, the `stop_flag` is set to prevent false durability
+    /// signals. Callers waiting on commit will detect this and stop waiting.
     async fn perform_flush(
         state: &Arc<LogManagerState>,
         records: Vec<Arc<LogRecord>>,
@@ -348,18 +410,33 @@ impl LogManager {
         }
     }
 
+    /// Shuts down the log manager and waits for the flush thread to complete.
+    ///
+    /// This method:
+    /// 1. Sets the stop flag to signal the flush thread to exit.
+    /// 2. Waits for the flush thread to drain remaining records and terminate.
+    /// 3. Joins the flush task to ensure clean shutdown.
+    ///
+    /// # Note
+    ///
+    /// It is safe to call this method multiple times; subsequent calls are no-ops.
+    /// Any remaining queued records will be flushed before the thread exits.
     pub fn shut_down(&mut self) {
         self.state.stop_flag.store(true, Ordering::SeqCst);
 
         let task_handle = self.state.flush_thread.lock().take();
 
-        // Join the task if we got a valid handle
+        // Join the task if we got a valid handle.
+        // Use a separate OS thread to avoid block_in_place limitation with single-threaded runtime.
         if let Some(handle) = task_handle {
-            block_in_place(|| {
-                if let Err(e) = self.runtime_handle.block_on(handle) {
-                    error!("Flush task panicked or cancelled: {:?}", e);
-                }
-            });
+            let runtime_handle = self.runtime_handle.clone();
+            let join_result = std::thread::spawn(move || runtime_handle.block_on(handle)).join();
+
+            match join_result {
+                Ok(Ok(())) => {},
+                Ok(Err(e)) => error!("Flush task panicked or cancelled: {:?}", e),
+                Err(_) => error!("Thread panicked while joining flush task"),
+            }
         }
     }
 
@@ -377,14 +454,24 @@ impl LogManager {
         // Set the LSN in the log record - now thread-safe with interior mutability
         log_record.set_lsn(lsn);
 
-        // Send log record to processing queue
-        let record_to_send = log_record.clone();
-        block_in_place(|| {
-            if let Err(e) = self.state.sender.blocking_send(record_to_send) {
-                error!("Failed to queue log record: {}", e);
-                // Consider implementing retry logic or returning an error
+        // Send log record to processing queue using try_send with retry.
+        // This approach works with both single-threaded and multi-threaded Tokio runtimes,
+        // avoiding the block_in_place limitation that requires multi-threaded runtime.
+        let mut record_to_send = log_record.clone();
+        loop {
+            match self.state.sender.try_send(record_to_send) {
+                Ok(()) => break,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(returned)) => {
+                    // Channel is full, wait briefly and retry
+                    record_to_send = returned;
+                    thread::sleep(Duration::from_micros(100));
+                },
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    error!("Failed to queue log record: channel closed");
+                    break;
+                },
             }
-        });
+        }
 
         // For commit records, ensure durability by waiting for buffer to be flushed
         if log_record.is_commit() {
@@ -394,21 +481,20 @@ impl LogManager {
 
             // Wait for buffer to be flushed (observe persistent_lsn ≥ lsn).
             // persistent_lsn is initialized to INVALID_LSN, which must be treated as "nothing flushed yet".
-            block_in_place(|| {
-                while {
-                    let persisted = self.state.persistent_lsn.load(Ordering::SeqCst);
-                    persisted == INVALID_LSN || persisted < lsn
-                } {
-                    if self.state.stop_flag.load(Ordering::SeqCst) {
-                        error!(
-                            "Log flush thread stopped while waiting for commit LSN {} to persist",
-                            lsn
-                        );
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(1));
+            // This spin-wait loop is synchronous and doesn't require block_in_place.
+            while {
+                let persisted = self.state.persistent_lsn.load(Ordering::SeqCst);
+                persisted == INVALID_LSN || persisted < lsn
+            } {
+                if self.state.stop_flag.load(Ordering::SeqCst) {
+                    error!(
+                        "Log flush thread stopped while waiting for commit LSN {} to persist",
+                        lsn
+                    );
+                    break;
                 }
-            });
+                thread::sleep(Duration::from_millis(1));
+            }
 
             debug!("Commit record with LSN {} has been flushed", lsn);
         }
@@ -416,14 +502,29 @@ impl LogManager {
         lsn
     }
 
-    /// Returns the next log sequence number (LSN).
+    /// Returns the next LSN that will be assigned to a new log record.
+    ///
+    /// This is the current value of the monotonic LSN counter. The actual
+    /// assignment happens atomically in `append_log_record`.
+    ///
+    /// # Returns
+    ///
+    /// The next available LSN.
     pub fn get_next_lsn(&self) -> Lsn {
         let lsn = self.state.next_lsn.load(Ordering::SeqCst);
         trace!("Retrieved next LSN: {}", lsn);
         lsn
     }
 
-    /// Returns the persistent log sequence number (LSN).
+    /// Returns the highest LSN that has been durably written to disk.
+    ///
+    /// Commit operations block until `persistent_lsn >= commit_lsn` to ensure
+    /// durability. This value is updated by the flush thread after successful
+    /// disk writes and syncs.
+    ///
+    /// # Returns
+    ///
+    /// The highest durable LSN, or `INVALID_LSN` if nothing has been flushed yet.
     pub fn get_persistent_lsn(&self) -> Lsn {
         let lsn = self.state.persistent_lsn.load(Ordering::SeqCst);
         trace!("Retrieved persistent LSN: {}", lsn);
@@ -471,9 +572,16 @@ impl LogManager {
     /// # Returns
     /// An optional LogRecord if reading and parsing was successful
     pub async fn read_log_record_async(&self, offset: u64) -> Option<LogRecord> {
+        Self::read_log_record_static(Arc::clone(&self.state.disk_manager), offset).await
+    }
+
+    /// Static helper for reading log records, used by both async and sync wrappers.
+    async fn read_log_record_static(
+        disk_manager: Arc<AsyncDiskManager>,
+        offset: u64,
+    ) -> Option<LogRecord> {
         debug!("Reading log record from offset {}", offset);
 
-        let disk_manager = Arc::clone(&self.state.disk_manager);
         match disk_manager.read_log(offset).await {
             Ok(bytes) => match LogRecord::from_bytes(&bytes) {
                 Ok(record) => {
@@ -500,10 +608,31 @@ impl LogManager {
         }
     }
 
+    /// Reads a log record from disk at the specified offset (synchronous version).
+    ///
+    /// This is a blocking wrapper around [`read_log_record_async`](Self::read_log_record_async).
+    /// It handles both cases: running on a tokio runtime (uses a separate OS thread)
+    /// or running outside a runtime (uses the stored runtime handle directly).
+    ///
+    /// # Parameters
+    ///
+    /// - `offset`: The byte offset in the log file to read from.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(LogRecord)`: If reading and parsing succeeded.
+    /// - `None`: If the offset is invalid or parsing failed.
     pub fn read_log_record(&self, offset: u64) -> Option<LogRecord> {
-        // If we're already on a Tokio runtime, block in place to avoid nested runtime errors.
+        // If we're already on a Tokio runtime, spawn a separate OS thread to avoid
+        // block_in_place limitation with single-threaded runtime.
         if Handle::try_current().is_ok() {
-            block_in_place(|| Handle::current().block_on(self.read_log_record_async(offset)))
+            let runtime_handle = self.runtime_handle.clone();
+            let disk_manager = Arc::clone(&self.state.disk_manager);
+            std::thread::spawn(move || {
+                runtime_handle.block_on(Self::read_log_record_static(disk_manager, offset))
+            })
+            .join()
+            .unwrap_or(None)
         } else {
             self.runtime_handle
                 .block_on(self.read_log_record_async(offset))

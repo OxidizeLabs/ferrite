@@ -5,7 +5,7 @@ use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_basic_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -39,7 +39,7 @@ async fn create_table_basic_operations() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_all_data_types() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -62,7 +62,7 @@ async fn create_table_all_data_types() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_minimal_columns() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -79,7 +79,7 @@ async fn create_table_minimal_columns() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_wide_schema() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -99,7 +99,7 @@ async fn create_table_wide_schema() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_varchar_sizes() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -120,7 +120,7 @@ async fn create_table_varchar_sizes() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_numeric_precision() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -141,7 +141,7 @@ async fn create_table_numeric_precision() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_edge_case_names() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -168,7 +168,7 @@ async fn create_table_edge_case_names() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_duplicate_name_error() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -198,7 +198,7 @@ async fn create_table_duplicate_name_error() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_primary_key_constraint() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -218,7 +218,7 @@ async fn create_table_primary_key_constraint() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_default_values() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -239,7 +239,7 @@ async fn create_table_default_values() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_foreign_key_constraint() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -273,7 +273,7 @@ async fn create_table_foreign_key_constraint() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_with_boolean_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -330,7 +330,7 @@ async fn create_table_with_boolean_operations() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_and_complex_queries() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -400,7 +400,7 @@ async fn create_table_and_complex_queries() {
     assert!(ok);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_table_transaction_safety() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

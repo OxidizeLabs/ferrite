@@ -3,7 +3,7 @@ use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_basic_operations() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -74,7 +74,7 @@ async fn test_update_basic_operations() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_with_conditions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -147,7 +147,7 @@ async fn test_update_with_conditions() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_with_expressions() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -203,7 +203,7 @@ async fn test_update_with_expressions() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_no_rows_affected() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -244,7 +244,7 @@ async fn test_update_no_rows_affected() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_all_rows() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();
@@ -284,7 +284,7 @@ async fn test_update_all_rows() {
         .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_in_transaction() {
     init_test_logger();
     let db = new_temp_db().await.unwrap();

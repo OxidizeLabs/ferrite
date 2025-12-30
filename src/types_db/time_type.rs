@@ -14,6 +14,7 @@ impl Default for TimeType {
 }
 
 impl TimeType {
+    /// Creates a new `TimeType` instance.
     pub fn new() -> Self {
         TimeType
     }

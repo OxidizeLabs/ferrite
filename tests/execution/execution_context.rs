@@ -88,7 +88,7 @@ fn create_test_schema() -> Schema {
     ])
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn executor_type_create_table_construction() {
     let test_ctx = TestContext::new("executor_type_create_table_construction").await;
     let schema = create_test_schema();
@@ -105,7 +105,7 @@ async fn executor_type_create_table_construction() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execution_context_getters_setters() {
     let test_ctx = TestContext::new("execution_context_getters_setters").await;
     {
@@ -125,7 +125,7 @@ async fn execution_context_getters_setters() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn executor_type_from_constructors() {
     let test_ctx = TestContext::new("executor_type_from_constructors").await;
     let schema = create_test_schema();
@@ -142,7 +142,7 @@ async fn executor_type_from_constructors() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn executor_type_init_and_operations() {
     let test_ctx = TestContext::new("executor_type_init_and_operations").await;
     let schema = create_test_schema();
@@ -166,7 +166,7 @@ async fn executor_type_init_and_operations() {
     assert!(result.unwrap().is_none());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execution_context_add_check_option() {
     let test_ctx = TestContext::new("execution_context_add_check_option").await;
     let schema = create_test_schema();
@@ -200,7 +200,7 @@ async fn execution_context_add_check_option() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn executor_type_pattern_matching() {
     let test_ctx = TestContext::new("executor_type_pattern_matching").await;
     let schema = create_test_schema();
@@ -219,7 +219,7 @@ async fn executor_type_pattern_matching() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn all_executor_type_names() {
     // This validates the enum remains comprehensive. We only assert metadata here.
     let type_names = vec![
@@ -254,7 +254,7 @@ async fn all_executor_type_names() {
     assert!(true);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multiple_executor_types_in_context() {
     let test_ctx = TestContext::new("multiple_executor_types_in_context").await;
     let schema = create_test_schema();
@@ -288,7 +288,7 @@ async fn multiple_executor_types_in_context() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn execution_context_init_check_options() {
     let test_ctx = TestContext::new("execution_context_init_check_options").await;
     {

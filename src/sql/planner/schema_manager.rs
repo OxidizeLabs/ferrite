@@ -190,7 +190,15 @@ use sqlparser::ast::{
 use std::collections::HashSet;
 use std::sync::Arc;
 
-// Type alias for complex return type
+/// Result type for parsing column constraint options.
+///
+/// Returns a tuple containing:
+/// - `is_primary_key`: Whether the column is a primary key
+/// - `is_not_null`: Whether the column has a NOT NULL constraint
+/// - `is_unique`: Whether the column has a UNIQUE constraint
+/// - `foreign_key`: Optional foreign key constraint details
+/// - `check_constraint`: Optional CHECK constraint expression as string
+/// - `default_value`: Optional default value for the column
 type ColumnOptionsResult = Result<
     (
         bool,
@@ -203,20 +211,66 @@ type ColumnOptionsResult = Result<
     String,
 >;
 
-/// 2. Responsible for schema-related operations
+/// Central component for handling schema-related operations in SQL processing.
+///
+/// The `SchemaManager` bridges the gap between SQL syntax (parsed by `sqlparser`)
+/// and the internal type system. It handles type conversion, constraint parsing,
+/// schema construction, and value mapping between different schemas.
+///
+/// # Responsibilities
+///
+/// - **Type Conversion**: Maps SQL data types to internal `TypeId` values
+/// - **Column Creation**: Converts `ColumnDef` AST nodes to `Column` structs
+/// - **Constraint Parsing**: Extracts PRIMARY KEY, NOT NULL, UNIQUE, FOREIGN KEY, etc.
+/// - **Schema Construction**: Creates join schemas, aggregation schemas, VALUES schemas
+/// - **Value Mapping**: Maps values between source and target schemas
+/// - **Compatibility Checking**: Validates schema type compatibility
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let manager = SchemaManager::new();
+///
+/// // Convert SQL type
+/// let type_id = manager.convert_sql_type(&DataType::Integer(None))?;
+///
+/// // Create join schema
+/// let joined = manager.create_join_schema(&left_schema, &right_schema);
+///
+/// // Map values to schema
+/// let mapped = manager.map_values_to_schema(&values, &source, &target);
+/// ```
 pub struct SchemaManager {}
 
 impl Default for SchemaManager {
+    /// Creates a default `SchemaManager` instance.
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl SchemaManager {
+    /// Creates a new `SchemaManager` instance.
+    ///
+    /// The schema manager is stateless and can be reused across multiple operations.
     pub fn new() -> Self {
         Self {}
     }
 
+    /// Creates an output schema for aggregation operations.
+    ///
+    /// Combines group-by columns with aggregate expression results into a single
+    /// output schema. Group-by columns appear first, followed by aggregates.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_by_exprs` - Expressions used in the GROUP BY clause
+    /// * `agg_exprs` - Aggregate expressions (SUM, COUNT, AVG, etc.)
+    /// * `has_group_by` - Whether a GROUP BY clause is present
+    ///
+    /// # Returns
+    ///
+    /// A `Schema` containing columns for all group-by and aggregate results.
     pub fn create_aggregation_output_schema(
         &self,
         group_by_exprs: &[&Expression],
@@ -231,6 +285,21 @@ impl SchemaManager {
         )
     }
 
+    /// Creates an aggregation output schema with optional column alias mapping.
+    ///
+    /// Similar to [`create_aggregation_output_schema`](Self::create_aggregation_output_schema),
+    /// but allows renaming columns based on SELECT aliases.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_by_exprs` - Expressions used in the GROUP BY clause
+    /// * `agg_exprs` - Aggregate expressions (SUM, COUNT, AVG, etc.)
+    /// * `has_group_by` - Whether a GROUP BY clause is present
+    /// * `alias_mapping` - Optional map from original names to alias names
+    ///
+    /// # Returns
+    ///
+    /// A `Schema` with columns named according to the alias mapping.
     pub fn create_aggregation_output_schema_with_alias_mapping(
         &self,
         group_by_exprs: &[&Expression],
@@ -289,6 +358,25 @@ impl SchemaManager {
         Schema::new(columns)
     }
 
+    /// Creates a schema from a VALUES clause by inferring types from the first row.
+    ///
+    /// Column names are auto-generated as "column1", "column2", etc.
+    ///
+    /// # Arguments
+    ///
+    /// * `rows` - The rows from the VALUES clause
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Schema)` - Schema with inferred column types
+    /// * `Err` - If the VALUES clause is empty
+    ///
+    /// # Example
+    ///
+    /// ```sql
+    /// VALUES (1, 'Alice'), (2, 'Bob')
+    /// -- Creates schema: [column1: Integer, column2: VarChar]
+    /// ```
     pub fn create_values_schema(&self, rows: &[Vec<Expr>]) -> Result<Schema, String> {
         if rows.is_empty() {
             return Err("VALUES clause cannot be empty".to_string());
@@ -307,6 +395,22 @@ impl SchemaManager {
         Ok(Schema::new(columns))
     }
 
+    /// Converts SQL column definitions from CREATE TABLE into internal `Column` structs.
+    ///
+    /// Processes each column definition, extracting:
+    /// - Column name and data type
+    /// - Constraints (PRIMARY KEY, NOT NULL, UNIQUE, FOREIGN KEY, CHECK)
+    /// - Type-specific parameters (precision, scale, length)
+    /// - Default values
+    ///
+    /// # Arguments
+    ///
+    /// * `column_defs` - Parsed column definitions from the SQL AST
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<Column>)` - Vector of converted columns
+    /// * `Err` - If a column type is unsupported or constraint is invalid
     pub fn convert_column_defs(&self, column_defs: &[ColumnDef]) -> Result<Vec<Column>, String> {
         let mut columns = Vec::new();
 
@@ -342,7 +446,28 @@ impl SchemaManager {
         Ok(columns)
     }
 
-    /// Parse column options to extract constraint information
+    /// Parses column options to extract constraint information.
+    ///
+    /// Processes column-level constraints from a CREATE TABLE statement:
+    ///
+    /// | Constraint | Extracted As |
+    /// |------------|--------------|
+    /// | PRIMARY KEY | `is_primary_key=true`, `is_not_null=true` |
+    /// | NOT NULL | `is_not_null=true` |
+    /// | NULL | `is_not_null=false` |
+    /// | UNIQUE | `is_unique=true` |
+    /// | REFERENCES | `ForeignKeyConstraint` with actions |
+    /// | CHECK | Expression as string |
+    /// | DEFAULT | Value expression |
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Column option definitions from the SQL parser
+    ///
+    /// # Returns
+    ///
+    /// A tuple of all extracted constraint information, or an error if
+    /// a multi-column foreign key is encountered.
     fn parse_column_options(&self, options: &[ColumnOptionDef]) -> ColumnOptionsResult {
         let mut is_primary_key = false;
         let mut is_not_null = false;
@@ -421,12 +546,18 @@ impl SchemaManager {
         ))
     }
 
-    /// Convert ObjectName to string
+    /// Converts a parsed `ObjectName` to a string representation.
+    ///
+    /// Handles qualified names like `schema.table` by converting to their
+    /// string representation.
     fn object_name_to_string(&self, obj_name: &ObjectName) -> String {
         obj_name.to_string()
     }
 
-    /// Convert sqlparser ReferentialAction to our ReferentialAction
+    /// Converts a sqlparser `ReferentialAction` to the internal representation.
+    ///
+    /// Maps foreign key actions (ON DELETE, ON UPDATE) to the catalog's
+    /// `ReferentialAction` enum.
     fn convert_referential_action(
         &self,
         action: &ReferentialAction,
@@ -440,7 +571,26 @@ impl SchemaManager {
         }
     }
 
-    /// Create a column from SQL DataType with all parameters including constraints
+    /// Creates a column from SQL DataType with all type parameters and constraints.
+    ///
+    /// Handles type-specific parameters:
+    /// - DECIMAL/NUMERIC: precision and scale
+    /// - FLOAT: precision
+    /// - VARCHAR/CHAR: length
+    /// - BINARY/VARBINARY: length
+    /// - ARRAY: default size
+    ///
+    /// # Arguments
+    ///
+    /// * `column_name` - Name of the column
+    /// * `sql_type` - Original SQL data type for parameter extraction
+    /// * `type_id` - Converted internal type ID
+    /// * `is_primary_key` - PRIMARY KEY constraint
+    /// * `is_not_null` - NOT NULL constraint
+    /// * `is_unique` - UNIQUE constraint
+    /// * `foreign_key` - Optional foreign key constraint
+    /// * `check_constraint` - Optional CHECK expression
+    /// * `default_value` - Optional default value
     fn create_column_from_sql_type_with_constraints(
         &self,
         column_name: &str,
@@ -589,7 +739,21 @@ impl SchemaManager {
         }
     }
 
-    /// Extract precision and scale from ExactNumberInfo
+    /// Extracts precision and scale from numeric type information.
+    ///
+    /// Handles three cases:
+    /// - `None`: No precision/scale specified
+    /// - `Precision(p)`: Only precision specified
+    /// - `PrecisionAndScale(p, s)`: Both precision and scale specified
+    ///
+    /// # Arguments
+    ///
+    /// * `exact_info` - Numeric precision/scale information from SQL parser
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((precision, scale))` - Extracted values as u8 (or None)
+    /// * `Err` - If precision > 255, scale out of range, or scale > precision
     fn extract_precision_scale(
         &self,
         exact_info: &ExactNumberInfo,
@@ -632,6 +796,20 @@ impl SchemaManager {
         }
     }
 
+    /// Checks if two schemas are compatible for data transfer.
+    ///
+    /// Schemas are compatible if they have the same number of columns and
+    /// each corresponding column pair has compatible types. Column names
+    /// are ignored in the comparison.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Source schema to compare
+    /// * `target` - Target schema to compare
+    ///
+    /// # Returns
+    ///
+    /// `true` if schemas have matching column counts and types.
     pub fn schemas_compatible(&self, source: &Schema, target: &Schema) -> bool {
         if source.get_column_count() != target.get_column_count() {
             return false;
@@ -649,6 +827,19 @@ impl SchemaManager {
         true
     }
 
+    /// Checks if two types are compatible for assignment/comparison.
+    ///
+    /// Currently uses strict type matching (same type = compatible).
+    /// No implicit type coercion rules are applied.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_type` - Source type ID
+    /// * `target_type` - Target type ID
+    ///
+    /// # Returns
+    ///
+    /// `true` if the types are identical.
     pub fn types_compatible(&self, source_type: TypeId, target_type: TypeId) -> bool {
         // Add your type compatibility rules here
         // For example:
@@ -659,6 +850,25 @@ impl SchemaManager {
         }
     }
 
+    /// Converts a SQL data type to the internal `TypeId` representation.
+    ///
+    /// Supports a comprehensive range of SQL types including:
+    /// - Boolean types: BOOLEAN, BOOL
+    /// - Integer types: TINYINT, SMALLINT, INT, INTEGER, BIGINT, and unsigned variants
+    /// - Decimal types: DECIMAL, NUMERIC, FLOAT, REAL, DOUBLE
+    /// - String types: VARCHAR, TEXT, CHAR, STRING, NVARCHAR
+    /// - Binary types: BINARY, VARBINARY, BLOB, BYTEA
+    /// - Date/time types: DATE, TIME, TIMESTAMP, DATETIME, INTERVAL
+    /// - Special types: JSON, JSONB, UUID, ENUM, STRUCT, VECTOR
+    ///
+    /// # Arguments
+    ///
+    /// * `sql_type` - The SQL data type from the parser
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(TypeId)` - The corresponding internal type
+    /// * `Err` - For unsupported types (MAP, TUPLE, NESTED, etc.)
     pub fn convert_sql_type(&self, sql_type: &DataType) -> Result<TypeId, String> {
         match sql_type {
             DataType::Boolean | DataType::Bool => Ok(TypeId::Boolean),
@@ -793,6 +1003,23 @@ impl SchemaManager {
         }
     }
 
+    /// Infers the result type of a SQL expression.
+    ///
+    /// Currently handles literal values:
+    /// - Numbers → `TypeId::Integer`
+    /// - Strings → `TypeId::VarChar`
+    /// - Booleans → `TypeId::Boolean`
+    /// - NULL → `TypeId::Invalid`
+    ///
+    /// Complex expressions (binary ops, function calls, etc.) return `TypeId::Invalid`.
+    ///
+    /// # Arguments
+    ///
+    /// * `expr` - The SQL expression to analyze
+    ///
+    /// # Returns
+    ///
+    /// The inferred type, or an error for unsupported value types.
     pub fn infer_expression_type(&self, expr: &Expr) -> Result<TypeId, String> {
         match expr {
             Expr::Value(value_with_span) => match &value_with_span.value {
@@ -810,6 +1037,27 @@ impl SchemaManager {
         }
     }
 
+    /// Creates a combined schema for a JOIN operation.
+    ///
+    /// Concatenates all columns from the left schema followed by all columns
+    /// from the right schema. Column names are preserved as-is, including
+    /// any table prefixes (e.g., "t1.id", "t2.name").
+    ///
+    /// # Arguments
+    ///
+    /// * `left_schema` - Schema of the left side of the join
+    /// * `right_schema` - Schema of the right side of the join
+    ///
+    /// # Returns
+    ///
+    /// A new schema containing all columns from both schemas.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// Left: [id, name]    Right: [user_id, email]
+    /// Result: [id, name, user_id, email]
+    /// ```
     pub fn create_join_schema(&self, left_schema: &Schema, right_schema: &Schema) -> Schema {
         // Extract table aliases from the schemas
         let left_alias = self.extract_table_alias_from_schema(left_schema);
@@ -836,7 +1084,18 @@ impl SchemaManager {
         Schema::new(merged_columns)
     }
 
-    // Helper function to extract table alias from schema
+    /// Extracts the most common table alias from a schema's column names.
+    ///
+    /// Analyzes column names for qualified patterns (e.g., "t1.column") and
+    /// returns the most frequently used table alias.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - The schema to analyze
+    ///
+    /// # Returns
+    ///
+    /// The most common table alias, or `None` if no qualified names found.
     fn extract_table_alias_from_schema(&self, schema: &Schema) -> Option<String> {
         // Create a map to count occurrences of each alias
         let mut alias_counts = std::collections::HashMap::new();
@@ -861,6 +1120,22 @@ impl SchemaManager {
         None
     }
 
+    /// Resolves a qualified column reference (e.g., "t1.id") to its position and metadata.
+    ///
+    /// Supports two table aliases: "t1" for the left schema and "t2" for the right schema.
+    /// The returned index accounts for the combined schema position.
+    ///
+    /// # Arguments
+    ///
+    /// * `table_alias` - Table qualifier ("t1" or "t2")
+    /// * `column_name` - Column name without qualifier
+    /// * `left_schema` - Schema for "t1"
+    /// * `right_schema` - Schema for "t2"
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((index, column))` - Column index in combined schema and column metadata
+    /// * `Err` - If column not found or unknown table alias
     pub fn resolve_qualified_column<'a>(
         &self,
         table_alias: &str,
@@ -899,7 +1174,26 @@ impl SchemaManager {
         }
     }
 
-    // Helper method to map qualified column names to their aliases in the SELECT projection
+    /// Creates a mapping from qualified column names to their SELECT aliases.
+    ///
+    /// Analyzes SELECT items to build a map from original qualified names
+    /// (e.g., "e.name") to their aliases (e.g., "employee").
+    ///
+    /// # Arguments
+    ///
+    /// * `select_items` - Items from the SELECT clause
+    /// * `group_by_exprs` - GROUP BY expressions for matching
+    ///
+    /// # Returns
+    ///
+    /// A `HashMap` from qualified names to alias names.
+    ///
+    /// # Example
+    ///
+    /// ```sql
+    /// SELECT e.name AS employee FROM employees e
+    /// -- Creates mapping: {"e.name" => "employee"}
+    /// ```
     pub fn create_column_alias_mapping(
         &self,
         select_items: &[sqlparser::ast::SelectItem],
@@ -949,10 +1243,38 @@ impl SchemaManager {
     }
 
     /// Maps values from a source schema to a target schema.
-    /// - Uses name-based mapping when appropriate (e.g. column specifications in INSERT)
-    /// - Otherwise, uses positional mapping
-    /// - Fills missing columns with NULL values
-    /// - Performs type casting when necessary
+    ///
+    /// Supports two mapping strategies:
+    ///
+    /// 1. **Name-based mapping**: When ALL source column names match target columns,
+    ///    values are mapped by column name regardless of position. This is used for
+    ///    INSERT statements with explicit column lists.
+    ///
+    /// 2. **Positional mapping**: When column names don't fully match, values are
+    ///    mapped by position (first value → first column, etc.).
+    ///
+    /// # Features
+    ///
+    /// - Fills missing columns with NULL values (typed appropriately)
+    /// - Performs type casting using `Value::cast_to()`
+    /// - Failed casts result in NULL values
+    ///
+    /// # Arguments
+    ///
+    /// * `source_values` - Values to map
+    /// * `source_schema` - Schema describing the source values
+    /// * `target_schema` - Target schema to map into
+    ///
+    /// # Returns
+    ///
+    /// A vector of values aligned to the target schema.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// Source: [name="Bob", id=42]     Target: [id, name, email]
+    /// Result: [id=42, name="Bob", email=NULL]  (name-based mapping)
+    /// ```
     pub fn map_values_to_schema(
         &self,
         source_values: &[Value],
@@ -1007,7 +1329,20 @@ impl SchemaManager {
         target_values
     }
 
-    /// Detects whether name-based mapping should be used by checking for column name matches
+    /// Determines whether to use name-based or positional value mapping.
+    ///
+    /// Name-based mapping is used only when ALL source column names have
+    /// exact matches in the target schema. This prevents false positives
+    /// from partial matches.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_schema` - Schema of source values
+    /// * `target_schema` - Target schema to map to
+    ///
+    /// # Returns
+    ///
+    /// `true` if all source columns match target columns by name.
     fn detect_name_based_mapping(&self, source_schema: &Schema, target_schema: &Schema) -> bool {
         let source_count = source_schema.get_column_count();
 
@@ -1042,7 +1377,21 @@ impl SchemaManager {
         matching_count == source_count && matching_count > 0
     }
 
-    /// Finds a value by column name in the source schema
+    /// Finds and casts a value by column name from the source schema.
+    ///
+    /// Searches the source schema for a column with the given name and
+    /// returns the corresponding value cast to the target type.
+    ///
+    /// # Arguments
+    ///
+    /// * `target_column_name` - Name of the column to find
+    /// * `source_values` - Values from the source tuple
+    /// * `source_schema` - Schema describing the source values
+    /// * `target_type` - Type to cast the found value to
+    ///
+    /// # Returns
+    ///
+    /// The found value (cast to target type), or a typed NULL if not found.
     fn find_value_by_name(
         &self,
         target_column_name: &str,
@@ -1064,7 +1413,19 @@ impl SchemaManager {
         Value::new_with_type(crate::types_db::value::Val::Null, target_type)
     }
 
-    /// Casts a value to the target type, returning NULL if casting fails
+    /// Attempts to cast a value to the target type.
+    ///
+    /// If casting fails (e.g., "abc" to Integer), returns a typed NULL value
+    /// instead of propagating the error.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The value to cast
+    /// * `target_type` - The target type ID
+    ///
+    /// # Returns
+    ///
+    /// The cast value, or a NULL of the target type if casting fails.
     fn cast_value_to_type(&self, value: &Value, target_type: TypeId) -> Value {
         match value.cast_to(target_type) {
             Ok(casted_value) => casted_value,

@@ -1,4 +1,3 @@
-pub mod checkpoint_manager;
 pub mod log_iterator;
 pub mod log_manager;
 pub mod log_record;

@@ -231,14 +231,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-/// Transaction manager core: owns transaction state, timestamps, undo links,
-/// and MVCC bookkeeping. This module deliberately avoids side effects
-/// (no WAL writes, no buffer flushes, no lock release); higher-level
-/// coordinators handle I/O and synchronization around these state transitions.
-
+/// Per-page version tracking for MVCC.
+///
+/// Stores the mapping from each record (RID) on a page to the first
+/// undo link in its version chain. This enables traversal of prior
+/// versions during visibility checks and rollback operations.
 #[derive(Debug)]
 pub struct PageVersionInfo {
-    // Stores previous version info for all slots
+    /// Map from RID to the first undo link in the version chain.
+    /// Each entry points to the most recent undo log for that record.
     prev_link: RwLock<HashMap<RID, UndoLink>>,
 }
 
@@ -249,42 +250,98 @@ impl Default for PageVersionInfo {
 }
 
 impl PageVersionInfo {
+    /// Creates a new empty `PageVersionInfo`.
     pub fn new() -> Self {
         Self {
             prev_link: RwLock::new(HashMap::new()),
         }
     }
 
+    /// Gets the undo link for a specific RID.
+    ///
+    /// # Parameters
+    /// - `rid`: The record ID to look up.
+    ///
+    /// # Returns
+    /// The undo link if one exists for this RID, or `None` otherwise.
     pub fn get_link(&self, rid: &RID) -> Option<UndoLink> {
         self.prev_link.read().get(rid).cloned()
     }
 
+    /// Sets the undo link for a specific RID.
+    ///
+    /// # Parameters
+    /// - `rid`: The record ID.
+    /// - `link`: The undo link to associate with this RID.
     pub fn set_link(&self, rid: RID, link: UndoLink) {
         self.prev_link.write().insert(rid, link);
     }
 
+    /// Removes the undo link for a specific RID.
+    ///
+    /// # Parameters
+    /// - `rid`: The record ID whose link should be removed.
+    ///
+    /// # Returns
+    /// The removed undo link if one existed, or `None` otherwise.
     pub fn remove_link(&self, rid: &RID) -> Option<UndoLink> {
         self.prev_link.write().remove(rid)
     }
 
+    /// Returns `true` if there are no undo links stored for this page.
     pub fn is_empty(&self) -> bool {
         self.prev_link.read().is_empty()
     }
 }
 
-/// Represents the internal state of the transaction manager
+/// Internal state container for the transaction manager.
+///
+/// All state is protected by `RwLock` for concurrent access. This struct
+/// is shared via `Arc` across all clones of `TransactionManager`.
 #[derive(Debug)]
 struct TransactionManagerState {
+    /// Map of transaction ID to transaction object.
+    /// Contains both active and recently-completed transactions.
     txn_map: RwLock<HashMap<TxnId, Arc<Transaction>>>,
+    /// Watermark tracker for active read timestamps.
+    /// Used to determine the oldest visible version and enable GC.
     running_txns: RwLock<Watermark>,
+    /// Per-page version info mapping RIDs to their first undo links.
+    /// Enables MVCC version chain traversal.
     version_info: RwLock<HashMap<PageId, Arc<PageVersionInfo>>>,
+    /// Registered transactional table heaps for rollback support.
+    /// Key is the table OID.
     table_heaps: RwLock<HashMap<TableOidT, Arc<TransactionalTableHeap>>>,
+    /// Flag indicating whether the transaction manager is shutting down.
+    /// When set, new transactions are rejected.
     is_shutdown: AtomicBool,
 }
 
+/// Central coordinator for transaction lifecycle, MVCC, and undo log management.
+///
+/// The `TransactionManager` owns transaction state, timestamps, and undo links.
+/// It deliberately avoids I/O side effects (no WAL writes, no buffer flushes,
+/// no lock release); higher-level coordinators like `TransactionManagerFactory`
+/// handle those concerns around state transitions.
+///
+/// # Thread Safety
+///
+/// `TransactionManager` is `Clone` and thread-safe. All internal state is
+/// protected by `RwLock`, and the next transaction ID uses `AtomicU64`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let tm = TransactionManager::new();
+/// let txn = tm.begin(IsolationLevel::ReadCommitted)?;
+/// // ... perform operations ...
+/// tm.commit(txn, buffer_pool).await;
+/// ```
 #[derive(Debug, Clone)]
 pub struct TransactionManager {
+    /// Atomic counter for allocating unique transaction IDs.
     next_txn_id: Arc<AtomicU64>,
+    /// Shared state container (transactions, watermark, version info, etc.).
     state: Arc<TransactionManagerState>,
 }
 
@@ -295,6 +352,17 @@ impl Default for TransactionManager {
 }
 
 impl TransactionManager {
+    /// Creates a new `TransactionManager` with default state.
+    ///
+    /// Initializes:
+    /// - Transaction ID counter starting at 0
+    /// - Empty transaction map
+    /// - Default watermark
+    /// - Empty version info and table heap registrations
+    ///
+    /// # Returns
+    ///
+    /// A new `TransactionManager` instance ready to begin transactions.
     pub fn new() -> Self {
         // First create the transaction manager without a lock manager
         let tm = Self {
@@ -318,7 +386,19 @@ impl TransactionManager {
         }
     }
 
-    /// Shuts down the transaction manager
+    /// Shuts down the transaction manager.
+    ///
+    /// This method:
+    /// 1. Sets the shutdown flag to reject new transactions.
+    /// 2. Aborts all currently running transactions.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` on successful shutdown.
+    ///
+    /// # Note
+    ///
+    /// After shutdown, calls to `begin()` will return an error.
     pub fn shutdown(&self) -> Result<(), String> {
         // Set shutdown flag
         self.state.is_shutdown.store(true, Ordering::SeqCst);
@@ -340,7 +420,26 @@ impl TransactionManager {
         Ok(())
     }
 
-    /// Begins a new transaction with proper state checks
+    /// Begins a new transaction with the specified isolation level.
+    ///
+    /// This method:
+    /// 1. Allocates a unique transaction ID.
+    /// 2. Creates a new `Transaction` object.
+    /// 3. Registers the transaction's read timestamp with the watermark.
+    /// 4. Adds the transaction to the active transaction map.
+    ///
+    /// # Parameters
+    ///
+    /// - `isolation_level`: The isolation level for the new transaction.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Arc<Transaction>)` on success, or `Err` if the transaction
+    /// manager has been shut down.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction manager is in shutdown state.
     pub fn begin(&self, isolation_level: IsolationLevel) -> Result<Arc<Transaction>, String> {
         // Check if transaction manager is shutdown
         if self.state.is_shutdown.load(Ordering::SeqCst) {
@@ -706,7 +805,20 @@ impl TransactionManager {
         self.prune_completed_transactions();
     }
 
-    /// Performs garbage collection.
+    /// Performs garbage collection of old tuple versions.
+    ///
+    /// This method removes undo links and version information that are no longer
+    /// visible to any active transaction. It uses the current watermark (the
+    /// minimum read timestamp of all active transactions) to determine what
+    /// can be safely removed.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Get the current watermark.
+    /// 2. For each page's version info, remove undo links pointing to
+    ///    transactions with timestamps below the watermark.
+    /// 3. Remove empty page version info entries.
+    /// 4. Prune completed transactions that are no longer needed.
     pub fn garbage_collection(&self) {
         let watermark = self.get_watermark();
         let mut version_info = self.state.version_info.write();
@@ -784,6 +896,24 @@ impl TransactionManager {
             .and_then(|page_info| page_info.get_link(&rid))
     }
 
+    /// Updates a tuple and tracks the modification in the transaction's write set.
+    ///
+    /// This method validates that the transaction is in a valid state before
+    /// allowing the update, then records the modification in the write set
+    /// for later commit processing.
+    ///
+    /// # Parameters
+    ///
+    /// - `table_heap`: The table heap containing the tuple.
+    /// - `_meta`: The tuple metadata (currently unused).
+    /// - `_tuple`: The tuple being updated (currently unused).
+    /// - `rid`: The record ID of the tuple.
+    /// - `txn_ctx`: Optional transaction context.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the update tracking succeeded, or `Err` if the transaction
+    /// is not in a valid state.
     pub fn update_tuple(
         &self,
         table_heap: &TableHeap,
@@ -810,6 +940,20 @@ impl TransactionManager {
         Ok(())
     }
 
+    /// Gets a tuple along with its undo link for version traversal.
+    ///
+    /// This is a convenience method that retrieves both the current tuple
+    /// data and the undo link needed to traverse the version chain.
+    ///
+    /// # Parameters
+    ///
+    /// - `table_heap`: The table heap containing the tuple.
+    /// - `rid`: The record ID of the tuple.
+    /// - `lock_manager`: The lock manager for creating a transaction context.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (metadata, tuple data, optional undo link).
     pub fn get_tuple_and_undo_link(
         &self,
         table_heap: &TableHeap,
@@ -904,32 +1048,68 @@ impl TransactionManager {
         })
     }
 
-    /// Gets the lowest read timestamp in the system.
+    /// Gets the lowest read timestamp in the system (the watermark).
+    ///
+    /// The watermark represents the oldest read timestamp among all active
+    /// transactions. Versions older than this can be safely garbage collected.
     ///
     /// # Returns
-    /// The watermark.
+    ///
+    /// The current watermark timestamp.
     pub fn get_watermark(&self) -> Timestamp {
         self.state.running_txns.read().get_watermark()
     }
 
-    /// Gets the running transactions watermark
+    /// Gets a clone of the running transactions watermark.
+    ///
+    /// # Returns
+    ///
+    /// A copy of the `Watermark` tracking active transactions.
     pub fn get_running_transactions(&self) -> Watermark {
         self.state.running_txns.read().clone_watermark()
     }
 
+    /// Gets a transaction by its ID.
+    ///
+    /// # Parameters
+    ///
+    /// - `txn_id`: The transaction ID to look up.
+    ///
+    /// # Returns
+    ///
+    /// The transaction if found, or `None` if no transaction with that ID exists.
     pub fn get_transaction(&self, txn_id: &TxnId) -> Option<Arc<Transaction>> {
         self.state.txn_map.read().get(txn_id).cloned()
     }
 
+    /// Gets all transactions currently tracked by the manager.
+    ///
+    /// This includes both active and recently-completed transactions
+    /// that haven't been pruned yet.
+    ///
+    /// # Returns
+    ///
+    /// A vector of all tracked transactions.
     pub fn get_transactions(&self) -> Vec<Arc<Transaction>> {
         self.state.txn_map.read().values().cloned().collect()
     }
 
+    /// Gets the count of transactions currently tracked by the manager.
+    ///
+    /// # Returns
+    ///
+    /// The number of tracked transactions.
     pub fn get_active_transaction_count(&self) -> usize {
         self.get_transactions().len()
     }
 
-    /// Removes completed transactions whose versions are no longer visible to active readers.
+    /// Removes completed transactions whose versions are no longer visible.
+    ///
+    /// Uses the watermark to determine which transactions can be safely
+    /// removed. Transactions are retained if:
+    /// - They are still running or tainted.
+    /// - They are committed with a timestamp >= watermark.
+    /// - They are aborted with a read timestamp >= watermark.
     fn prune_completed_transactions(&self) {
         let watermark = self.get_watermark();
         let mut txn_map = self.state.txn_map.write();
@@ -945,7 +1125,20 @@ impl TransactionManager {
         });
     }
 
-    /// Gets the undo link for a specific transaction
+    /// Gets the undo link for a specific RID that belongs to a specific transaction.
+    ///
+    /// This is useful when you need to find the undo link created by a
+    /// particular transaction.
+    ///
+    /// # Parameters
+    ///
+    /// - `rid`: The record ID.
+    /// - `txn_id`: The transaction ID to filter by.
+    ///
+    /// # Returns
+    ///
+    /// The undo link if one exists for this RID and was created by the
+    /// specified transaction, or `None` otherwise.
     pub fn get_undo_link_for_txn(&self, rid: RID, txn_id: TxnId) -> Option<UndoLink> {
         let version_info = self.state.version_info.read();
         version_info.get(&rid.get_page_id()).and_then(|page_info| {
@@ -958,12 +1151,28 @@ impl TransactionManager {
         })
     }
 
-    // Add method to register table heaps
+    /// Registers a transactional table heap with the transaction manager.
+    ///
+    /// Registered table heaps are used during rollback operations to
+    /// restore tuple data from undo logs.
+    ///
+    /// # Parameters
+    ///
+    /// - `table_heap`: The transactional table heap to register.
     pub fn register_table(&self, table_heap: Arc<TransactionalTableHeap>) {
         let mut table_heaps = self.state.table_heaps.write();
         table_heaps.insert(table_heap.get_table_oid(), table_heap);
     }
 
+    /// Gets a registered table heap by its OID.
+    ///
+    /// # Parameters
+    ///
+    /// - `table_oid`: The table OID to look up.
+    ///
+    /// # Returns
+    ///
+    /// The table heap if registered, or `None` otherwise.
     fn get_table_heap(&self, table_oid: TableOidT) -> Option<Arc<TransactionalTableHeap>> {
         self.state.table_heaps.read().get(&table_oid).cloned()
     }

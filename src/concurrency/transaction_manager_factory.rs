@@ -151,14 +151,36 @@ use std::sync::Arc;
 /// transitions with WAL logging, buffer flush of pages dirtied by the txn,
 /// and lock release via LockManager. Keeps TransactionManager focused on
 /// state/MVCC while centralizing I/O and synchronization concerns here.
+///
+/// # Thread Safety
+///
+/// All internal components are wrapped in `Arc` for safe concurrent access.
+/// The factory itself is designed to be shared across multiple execution threads.
 pub struct TransactionManagerFactory {
+    /// The underlying transaction manager for state transitions and MVCC logic.
     transaction_manager: Arc<TransactionManager>,
+    /// The lock manager for 2PL lock acquisition and release.
     lock_manager: Arc<LockManager>,
+    /// The buffer pool manager for page I/O and dirty page flushing.
     buffer_pool_manager: Arc<BufferPoolManager>,
+    /// Optional WAL manager for write-ahead logging (enables crash recovery).
     wal_manager: Option<Arc<WALManager>>,
 }
 
 impl TransactionManagerFactory {
+    /// Creates a new `TransactionManagerFactory` without WAL support.
+    ///
+    /// This constructor is primarily intended for testing scenarios where
+    /// crash recovery is not required. It creates fresh `TransactionManager`
+    /// and `LockManager` instances internally.
+    ///
+    /// # Parameters
+    ///
+    /// * `buffer_pool_manager` - The buffer pool manager for page I/O.
+    ///
+    /// # Returns
+    ///
+    /// A new `TransactionManagerFactory` instance without WAL logging.
     pub fn new(buffer_pool_manager: Arc<BufferPoolManager>) -> Self {
         let transaction_manager = Arc::new(TransactionManager::new());
         let lock_manager = Arc::new(LockManager::new());
@@ -171,6 +193,19 @@ impl TransactionManagerFactory {
         }
     }
 
+    /// Creates a new `TransactionManagerFactory` with WAL support.
+    ///
+    /// This constructor creates a fresh `TransactionManager` internally
+    /// and associates it with the provided WAL manager for crash recovery.
+    ///
+    /// # Parameters
+    ///
+    /// * `buffer_pool_manager` - The buffer pool manager for page I/O.
+    /// * `wal_manager` - The WAL manager for write-ahead logging.
+    ///
+    /// # Returns
+    ///
+    /// A new `TransactionManagerFactory` instance with WAL logging enabled.
     pub fn with_wal_manager(
         buffer_pool_manager: Arc<BufferPoolManager>,
         wal_manager: Arc<WALManager>,
@@ -183,8 +218,21 @@ impl TransactionManagerFactory {
         )
     }
 
-    /// Build a factory using an externally supplied TransactionManager so catalog
-    /// registration and transaction lifecycle share the same instance.
+    /// Creates a `TransactionManagerFactory` with an externally supplied `TransactionManager`.
+    ///
+    /// This constructor allows the catalog and transaction lifecycle to share
+    /// the same `TransactionManager` instance, which is necessary when the catalog
+    /// needs to register pages or perform operations during transaction recovery.
+    ///
+    /// # Parameters
+    ///
+    /// * `buffer_pool_manager` - The buffer pool manager for page I/O.
+    /// * `wal_manager` - The WAL manager for write-ahead logging.
+    /// * `transaction_manager` - The externally created transaction manager to use.
+    ///
+    /// # Returns
+    ///
+    /// A new `TransactionManagerFactory` instance using the provided transaction manager.
     pub fn with_wal_manager_and_txn(
         buffer_pool_manager: Arc<BufferPoolManager>,
         wal_manager: Arc<WALManager>,
@@ -202,6 +250,20 @@ impl TransactionManagerFactory {
         }
     }
 
+    /// Begins a new transaction with the specified isolation level.
+    ///
+    /// This method:
+    /// 1. Creates a new transaction via the underlying `TransactionManager`.
+    /// 2. Writes a BEGIN record to the WAL (if WAL is enabled).
+    /// 3. Wraps the transaction in a `TransactionContext` with access to the lock manager.
+    ///
+    /// # Parameters
+    ///
+    /// * `isolation_level` - The isolation level for the new transaction.
+    ///
+    /// # Returns
+    ///
+    /// An `Arc<TransactionContext>` representing the new transaction.
     pub fn begin_transaction(&self, isolation_level: IsolationLevel) -> Arc<TransactionContext> {
         let txn = self.transaction_manager.begin(isolation_level).unwrap();
 
@@ -218,6 +280,26 @@ impl TransactionManagerFactory {
         ))
     }
 
+    /// Commits a transaction, persisting all changes durably.
+    ///
+    /// This method implements the WAL-first commit protocol:
+    /// 1. Writes a COMMIT record to the WAL (if enabled).
+    /// 2. Transitions the transaction state to committed via `TransactionManager`.
+    /// 3. Flushes all dirty pages modified by the transaction to disk.
+    /// 4. Releases all locks held by the transaction (Strict 2PL).
+    ///
+    /// # Parameters
+    ///
+    /// * `ctx` - The transaction context to commit.
+    ///
+    /// # Returns
+    ///
+    /// * `true` if the transaction committed successfully.
+    /// * `false` if the commit failed (e.g., due to page flush errors or state transition failure).
+    ///
+    /// # Note
+    ///
+    /// Locks are released on both success and failure to prevent resource leaks.
     pub async fn commit_transaction(&self, ctx: Arc<TransactionContext>) -> bool {
         let txn = ctx.get_transaction();
 
@@ -275,6 +357,16 @@ impl TransactionManagerFactory {
         true
     }
 
+    /// Aborts a transaction, rolling back all changes.
+    ///
+    /// This method:
+    /// 1. Writes an ABORT record to the WAL (if enabled).
+    /// 2. Reverts all changes via the `TransactionManager` (using undo logs).
+    /// 3. Releases all locks held by the transaction.
+    ///
+    /// # Parameters
+    ///
+    /// * `ctx` - The transaction context to abort.
     pub fn abort_transaction(&self, ctx: Arc<TransactionContext>) {
         let txn = ctx.get_transaction();
 
@@ -295,10 +387,18 @@ impl TransactionManagerFactory {
         }
     }
 
+    /// Returns a reference to the lock manager.
+    ///
+    /// This is used by components that need to acquire locks directly
+    /// (e.g., executors during query processing).
     pub fn get_lock_manager(&self) -> Arc<LockManager> {
         self.lock_manager.clone()
     }
 
+    /// Returns a reference to the underlying transaction manager.
+    ///
+    /// This is used by components that need to inspect transaction state
+    /// or register pages with the catalog during recovery.
     pub fn get_transaction_manager(&self) -> Arc<TransactionManager> {
         self.transaction_manager.clone()
     }

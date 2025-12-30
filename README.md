@@ -6,9 +6,11 @@
 
 # Ferrite
 
-**A Rust-native database management system built on proven DBMS techniques.**
+**The smallest, clearest, well-documented OLTP engine to demonstrate modern Rust concurrency and recovery design.**
 
-Ferrite combines decades of database research with Rust's memory safety and performance guarantees to deliver a reliable, high-performance storage engine. Built with the rigor of academic database systems and the ergonomics of modern Rust.
+Ferrite is an end-to-end OLTP DBMS implementation focused on *clarity over completeness* and *evidence over claims*: readable code, tight docs, and reproducible demonstrations of concurrency control and ARIES-style crash recovery.
+
+If you want a feature-complete production database, Ferrite is not that. If you want a DBMS you can understand, modify, and learn from, Ferrite is for you.
 
 ---
 
@@ -31,6 +33,12 @@ Ferrite combines decades of database research with Rust's memory safety and perf
 - ⚡ **Async I/O** — Tokio-powered async execution with backpressure
 - 🔒 **Robust Concurrency** — `parking_lot` locks, MVCC-ready watermarks
 - 🗄️ **Flexible Deployment** — Embedded library or client-server modes
+
+### Project Focus (read this first)
+
+- **Mission**: be the *smallest*, *clearest*, *well-documented* OLTP engine that demonstrates modern Rust concurrency + recovery.
+- **Non-goals**: distributed consensus, Postgres compatibility, full SQL coverage, and “chase every benchmark.”
+- **Evidence**: runnable crash-recovery demos + tests you can reproduce locally.
 
 ### Supported SQL Features
 
@@ -281,6 +289,9 @@ Ferrite follows a classic layered database architecture:
 | [BENCHMARKING.md](docs/BENCHMARKING.md) | Performance benchmarking guide |
 | [PERFORMANCE_TESTS.md](docs/PERFORMANCE_TESTS.md) | Performance testing methodology |
 | [ZERO_COPY_ARCHITECTURE.md](docs/ZERO_COPY_ARCHITECTURE.md) | Zero-copy I/O design details |
+| [VISION.md](docs/VISION.md) | Project mission, principles, and target audience |
+| [NON_GOALS.md](docs/NON_GOALS.md) | Explicit “what we’re not building” to keep scope sane |
+| [EVIDENCE.md](docs/EVIDENCE.md) | Reproducible demos + what Ferrite claims (and proves) |
 
 ### Module Structure
 

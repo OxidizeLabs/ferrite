@@ -260,24 +260,49 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// LogRecoveryManager is responsible for recovering the database from log records
-/// after a crash. It follows the ARIES recovery protocol:
-/// 1. Analysis phase: Identify active transactions at time of crash
-/// 2. Redo phase: Replay all actions, even for aborted transactions
-/// 3. Undo phase: Reverse actions of uncommitted transactions
+/// Orchestrates the ARIES recovery protocol to restore the database to a
+/// consistent state after a crash.
+///
+/// The recovery process consists of three phases:
+/// 1. **Analysis**: Scan the WAL to identify active transactions and dirty pages at crash time
+/// 2. **Redo**: Replay all logged operations to bring pages to their crash-time state
+/// 3. **Undo**: Roll back uncommitted transactions by reversing their operations
+///
+/// See the module-level documentation for detailed architecture and examples.
+///
+/// # Thread Safety
+///
+/// Recovery runs single-threaded during startup before normal database operations begin.
+/// Internal access to `LogManager` is protected by `RwLock`.
 pub struct LogRecoveryManager {
+    /// Async disk manager for reading WAL records and database pages.
     disk_manager: Arc<AsyncDiskManager>,
+    /// Log manager for LSN tracking and record parsing.
     log_manager: Arc<RwLock<LogManager>>,
+    /// Buffer pool manager for fetching and modifying pages during redo/undo.
     bpm: Arc<BufferPoolManager>,
 }
 
-/// Keeps track of active transactions during recovery
+/// Tracks active transactions during recovery.
+///
+/// Built during the analysis phase by scanning the WAL. Transactions are added
+/// on `BEGIN` records and removed on `COMMIT`/`ABORT` records. After analysis,
+/// any transactions remaining in this table were active at crash time and need
+/// to be undone.
+///
+/// Maps `TxnId` to the last LSN processed for that transaction.
 struct TxnTable {
+    /// Map of transaction ID to its last observed LSN.
     table: HashMap<TxnId, Lsn>,
 }
 
-/// Keeps track of dirty pages during recovery for efficient checkpointing
+/// Tracks dirty pages during recovery for efficient redo decisions.
+///
+/// Built during the analysis phase. Each entry maps a page ID to its "recovery LSN"
+/// (RecLSN) - the LSN of the first log record that dirtied the page. During redo,
+/// operations are only applied if the record's LSN >= the page's RecLSN.
 struct DirtyPageTable {
+    /// Map of page ID to its recovery LSN (first LSN that dirtied the page).
     table: HashMap<PageId, Lsn>,
 }
 
@@ -746,54 +771,115 @@ impl LogRecoveryManager {
 }
 
 impl TxnTable {
+    /// Creates an empty transaction table.
     fn new() -> Self {
         Self {
             table: HashMap::new(),
         }
     }
 
+    /// Adds a new transaction to the table (called on BEGIN records).
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID to add.
+    /// - `lsn`: The LSN of the BEGIN record.
     fn add_txn(&mut self, txn_id: TxnId, lsn: Lsn) {
         self.table.insert(txn_id, lsn);
     }
 
+    /// Updates the last LSN for a transaction (called on data operation records).
+    ///
+    /// Also adds the transaction if not already present, ensuring transactions
+    /// with only data operation records (no explicit BEGIN) are still tracked.
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID to update.
+    /// - `lsn`: The LSN of the current log record.
     fn update_txn(&mut self, txn_id: TxnId, lsn: Lsn) {
         // Always update or add the transaction to the table
         // This ensures transactions with only update records are still tracked
         self.table.insert(txn_id, lsn);
     }
 
+    /// Removes a transaction from the table (called on COMMIT/ABORT records).
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID to remove.
     fn remove_txn(&mut self, txn_id: TxnId) {
         self.table.remove(&txn_id);
     }
 
+    /// Checks if a transaction is currently in the table.
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID to check.
+    ///
+    /// # Returns
+    /// `true` if the transaction is present, `false` otherwise.
     fn contains_txn(&self, txn_id: TxnId) -> bool {
         self.table.contains_key(&txn_id)
     }
 
+    /// Gets the last LSN for a transaction.
+    ///
+    /// Used during undo to find the starting point for walking the prev_lsn chain.
+    ///
+    /// # Parameters
+    /// - `txn_id`: The transaction ID to look up.
+    ///
+    /// # Returns
+    /// The last LSN for the transaction, or `None` if not found.
     fn get_prev_lsn(&self, txn_id: TxnId) -> Option<Lsn> {
         self.table.get(&txn_id).copied()
     }
 
+    /// Returns a list of all transaction IDs currently in the table.
+    ///
+    /// After analysis, this represents the transactions that were active at crash
+    /// time and need to be undone.
     fn get_active_txns(&self) -> Vec<TxnId> {
         self.table.keys().copied().collect()
     }
 }
 
 impl DirtyPageTable {
+    /// Creates an empty dirty page table.
     fn new() -> Self {
         Self {
             table: HashMap::new(),
         }
     }
 
+    /// Adds a page to the dirty table if not already present.
+    ///
+    /// The first LSN that dirtied the page is recorded as the RecLSN.
+    /// Subsequent calls for the same page are ignored to preserve the
+    /// original RecLSN.
+    ///
+    /// # Parameters
+    /// - `page_id`: The page ID to add.
+    /// - `lsn`: The LSN of the log record that dirtied the page.
     fn add_page(&mut self, page_id: PageId, lsn: Lsn) {
         self.table.entry(page_id).or_insert(lsn);
     }
 
+    /// Gets the recovery LSN (RecLSN) for a page.
+    ///
+    /// The RecLSN is the LSN of the first log record that dirtied the page.
+    /// Used during redo to determine if an operation needs to be replayed.
+    ///
+    /// # Parameters
+    /// - `page_id`: The page ID to look up.
+    ///
+    /// # Returns
+    /// The RecLSN for the page, or `None` if the page is not in the table.
     fn get_rec_lsn(&self, page_id: PageId) -> Option<Lsn> {
         self.table.get(&page_id).copied()
     }
 
+    /// Returns all dirty pages and their RecLSNs.
+    ///
+    /// Primarily used for debugging and logging during recovery.
     fn get_dirty_pages(&self) -> Vec<(PageId, Lsn)> {
         self.table.iter().map(|(&pid, &lsn)| (pid, lsn)).collect()
     }

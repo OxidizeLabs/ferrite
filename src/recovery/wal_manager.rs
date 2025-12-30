@@ -144,15 +144,45 @@ use std::sync::Arc;
 ///
 /// Wraps `LogManager` to provide a transaction-oriented API for creating
 /// and appending log records for BEGIN, COMMIT, ABORT, and UPDATE operations.
+///
+/// See the module-level documentation for architecture diagrams and examples.
+///
+/// # Thread Safety
+///
+/// The internal `LogManager` is protected by `RwLock` for concurrent access.
+/// Write operations acquire an exclusive lock briefly, and commit durability
+/// waiting happens outside the lock to avoid blocking other transactions.
 pub struct WALManager {
+    /// The underlying log manager that handles low-level record appending and flushing.
     log_manager: Arc<RwLock<LogManager>>,
 }
 
 impl WALManager {
+    /// Creates a new `WALManager` wrapping the given log manager.
+    ///
+    /// # Parameters
+    /// - `log_manager`: An `Arc<RwLock<LogManager>>` for the underlying logging operations.
+    ///
+    /// # Returns
+    /// A new `WALManager` instance.
     pub fn new(log_manager: Arc<RwLock<LogManager>>) -> Self {
         Self { log_manager }
     }
 
+    /// Writes a COMMIT record to the WAL for the given transaction.
+    ///
+    /// This method **blocks** until the log record is durably written to disk,
+    /// ensuring the transaction's changes are persistent before returning.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction to commit.
+    ///
+    /// # Returns
+    /// The LSN assigned to the commit record.
+    ///
+    /// # Note
+    /// The caller should have set `txn.prev_lsn` to the LSN of the last
+    /// operation in the transaction before calling this method.
     pub fn write_commit_record(&self, txn: &Transaction) -> u64 {
         let commit_record = Arc::new(LogRecord::new_transaction_record(
             txn.get_transaction_id(),
@@ -163,6 +193,16 @@ impl WALManager {
         log_manager.append_log_record(commit_record)
     }
 
+    /// Writes an ABORT record to the WAL for the given transaction.
+    ///
+    /// Unlike commit records, abort records do **not** block waiting for
+    /// durability since the transaction's changes will be rolled back anyway.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction to abort.
+    ///
+    /// # Returns
+    /// The LSN assigned to the abort record.
     pub fn write_abort_record(&self, txn: &Transaction) -> u64 {
         let abort_record = Arc::new(LogRecord::new_transaction_record(
             txn.get_transaction_id(),
@@ -173,6 +213,18 @@ impl WALManager {
         log_manager.append_log_record(abort_record)
     }
 
+    /// Writes a BEGIN record to the WAL for the given transaction.
+    ///
+    /// This should be the first WAL record written for a new transaction.
+    /// The `prev_lsn` is set to `INVALID_LSN` since there are no prior
+    /// operations in this transaction.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction that is beginning.
+    ///
+    /// # Returns
+    /// The LSN assigned to the begin record. The caller should save this
+    /// as `txn.prev_lsn` for linking subsequent records.
     pub fn write_begin_record(&self, txn: &Transaction) -> u64 {
         let begin_record = Arc::new(LogRecord::new_transaction_record(
             txn.get_transaction_id(),
@@ -183,6 +235,19 @@ impl WALManager {
         log_manager.append_log_record(begin_record)
     }
 
+    /// Writes an UPDATE record to the WAL for a tuple modification.
+    ///
+    /// Captures both the old and new tuple values for redo/undo during recovery.
+    ///
+    /// # Parameters
+    /// - `txn`: The transaction performing the update.
+    /// - `rid`: The record ID of the tuple being updated.
+    /// - `old_tuple`: The tuple's values before the update (for undo).
+    /// - `new_tuple`: The tuple's values after the update (for redo).
+    ///
+    /// # Returns
+    /// The LSN assigned to the update record. The caller should save this
+    /// as `txn.prev_lsn` for linking subsequent records.
     pub fn write_update_record(
         &self,
         txn: &Transaction,
@@ -202,6 +267,13 @@ impl WALManager {
         log_manager.append_log_record(update_record)
     }
 
+    /// Forces the log manager's background flush thread to start.
+    ///
+    /// This is typically called during database initialization to ensure
+    /// the flush thread is running before any transactions begin.
+    ///
+    /// # Panics
+    /// Panics if the flush thread is already running.
     pub fn force_run_flush_thread(&self) {
         let mut log_manager_write_guard = self.log_manager.write();
         log_manager_write_guard.run_flush_thread()

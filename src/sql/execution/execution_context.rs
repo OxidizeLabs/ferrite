@@ -182,147 +182,236 @@ use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-// Type aliases for complex types
+/// A pair of executors used for nested-loop join optimization checks.
+///
+/// Each pair represents the left and right sides of a potential join operation.
+/// Both executors are wrapped in `Arc<Mutex<>>` for thread-safe shared access.
 type ExecutorPair = (Arc<Mutex<ExecutorType>>, Arc<Mutex<ExecutorType>>);
+
+/// Queue of executor pairs for nested-loop join (NLJ) optimization validation.
+///
+/// During query optimization, potential NLJ operations are queued here for
+/// runtime verification that the chosen join strategy is efficient.
 type NLJCheckExecSet = VecDeque<ExecutorPair>;
 
-/// Type-safe, thread-safe executor enum that eliminates dynamic dispatch
+/// Type-safe executor enum that provides zero-overhead dispatch to concrete executor implementations.
+///
+/// This enum wraps all executor types in the system, enabling direct function calls
+/// via pattern matching instead of dynamic dispatch through vtables. This approach
+/// provides better performance at the cost of slightly larger binary size.
+///
+/// # Design Rationale
+///
+/// Using an enum instead of `Box<dyn AbstractExecutor>` provides:
+/// - **Zero dispatch cost**: Direct function calls via match
+/// - **Stack allocation**: No heap allocation for the enum itself
+/// - **Compile-time safety**: All variants known at compile time
+/// - **Native pattern matching**: Easy type inspection and handling
+///
+/// # Thread Safety
+///
+/// All variants are thread-safe, and the enum itself implements `Send + Sync`.
 pub enum ExecutorType {
+    /// Executor for aggregate operations (COUNT, SUM, AVG, etc.).
     Aggregation(AggregationExecutor),
+    /// Executor for utility commands (SET, SHOW, EXPLAIN).
     Command(CommandExecutor),
+    /// Executor for COMMIT TRANSACTION statements.
     CommitTransaction(CommitTransactionExecutor),
+    /// Executor for CREATE INDEX statements.
     CreateIndex(CreateIndexExecutor),
+    /// Executor for CREATE TABLE statements.
     CreateTable(CreateTableExecutor),
+    /// Executor for DELETE statements.
     Delete(DeleteExecutor),
+    /// Executor for WHERE clause filtering.
     Filter(FilterExecutor),
+    /// Executor for hash-based join operations.
     HashJoin(HashJoinExecutor),
+    /// Executor for index-based scans.
     IndexScan(IndexScanExecutor),
+    /// Executor for INSERT statements.
     Insert(InsertExecutor),
+    /// Executor for LIMIT clause processing.
     Limit(LimitExecutor),
+    /// Mock executor for testing purposes.
     Mock(MockExecutor),
+    /// Mock scan executor for testing purposes.
     MockScan(MockScanExecutor),
+    /// Executor for index-nested-loop joins.
     NestedIndexJoin(NestedIndexJoinExecutor),
+    /// Executor for nested-loop joins without index.
     NestedLoopJoin(NestedLoopJoinExecutor),
+    /// Executor for SELECT column projections.
     Projection(ProjectionExecutor),
+    /// Executor for ROLLBACK TRANSACTION statements.
     RollbackTransaction(RollbackTransactionExecutor),
+    /// Executor for sequential full-table scans.
     SeqScan(SeqScanExecutor),
+    /// Executor for ORDER BY sorting.
     Sort(SortExecutor),
+    /// Executor for BEGIN TRANSACTION statements.
     StartTransaction(StartTransactionExecutor),
+    /// Executor for table scans with predicate pushdown.
     TableScan(TableScanExecutor),
+    /// Executor for ORDER BY ... LIMIT N (top-N) queries.
     TopN(TopNExecutor),
+    /// Executor for top-N within groups (window-like behavior).
     TopNPerGroup(TopNPerGroupExecutor),
+    /// Executor for UPDATE statements.
     Update(UpdateExecutor),
+    /// Executor for VALUES clauses in INSERT statements.
     Values(ValuesExecutor),
+    /// Executor for window functions (ROW_NUMBER, RANK, etc.).
     Window(WindowExecutor),
 }
 
 impl ExecutorType {
-    /// Constructor methods for each executor type
+    // ==================== Constructor Methods ====================
+    //
+    // Factory methods for wrapping concrete executor instances into the enum.
+    // Each method takes ownership of the executor and returns an `ExecutorType`.
+
+    /// Wraps an `AggregationExecutor` into the enum.
     pub fn from_aggregation(executor: AggregationExecutor) -> Self {
         ExecutorType::Aggregation(executor)
     }
 
+    /// Wraps a `CommandExecutor` into the enum.
     pub fn from_command(executor: CommandExecutor) -> Self {
         ExecutorType::Command(executor)
     }
 
+    /// Wraps a `CommitTransactionExecutor` into the enum.
     pub fn from_commit_transaction(executor: CommitTransactionExecutor) -> Self {
         ExecutorType::CommitTransaction(executor)
     }
 
+    /// Wraps a `CreateIndexExecutor` into the enum.
     pub fn from_create_index(executor: CreateIndexExecutor) -> Self {
         ExecutorType::CreateIndex(executor)
     }
 
+    /// Wraps a `CreateTableExecutor` into the enum.
     pub fn from_create_table(executor: CreateTableExecutor) -> Self {
         ExecutorType::CreateTable(executor)
     }
 
+    /// Wraps a `DeleteExecutor` into the enum.
     pub fn from_delete(executor: DeleteExecutor) -> Self {
         ExecutorType::Delete(executor)
     }
 
+    /// Wraps a `FilterExecutor` into the enum.
     pub fn from_filter(executor: FilterExecutor) -> Self {
         ExecutorType::Filter(executor)
     }
 
+    /// Wraps a `HashJoinExecutor` into the enum.
     pub fn from_hash_join(executor: HashJoinExecutor) -> Self {
         ExecutorType::HashJoin(executor)
     }
 
+    /// Wraps an `IndexScanExecutor` into the enum.
     pub fn from_index_scan(executor: IndexScanExecutor) -> Self {
         ExecutorType::IndexScan(executor)
     }
 
+    /// Wraps an `InsertExecutor` into the enum.
     pub fn from_insert(executor: InsertExecutor) -> Self {
         ExecutorType::Insert(executor)
     }
 
+    /// Wraps a `LimitExecutor` into the enum.
     pub fn from_limit(executor: LimitExecutor) -> Self {
         ExecutorType::Limit(executor)
     }
 
+    /// Wraps a `MockExecutor` into the enum (for testing).
     pub fn from_mock(executor: MockExecutor) -> Self {
         ExecutorType::Mock(executor)
     }
 
+    /// Wraps a `MockScanExecutor` into the enum (for testing).
     pub fn from_mock_scan(executor: MockScanExecutor) -> Self {
         ExecutorType::MockScan(executor)
     }
 
+    /// Wraps a `NestedIndexJoinExecutor` into the enum.
     pub fn from_nested_index_join(executor: NestedIndexJoinExecutor) -> Self {
         ExecutorType::NestedIndexJoin(executor)
     }
 
+    /// Wraps a `NestedLoopJoinExecutor` into the enum.
     pub fn from_nested_loop_join(executor: NestedLoopJoinExecutor) -> Self {
         ExecutorType::NestedLoopJoin(executor)
     }
 
+    /// Wraps a `ProjectionExecutor` into the enum.
     pub fn from_projection(executor: ProjectionExecutor) -> Self {
         ExecutorType::Projection(executor)
     }
 
+    /// Wraps a `RollbackTransactionExecutor` into the enum.
     pub fn from_rollback_transaction(executor: RollbackTransactionExecutor) -> Self {
         ExecutorType::RollbackTransaction(executor)
     }
 
+    /// Wraps a `SeqScanExecutor` into the enum.
     pub fn from_seq_scan(executor: SeqScanExecutor) -> Self {
         ExecutorType::SeqScan(executor)
     }
 
+    /// Wraps a `SortExecutor` into the enum.
     pub fn from_sort(executor: SortExecutor) -> Self {
         ExecutorType::Sort(executor)
     }
 
+    /// Wraps a `StartTransactionExecutor` into the enum.
     pub fn from_start_transaction(executor: StartTransactionExecutor) -> Self {
         ExecutorType::StartTransaction(executor)
     }
 
+    /// Wraps a `TableScanExecutor` into the enum.
     pub fn from_table_scan(executor: TableScanExecutor) -> Self {
         ExecutorType::TableScan(executor)
     }
 
+    /// Wraps a `TopNExecutor` into the enum.
     pub fn from_topn(executor: TopNExecutor) -> Self {
         ExecutorType::TopN(executor)
     }
 
+    /// Wraps a `TopNPerGroupExecutor` into the enum.
     pub fn from_topn_per_group(executor: TopNPerGroupExecutor) -> Self {
         ExecutorType::TopNPerGroup(executor)
     }
 
+    /// Wraps an `UpdateExecutor` into the enum.
     pub fn from_update(executor: UpdateExecutor) -> Self {
         ExecutorType::Update(executor)
     }
 
+    /// Wraps a `ValuesExecutor` into the enum.
     pub fn from_values(executor: ValuesExecutor) -> Self {
         ExecutorType::Values(executor)
     }
 
+    /// Wraps a `WindowExecutor` into the enum.
     pub fn from_window(executor: WindowExecutor) -> Self {
         ExecutorType::Window(executor)
     }
 
-    /// Execute the init method on the wrapped executor
+    // ==================== Executor Interface Methods ====================
+    //
+    // These methods delegate to the corresponding methods on the wrapped executor,
+    // implementing the Volcano-style iterator model (init/next pattern).
+
+    /// Initializes the executor, preparing it for tuple iteration.
+    ///
+    /// This method must be called before the first call to [`next()`](Self::next).
+    /// It performs any necessary setup such as opening child executors, building
+    /// hash tables, or sorting data.
     pub fn init(&mut self) {
         match self {
             ExecutorType::Aggregation(executor) => executor.init(),
@@ -354,7 +443,17 @@ impl ExecutorType {
         }
     }
 
-    /// Execute the next method on the wrapped executor
+    /// Returns the next tuple from the executor, or `None` if exhausted.
+    ///
+    /// This is the core iteration method in the Volcano model. Each call pulls
+    /// one tuple from the executor tree. The executor may in turn pull from
+    /// child executors to produce the result.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - The next tuple and its record ID
+    /// * `Ok(None)` - No more tuples available (executor exhausted)
+    /// * `Err(DBError)` - An error occurred during execution
     pub fn next(
         &mut self,
     ) -> Result<
@@ -394,7 +493,11 @@ impl ExecutorType {
         }
     }
 
-    /// Get the output schema from the wrapped executor
+    /// Returns the output schema describing the tuples produced by this executor.
+    ///
+    /// The schema defines the column names, types, and order of values in each
+    /// tuple returned by [`next()`](Self::next). This is used for result formatting
+    /// and for child executors to understand their input schema.
     pub fn get_output_schema(&self) -> &crate::catalog::schema::Schema {
         match self {
             ExecutorType::Aggregation(executor) => executor.get_output_schema(),
@@ -426,7 +529,11 @@ impl ExecutorType {
         }
     }
 
-    /// Get the executor context from the wrapped executor
+    /// Returns the execution context shared by all executors in the tree.
+    ///
+    /// The context provides access to shared resources (buffer pool, catalog,
+    /// transaction) needed during query execution. All executors in a query
+    /// tree share the same context.
     pub fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         match self {
             ExecutorType::Aggregation(executor) => executor.get_executor_context(),
@@ -459,21 +566,91 @@ impl ExecutorType {
     }
 }
 
-// Automatically implement Send + Sync for ExecutorType if all variants support it
+// SAFETY: All executor variants contain only `Send + Sync` types:
+// - `Arc<T>` where T: Send + Sync
+// - `parking_lot::RwLock<T>` (Send + Sync when T is)
+// - Primitive types and standard library thread-safe containers
+//
+// This enables `ExecutorType` to be shared across threads when wrapped
+// in appropriate synchronization primitives (e.g., `Arc<Mutex<ExecutorType>>`).
 unsafe impl Send for ExecutorType {}
 unsafe impl Sync for ExecutorType {}
 
+/// Shared execution state container for query processing.
+///
+/// The `ExecutionContext` holds all runtime state needed during query execution,
+/// including access to the buffer pool, catalog, and current transaction. It is
+/// shared (via `Arc<RwLock<>>`) among all executors in a query tree.
+///
+/// # Responsibilities
+///
+/// - **Resource Access**: Provides access to buffer pool and catalog
+/// - **Transaction State**: Maintains current transaction context
+/// - **Optimization Hints**: Stores runtime optimization options
+/// - **Operation Flags**: Tracks special operation modes (DELETE, chaining)
+///
+/// # Thread Safety
+///
+/// The context is designed to be shared across threads using `Arc<RwLock<ExecutionContext>>`.
+/// Internal fields use appropriate synchronization primitives.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let ctx = ExecutionContext::new(
+///     buffer_pool_manager.clone(),
+///     catalog.clone(),
+///     transaction_context.clone(),
+/// );
+///
+/// // Access resources
+/// let bpm = ctx.get_buffer_pool_manager();
+/// let catalog = ctx.get_catalog();
+/// ```
 pub struct ExecutionContext {
+    /// Buffer pool manager for page-level I/O operations.
     buffer_pool_manager: Arc<BufferPoolManager>,
+
+    /// Catalog containing schema metadata for all tables and indexes.
     catalog: Arc<RwLock<Catalog>>,
+
+    /// Current transaction context with lock manager and transaction state.
     transaction_context: Arc<TransactionContext>,
+
+    /// Queue of executor pairs for nested-loop join optimization checks.
     nlj_check_exec_set: NLJCheckExecSet,
+
+    /// Runtime optimization flags controlling query execution behavior.
     check_options: Arc<CheckOptions>,
+
+    /// Flag indicating this is a DELETE operation (affects tuple visibility).
     is_delete: bool,
+
+    /// Flag for `COMMIT AND CHAIN` / `ROLLBACK AND CHAIN` support.
     chain_after_transaction: bool,
 }
 
 impl ExecutionContext {
+    /// Creates a new execution context with the provided components.
+    ///
+    /// Initializes the context with default optimization options including
+    /// predicate pushdown and top-N optimizations enabled.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer_pool_manager` - Buffer pool for page I/O operations
+    /// * `catalog` - Catalog for schema metadata access
+    /// * `transaction_context` - Current transaction state and lock manager
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let ctx = ExecutionContext::new(
+    ///     buffer_pool_manager.clone(),
+    ///     catalog.clone(),
+    ///     transaction_context.clone(),
+    /// );
+    /// ```
     pub fn new(
         buffer_pool_manager: Arc<BufferPoolManager>,
         catalog: Arc<RwLock<Catalog>>,
@@ -500,31 +677,53 @@ impl ExecutionContext {
         }
     }
 
+    /// Returns the current transaction context.
+    ///
+    /// The transaction context provides access to the active transaction,
+    /// lock manager, and transaction manager for concurrency control.
     pub fn get_transaction_context(&self) -> Arc<TransactionContext> {
         self.transaction_context.clone()
     }
 
+    /// Returns a reference to the catalog.
+    ///
+    /// The catalog contains metadata about all tables, indexes, and schemas
+    /// in the database.
     pub fn get_catalog(&self) -> &Arc<RwLock<Catalog>> {
         &self.catalog
     }
 
+    /// Returns the buffer pool manager for page I/O operations.
     pub fn get_buffer_pool_manager(&self) -> Arc<BufferPoolManager> {
         self.buffer_pool_manager.clone()
     }
 
+    /// Returns the queue of executor pairs for NLJ optimization checks.
     pub fn get_nlj_check_exec_set(&self) -> &NLJCheckExecSet {
         &self.nlj_check_exec_set
     }
 
+    /// Returns the current runtime optimization options.
     pub fn get_check_options(&self) -> Arc<CheckOptions> {
         Arc::clone(&self.check_options)
     }
 
+    /// Replaces the current optimization options with new ones.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - New set of optimization options to apply
     pub fn set_check_options(&mut self, options: CheckOptions) {
         debug!("Setting check options");
         self.check_options = Arc::new(options);
     }
 
+    /// Adds a pair of executors to the NLJ optimization check queue.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_exec` - Left side executor of the potential join
+    /// * `right_exec` - Right side executor of the potential join
     pub fn add_check_option(
         &mut self,
         left_exec: Arc<Mutex<ExecutorType>>,
@@ -533,7 +732,14 @@ impl ExecutionContext {
         self.nlj_check_exec_set.push_back((left_exec, right_exec));
     }
 
-    /// Convenience method for adding check options from `Box<dyn AbstractExecutor>`
+    /// Convenience method for adding NLJ check options from owned executor types.
+    ///
+    /// Wraps both executors in `Arc<Mutex<>>` and adds them to the check queue.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_exec` - Left side executor (takes ownership)
+    /// * `right_exec` - Right side executor (takes ownership)
     pub fn add_check_option_from_executor_type(
         &mut self,
         left_exec: ExecutorType,
@@ -544,6 +750,10 @@ impl ExecutionContext {
         self.add_check_option(left_arc, right_arc);
     }
 
+    /// Initializes optimization options based on current executor state.
+    ///
+    /// Enables NLJ check if there are executor pairs queued, and always
+    /// enables predicate pushdown and top-N optimizations.
     pub fn init_check_options(&mut self) {
         let mut options = CheckOptions::new();
 
@@ -557,30 +767,63 @@ impl ExecutionContext {
         self.check_options = Arc::new(options);
     }
 
+    /// Returns whether this context is for a DELETE operation.
+    ///
+    /// DELETE operations may require special handling for tuple visibility
+    /// and write set tracking.
     pub fn is_delete(&self) -> bool {
         self.is_delete
     }
 
+    /// Marks this context as a DELETE operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `is_delete` - `true` if this is a DELETE operation
     pub fn set_delete(&mut self, is_delete: bool) {
         self.is_delete = is_delete;
     }
 
-    /// Sets a new transaction context
+    /// Replaces the current transaction context with a new one.
+    ///
+    /// Used during transaction chaining to install a new transaction
+    /// after commit/rollback.
+    ///
+    /// # Arguments
+    ///
+    /// * `txn_ctx` - The new transaction context to use
     pub fn set_transaction_context(&mut self, txn_ctx: Arc<TransactionContext>) {
         self.transaction_context = txn_ctx;
     }
 
-    /// Gets whether transaction should be chained after commit/rollback
+    /// Returns whether a new transaction should be started after commit/rollback.
+    ///
+    /// This supports the SQL `COMMIT AND CHAIN` and `ROLLBACK AND CHAIN` syntax.
     pub fn should_chain_after_transaction(&self) -> bool {
         self.chain_after_transaction
     }
 
-    /// Sets whether transaction should be chained after commit/rollback
+    /// Sets whether to chain a new transaction after commit/rollback.
+    ///
+    /// # Arguments
+    ///
+    /// * `chain` - `true` to start a new transaction after the current one ends
     pub fn set_chain_after_transaction(&mut self, chain: bool) {
         self.chain_after_transaction = chain;
     }
 
-    /// Get the name/type of an executor as a string (useful for debugging)
+    /// Returns the type name of an executor as a static string.
+    ///
+    /// Useful for logging and debugging to identify executor types without
+    /// pattern matching in calling code.
+    ///
+    /// # Arguments
+    ///
+    /// * `executor` - The executor to get the type name for
+    ///
+    /// # Returns
+    ///
+    /// A static string like `"SeqScanExecutor"`, `"HashJoinExecutor"`, etc.
     pub fn get_executor_type_name(executor: &ExecutorType) -> &'static str {
         match executor {
             ExecutorType::Aggregation(_) => "AggregationExecutor",
