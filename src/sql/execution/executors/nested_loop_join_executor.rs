@@ -1,17 +1,99 @@
-/**
- * REFACTORED NESTED LOOP JOIN EXECUTOR
- * ====================================
- *
- * This refactored version follows the Single Responsibility Principle by breaking
- * the monolithic join executor into composable parts:
- *
- * 1. JoinState - Manages execution state and progress tracking
- * 2. TupleCombiner - Handles tuple combination and null padding
- * 3. JoinPredicateEvaluator - Evaluates join predicates
- * 4. JoinTypeHandler - Implements join type-specific logic
- * 5. ExecutorManager - Manages child executors and reset logic
- * 6. NestedLoopJoinExecutor - Orchestrates all components
- */
+//! # Nested Loop Join Executor
+//!
+//! Implements a refactored nested loop join following the Single Responsibility Principle.
+//!
+//! ## Overview
+//!
+//! The nested loop join is the most general join algorithm, supporting all join types
+//! and predicates. It works by iterating through every combination of tuples from
+//! the left and right relations, evaluating the join predicate for each pair.
+//!
+//! ## Architecture
+//!
+//! This implementation breaks the join logic into composable components:
+//!
+//! | Component | Responsibility |
+//! |-----------|----------------|
+//! | [`JoinState`] | Tracks execution progress and phase transitions |
+//! | [`TupleCombiner`] | Combines tuples and handles null padding |
+//! | [`JoinPredicateEvaluator`] | Evaluates join conditions |
+//! | [`JoinTypeHandler`] | Implements join type-specific logic |
+//! | [`ExecutorManager`] | Manages child executor lifecycle |
+//! | [`NestedLoopJoinExecutor`] | Orchestrates all components |
+//!
+//! ## Supported Join Types
+//!
+//! ```sql
+//! -- Inner Join
+//! SELECT * FROM left INNER JOIN right ON left.id = right.id;
+//!
+//! -- Left Outer Join
+//! SELECT * FROM left LEFT JOIN right ON left.id = right.id;
+//!
+//! -- Right Outer Join
+//! SELECT * FROM left RIGHT JOIN right ON left.id = right.id;
+//!
+//! -- Full Outer Join
+//! SELECT * FROM left FULL OUTER JOIN right ON left.id = right.id;
+//!
+//! -- Cross Join
+//! SELECT * FROM left CROSS JOIN right;
+//! ```
+//!
+//! ## Execution Phases
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                    Join Execution Phases                        │
+//! ├─────────────────────────────────────────────────────────────────┤
+//! │                                                                  │
+//! │  ┌──────────────┐     ┌──────────────────┐     ┌─────────────┐  │
+//! │  │  MainJoin    │────▶│ UnmatchedRight   │────▶│ Completed   │  │
+//! │  │              │     │ (Right/Full)     │     │             │  │
+//! │  └──────────────┘     └────────┬─────────┘     └─────────────┘  │
+//! │         │                      │                      ▲         │
+//! │         │                      ▼                      │         │
+//! │         │             ┌──────────────────┐            │         │
+//! │         └────────────▶│ UnmatchedLeft    │────────────┘         │
+//! │         (Inner/Cross) │ (Full only)      │                      │
+//! │                       └──────────────────┘                      │
+//! │                                                                  │
+//! └─────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Algorithm
+//!
+//! ```text
+//! for each left_tuple in left_relation:
+//!     for each right_tuple in right_relation:
+//!         if predicate(left_tuple, right_tuple):
+//!             emit combine(left_tuple, right_tuple)
+//!             mark both tuples as matched
+//!
+//!     if left_tuple unmatched AND (LEFT/FULL OUTER):
+//!         emit combine(left_tuple, NULL)
+//!
+//!     reset right_relation for next left_tuple
+//!
+//! if RIGHT/FULL OUTER:
+//!     for each unmatched right_tuple:
+//!         emit combine(NULL, right_tuple)
+//! ```
+//!
+//! ## Performance
+//!
+//! | Metric | Complexity |
+//! |--------|------------|
+//! | Time | O(N × M) where N = left size, M = right size |
+//! | Space | O(M) for tracking unmatched right tuples |
+//!
+//! ## Design Benefits
+//!
+//! - **Single Responsibility**: Each component has one clear purpose
+//! - **Testability**: Components can be unit tested independently
+//! - **Extensibility**: New join types only require changes to `JoinTypeHandler`
+//! - **Reusability**: `TupleCombiner` can be reused in hash/merge joins
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -31,22 +113,54 @@ use std::sync::Arc;
 // 1. JOIN STATE MANAGEMENT
 // =============================================================================
 
-/**
- * Represents the current state of join execution
- * Responsibility: Track progress through left/right tuples and join phases
- */
+/// Represents the current phase of join execution.
+///
+/// The join executor progresses through phases based on the join type:
+///
+/// - **Inner/Cross Join**: `MainJoin` → `Completed`
+/// - **Left Outer Join**: `MainJoin` → `Completed` (unmatched left handled inline)
+/// - **Right Outer Join**: `MainJoin` → `UnmatchedRight` → `Completed`
+/// - **Full Outer Join**: `MainJoin` → `UnmatchedRight` → `UnmatchedLeft` → `Completed`
 #[derive(Debug, Clone)]
 pub enum JoinPhase {
-    /// Processing main join (matching pairs)
+    /// Processing main join (matching pairs from both relations)
     MainJoin,
-    /// Processing unmatched right tuples for outer joins
+    /// Processing unmatched right tuples (for right/full outer joins)
     UnmatchedRight,
-    /// Processing unmatched left tuples for full outer joins
+    /// Processing unmatched left tuples (for full outer joins only)
     UnmatchedLeft,
-    /// Join execution completed
+    /// Join execution completed, no more tuples to return
     Completed,
 }
 
+/// Manages the execution state for nested loop join.
+///
+/// Tracks progress through the join phases, maintains the current left tuple
+/// being processed, and collects unmatched tuples for outer joins.
+///
+/// # Responsibilities
+///
+/// - Track current execution phase
+/// - Manage current left tuple state
+/// - Collect unmatched tuples for outer join processing
+/// - Track which right tuples have been matched (for full outer)
+///
+/// # Example
+///
+/// ```ignore
+/// let mut state = JoinState::new();
+///
+/// // Process a new left tuple
+/// state.reset_for_new_left_tuple((left_tuple, rid));
+///
+/// // Mark as matched when predicate succeeds
+/// if predicate_matches {
+///     state.mark_left_matched();
+/// }
+///
+/// // Transition to next phase when main join completes
+/// state.advance_phase(&join_type);
+/// ```
 #[derive(Debug)]
 pub struct JoinState {
     /// Current execution phase
@@ -208,19 +322,49 @@ impl JoinState {
 // 2. TUPLE COMBINATION
 // =============================================================================
 
-/**
- * Handles tuple combination logic
- * Responsibility: Combine tuples and create null-padded tuples for outer joins
- */
+/// Handles tuple combination for join output.
+///
+/// Provides methods to combine left and right tuples into a single output
+/// tuple, with support for null-padding required by outer joins.
+///
+/// # Output Tuple Format
+///
+/// ```text
+/// [left_col1, left_col2, ..., right_col1, right_col2, ...]
+/// ```
+///
+/// # Null Padding
+///
+/// For outer joins, unmatched tuples are padded with NULL values:
+///
+/// | Join Type | Unmatched Left | Unmatched Right |
+/// |-----------|----------------|-----------------|
+/// | LEFT OUTER | [left..., NULL...] | - |
+/// | RIGHT OUTER | - | [NULL..., right...] |
+/// | FULL OUTER | [left..., NULL...] | [NULL..., right...] |
+///
+/// # Thread Safety
+///
+/// This struct is `Clone` and does not hold mutable state, making it
+/// safe to share across multiple join operations.
 #[derive(Clone)]
 pub struct TupleCombiner {
+    /// Schema of the left (outer) relation
     pub left_schema: Schema,
+    /// Schema of the right (inner) relation
     pub right_schema: Schema,
+    /// Combined output schema for joined tuples
     pub output_schema: Schema,
 }
 
 impl TupleCombiner {
-    /// Create new tuple combiner
+    /// Creates a new tuple combiner with the given schemas.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_schema` - Schema of the left relation
+    /// * `right_schema` - Schema of the right relation
+    /// * `output_schema` - Combined output schema (left + right columns)
     pub fn new(left_schema: Schema, right_schema: Schema, output_schema: Schema) -> Self {
         Self {
             left_schema,
@@ -229,7 +373,14 @@ impl TupleCombiner {
         }
     }
 
-    /// Combine left and right tuples
+    /// Combines left and right tuples into a single output tuple.
+    ///
+    /// Concatenates all values from the left tuple followed by all values
+    /// from the right tuple. The result uses the combined output schema.
+    ///
+    /// # Returns
+    ///
+    /// A new tuple with format: `[left_values..., right_values...]`
     pub fn combine_tuples(&self, left_tuple: &Arc<Tuple>, right_tuple: &Arc<Tuple>) -> Arc<Tuple> {
         let mut combined_values = Vec::new();
         combined_values.extend(left_tuple.get_values().iter().cloned());
@@ -239,7 +390,31 @@ impl TupleCombiner {
         Arc::new(Tuple::new(&combined_values, &self.output_schema, rid))
     }
 
-    /// Create null-padded tuple for outer joins
+    /// Creates a null-padded tuple for outer joins.
+    ///
+    /// Used when one side of the join has no match. The missing side's
+    /// columns are filled with NULL values.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_tuple` - Left tuple if present, None for unmatched right
+    /// * `right_tuple` - Right tuple if present, None for unmatched left
+    ///
+    /// # Returns
+    ///
+    /// A tuple with the present side's values and NULLs for the missing side.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Left outer join: unmatched left tuple
+    /// combiner.create_null_padded_tuple(Some(&left), None)
+    /// // Result: [left_val1, left_val2, NULL, NULL]
+    ///
+    /// // Right outer join: unmatched right tuple
+    /// combiner.create_null_padded_tuple(None, Some(&right))
+    /// // Result: [NULL, NULL, right_val1, right_val2]
+    /// ```
     pub fn create_null_padded_tuple(
         &self,
         left_tuple: Option<&Arc<Tuple>>,
@@ -269,7 +444,14 @@ impl TupleCombiner {
         Arc::new(Tuple::new(&combined_values, &self.output_schema, rid))
     }
 
-    /// Create left-only tuple for semi/anti joins
+    /// Creates a left-only tuple for semi/anti joins.
+    ///
+    /// Semi-joins and anti-joins return only columns from the left relation,
+    /// without including right relation columns.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing only the left tuple's values with the left schema.
     pub fn create_left_only_tuple(&self, left_tuple: &Arc<Tuple>) -> Arc<Tuple> {
         let left_values = left_tuple.get_values().clone();
         let rid = RID::new(0, 0);
@@ -281,19 +463,42 @@ impl TupleCombiner {
 // 3. JOIN PREDICATE EVALUATION
 // =============================================================================
 
-/**
- * Handles join predicate evaluation
- * Responsibility: Evaluate join conditions between tuple pairs
- */
+/// Evaluates join predicates between tuple pairs.
+///
+/// Encapsulates the logic for evaluating join conditions (e.g., `ON left.id = right.id`)
+/// between tuples from the left and right relations.
+///
+/// # Predicate Handling
+///
+/// | Result Type | Interpretation |
+/// |-------------|----------------|
+/// | `Boolean(true)` | Tuples match, include in join result |
+/// | `Boolean(false)` | Tuples don't match, skip |
+/// | `Null` | Treated as `false` (SQL three-valued logic) |
+/// | Non-boolean | Treated as `false` |
+///
+/// # Thread Safety
+///
+/// This struct is `Clone` and safe to use across multiple evaluations.
+/// The predicate expression is wrapped in `Arc` for shared ownership.
 #[derive(Clone)]
 pub struct JoinPredicateEvaluator {
+    /// The join predicate expression (e.g., `left.id = right.id`)
     predicate: Arc<dyn ExpressionOps + Send + Sync>,
+    /// Schema for left tuple column resolution
     left_schema: Schema,
+    /// Schema for right tuple column resolution
     right_schema: Schema,
 }
 
 impl JoinPredicateEvaluator {
-    /// Create new predicate evaluator
+    /// Creates a new predicate evaluator.
+    ///
+    /// # Arguments
+    ///
+    /// * `predicate` - The join condition expression
+    /// * `left_schema` - Schema for resolving left tuple columns
+    /// * `right_schema` - Schema for resolving right tuple columns
     pub fn new(
         predicate: Arc<dyn ExpressionOps + Send + Sync>,
         left_schema: Schema,
@@ -306,7 +511,23 @@ impl JoinPredicateEvaluator {
         }
     }
 
-    /// Evaluate predicate for tuple pair
+    /// Evaluates the join predicate for a tuple pair.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_tuple` - Tuple from the left relation
+    /// * `right_tuple` - Tuple from the right relation
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - Tuples satisfy the join condition
+    /// * `Ok(false)` - Tuples don't match (or NULL/non-boolean result)
+    /// * `Err(DBError)` - Evaluation error
+    ///
+    /// # NULL Handling
+    ///
+    /// Following SQL three-valued logic, NULL predicate results are
+    /// treated as false (tuples don't match).
     pub fn evaluate(
         &self,
         left_tuple: &Arc<Tuple>,
@@ -364,18 +585,45 @@ impl JoinPredicateEvaluator {
 // 4. JOIN TYPE HANDLING
 // =============================================================================
 
-/**
- * Handles join type-specific logic
- * Responsibility: Implement behavior for different SQL join types
- */
+/// Implements join type-specific behavior.
+///
+/// Encapsulates the logic differences between join types, dispatching
+/// to the appropriate handling method based on the SQL join operator.
+///
+/// # Supported Join Types
+///
+/// | Join Type | Behavior |
+/// |-----------|----------|
+/// | `INNER JOIN` | Only matching pairs |
+/// | `LEFT OUTER JOIN` | All left + matching right (NULL if unmatched) |
+/// | `RIGHT OUTER JOIN` | All right + matching left (NULL if unmatched) |
+/// | `FULL OUTER JOIN` | All from both (NULL for unmatched) |
+/// | `CROSS JOIN` | Cartesian product (no predicate) |
+///
+/// # Extensibility
+///
+/// To add new join types (e.g., SEMI JOIN, ANTI JOIN):
+///
+/// 1. Add case to `process_tuple_pair()` match
+/// 2. Implement handler method (e.g., `handle_semi_join()`)
+/// 3. Update phase transitions in `JoinState::advance_phase()`
 pub struct JoinTypeHandler {
+    /// The SQL join type being executed
     join_type: JoinType,
+    /// Component for combining tuples
     tuple_combiner: TupleCombiner,
+    /// Component for evaluating join predicates
     predicate_evaluator: JoinPredicateEvaluator,
 }
 
 impl JoinTypeHandler {
-    /// Create new join type handler
+    /// Creates a new join type handler.
+    ///
+    /// # Arguments
+    ///
+    /// * `join_type` - The SQL join type to implement
+    /// * `tuple_combiner` - Component for combining tuples
+    /// * `predicate_evaluator` - Component for evaluating join predicates
     pub fn new(
         join_type: JoinType,
         tuple_combiner: TupleCombiner,
@@ -388,7 +636,16 @@ impl JoinTypeHandler {
         }
     }
 
-    /// Process tuple pair for current join type
+    /// Processes a tuple pair according to the join type.
+    ///
+    /// Dispatches to the appropriate handler based on the configured join type,
+    /// evaluating predicates and combining tuples as needed.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Join result tuple
+    /// * `Ok(None)` - No result for this pair (predicate false or wrong phase)
+    /// * `Err(DBError)` - Unsupported join type or evaluation error
     pub fn process_tuple_pair(
         &self,
         left_tuple: &Arc<Tuple>,
@@ -545,13 +802,35 @@ impl JoinTypeHandler {
 // 5. EXECUTOR MANAGEMENT
 // =============================================================================
 
-/**
- * Manages child executors and their lifecycle
- * Responsibility: Handle executor creation, initialization, and reset
- */
+/// Manages child executor lifecycle for the join.
+///
+/// Handles creation, initialization, and resetting of the left and right
+/// child executors. The right executor is recreated for each new left tuple
+/// to restart iteration through the right relation.
+///
+/// # Executor Indices
+///
+/// - `children[0]` - Left (outer) relation executor
+/// - `children[1]` - Right (inner) relation executor
+///
+/// # Right Executor Reset
+///
+/// For nested loop join, the right executor must be reset for each left tuple.
+/// This is implemented by recreating the executor from the plan, which
+/// reinitializes any internal iterators or scan positions.
+///
+/// # Error Handling
+///
+/// Returns `DBError` if:
+/// - Child plans are not exactly 2
+/// - Executor creation fails
+/// - Executors are accessed before initialization
 pub struct ExecutorManager {
+    /// Child executors: [left, right]
     children_executors: Option<Vec<Box<dyn AbstractExecutor>>>,
+    /// Execution context for creating new executors
     context: Arc<RwLock<ExecutionContext>>,
+    /// Join plan for recreating right executor
     plan: Arc<NestedLoopJoinNode>,
 }
 
@@ -639,32 +918,90 @@ impl ExecutorManager {
 // 6. MAIN EXECUTOR ORCHESTRATOR
 // =============================================================================
 
-/**
- * Main nested loop join executor that orchestrates all components
- * Responsibility: Coordinate between all components to execute the join
- */
+/// Main executor for nested loop join operations.
+///
+/// Orchestrates all join components to implement the complete nested loop
+/// join algorithm. Supports all SQL join types with proper handling of
+/// unmatched tuples for outer joins.
+///
+/// # Component Orchestration
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────┐
+/// │                 NestedLoopJoinExecutor                       │
+/// │                                                              │
+/// │  ┌─────────────────┐      ┌──────────────────────────┐      │
+/// │  │ ExecutorManager │─────▶│ Left/Right Child         │      │
+/// │  │                 │      │ Executors                │      │
+/// │  └─────────────────┘      └──────────────────────────┘      │
+/// │           │                                                  │
+/// │           ▼                                                  │
+/// │  ┌─────────────────┐      ┌──────────────────────────┐      │
+/// │  │   JoinState     │◀────▶│    JoinTypeHandler       │      │
+/// │  │ (Phase/Match)   │      │ (Type-specific logic)    │      │
+/// │  └─────────────────┘      └──────────────────────────┘      │
+/// │                                    │                         │
+/// │                    ┌───────────────┼───────────────┐         │
+/// │                    ▼               ▼               │         │
+/// │           ┌──────────────┐ ┌──────────────────┐    │         │
+/// │           │TupleCombiner │ │PredicateEvaluator│    │         │
+/// │           └──────────────┘ └──────────────────┘    │         │
+/// │                                                              │
+/// └─────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// # Example
+///
+/// ```ignore
+/// let join_plan = NestedLoopJoinNode::new(
+///     left_schema,
+///     right_schema,
+///     predicate,
+///     JoinType::Inner(JoinConstraint::None),
+///     children,
+/// );
+///
+/// let mut executor = NestedLoopJoinExecutor::new(context, Arc::new(join_plan));
+/// executor.init();
+///
+/// while let Some((joined_tuple, _)) = executor.next()? {
+///     process(joined_tuple);
+/// }
+/// ```
 pub struct NestedLoopJoinExecutor {
-    /// Executor management
+    /// Manages left and right child executors
     executor_manager: ExecutorManager,
 
-    /// Join state tracking
+    /// Tracks execution state and phase
     join_state: JoinState,
 
-    /// Join type handler
+    /// Implements join type-specific behavior
     join_handler: JoinTypeHandler,
 
-    /// Execution context
+    /// Shared execution context
     context: Arc<RwLock<ExecutionContext>>,
 
-    /// Join plan
+    /// Join plan node with configuration
     plan: Arc<NestedLoopJoinNode>,
 
-    /// Initialization flag
+    /// Whether init() has been called
     initialized: bool,
 }
 
 impl NestedLoopJoinExecutor {
-    /// Create new nested loop join executor
+    /// Creates a new nested loop join executor.
+    ///
+    /// Initializes all component handlers with schemas and predicate from
+    /// the join plan. The child executors are created during `init()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context
+    /// * `plan` - Join plan containing configuration and child plans
+    ///
+    /// # Returns
+    ///
+    /// A new uninitialized executor. Call `init()` before `next()`.
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<NestedLoopJoinNode>) -> Self {
         debug!("Creating NestedLoopJoinExecutor");
         let executor_manager = ExecutorManager::new(context.clone(), plan.clone());
@@ -700,7 +1037,24 @@ impl NestedLoopJoinExecutor {
         }
     }
 
-    /// Execute main join logic
+    /// Executes the main nested loop join phase.
+    ///
+    /// Iterates through all combinations of left and right tuples,
+    /// evaluating the join predicate for each pair and emitting
+    /// matching tuples.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Fetch next left tuple if needed
+    /// 2. For each right tuple, evaluate predicate and emit matches
+    /// 3. When right exhausted, handle unmatched left (for outer joins)
+    /// 4. Repeat until left exhausted
+    /// 5. Transition to next phase
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next join result
+    /// * `Ok(None)` - Main join phase complete, moved to next phase
     fn execute_main_join(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         loop {
             debug!(
@@ -820,7 +1174,22 @@ impl NestedLoopJoinExecutor {
         }
     }
 
-    /// Process unmatched tuples for outer joins
+    /// Processes unmatched tuples for outer joins.
+    ///
+    /// Called after the main join phase to emit null-padded tuples for
+    /// unmatched rows in outer joins.
+    ///
+    /// # Phase Handling
+    ///
+    /// * `UnmatchedRight` - Emits `[NULL..., right_values...]` for each
+    ///   unmatched right tuple (RIGHT/FULL OUTER)
+    /// * `UnmatchedLeft` - Emits `[left_values..., NULL...]` for each
+    ///   unmatched left tuple (FULL OUTER only)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next unmatched tuple result
+    /// * `Ok(None)` - Current phase complete, advanced to next phase
     fn process_unmatched_tuples(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         match &self.join_state.phase {
             JoinPhase::UnmatchedRight => {
@@ -860,6 +1229,14 @@ impl NestedLoopJoinExecutor {
 }
 
 impl AbstractExecutor for NestedLoopJoinExecutor {
+    /// Initializes the join executor and child executors.
+    ///
+    /// Creates and initializes both left and right child executors from
+    /// the join plan. Must be called before `next()`.
+    ///
+    /// # Idempotency
+    ///
+    /// Multiple calls to `init()` are safe; reinitialization is skipped.
     fn init(&mut self) {
         debug!("NestedLoopJoinExecutor::init() called");
         if !self.initialized {
@@ -875,6 +1252,23 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
         }
     }
 
+    /// Returns the next joined tuple.
+    ///
+    /// Executes the nested loop join algorithm, progressing through phases
+    /// as needed for the configured join type.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next join result tuple
+    /// * `Ok(None)` - Join execution complete
+    /// * `Err(DBError)` - Execution error
+    ///
+    /// # Execution Phases
+    ///
+    /// 1. **MainJoin**: Process all tuple combinations
+    /// 2. **UnmatchedRight**: Emit unmatched right tuples (RIGHT/FULL)
+    /// 3. **UnmatchedLeft**: Emit unmatched left tuples (FULL only)
+    /// 4. **Completed**: Return None
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         debug!("NestedLoopJoinExecutor::next() called");
         if !self.initialized {
@@ -904,10 +1298,17 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
         }
     }
 
+    /// Returns the output schema for joined tuples.
+    ///
+    /// The output schema is the concatenation of left and right schemas:
+    /// `[left_columns..., right_columns...]`
     fn get_output_schema(&self) -> &Schema {
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to catalog, buffer pool, and transaction state.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

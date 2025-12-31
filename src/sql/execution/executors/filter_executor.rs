@@ -1,3 +1,55 @@
+//! # Filter Executor Module
+//!
+//! This module implements the executor for SQL `WHERE` and `HAVING` clauses,
+//! which filter tuples based on predicate expressions.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! SELECT ... FROM table WHERE <predicate>           -- Row filtering
+//! SELECT ... GROUP BY ... HAVING <agg_predicate>    -- Group filtering
+//! ```
+//!
+//! ## Filter Types
+//!
+//! | Type    | Applied To     | Evaluation                          |
+//! |---------|----------------|-------------------------------------|
+//! | WHERE   | Individual rows| Predicate evaluated per tuple       |
+//! | HAVING  | Groups         | Aggregate computed, then predicated |
+//!
+//! ## Execution Model
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                    FilterExecutor                           │
+//! │                                                             │
+//! │  WHERE Mode:                                                │
+//! │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+//! │  │ Child Tuple │───▶│ Evaluate    │───▶│ Pass/Skip   │     │
+//! │  │             │    │ Predicate   │    │             │     │
+//! │  └─────────────┘    └─────────────┘    └─────────────┘     │
+//! │                                                             │
+//! │  HAVING Mode:                                               │
+//! │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+//! │  │ Collect All │───▶│ Compute     │───▶│ Predicate   │     │
+//! │  │ Tuples      │    │ Aggregate   │    │ on Result   │     │
+//! │  └─────────────┘    └─────────────┘    └─────────────┘     │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## HAVING Aggregates
+//!
+//! Supported aggregate functions in HAVING clauses:
+//! - `COUNT(*)`, `COUNT(column)`
+//! - `SUM(column)`
+//! - `AVG(column)`
+//! - `MIN(column)`, `MAX(column)`
+//!
+//! ## Pipelining Behavior
+//!
+//! - **WHERE**: Pipelined - processes tuples one at a time
+//! - **HAVING**: Pipeline breaker - collects all tuples before evaluation
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -16,16 +68,69 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for `WHERE` and `HAVING` clause filtering.
+///
+/// `FilterExecutor` evaluates predicate expressions against tuples and
+/// returns only those that satisfy the condition. It supports two modes:
+///
+/// - **WHERE**: Evaluates predicates on individual tuples (pipelined)
+/// - **HAVING**: Computes aggregates over groups, then evaluates predicate
+///
+/// # WHERE Mode
+///
+/// For each tuple from the child executor, the predicate is evaluated.
+/// Tuples producing `true` are returned; others are skipped.
+///
+/// # HAVING Mode
+///
+/// All tuples are collected during initialization. The aggregate is computed
+/// over the entire group, and if the predicate is satisfied, all tuples
+/// are returned one by one.
+///
+/// # Example
+///
+/// ```ignore
+/// // WHERE age > 21
+/// let filter = FilterExecutor::new(
+///     child_executor,
+///     context,
+///     where_filter_plan,
+/// );
+///
+/// // HAVING COUNT(*) > 5
+/// let filter = FilterExecutor::new(
+///     group_executor,
+///     context,
+///     having_filter_plan,
+/// );
+/// ```
 pub struct FilterExecutor {
+    /// Child executor providing input tuples.
     child_executor: Box<dyn AbstractExecutor>,
+    /// Shared execution context.
     context: Arc<RwLock<ExecutionContext>>,
+    /// Filter plan containing the predicate expression.
     plan: Arc<FilterNode>,
+    /// Flag indicating whether `init()` has been called.
     initialized: bool,
+    /// Collected tuples for HAVING clause evaluation.
     group_tuples: Vec<Arc<Tuple>>,
+    /// Current index in group_tuples for HAVING mode iteration.
     current_group_idx: usize,
 }
 
 impl FilterExecutor {
+    /// Creates a new `FilterExecutor` with the given child and filter plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `child_executor` - Child executor providing input tuples.
+    /// * `context` - Shared execution context.
+    /// * `plan` - Filter plan containing the predicate expression and filter type.
+    ///
+    /// # Returns
+    ///
+    /// A new executor ready for initialization.
     pub fn new(
         child_executor: Box<dyn AbstractExecutor>,
         context: Arc<RwLock<ExecutionContext>>,
@@ -41,6 +146,18 @@ impl FilterExecutor {
         }
     }
 
+    /// Applies the filter predicate to a tuple.
+    ///
+    /// Dispatches to the appropriate filter method based on filter type
+    /// (WHERE vs HAVING).
+    ///
+    /// # Arguments
+    ///
+    /// * `tuple` - The tuple to evaluate.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the tuple passes the filter, `false` otherwise.
     fn apply_filter(&self, tuple: &Tuple) -> bool {
         let filter_expr = self.plan.get_filter_expression();
         let schema = self.child_executor.get_output_schema();
@@ -51,6 +168,19 @@ impl FilterExecutor {
         }
     }
 
+    /// Evaluates a WHERE predicate on a single tuple.
+    ///
+    /// The predicate expression is evaluated against the tuple using the
+    /// child executor's output schema. The result must be a boolean value.
+    ///
+    /// # Arguments
+    ///
+    /// * `tuple` - The tuple to evaluate.
+    /// * `schema` - Schema for expression evaluation.
+    ///
+    /// # Returns
+    ///
+    /// `true` if predicate evaluates to true, `false` otherwise (including errors).
     fn apply_where_filter(&self, tuple: &Tuple, schema: &Schema) -> bool {
         let filter_expr = self.plan.get_filter_expression();
         debug!(
@@ -83,7 +213,30 @@ impl FilterExecutor {
         }
     }
 
-    /// Applies a HAVING filter to a group of tuples.
+    /// Evaluates a HAVING predicate over the collected group tuples.
+    ///
+    /// Computes the aggregate value (COUNT, SUM, AVG, MIN, MAX) over all
+    /// tuples in `group_tuples`, then evaluates the predicate against this
+    /// aggregate result.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Schema for expression evaluation.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the aggregate satisfies the predicate, `false` otherwise.
+    ///
+    /// # Aggregate Computation
+    ///
+    /// | Type       | Computation                                      |
+    /// |------------|--------------------------------------------------|
+    /// | COUNT(*)   | Number of tuples in group                        |
+    /// | COUNT(col) | Number of non-NULL values                        |
+    /// | SUM(col)   | Sum of column values                             |
+    /// | AVG(col)   | Sum / count of non-NULL values                   |
+    /// | MIN(col)   | Minimum non-NULL value                           |
+    /// | MAX(col)   | Maximum non-NULL value                           |
     fn apply_having_filter(&self, schema: &Schema) -> bool {
         debug!(
             "Applying HAVING filter. Group tuples count: {}",
@@ -286,6 +439,17 @@ impl FilterExecutor {
 }
 
 impl AbstractExecutor for FilterExecutor {
+    /// Initializes the filter executor and its child.
+    ///
+    /// For WHERE filters, simply initializes the child executor.
+    /// For HAVING filters, also collects all child tuples into `group_tuples`
+    /// for aggregate computation.
+    ///
+    /// # HAVING Initialization
+    ///
+    /// When the filter type is HAVING, this method is a **pipeline breaker**
+    /// that consumes all child tuples before returning. This is necessary
+    /// because the aggregate must be computed over the entire group.
     fn init(&mut self) {
         if self.initialized {
             debug!("FilterExecutor already initialized");
@@ -318,6 +482,25 @@ impl AbstractExecutor for FilterExecutor {
         debug!("FilterExecutor initialized successfully");
     }
 
+    /// Returns the next tuple that passes the filter predicate.
+    ///
+    /// # WHERE Mode
+    ///
+    /// Pulls tuples from the child executor one at a time, evaluating the
+    /// predicate on each. Returns the first tuple that passes, or continues
+    /// pulling until one passes or the child is exhausted.
+    ///
+    /// # HAVING Mode
+    ///
+    /// Iterates through the pre-collected `group_tuples`. For each tuple,
+    /// evaluates the aggregate predicate. If the predicate is satisfied,
+    /// returns all tuples in sequence.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next matching tuple
+    /// * `Ok(None)` - No more matching tuples
+    /// * `Err(DBError)` - Error from child executor or predicate evaluation
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("FilterExecutor not initialized, initializing now");
@@ -358,10 +541,15 @@ impl AbstractExecutor for FilterExecutor {
         }
     }
 
+    /// Returns the output schema for filtered results.
+    ///
+    /// The output schema is the same as the filter plan's schema, which
+    /// typically matches the child executor's output.
     fn get_output_schema(&self) -> &Schema {
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

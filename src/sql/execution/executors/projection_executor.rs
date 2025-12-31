@@ -1,3 +1,76 @@
+//! # Projection Executor
+//!
+//! Implements the `SELECT` list projection for transforming input tuples.
+//!
+//! ## Overview
+//!
+//! The `ProjectionExecutor` evaluates a list of expressions for each input tuple,
+//! producing output tuples with only the specified columns or computed values.
+//! This implements the projection operation in relational algebra (π).
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! -- Simple column selection
+//! SELECT column1, column2 FROM table_name;
+//!
+//! -- Column aliasing
+//! SELECT column1 AS alias1, column2 AS alias2 FROM table_name;
+//!
+//! -- Computed expressions
+//! SELECT price * quantity AS total, name FROM products;
+//!
+//! -- Aggregate aliasing
+//! SELECT SUM(age) AS total_age, COUNT(*) AS emp_count FROM employees;
+//! ```
+//!
+//! ## Execution Model
+//!
+//! ```text
+//! ┌────────────────────────────────────────────────────────────────┐
+//! │                    ProjectionExecutor                          │
+//! │                                                                │
+//! │  Input: (id, name, age, salary, dept)                         │
+//! │                    │                                           │
+//! │                    ▼                                           │
+//! │  ┌──────────────────────────────────────────────────────────┐  │
+//! │  │ Evaluate expressions:                                     │  │
+//! │  │   expr[0]: ColumnRef(name)     → name                    │  │
+//! │  │   expr[1]: ColumnRef(salary)   → salary                  │  │
+//! │  │   expr[2]: salary * 1.1        → adjusted_salary         │  │
+//! │  └──────────────────────────────────────────────────────────┘  │
+//! │                    │                                           │
+//! │                    ▼                                           │
+//! │  Output: (name, salary, adjusted_salary)                       │
+//! │                                                                │
+//! └────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Expression Types Supported
+//!
+//! | Expression Type | Example | Description |
+//! |-----------------|---------|-------------|
+//! | Column Reference | `name` | Direct column access |
+//! | Constant | `42`, `'hello'` | Literal values |
+//! | Arithmetic | `price * qty` | Math operations |
+//! | Comparison | `age > 18` | Boolean expressions |
+//! | Aggregate Alias | `SUM(x) AS total` | Rename aggregates |
+//!
+//! ## Column Aliasing
+//!
+//! The executor handles special aliasing for aggregate functions:
+//!
+//! - `SUM(age)` → `total_age`
+//! - `COUNT(*)` → `emp_count`
+//! - `AVG(salary)` → `avg_salary`
+//! - `MIN(age)` → `min_age`
+//! - `MAX(salary)` → `max_salary`
+//!
+//! ## Error Handling
+//!
+//! Invalid column references are handled gracefully by skipping the tuple
+//! and attempting the next one, rather than failing the entire query.
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -12,6 +85,42 @@ use parking_lot::RwLock;
 use std::fmt::Display;
 use std::sync::Arc;
 
+/// Executor for SQL `SELECT` list projections.
+///
+/// Transforms input tuples by evaluating a list of expressions, producing
+/// output tuples with the projected columns and computed values.
+///
+/// # Fields
+///
+/// * `child_executor` - Source of input tuples to project
+/// * `context` - Shared execution context
+/// * `plan` - Projection plan with expressions and output schema
+/// * `initialized` - Whether `init()` has been called
+///
+/// # Expression Evaluation
+///
+/// For each input tuple, the executor:
+/// 1. Evaluates each expression in the projection list
+/// 2. Collects the resulting values
+/// 3. Creates a new output tuple with the projected values
+///
+/// # Example
+///
+/// ```ignore
+/// // Project only name and computed total
+/// let expressions = vec![
+///     Arc::new(Expression::ColumnRef(name_col)),
+///     Arc::new(Expression::Arithmetic(price_times_qty)),
+/// ];
+///
+/// let plan = ProjectionNode::new(output_schema, expressions, mappings);
+/// let mut executor = ProjectionExecutor::new(child, context, Arc::new(plan));
+/// executor.init();
+///
+/// while let Some((tuple, _)) = executor.next()? {
+///     // tuple contains: (name, total)
+/// }
+/// ```
 pub struct ProjectionExecutor {
     child_executor: Box<dyn AbstractExecutor>,
     context: Arc<RwLock<ExecutionContext>>,
@@ -20,6 +129,36 @@ pub struct ProjectionExecutor {
 }
 
 impl ProjectionExecutor {
+    /// Creates a new `ProjectionExecutor` with expression-based projection.
+    ///
+    /// # Arguments
+    ///
+    /// * `child_executor` - The child executor providing input tuples
+    /// * `context` - Shared execution context
+    /// * `plan` - Projection plan containing expressions and output schema
+    ///
+    /// # Column Mapping
+    ///
+    /// The constructor builds column mappings to handle:
+    /// - Direct column references
+    /// - Aggregate function aliasing (e.g., `SUM(age)` → `total_age`)
+    /// - Schema transformation from input to output
+    ///
+    /// # Aggregate Alias Detection
+    ///
+    /// Automatically detects and maps common aggregate patterns:
+    ///
+    /// | Input Column | Alias Pattern |
+    /// |--------------|---------------|
+    /// | `SUM(...)` | `total_*` |
+    /// | `COUNT(...)` | `*_count` |
+    /// | `AVG(...)` | `avg_*` |
+    /// | `MIN(...)` | `min_*` |
+    /// | `MAX(...)` | `max_*` |
+    ///
+    /// # Returns
+    ///
+    /// A new uninitialized `ProjectionExecutor`. Call `init()` before `next()`.
     pub fn new(
         child_executor: Box<dyn AbstractExecutor>,
         context: Arc<RwLock<ExecutionContext>>,
@@ -74,12 +213,44 @@ impl ProjectionExecutor {
 }
 
 impl AbstractExecutor for ProjectionExecutor {
+    /// Initializes the projection executor and its child.
+    ///
+    /// Propagates initialization to the child executor, ensuring the
+    /// entire executor tree is ready for tuple retrieval.
     fn init(&mut self) {
         debug!("Initializing ProjectionExecutor");
         self.child_executor.init();
         self.initialized = true;
     }
 
+    /// Returns the next projected tuple.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Fetch the next tuple from the child executor
+    /// 2. For each expression in the projection list:
+    ///    - Evaluate the expression against the input tuple
+    ///    - Collect the resulting value
+    /// 3. Create a new output tuple with the projected values
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Projected tuple with original RID
+    /// * `Ok(None)` - Child executor exhausted
+    /// * `Err(DBError::Execution)` - Not initialized or expression error
+    ///
+    /// # Error Recovery
+    ///
+    /// If an expression evaluation fails due to an invalid column index,
+    /// the tuple is skipped and the next tuple is attempted. This provides
+    /// graceful degradation for schema mismatches.
+    ///
+    /// # Output Tuple
+    ///
+    /// The output tuple:
+    /// - Contains only the projected values
+    /// - Uses the projection's output schema
+    /// - Preserves the original RID from the input tuple
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             return Err(DBError::Execution(
@@ -135,15 +306,29 @@ impl AbstractExecutor for ProjectionExecutor {
         }
     }
 
+    /// Returns the output schema for projected tuples.
+    ///
+    /// The output schema reflects:
+    /// - Only the projected columns
+    /// - Any column aliases applied
+    /// - Computed expression result types
+    ///
+    /// # Returns
+    ///
+    /// Reference to the projection's output schema.
     fn get_output_schema(&self) -> &Schema {
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to catalog, buffer pool, and transaction state.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
 
+/// Display implementation for debugging and logging.
 impl Display for ProjectionExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ProjectionExecutor")

@@ -1,3 +1,52 @@
+//! # Delete Executor Module
+//!
+//! This module implements the executor for SQL `DELETE` statements, which
+//! remove tuples from tables based on selection criteria.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! DELETE FROM <table_name> [WHERE <condition>]
+//! ```
+//!
+//! ## Execution Model
+//!
+//! The delete executor follows a **pull-based model** with a child executor
+//! that identifies tuples to delete:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────┐
+//! │                   DeleteExecutor                        │
+//! │                                                         │
+//! │  ┌─────────────────────────────────────────────────┐    │
+//! │  │ Child Executor (SeqScan/IndexScan + Filter)     │    │
+//! │  │  └─ Produces RIDs of tuples to delete           │    │
+//! │  └─────────────────────────────────────────────────┘    │
+//! │                        │                                │
+//! │                        ▼                                │
+//! │  ┌─────────────────────────────────────────────────┐    │
+//! │  │ TransactionalTableHeap                          │    │
+//! │  │  └─ Mark tuples as deleted (MVCC)               │    │
+//! │  └─────────────────────────────────────────────────┘    │
+//! │                        │                                │
+//! │                        ▼                                │
+//! │        Result: rows_deleted count                       │
+//! └─────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## MVCC Semantics
+//!
+//! Deletes use soft-delete via the `TransactionalTableHeap`:
+//! - Tuples are marked as deleted, not physically removed
+//! - Deleted tuples remain visible to earlier transactions
+//! - Physical cleanup happens during garbage collection
+//!
+//! ## Output
+//!
+//! Returns a single tuple with the count of deleted rows:
+//! - Schema: `(rows_deleted INTEGER)`
+//! - Returns `None` if zero rows were deleted
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
@@ -14,17 +63,78 @@ use log::{debug, error, info, trace, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for SQL `DELETE` statements.
+///
+/// `DeleteExecutor` removes tuples from a table by marking them as deleted
+/// in the transactional table heap. It works with a child executor that
+/// identifies which tuples to delete (typically a scan with optional filter).
+///
+/// # Transaction Safety
+///
+/// All deletes are performed through `TransactionalTableHeap`, which:
+/// - Records delete operations in the transaction's write set
+/// - Supports rollback if the transaction aborts
+/// - Maintains MVCC visibility for concurrent readers
+///
+/// # Output Schema
+///
+/// On successful deletion, returns a single tuple:
+/// ```text
+/// (rows_deleted: INTEGER)
+/// ```
+///
+/// Returns `None` if no rows matched the delete criteria.
+///
+/// # Example
+///
+/// ```ignore
+/// // DELETE FROM users WHERE age < 18
+/// let scan_plan = SeqScanPlanNode::new(schema, table_oid, "users");
+/// let filter_plan = FilterPlanNode::new(schema, predicate, scan_plan);
+/// let delete_plan = DeleteNode::new(schema, "users", table_oid, vec![filter_plan]);
+/// let executor = DeleteExecutor::new(context, Arc::new(delete_plan));
+/// ```
 pub struct DeleteExecutor {
+    /// Shared execution context for catalog and transaction access.
     context: Arc<RwLock<ExecutionContext>>,
+    /// Delete plan node containing table information.
     plan: Arc<DeleteNode>,
+    /// Transactional table heap for MVCC-safe deletions.
     table_heap: Arc<TransactionalTableHeap>,
+    /// Flag indicating whether `init()` has been called.
     initialized: bool,
+    /// Child executor that identifies tuples to delete.
     child_executor: Option<Box<dyn AbstractExecutor>>,
+    /// Flag indicating whether the delete has been executed.
     executed: bool,
+    /// Count of rows deleted (for result tuple).
     rows_deleted: usize,
 }
 
 impl DeleteExecutor {
+    /// Creates a new `DeleteExecutor` for the given delete plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context for catalog and transaction access.
+    /// * `plan` - Delete plan node containing the target table and child plans.
+    ///
+    /// # Returns
+    ///
+    /// A new executor ready for initialization.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the target table does not exist in the catalog. This is a
+    /// programming error since the planner should validate table existence.
+    ///
+    /// # Lock Acquisition
+    ///
+    /// Briefly acquires read locks on:
+    /// 1. Execution context (to get catalog reference)
+    /// 2. Catalog (to get table information)
+    ///
+    /// Locks are released before returning to avoid holding them during execution.
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<DeleteNode>) -> Self {
         debug!(
             "Creating DeleteExecutor for table '{}' with values plan",
@@ -81,6 +191,19 @@ impl DeleteExecutor {
 }
 
 impl AbstractExecutor for DeleteExecutor {
+    /// Initializes the delete executor and its child.
+    ///
+    /// Creates the child executor from the plan's children if not already
+    /// present. The child executor (typically a scan + filter combination)
+    /// identifies which tuples to delete.
+    ///
+    /// # Child Executor
+    ///
+    /// The first child plan is used to create the executor that produces
+    /// tuples to delete. Common patterns:
+    /// - `SeqScanPlanNode`: Delete all rows
+    /// - `FilterPlanNode` → `SeqScanPlanNode`: Delete matching rows
+    /// - `IndexScanPlanNode`: Delete by indexed lookup
     fn init(&mut self) {
         debug!("Initializing DeleteExecutor");
 
@@ -107,6 +230,37 @@ impl AbstractExecutor for DeleteExecutor {
         self.initialized = true;
     }
 
+    /// Executes the delete operation and returns a row count.
+    ///
+    /// Pulls all tuples from the child executor and marks each one as
+    /// deleted in the transactional table heap. This is a **pipeline breaker**
+    /// that processes all deletions before returning.
+    ///
+    /// # Execution Flow
+    ///
+    /// 1. Retrieve table info from catalog
+    /// 2. Pull tuples from child executor
+    /// 3. For each tuple, call `delete_tuple` on the table heap
+    /// 4. Return count of deleted rows
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Tuple with `rows_deleted` count (if > 0)
+    /// * `Ok(None)` - No rows were deleted, or already executed
+    /// * `Err(DBError::Execution)` - Delete operation failed
+    ///
+    /// # Errors
+    ///
+    /// | Condition                | Error                              |
+    /// |--------------------------|------------------------------------|
+    /// | Table not found          | `DBError::Execution`               |
+    /// | No child executor        | `DBError::Execution`               |
+    /// | Delete tuple failed      | `DBError::Execution`               |
+    ///
+    /// # Transaction Behavior
+    ///
+    /// All deletions are recorded in the current transaction's write set.
+    /// If the transaction aborts, deletions are rolled back automatically.
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             warn!("DeleteExecutor not initialized, initializing now");
@@ -187,10 +341,19 @@ impl AbstractExecutor for DeleteExecutor {
         }
     }
 
+    /// Returns the output schema for delete results.
+    ///
+    /// The actual result tuple uses a simplified schema with just
+    /// `rows_deleted INTEGER`. This returns the plan's schema for
+    /// compatibility with the executor interface.
     fn get_output_schema(&self) -> &Schema {
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to the catalog and transaction context for
+    /// delete operations.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

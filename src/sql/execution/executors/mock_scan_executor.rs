@@ -1,3 +1,66 @@
+//! # Mock Scan Executor
+//!
+//! Provides a self-generating test executor that produces mock tuples based on schema.
+//!
+//! ## Overview
+//!
+//! The `MockScanExecutor` is a testing utility that automatically generates mock
+//! tuples during initialization based on the provided schema. Unlike `MockExecutor`
+//! which requires pre-defined tuples, this executor creates its own test data.
+//!
+//! ## Purpose
+//!
+//! This executor is **not intended for production use**. It serves to:
+//!
+//! - Provide automatic test data generation based on schema
+//! - Test executor pipelines without manual tuple construction
+//! - Verify schema-aware processing in downstream executors
+//! - Enable quick prototyping and debugging of query execution
+//!
+//! ## Mock Data Generation
+//!
+//! The executor generates 3 tuples with type-appropriate values:
+//!
+//! | Type | Generated Values |
+//! |------|------------------|
+//! | `Integer` | 0, 1, 2 |
+//! | `VarChar` | "mock_value_0", "mock_value_1", "mock_value_2" |
+//! | `Boolean` | true, false, true |
+//! | Other | 0 (default) |
+//!
+//! ## Comparison with MockExecutor
+//!
+//! | Feature | MockScanExecutor | MockExecutor |
+//! |---------|------------------|--------------|
+//! | Data source | Auto-generated | User-provided |
+//! | Tuple count | Fixed (3) | Variable |
+//! | RID assignment | Sequential pages | User-defined |
+//! | Use case | Quick tests | Precise test data |
+//!
+//! ## Usage Example
+//!
+//! ```ignore
+//! let schema = Schema::new(vec![
+//!     Column::new("id", TypeId::Integer),
+//!     Column::new("name", TypeId::VarChar),
+//! ]);
+//!
+//! let plan = Arc::new(MockScanNode::new(schema, "test_table".into(), vec![]));
+//! let mut executor = MockScanExecutor::new(context, plan);
+//! executor.init();
+//!
+//! // Will return 3 tuples:
+//! // (0, "mock_value_0"), (1, "mock_value_1"), (2, "mock_value_2")
+//! while let Some((tuple, rid)) = executor.next()? {
+//!     println!("{:?}", tuple);
+//! }
+//! ```
+//!
+//! ## Reusability
+//!
+//! The executor supports multiple scans by calling `init()` again, which
+//! resets the cursor to the beginning of the generated tuples.
+
 use crate::catalog::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::exception::DBError;
@@ -13,6 +76,33 @@ use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Test executor that auto-generates mock tuples based on schema.
+///
+/// Generates 3 tuples during initialization with type-appropriate values
+/// derived from the schema. Useful for quick testing without manually
+/// constructing test data.
+///
+/// # Fields
+///
+/// * `context` - Shared execution context (required by trait interface)
+/// * `plan` - Mock scan plan containing schema and table name
+/// * `mock_tuples` - Generated tuples (populated during `init()`)
+/// * `current_index` - Current position in the mock tuples vector
+/// * `initialized` - Whether `init()` has been called
+///
+/// # Generated Data
+///
+/// For a schema with columns `(id: Integer, name: VarChar, active: Boolean)`:
+///
+/// ```text
+/// Tuple 0: (0, "mock_value_0", true)  RID(0, 0)
+/// Tuple 1: (1, "mock_value_1", false) RID(1, 0)
+/// Tuple 2: (2, "mock_value_2", true)  RID(2, 0)
+/// ```
+///
+/// # Note
+///
+/// This is a **testing-only** component. Do not use in production code.
 pub struct MockScanExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<MockScanNode>,
@@ -22,6 +112,29 @@ pub struct MockScanExecutor {
 }
 
 impl MockScanExecutor {
+    /// Creates a new `MockScanExecutor` for the given plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context (required by trait interface)
+    /// * `plan` - Mock scan plan containing schema and table name
+    ///
+    /// # Returns
+    ///
+    /// A new uninitialized `MockScanExecutor`. Call `init()` to generate
+    /// mock tuples before calling `next()`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let plan = Arc::new(MockScanNode::new(schema, "users".into(), vec![]));
+    /// let mut executor = MockScanExecutor::new(context, plan);
+    /// executor.init(); // Generates 3 mock tuples
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// Mock tuples are not generated until `init()` is called.
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<MockScanNode>) -> Self {
         debug!(
             "Creating MockScanExecutor for table '{}'",
@@ -37,7 +150,24 @@ impl MockScanExecutor {
         }
     }
 
-    // Helper method to generate mock data based on schema
+    /// Generates mock tuples based on the schema.
+    ///
+    /// Creates 3 tuples with values appropriate for each column type:
+    ///
+    /// - `Integer`: Sequential values (0, 1, 2)
+    /// - `VarChar`: Format strings ("mock_value_0", etc.)
+    /// - `Boolean`: Alternating (true, false, true)
+    /// - Other types: Default to 0
+    ///
+    /// # Returns
+    ///
+    /// Vector of 3 (tuple, RID) pairs with sequential page IDs.
+    ///
+    /// # RID Assignment
+    ///
+    /// Each tuple gets a RID with:
+    /// - Page ID: Matches tuple index (0, 1, 2)
+    /// - Slot number: Always 0
     fn generate_mock_data(&self) -> Vec<(Arc<Tuple>, RID)> {
         let schema = self.plan.get_output_schema();
         let mut mock_data = Vec::new();
@@ -67,6 +197,27 @@ impl MockScanExecutor {
 }
 
 impl AbstractExecutor for MockScanExecutor {
+    /// Initializes the executor and generates mock tuples.
+    ///
+    /// # First Call Behavior
+    ///
+    /// On first call, generates 3 mock tuples based on the schema and
+    /// sets the cursor to the beginning.
+    ///
+    /// # Subsequent Call Behavior
+    ///
+    /// On subsequent calls, resets the cursor to allow rescanning the
+    /// same mock tuples without regenerating them. This enables
+    /// executor reuse in tests.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// executor.init();  // Generates tuples, cursor at 0
+    /// // ... scan all tuples ...
+    /// executor.init();  // Resets cursor to 0, same tuples
+    /// // ... scan again ...
+    /// ```
     fn init(&mut self) {
         if self.initialized {
             debug!("MockScanExecutor already initialized, resetting for reuse");
@@ -86,6 +237,25 @@ impl AbstractExecutor for MockScanExecutor {
         self.initialized = true;
     }
 
+    /// Returns the next mock tuple.
+    ///
+    /// Iterates through the generated mock tuples sequentially,
+    /// returning each tuple exactly once per scan.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next mock tuple
+    /// * `Ok(None)` - All 3 mock tuples have been returned
+    ///
+    /// # Auto-Initialization
+    ///
+    /// If `init()` was not called, it will be called automatically
+    /// on the first `next()` invocation.
+    ///
+    /// # Tuple Cloning
+    ///
+    /// Tuples are cloned (Arc clone) on each call, allowing the
+    /// executor to be rescanned after calling `init()` again.
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("MockScanExecutor not initialized, initializing now");
@@ -103,11 +273,27 @@ impl AbstractExecutor for MockScanExecutor {
         }
     }
 
+    /// Returns the output schema from the mock scan plan.
+    ///
+    /// The schema is used both for mock data generation and by
+    /// parent executors for tuple interpretation.
+    ///
+    /// # Returns
+    ///
+    /// Reference to the schema defined in the mock scan plan.
     fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// While the mock scan executor doesn't actively use the context,
+    /// it's required by the `AbstractExecutor` trait interface.
+    ///
+    /// # Returns
+    ///
+    /// Arc-wrapped RwLock-protected execution context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

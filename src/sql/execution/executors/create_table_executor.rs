@@ -1,3 +1,61 @@
+//! # Create Table Executor Module
+//!
+//! This module implements the executor for `CREATE TABLE` statements, which
+//! define new tables with their column schemas in the database catalog.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! CREATE TABLE [IF NOT EXISTS] <table_name> (
+//!     <column_name> <data_type> [constraints],
+//!     ...
+//! )
+//! ```
+//!
+//! ## Supported Data Types
+//!
+//! | Type       | Description                              |
+//! |------------|------------------------------------------|
+//! | INTEGER    | 32-bit signed integer                    |
+//! | BIGINT     | 64-bit signed integer                    |
+//! | DECIMAL    | 64-bit floating point                    |
+//! | VARCHAR    | Variable-length string                   |
+//! | BOOLEAN    | True/false value                         |
+//! | TIMESTAMP  | Date and time with timezone              |
+//! | DATE       | Calendar date                            |
+//!
+//! ## Execution Flow
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                CreateTableExecutor                          │
+//! │                                                             │
+//! │  1. Acquire context read lock (try_read for deadlock safe)  │
+//! │  2. Acquire catalog write lock (try_write)                  │
+//! │  3. Check IF NOT EXISTS condition                           │
+//! │  4. Create table metadata in catalog                        │
+//! │  5. Initialize table heap for data storage                  │
+//! │                                                             │
+//! │  ┌─────────────────────────────────────────────────────┐    │
+//! │  │ Catalog                                             │    │
+//! │  │  └─ TableInfo                                       │    │
+//! │  │      ├─ table_oid: 1                                │    │
+//! │  │      ├─ table_name: "users"                         │    │
+//! │  │      └─ schema: (id INT, name VARCHAR, ...)         │    │
+//! │  └─────────────────────────────────────────────────────┘    │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Lock Acquisition
+//!
+//! Uses `try_read` and `try_write` to avoid deadlocks in concurrent scenarios.
+//! Returns an error if locks cannot be acquired, allowing the caller to retry.
+//!
+//! ## Output
+//!
+//! Table creation produces no output tuples. Success is indicated by `Ok(None)`,
+//! while failures return `Err(DBError)`.
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -10,13 +68,64 @@ use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for `CREATE TABLE` DDL statements.
+///
+/// `CreateTableExecutor` handles the creation of new tables in the database
+/// catalog. It validates preconditions, creates table metadata, and initializes
+/// the underlying storage structures (table heap).
+///
+/// # Table Components Created
+///
+/// When a table is successfully created:
+/// - **TableInfo**: Metadata entry in the catalog
+/// - **TableHeap**: Slotted-page storage for tuple data
+/// - **Schema**: Column definitions with types and constraints
+///
+/// # Concurrency Safety
+///
+/// The executor uses `try_read`/`try_write` lock acquisition to prevent
+/// deadlocks. If locks cannot be acquired, an execution error is returned
+/// rather than blocking indefinitely.
+///
+/// # Example
+///
+/// ```ignore
+/// // CREATE TABLE users (id INTEGER, name VARCHAR, age INTEGER)
+/// let schema = Schema::new(vec![
+///     Column::new("id", TypeId::Integer),
+///     Column::new("name", TypeId::VarChar),
+///     Column::new("age", TypeId::Integer),
+/// ]);
+/// let plan = CreateTablePlanNode::new(schema, "users".to_string(), false);
+/// let executor = CreateTableExecutor::new(context, Arc::new(plan), false);
+/// ```
+///
+/// # Lifecycle
+///
+/// The executor logs its creation and destruction for debugging purposes
+/// via the `Drop` implementation.
 pub struct CreateTableExecutor {
+    /// Shared execution context providing catalog access.
     context: Arc<RwLock<ExecutionContext>>,
+    /// Plan node containing table name, schema, and IF NOT EXISTS flag.
     plan: Arc<CreateTablePlanNode>,
+    /// Flag indicating whether table creation has been attempted.
     executed: bool,
 }
 
 impl CreateTableExecutor {
+    /// Creates a new `CreateTableExecutor` from a plan node.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context providing catalog access.
+    /// * `plan` - Plan node with table name, schema, and IF NOT EXISTS flag.
+    /// * `executed` - Initial execution state (typically `false`).
+    ///
+    /// # Returns
+    ///
+    /// A new executor ready for initialization. Debug logging captures the
+    /// table name and IF NOT EXISTS setting.
     pub fn new(
         context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<CreateTablePlanNode>,
@@ -38,6 +147,11 @@ impl CreateTableExecutor {
 }
 
 impl AbstractExecutor for CreateTableExecutor {
+    /// Initializes the executor for table creation.
+    ///
+    /// Resets the `executed` flag to allow re-execution. This is useful
+    /// when the same executor needs to be used after a failed attempt
+    /// due to lock contention.
     fn init(&mut self) {
         debug!(
             "Initializing CreateTableExecutor for table '{}'",
@@ -46,6 +160,34 @@ impl AbstractExecutor for CreateTableExecutor {
         self.executed = false;
     }
 
+    /// Attempts to create the table in the catalog.
+    ///
+    /// # Execution Steps
+    ///
+    /// 1. **Lock acquisition**: Acquires context read lock, then catalog write lock
+    /// 2. **Existence check**: If IF NOT EXISTS, skips creation for existing tables
+    /// 3. **Table creation**: Creates TableInfo and initializes TableHeap
+    ///
+    /// # Lock Behavior
+    ///
+    /// Uses non-blocking `try_read`/`try_write` to prevent deadlocks:
+    /// - Returns `Err(DBError::Execution)` if locks cannot be acquired
+    /// - Caller can retry after backoff
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(None)` - Table created successfully, or skipped (IF NOT EXISTS)
+    /// * `Err(DBError::Execution)` - Lock contention prevented execution
+    /// * `Err(DBError::Validation)` - Table creation failed (e.g., duplicate without IF NOT EXISTS)
+    ///
+    /// # Error Conditions
+    ///
+    /// | Condition                    | Error Type              |
+    /// |------------------------------|-------------------------|
+    /// | Context lock contention      | `DBError::Execution`    |
+    /// | Catalog lock contention      | `DBError::Execution`    |
+    /// | Duplicate table (no IF NOT)  | `DBError::Validation`   |
+    /// | Constraint validation failed | `DBError::Validation`   |
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
             debug!("CreateTableExecutor already executed, returning None");
@@ -125,16 +267,27 @@ impl AbstractExecutor for CreateTableExecutor {
         Ok(None)
     }
 
+    /// Returns the output schema for table creation.
+    ///
+    /// Returns the schema that was used to create the table. Note that
+    /// DDL statements produce no tuples; this schema describes the
+    /// table structure, not the executor output.
     fn get_output_schema(&self) -> &Schema {
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to the catalog for table creation.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
 
 impl Drop for CreateTableExecutor {
+    /// Logs executor destruction for debugging.
+    ///
+    /// Helps trace executor lifecycle in complex query plans.
     fn drop(&mut self) {
         debug!(
             "Dropping CreateTableExecutor for table '{}'",

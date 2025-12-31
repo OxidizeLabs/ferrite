@@ -1,3 +1,108 @@
+//! # Sort Executor
+//!
+//! This module implements the executor for the SQL `ORDER BY` clause, which
+//! sorts query results according to one or more expressions with configurable
+//! ascending or descending order.
+//!
+//! ## SQL Syntax
+//!
+//! The executor handles various `ORDER BY` patterns:
+//!
+//! ```sql
+//! -- Single column sort (ascending by default)
+//! SELECT * FROM employees ORDER BY name;
+//!
+//! -- Explicit ascending order
+//! SELECT * FROM employees ORDER BY salary ASC;
+//!
+//! -- Descending order
+//! SELECT * FROM employees ORDER BY hire_date DESC;
+//!
+//! -- Multiple sort keys (lexicographic ordering)
+//! SELECT * FROM employees ORDER BY department ASC, salary DESC;
+//!
+//! -- Sort by expression
+//! SELECT * FROM employees ORDER BY salary * 12 DESC;
+//!
+//! -- Sort with LIMIT (Top-N query)
+//! SELECT * FROM employees ORDER BY salary DESC LIMIT 10;
+//! ```
+//!
+//! ## Execution Model
+//!
+//! The sort executor is a **blocking operator** that must materialize all input
+//! tuples before producing any output. This differs from streaming operators
+//! like filter or projection.
+//!
+//! ```text
+//! Execution Timeline
+//! ──────────────────────────────────────────────────────────────────────
+//!
+//! init() Phase (Blocking):
+//! ┌─────────────────────────────────────────────────────────────────────┐
+//! │  Child.init() ──▶ Collect ALL tuples ──▶ Sort in memory            │
+//! │                                                                     │
+//! │  Input:  [T3, T1, T5, T2, T4]  (unsorted from child)               │
+//! │  Output: [T1, T2, T3, T4, T5]  (sorted in sorted_tuples vector)    │
+//! └─────────────────────────────────────────────────────────────────────┘
+//!
+//! next() Phase (Streaming):
+//! ┌─────────────────────────────────────────────────────────────────────┐
+//! │  Return tuples one at a time from sorted vector                     │
+//! │                                                                     │
+//! │  next() → T1    next() → T2    next() → T3    ...    next() → None │
+//! └─────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Multi-Key Sorting
+//!
+//! When multiple sort keys are specified, they are evaluated in order:
+//!
+//! ```text
+//! ORDER BY department ASC, salary DESC
+//!
+//! ┌────────────┬────────┐     ┌────────────┬────────┐
+//! │ department │ salary │     │ department │ salary │
+//! ├────────────┼────────┤     ├────────────┼────────┤
+//! │ Sales      │ 60000  │     │ Eng        │ 90000  │  ← Eng first (ASC)
+//! │ Eng        │ 80000  │ ──▶ │ Eng        │ 80000  │  ← Within Eng: 90k > 80k (DESC)
+//! │ Eng        │ 90000  │     │ Sales      │ 70000  │  ← Sales second
+//! │ Sales      │ 70000  │     │ Sales      │ 60000  │  ← Within Sales: 70k > 60k (DESC)
+//! └────────────┴────────┘     └────────────┴────────┘
+//! ```
+//!
+//! ## Performance Characteristics
+//!
+//! | Aspect | Complexity | Notes |
+//! |--------|------------|-------|
+//! | Time | O(n log n) | Standard comparison sort |
+//! | Memory | O(n) | Must store all tuples |
+//! | First tuple | O(n log n) | Blocking - must sort all first |
+//! | Subsequent | O(1) | Just array index increment |
+//!
+//! ## Memory Considerations
+//!
+//! Since all tuples must be materialized in memory for sorting:
+//!
+//! - **Small result sets**: Efficient in-memory sort
+//! - **Large result sets**: May cause memory pressure
+//! - **With LIMIT**: Consider Top-N heap optimization (not yet implemented)
+//! - **External sort**: Disk-based merge sort for very large data (not yet implemented)
+//!
+//! ## Sorting Algorithm
+//!
+//! Uses Rust's stable `sort_by` which is based on TimSort:
+//! - **Stable**: Equal elements maintain their relative order
+//! - **Adaptive**: O(n) for already-sorted data
+//! - **Worst case**: O(n log n) comparisons
+//!
+//! ## NULL Handling
+//!
+//! NULL values are handled according to SQL semantics:
+//! - NULLs are compared using `partial_cmp`
+//! - Incomparable values (both NULL) are treated as equal
+//! - Sort continues to next key if current key comparison is inconclusive
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -11,16 +116,125 @@ use log::{debug, error, trace};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for sorting query results according to `ORDER BY` specifications.
+///
+/// `SortExecutor` is a blocking operator that collects all tuples from its
+/// child executor, sorts them in memory according to the specified order-by
+/// expressions and directions, then returns them one at a time.
+///
+/// # Blocking Behavior
+///
+/// Unlike streaming operators (filter, projection), the sort executor must
+/// see all input tuples before producing any output. This has implications:
+///
+/// - `init()` consumes all child tuples and performs the sort
+/// - `next()` simply iterates through the pre-sorted vector
+/// - Memory usage is proportional to result set size
+///
+/// # Multi-Key Sorting
+///
+/// The executor supports multiple sort keys with independent directions:
+///
+/// ```sql
+/// ORDER BY department ASC, salary DESC, name ASC
+/// ```
+///
+/// Keys are evaluated left-to-right; later keys only matter when earlier
+/// keys compare equal.
+///
+/// # Example Usage
+///
+/// ```ignore
+/// // Create sort plan: ORDER BY salary DESC, name ASC
+/// let order_by_specs = vec![
+///     OrderBySpec::new(salary_expr, OrderDirection::Desc),
+///     OrderBySpec::new(name_expr, OrderDirection::Asc),
+/// ];
+/// let sort_plan = Arc::new(SortNode::new(schema, order_by_specs, children));
+///
+/// // Create executor with child (e.g., a scan or filter)
+/// let mut executor = SortExecutor::new(child_executor, context, sort_plan);
+/// executor.init();  // This collects and sorts all tuples
+///
+/// // Results come out in sorted order
+/// while let Ok(Some((tuple, rid))) = executor.next() {
+///     // Tuples are returned in ORDER BY order
+/// }
+/// ```
+///
+/// # Fields
+///
+/// - `context`: Shared execution context
+/// - `plan`: Sort plan with order-by specifications
+/// - `child_executor`: Source of unsorted tuples
+/// - `sorted_tuples`: Materialized and sorted result set
+/// - `current_index`: Position in sorted output
+/// - `initialized`: Prevents double initialization
 pub struct SortExecutor {
+    /// Shared execution context for catalog and transaction access.
     context: Arc<RwLock<ExecutionContext>>,
+
+    /// The sort plan containing order-by specifications.
     plan: Arc<SortNode>,
+
+    /// Child executor providing unsorted input tuples.
+    /// Wrapped in `Option` because it's consumed during `init()`.
     child_executor: Option<Box<dyn AbstractExecutor>>,
+
+    /// All tuples from child, sorted according to order-by specs.
+    /// Populated during `init()`, then read sequentially by `next()`.
     sorted_tuples: Vec<(Arc<Tuple>, RID)>,
+
+    /// Current position in the sorted output vector.
     current_index: usize,
+
+    /// Flag indicating whether initialization (and sorting) is complete.
     initialized: bool,
 }
 
 impl SortExecutor {
+    /// Creates a new `SortExecutor` with the given child executor and sort plan.
+    ///
+    /// The child executor provides unsorted tuples that will be collected and
+    /// sorted during initialization. The sort plan specifies the order-by
+    /// expressions and their directions (ASC/DESC).
+    ///
+    /// # Arguments
+    ///
+    /// * `child_executor` - Source of tuples to be sorted
+    /// * `context` - Shared execution context
+    /// * `plan` - Sort plan containing:
+    ///   - Order-by specifications (expression + direction pairs)
+    ///   - Output schema
+    ///   - Child plan nodes
+    ///
+    /// # Returns
+    ///
+    /// A new executor instance ready for initialization.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Create a sort executor for ORDER BY salary DESC
+    /// let salary_spec = OrderBySpec::new(salary_expr, OrderDirection::Desc);
+    /// let sort_plan = Arc::new(SortNode::new(
+    ///     schema.clone(),
+    ///     vec![salary_spec],
+    ///     children,
+    /// ));
+    ///
+    /// let executor = SortExecutor::new(
+    ///     scan_executor,  // Child providing unsorted data
+    ///     context.clone(),
+    ///     sort_plan,
+    /// );
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// The child executor is stored in an `Option` because it will be consumed
+    /// during `init()`. After initialization, the child is no longer needed
+    /// as all tuples have been materialized into `sorted_tuples`.
     pub fn new(
         child_executor: Box<dyn AbstractExecutor>,
         context: Arc<RwLock<ExecutionContext>>,
@@ -40,6 +254,41 @@ impl SortExecutor {
 }
 
 impl AbstractExecutor for SortExecutor {
+    /// Initializes the sort executor by collecting and sorting all input tuples.
+    ///
+    /// This is a **blocking operation** that must complete before any output
+    /// can be produced. The method performs three main steps:
+    ///
+    /// 1. **Initialize child**: Prepare the source executor
+    /// 2. **Collect tuples**: Pull all tuples from child into memory
+    /// 3. **Sort**: Order tuples according to order-by specifications
+    ///
+    /// # Sorting Algorithm
+    ///
+    /// Uses Rust's stable `sort_by` (TimSort) with a custom comparator:
+    ///
+    /// ```text
+    /// For each pair of tuples (A, B):
+    ///   For each order-by spec in sequence:
+    ///     1. Evaluate expression on both tuples
+    ///     2. Compare values using partial_cmp
+    ///     3. If not equal:
+    ///        - ASC: return natural ordering
+    ///        - DESC: return reversed ordering
+    ///     4. If equal or incomparable: continue to next spec
+    ///   If all specs exhausted: treat as equal
+    /// ```
+    ///
+    /// # Error Handling
+    ///
+    /// - Child executor errors during collection are logged and terminate collection
+    /// - Expression evaluation errors are logged and that comparison key is skipped
+    /// - Incomparable values (e.g., NULLs) continue to the next sort key
+    ///
+    /// # Idempotency
+    ///
+    /// This method is idempotent - subsequent calls after the first have no effect.
+    /// The `initialized` flag prevents redundant work.
     fn init(&mut self) {
         if self.initialized {
             debug!("SortExecutor already initialized");
@@ -147,6 +396,37 @@ impl AbstractExecutor for SortExecutor {
         debug!("SortExecutor initialization complete");
     }
 
+    /// Returns the next tuple in sorted order.
+    ///
+    /// After initialization has sorted all tuples, this method simply
+    /// iterates through the sorted vector, returning one tuple per call.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some((tuple, rid)))` - Next tuple in sorted order
+    /// - `Ok(None)` - All sorted tuples have been returned
+    ///
+    /// # Lazy Initialization
+    ///
+    /// If called before `init()`, initialization is triggered automatically.
+    /// However, explicit initialization is recommended for predictable latency.
+    ///
+    /// # Performance
+    ///
+    /// After initialization, each `next()` call is O(1) - just an index
+    /// increment and clone of the tuple reference.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut executor = SortExecutor::new(child, context, plan);
+    /// executor.init();  // Sorts all tuples
+    ///
+    /// // Tuples come out in ORDER BY order
+    /// let first = executor.next()?;   // Smallest/largest by sort key
+    /// let second = executor.next()?;  // Second in sort order
+    /// // ... continue until None
+    /// ```
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("SortExecutor not initialized, initializing now");
@@ -168,11 +448,29 @@ impl AbstractExecutor for SortExecutor {
         Ok(Some(result))
     }
 
+    /// Returns the output schema for this executor.
+    ///
+    /// The sort operation preserves the schema from its child - it only
+    /// reorders tuples, it doesn't change their structure.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the schema from the underlying sort plan node.
     fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to:
+    /// - **Catalog**: Table and schema metadata
+    /// - **Buffer Pool Manager**: Page access (though sorting is in-memory)
+    /// - **Transaction Context**: Current transaction state
+    ///
+    /// # Returns
+    ///
+    /// An `Arc`-wrapped, `RwLock`-protected reference to the execution context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

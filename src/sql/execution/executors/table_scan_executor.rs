@@ -1,3 +1,86 @@
+//! # Table Scan Executor
+//!
+//! This module implements a straightforward sequential scan executor that reads
+//! all tuples from a table using the Volcano-style iterator model. It provides
+//! a simpler implementation compared to `SeqScanExecutor` by delegating iterator
+//! creation to the plan node.
+//!
+//! ## SQL Syntax
+//!
+//! Table scans are the fundamental data access method for queries:
+//!
+//! ```sql
+//! -- Full table scan
+//! SELECT * FROM employees;
+//!
+//! -- Scan with projection (columns selected at higher level)
+//! SELECT name, salary FROM employees;
+//!
+//! -- Scan feeding into filter
+//! SELECT * FROM employees WHERE department = 'Engineering';
+//! ```
+//!
+//! ## Execution Model
+//!
+//! The executor follows the Volcano iterator model with three phases:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────┐
+//! │                     TableScanExecutor Lifecycle                     │
+//! ├─────────────────────────────────────────────────────────────────────┤
+//! │                                                                     │
+//! │  new()  ─────▶  Store plan reference                                │
+//! │                 No iterator created yet                             │
+//! │                                                                     │
+//! │  init() ─────▶  Create TableScanIterator via plan.scan()            │
+//! │                 Iterator positioned at first tuple                  │
+//! │                                                                     │
+//! │  next() ─────▶  Loop: get next tuple from iterator                  │
+//! │                       if deleted → skip, continue                   │
+//! │                       if valid → return (Tuple, RID)                │
+//! │                       if exhausted → return None                    │
+//! │                                                                     │
+//! └─────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Deleted Tuple Handling
+//!
+//! The executor automatically filters out deleted tuples:
+//!
+//! ```text
+//! Table Heap Slots:
+//! ┌─────────┬─────────┬─────────┬─────────┬─────────┐
+//! │ Tuple 0 │ Tuple 1 │ Tuple 2 │ Tuple 3 │ Tuple 4 │
+//! │ Active  │ DELETED │ Active  │ DELETED │ Active  │
+//! └────┬────┴────┬────┴────┬────┴────┬────┴────┬────┘
+//!      │         │         │         │         │
+//!      ▼         ✗         ▼         ✗         ▼
+//!   Return     Skip     Return     Skip     Return
+//! ```
+//!
+//! ## Comparison with SeqScanExecutor
+//!
+//! | Aspect | TableScanExecutor | SeqScanExecutor |
+//! |--------|-------------------|-----------------|
+//! | Iterator source | Plan node (`scan()`) | Created manually |
+//! | Table lookup | Via plan's TableInfo | Via catalog by OID |
+//! | MVCC support | Basic (deleted flag) | Full transactional |
+//! | Complexity | Simpler | More features |
+//!
+//! ## Performance Characteristics
+//!
+//! | Aspect | Complexity | Notes |
+//! |--------|------------|-------|
+//! | Time | O(n) | Reads every tuple |
+//! | I/O | O(pages) | Sequential page access |
+//! | Memory | O(1) | Only current tuple in memory |
+//!
+//! ## Implementation Notes
+//!
+//! - The iterator is created lazily during `init()`, not in constructor
+//! - Deleted tuples are skipped using a loop (not recursion) to avoid stack overflow
+//! - The plan node owns the `TableInfo` and provides the `scan()` method
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -11,21 +94,97 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-/// TableScanExecutor implements a simple sequential scan over a table
-/// using the Volcano-style iterator model.
+/// Executor for sequential table scans using the Volcano iterator model.
+///
+/// `TableScanExecutor` provides a simple implementation of full table scans,
+/// reading tuples sequentially from the underlying table heap. It delegates
+/// iterator creation to the plan node, which encapsulates the table information.
+///
+/// # Architecture
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────┐
+/// │                    TableScanExecutor                        │
+/// │  ┌─────────────────────────────────────────────────────┐    │
+/// │  │  plan: TableScanNode                                │    │
+/// │  │    └── table_info: TableInfo                        │    │
+/// │  │          └── table_heap: Arc<TableHeap>             │    │
+/// │  └─────────────────────────────────────────────────────┘    │
+/// │                           │                                 │
+/// │                           ▼ plan.scan()                     │
+/// │  ┌─────────────────────────────────────────────────────┐    │
+/// │  │  iterator: TableScanIterator                        │    │
+/// │  │    └── Iterates over (TupleMeta, Tuple) pairs       │    │
+/// │  └─────────────────────────────────────────────────────┘    │
+/// └─────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// # Example Usage
+///
+/// ```ignore
+/// // Create a table scan plan from table info
+/// let plan = Arc::new(TableScanNode::new(
+///     table_info,
+///     schema.clone(),
+///     None,  // No predicate pushdown
+/// ));
+///
+/// // Create and initialize executor
+/// let mut executor = TableScanExecutor::new(context.clone(), plan);
+/// executor.init();
+///
+/// // Iterate through all non-deleted tuples
+/// while let Ok(Some((tuple, rid))) = executor.next() {
+///     println!("Tuple at {:?}: {:?}", rid, tuple);
+/// }
+/// ```
+///
+/// # Fields
+///
+/// - `context`: Shared execution context (catalog, buffer pool, transaction)
+/// - `plan`: The table scan plan containing table info and schema
+/// - `initialized`: Flag preventing double initialization
+/// - `iterator`: The underlying tuple iterator, created during init()
 pub struct TableScanExecutor {
-    /// The executor context
+    /// Shared execution context providing access to catalog and transaction.
     context: Arc<RwLock<ExecutionContext>>,
-    /// The table scan plan node
+
+    /// The table scan plan node containing table metadata and iterator factory.
     plan: Arc<TableScanNode>,
-    /// Flag indicating if the executor has been initialized
+
+    /// Flag indicating whether `init()` has been called.
     initialized: bool,
-    /// The iterator over the table's tuples
+
+    /// Iterator over the table's tuples, created during initialization.
+    /// Returns `(TupleMeta, Tuple)` pairs for each slot.
     iterator: Option<TableScanIterator>,
 }
 
 impl TableScanExecutor {
-    /// Create a new table scan executor
+    /// Creates a new `TableScanExecutor` with the given context and plan.
+    ///
+    /// The iterator is not created at this point - it will be instantiated
+    /// lazily during `init()` by calling `plan.scan()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context for catalog and transaction access
+    /// * `plan` - Table scan plan containing:
+    ///   - `TableInfo` with the table heap reference
+    ///   - Output schema for the scan
+    ///   - Optional filter predicate (for predicate pushdown)
+    ///
+    /// # Returns
+    ///
+    /// A new executor instance ready for initialization.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let plan = Arc::new(TableScanNode::new(table_info, schema, None));
+    /// let executor = TableScanExecutor::new(context.clone(), plan);
+    /// // Call init() before next()
+    /// ```
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<TableScanNode>) -> Self {
         Self {
             context,
@@ -37,6 +196,22 @@ impl TableScanExecutor {
 }
 
 impl AbstractExecutor for TableScanExecutor {
+    /// Initializes the table scan by creating the underlying iterator.
+    ///
+    /// This method delegates to `plan.scan()` to create a `TableScanIterator`
+    /// that will iterate over all tuples in the table heap.
+    ///
+    /// # Behavior
+    ///
+    /// - Creates a fresh iterator positioned at the first tuple
+    /// - Sets the `initialized` flag to prevent redundant initialization
+    /// - Logs the table name being scanned for debugging
+    ///
+    /// # Note
+    ///
+    /// If `next()` is called before `init()`, initialization happens
+    /// automatically. However, explicit initialization is recommended
+    /// for predictable behavior.
     fn init(&mut self) {
         debug!(
             "Initializing TableScanExecutor for table: {}",
@@ -50,6 +225,46 @@ impl AbstractExecutor for TableScanExecutor {
         debug!("TableScanExecutor initialized successfully");
     }
 
+    /// Returns the next non-deleted tuple from the table scan.
+    ///
+    /// This method iterates through the table heap, automatically skipping
+    /// any tuples marked as deleted, and returns the next visible tuple.
+    ///
+    /// # Deleted Tuple Filtering
+    ///
+    /// Uses a loop (not recursion) to skip deleted tuples, preventing
+    /// potential stack overflow on tables with many consecutive deletions:
+    ///
+    /// ```text
+    /// Iterator: [D] [D] [D] [Active] [D] [Active] ...
+    ///            ↓   ↓   ↓     ↓
+    ///          skip skip skip RETURN
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some((tuple, rid)))` - Next visible tuple and its location
+    /// - `Ok(None)` - End of table reached, no more tuples
+    /// - `Err(DBError::Execution)` - Iterator not initialized (internal error)
+    ///
+    /// # Lazy Initialization
+    ///
+    /// If called before `init()`, this method automatically initializes
+    /// the executor first.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut executor = TableScanExecutor::new(context, plan);
+    /// executor.init();
+    ///
+    /// let mut count = 0;
+    /// while let Ok(Some((tuple, rid))) = executor.next() {
+    ///     count += 1;
+    ///     // Process visible tuple
+    /// }
+    /// println!("Scanned {} tuples", count);
+    /// ```
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         // Initialize if not already done
         if !self.initialized {
@@ -83,10 +298,29 @@ impl AbstractExecutor for TableScanExecutor {
         }
     }
 
+    /// Returns the output schema for this scan.
+    ///
+    /// The schema defines the columns and types of tuples returned by
+    /// this executor. For table scans, this is typically the full table
+    /// schema unless column pruning has been applied.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the schema from the underlying plan node.
     fn get_output_schema(&self) -> &Schema {
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to:
+    /// - **Catalog**: Table and index metadata
+    /// - **Buffer Pool Manager**: Page access for the scan
+    /// - **Transaction Context**: Current transaction state
+    ///
+    /// # Returns
+    ///
+    /// An `Arc`-wrapped, `RwLock`-protected reference to the execution context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

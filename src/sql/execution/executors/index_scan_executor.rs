@@ -1,3 +1,59 @@
+//! # Index Scan Executor Module
+//!
+//! This module implements the executor for index-based table scans, which
+//! use B+ tree indexes to efficiently locate tuples matching predicates.
+//!
+//! ## SQL Optimization
+//!
+//! The query optimizer selects index scans when:
+//! - A suitable index exists on the filtered column(s)
+//! - The predicate is selective enough to benefit from index access
+//! - The query involves equality or range conditions
+//!
+//! ## Execution Model
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                   IndexScanExecutor                         │
+//! │                                                             │
+//! │  1. Analyze predicates → compute scan bounds                │
+//! │  ┌─────────────────────────────────────────────────────┐    │
+//! │  │ Predicate: id >= 5 AND id < 10                      │    │
+//! │  │ Bounds: start_key=5 (inclusive), end_key=10 (excl)  │    │
+//! │  └─────────────────────────────────────────────────────┘    │
+//! │                                                             │
+//! │  2. Create index iterator with bounds                       │
+//! │  ┌─────────────────────────────────────────────────────┐    │
+//! │  │ B+ Tree Index                                       │    │
+//! │  │  └─ Leaf: [5→RID₁] [6→RID₂] [7→RID₃] ...           │    │
+//! │  └─────────────────────────────────────────────────────┘    │
+//! │                                                             │
+//! │  3. For each RID: fetch tuple from table heap               │
+//! │  ┌─────────────────────────────────────────────────────┐    │
+//! │  │ TransactionalTableHeap                              │    │
+//! │  │  └─ get_tuple(RID₁) → (meta, tuple)                 │    │
+//! │  └─────────────────────────────────────────────────────┘    │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Predicate Analysis
+//!
+//! Supports converting predicates to index scan bounds:
+//!
+//! | Predicate         | Start Bound    | End Bound      |
+//! |-------------------|----------------|----------------|
+//! | `x = 5`           | 5 (inclusive)  | 5 (inclusive)  |
+//! | `x > 5`           | 5 (exclusive)  | None           |
+//! | `x >= 5`          | 5 (inclusive)  | None           |
+//! | `x < 10`          | None           | 10 (exclusive) |
+//! | `x <= 10`         | None           | 10 (inclusive) |
+//! | `x > 5 AND x < 10`| 5 (exclusive)  | 10 (exclusive) |
+//!
+//! ## MVCC Integration
+//!
+//! Fetched tuples are checked for visibility using the transaction context.
+//! Deleted tuples are automatically skipped.
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -17,15 +73,71 @@ use log::{debug, error, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for index-based table scans.
+///
+/// `IndexScanExecutor` uses a B+ tree index to efficiently locate tuples
+/// that match predicate conditions. It analyzes predicates to determine
+/// optimal scan bounds and fetches matching tuples from the table heap.
+///
+/// # Performance
+///
+/// Index scans are O(log n + k) where n is the table size and k is the
+/// number of matching tuples. This is significantly faster than sequential
+/// scans (O(n)) for selective queries.
+///
+/// # Predicate Handling
+///
+/// 1. Predicates are analyzed to extract index-usable bounds
+/// 2. An `IndexIterator` is created with the computed bounds
+/// 3. Each RID from the index is used to fetch the full tuple
+/// 4. Tuples are re-checked against all predicates (for safety)
+///
+/// # Example
+///
+/// ```ignore
+/// // SELECT * FROM users WHERE id = 42
+/// let plan = IndexScanNode::new(
+///     schema,
+///     "users",
+///     table_oid,
+///     "idx_users_id",
+///     index_oid,
+///     vec![equality_predicate],
+/// );
+/// let executor = IndexScanExecutor::new(context, Arc::new(plan));
+/// ```
 pub struct IndexScanExecutor {
+    /// Shared execution context for catalog and transaction access.
     context: Arc<RwLock<ExecutionContext>>,
+    /// Index scan plan with predicates and index information.
     plan: Arc<IndexScanNode>,
+    /// Table heap for fetching full tuples by RID.
     table_heap: Arc<TransactionalTableHeap>,
+    /// Flag indicating whether `init()` has been called.
     initialized: bool,
+    /// Iterator over index entries within the computed bounds.
     iterator: Option<IndexIterator>,
 }
 
 impl IndexScanExecutor {
+    /// Creates a new `IndexScanExecutor` for the given plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context for catalog and transaction access.
+    /// * `plan` - Index scan plan containing table/index names and predicates.
+    ///
+    /// # Returns
+    ///
+    /// A new executor ready for initialization.
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The specified table does not exist in the catalog
+    /// - The specified index does not exist in the catalog
+    ///
+    /// These are programming errors since the planner should validate existence.
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<IndexScanNode>) -> Self {
         let table_name = plan.get_table_name();
         debug!(
@@ -82,6 +194,28 @@ impl IndexScanExecutor {
         }
     }
 
+    /// Analyzes a predicate expression to extract index scan ranges.
+    ///
+    /// Recursively processes comparison and logic expressions to determine
+    /// the optimal start and end bounds for an index scan.
+    ///
+    /// # Arguments
+    ///
+    /// * `expr` - The predicate expression to analyze.
+    ///
+    /// # Returns
+    ///
+    /// A vector of ranges, where each range is a tuple of:
+    /// - `Option<Value>`: Start bound (None = unbounded)
+    /// - `bool`: Start bound inclusive
+    /// - `Option<Value>`: End bound (None = unbounded)
+    /// - `bool`: End bound inclusive
+    ///
+    /// # Logic Expression Handling
+    ///
+    /// - **AND**: Intersects ranges (takes most restrictive bounds)
+    /// - **OR**: Unions ranges (returns all child ranges)
+    /// - **NOT**: Inverts comparison operators
     fn analyze_predicate_ranges(
         expr: &Expression,
     ) -> Vec<(Option<Value>, bool, Option<Value>, bool)> {
@@ -240,6 +374,28 @@ impl IndexScanExecutor {
         }
     }
 
+    /// Computes the final index scan bounds from all predicates.
+    ///
+    /// Analyzes all predicate keys, collects their ranges, and computes
+    /// the widest range that covers all predicates (for OR semantics)
+    /// or the narrowest range (for AND semantics within each predicate).
+    ///
+    /// # Arguments
+    ///
+    /// * `index_info` - Index metadata containing the key schema.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of:
+    /// - `Option<Arc<Tuple>>`: Start key tuple (None = scan from beginning)
+    /// - `Option<Arc<Tuple>>`: End key tuple (None = scan to end)
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Collect ranges from all predicate expressions
+    /// 2. Take the minimum start value (widest coverage)
+    /// 3. Take the maximum end value (widest coverage)
+    /// 4. Create key tuples using the index's key schema
     fn analyze_bounds(&self, index_info: &IndexInfo) -> (Option<Arc<Tuple>>, Option<Arc<Tuple>>) {
         let predicate_keys = self.plan.get_predicate_keys();
         let mut all_ranges = Vec::new();
@@ -308,6 +464,15 @@ impl IndexScanExecutor {
 }
 
 impl AbstractExecutor for IndexScanExecutor {
+    /// Initializes the index scan executor.
+    ///
+    /// Retrieves the index from the catalog, analyzes predicates to compute
+    /// scan bounds, and creates an `IndexIterator` positioned at the start.
+    ///
+    /// # Bound Computation
+    ///
+    /// Predicates are analyzed to determine the optimal range for the index
+    /// scan. This avoids scanning the entire index when the query is selective.
     fn init(&mut self) {
         if self.initialized {
             return;
@@ -329,6 +494,33 @@ impl AbstractExecutor for IndexScanExecutor {
         }
     }
 
+    /// Returns the next tuple matching the index scan predicates.
+    ///
+    /// # Scan Algorithm
+    ///
+    /// 1. Get next RID from index iterator
+    /// 2. Fetch tuple from table heap using RID
+    /// 3. Check MVCC visibility (skip deleted tuples)
+    /// 4. Re-evaluate predicates on full tuple
+    /// 5. Return if all predicates match, else continue
+    ///
+    /// # Predicate Re-evaluation
+    ///
+    /// Although the index scan uses bounds, predicates are re-evaluated on
+    /// fetched tuples for correctness. This handles cases where:
+    /// - Index bounds are approximate (OR predicates)
+    /// - Non-indexed columns are in the predicate
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next matching tuple
+    /// * `Ok(None)` - No more matching tuples
+    /// * `Err(DBError::Execution)` - Index iterator error
+    ///
+    /// # MVCC Behavior
+    ///
+    /// Deleted tuples are automatically skipped. Visibility is determined
+    /// by the transaction context from the execution context.
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("IndexScanExecutor not initialized, initializing now");
@@ -415,11 +607,17 @@ impl AbstractExecutor for IndexScanExecutor {
         Ok(None)
     }
 
+    /// Returns the output schema for scanned tuples.
+    ///
+    /// The schema matches the table's full schema (all columns).
     fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to the catalog and transaction context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

@@ -1,3 +1,54 @@
+//! # Hash Join Executor Module
+//!
+//! This module implements the executor for hash-based join operations,
+//! providing efficient equi-join processing for SQL `JOIN` clauses.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! SELECT ... FROM left_table
+//! JOIN right_table ON left_table.key = right_table.key
+//! ```
+//!
+//! ## Algorithm Overview
+//!
+//! Hash join operates in two phases:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                    HashJoinExecutor                         │
+//! │                                                             │
+//! │  BUILD PHASE (right child):                                 │
+//! │  ┌─────────────┐    ┌─────────────────────────────────┐    │
+//! │  │ Right Tuple │───▶│ Hash(key) → DiskExtendableHash  │    │
+//! │  │ (id=1, 25)  │    │ table[hash] = RID               │    │
+//! │  └─────────────┘    └─────────────────────────────────┘    │
+//! │                                                             │
+//! │  PROBE PHASE (left child):                                  │
+//! │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
+//! │  │ Left Tuple  │───▶│ Hash(key)   │───▶│ Lookup RID  │     │
+//! │  │ (id=1,Alice)│    │ → bucket    │    │ → Match!    │     │
+//! │  └─────────────┘    └─────────────┘    └─────────────┘     │
+//! │                              │                              │
+//! │                              ▼                              │
+//! │                   Combined Tuple: (1, Alice, 1, 25)         │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Performance Characteristics
+//!
+//! | Metric          | Complexity                              |
+//! |-----------------|-----------------------------------------|
+//! | Build Phase     | O(n) where n = right table size         |
+//! | Probe Phase     | O(m) where m = left table size          |
+//! | Space           | O(n) for hash table + tuple storage     |
+//! | Total           | O(n + m) vs O(n × m) for nested loop    |
+//!
+//! ## Storage
+//!
+//! Uses `DiskExtendableHashTable` for the build phase, which supports
+//! spilling to disk for large datasets that exceed memory.
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -13,18 +64,75 @@ use log::debug;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for hash-based equi-join operations.
+///
+/// `HashJoinExecutor` implements a classic hash join algorithm with a
+/// build phase (right child) and probe phase (left child). It uses a
+/// disk-backed extendable hash table for the build side.
+///
+/// # Join Types
+///
+/// Currently supports inner joins. The output contains only rows where
+/// the join key matches in both tables.
+///
+/// # Algorithm
+///
+/// 1. **Build Phase**: Consume all tuples from right child, hash the
+///    join key, and insert (key → RID) into the hash table.
+///
+/// 2. **Probe Phase**: For each left tuple, hash the join key, probe
+///    the hash table, and emit combined tuples for matches.
+///
+/// # Example
+///
+/// ```ignore
+/// // SELECT * FROM users u JOIN orders o ON u.id = o.user_id
+/// let executor = HashJoinExecutor::new(
+///     context,
+///     hash_join_plan,
+///     users_scan_executor,
+///     orders_scan_executor,
+/// );
+/// ```
+///
+/// # Memory Management
+///
+/// Right-side tuples are stored in memory (`right_tuples` vector) for
+/// retrieval during the probe phase. The hash table itself may spill
+/// to disk via the buffer pool.
 pub struct HashJoinExecutor {
+    /// Shared execution context for buffer pool access.
     context: Arc<RwLock<ExecutionContext>>,
+    /// Join plan with key expressions and schemas.
     plan: Arc<HashJoinNode>,
+    /// Left child executor (probe side).
     left_child: Box<dyn AbstractExecutor>,
+    /// Right child executor (build side).
     right_child: Box<dyn AbstractExecutor>,
+    /// Disk-backed hash table built from right child.
     hash_table: Option<DiskExtendableHashTable>,
+    /// Stored right tuples for lookup during probe phase.
     right_tuples: Vec<(RID, Arc<Tuple>)>,
+    /// Current left tuple being probed (None if need next).
     current_left_tuple: Option<(Arc<Tuple>, RID)>,
+    /// Flag indicating whether initialization is complete.
     initialized: bool,
 }
 
 impl HashJoinExecutor {
+    /// Creates a new `HashJoinExecutor` with the given children.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context for buffer pool access.
+    /// * `plan` - Hash join plan with key expressions, schemas, and join type.
+    /// * `left_child` - Left (probe side) executor.
+    /// * `right_child` - Right (build side) executor.
+    ///
+    /// # Returns
+    ///
+    /// A new executor ready for initialization. The build phase occurs
+    /// during `init()`, not during construction.
     pub fn new(
         context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<HashJoinNode>,
@@ -45,6 +153,28 @@ impl HashJoinExecutor {
         }
     }
 
+    /// Builds the hash table from the right child (build phase).
+    ///
+    /// Consumes all tuples from the right child executor, evaluates the
+    /// join key expression on each, and inserts (key → RID) into the
+    /// disk-backed hash table.
+    ///
+    /// # Returns
+    ///
+    /// * `true` - Hash table built successfully
+    /// * `false` - Build failed (hash table creation, key evaluation, or insert error)
+    ///
+    /// # Hash Table Configuration
+    ///
+    /// Creates a `DiskExtendableHashTable` with:
+    /// - Bucket size: 4 entries
+    /// - Initial depth: 4
+    /// - Max buckets: 100
+    ///
+    /// # Side Effects
+    ///
+    /// - Populates `self.hash_table` with the built hash table
+    /// - Populates `self.right_tuples` with (RID, Tuple) pairs for lookup
     fn build_hash_table(&mut self) -> bool {
         debug!("Building hash table from right child");
 
@@ -99,6 +229,21 @@ impl HashJoinExecutor {
 }
 
 impl AbstractExecutor for HashJoinExecutor {
+    /// Initializes the hash join executor (build phase).
+    ///
+    /// Performs the build phase by consuming all tuples from the right
+    /// child and populating the hash table. Also initializes the left
+    /// child for the subsequent probe phase.
+    ///
+    /// # Build Phase
+    ///
+    /// This method is a **pipeline breaker** on the right side. All right
+    /// tuples must be consumed before any output can be produced.
+    ///
+    /// # Failure Handling
+    ///
+    /// If hash table construction fails, `initialized` remains `false` and
+    /// subsequent `next()` calls will return `None`.
     fn init(&mut self) {
         if !self.initialized {
             debug!("Initializing HashJoinExecutor");
@@ -114,6 +259,33 @@ impl AbstractExecutor for HashJoinExecutor {
         }
     }
 
+    /// Returns the next joined tuple (probe phase).
+    ///
+    /// For each left tuple, evaluates the join key and probes the hash
+    /// table. If a match is found, combines the left and right tuples
+    /// and returns the result.
+    ///
+    /// # Probe Algorithm
+    ///
+    /// 1. Get next left tuple (if current is None)
+    /// 2. Evaluate left key expression
+    /// 3. Probe hash table with key
+    /// 4. If match found: combine tuples and return
+    /// 5. If no match: advance to next left tuple
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Combined tuple from matching rows
+    /// * `Ok(None)` - No more matches (left child exhausted or not initialized)
+    /// * `Err(DBError)` - Error from left child executor
+    ///
+    /// # Output Tuple Structure
+    ///
+    /// Combined tuple contains all columns from left followed by all
+    /// columns from right:
+    /// ```text
+    /// [left_col_0, left_col_1, ..., right_col_0, right_col_1, ...]
+    /// ```
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             return Ok(None);
@@ -160,11 +332,18 @@ impl AbstractExecutor for HashJoinExecutor {
         }
     }
 
+    /// Returns the output schema for joined tuples.
+    ///
+    /// The schema is the concatenation of left and right schemas,
+    /// containing all columns from both tables.
     fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to the buffer pool for hash table operations.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

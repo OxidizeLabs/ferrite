@@ -1,3 +1,86 @@
+//! # Nested Index Join Executor
+//!
+//! Implements an index-optimized nested loop join algorithm for efficient
+//! equi-joins when an index exists on the inner (right) relation.
+//!
+//! ## Overview
+//!
+//! The `NestedIndexJoinExecutor` performs a nested loop join where the inner
+//! relation lookup is accelerated using an index. For each tuple from the
+//! outer (left) relation, it uses an index scan on the inner relation to
+//! find matching tuples efficiently.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! SELECT *
+//! FROM left_table
+//! INNER JOIN right_table ON left_table.id = right_table.id;
+//! ```
+//!
+//! ## Algorithm
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                  Nested Index Join Algorithm                     │
+//! ├─────────────────────────────────────────────────────────────────┤
+//! │                                                                  │
+//! │  for each tuple L in outer_relation:                            │
+//! │      key = extract_join_key(L)                                  │
+//! │                                                                  │
+//! │      # Use index to find matching tuples                        │
+//! │      for each tuple R in index_lookup(key):                     │
+//! │          if evaluate_predicate(L, R):                           │
+//! │              emit(L ⋈ R)                                        │
+//! │                                                                  │
+//! └─────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Execution Flow
+//!
+//! ```text
+//!                    ┌──────────────────────┐
+//!                    │  NestedIndexJoin     │
+//!                    │     Executor         │
+//!                    └──────────┬───────────┘
+//!                               │
+//!          ┌────────────────────┼────────────────────┐
+//!          │                    │                    │
+//!          ▼                    │                    ▼
+//! ┌─────────────────┐           │         ┌──────────────────┐
+//! │  Left (Outer)   │           │         │  Right (Inner)   │
+//! │  Sequential     │           │         │  Index Scan or   │
+//! │  Scan           │           │         │  Sequential Scan │
+//! └─────────────────┘           │         └──────────────────┘
+//!                               │
+//!                    ┌──────────▼───────────┐
+//!                    │  Output: Combined    │
+//!                    │  Left + Right tuples │
+//!                    └──────────────────────┘
+//! ```
+//!
+//! ## Index Optimization
+//!
+//! The executor attempts to use an index on the right relation:
+//!
+//! | Scenario | Strategy | Performance |
+//! |----------|----------|-------------|
+//! | Index exists | Index scan on right | O(N × log M) |
+//! | No suitable index | Sequential scan fallback | O(N × M) |
+//!
+//! Where N = left table size, M = right table size.
+//!
+//! ## Deduplication
+//!
+//! The executor tracks processed RIDs from the right relation to avoid
+//! returning duplicate join results when the same right tuple matches
+//! multiple times within a single left tuple's index lookup.
+//!
+//! ## Output Schema
+//!
+//! The output schema is the concatenation of left and right schemas:
+//! `[left_col1, left_col2, ..., right_col1, right_col2, ...]`
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
@@ -22,6 +105,49 @@ use log::{debug, trace};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for index-optimized nested loop joins.
+///
+/// Performs an inner join by iterating through the outer (left) relation
+/// and using an index to efficiently find matching tuples in the inner
+/// (right) relation.
+///
+/// # Fields
+///
+/// * `children_executors` - Vector containing the left (outer) executor
+/// * `context` - Shared execution context for catalog and transaction access
+/// * `plan` - The nested index join plan node
+/// * `initialized` - Whether `init()` has been called
+/// * `current_left_tuple` - Current tuple from the outer relation being processed
+/// * `right_exhausted` - Whether all matches for current left tuple have been found
+/// * `current_right_executor` - Index or sequential scan executor for right relation
+/// * `processed_right_rids` - RIDs already processed for current left tuple
+///
+/// # Join Types
+///
+/// Currently supports `INNER JOIN` only. Outer join support would require
+/// additional logic to emit unmatched tuples.
+///
+/// # Example
+///
+/// ```ignore
+/// // Join employees with departments on department_id
+/// let join_plan = NestedIndexJoinNode::new(
+///     emp_schema,
+///     dept_schema,
+///     predicate,        // emp.dept_id = dept.id
+///     JoinOperator::Inner(JoinConstraint::None),
+///     left_key_exprs,   // emp.dept_id
+///     right_key_exprs,  // dept.id
+///     children,
+/// );
+///
+/// let mut executor = NestedIndexJoinExecutor::new(context, Arc::new(join_plan));
+/// executor.init();
+///
+/// while let Some((joined_tuple, _)) = executor.next()? {
+///     // Each joined_tuple contains: [emp columns..., dept columns...]
+/// }
+/// ```
 pub struct NestedIndexJoinExecutor {
     children_executors: Option<Vec<Box<dyn AbstractExecutor>>>,
     context: Arc<RwLock<ExecutionContext>>,
@@ -34,6 +160,26 @@ pub struct NestedIndexJoinExecutor {
 }
 
 impl NestedIndexJoinExecutor {
+    /// Creates a new `NestedIndexJoinExecutor` for the given join plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context for catalog and transaction access
+    /// * `plan` - The nested index join plan containing:
+    ///   - Left and right schemas
+    ///   - Join predicate
+    ///   - Key expressions for index lookup
+    ///   - Child plan nodes
+    ///
+    /// # Returns
+    ///
+    /// A new uninitialized executor. Call `init()` before `next()`.
+    ///
+    /// # Note
+    ///
+    /// The right (inner) executor is created dynamically during execution
+    /// based on the current left tuple's key values, enabling index-based
+    /// lookups.
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: Arc<NestedIndexJoinNode>) -> Self {
         debug!("Creating NestedIndexJoinExecutor");
         Self {
@@ -48,7 +194,21 @@ impl NestedIndexJoinExecutor {
         }
     }
 
-    // Helper function to evaluate join predicate
+    /// Evaluates the join predicate between left and right tuples.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_tuple` - Tuple from the outer (left) relation
+    /// * `right_tuple` - Tuple from the inner (right) relation
+    ///
+    /// # Returns
+    ///
+    /// `true` if the tuples satisfy the join predicate, `false` otherwise.
+    ///
+    /// # Predicate Evaluation
+    ///
+    /// Uses `evaluate_join` which handles column references from both
+    /// relations using tuple indices (0 for left, 1 for right).
     fn evaluate_predicate(&self, left_tuple: &Tuple, right_tuple: &Tuple) -> bool {
         let predicate = self.plan.get_predicate();
         let left_schema = self.plan.get_left_schema();
@@ -81,6 +241,22 @@ impl NestedIndexJoinExecutor {
         }
     }
 
+    /// Constructs the output tuple by concatenating left and right tuple values.
+    ///
+    /// # Arguments
+    ///
+    /// * `left_tuple` - Tuple from the outer (left) relation
+    /// * `right_tuple` - Tuple from the inner (right) relation
+    ///
+    /// # Returns
+    ///
+    /// A new tuple containing all values from both input tuples:
+    /// `[left_val1, left_val2, ..., right_val1, right_val2, ...]`
+    ///
+    /// # RID Handling
+    ///
+    /// The output tuple uses a placeholder RID `(0, 0)` since joined tuples
+    /// don't have a single physical location.
     fn construct_output_tuple(&self, left_tuple: &Tuple, right_tuple: &Tuple) -> Arc<Tuple> {
         let mut joined_values = left_tuple.get_values().clone();
         joined_values.extend(right_tuple.get_values().clone());
@@ -93,6 +269,27 @@ impl NestedIndexJoinExecutor {
         ))
     }
 
+    /// Retrieves the next tuple from the inner (right) relation.
+    ///
+    /// Uses the current right executor (index scan or sequential scan) to
+    /// find the next matching tuple. Automatically skips tuples that have
+    /// already been processed for the current left tuple.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next unprocessed matching tuple
+    /// * `Ok(None)` - No more matching tuples for current left tuple
+    /// * `Err(DBError)` - Failed to create right executor
+    ///
+    /// # Deduplication
+    ///
+    /// Maintains a list of processed RIDs to prevent duplicate results
+    /// when the same right tuple matches multiple times.
+    ///
+    /// # Executor Creation
+    ///
+    /// If no current right executor exists, creates one via
+    /// `create_right_executor()` before attempting to fetch tuples.
     fn get_next_inner_tuple(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         // Updated to handle Result type from child executors
         // If we have a current right executor, try to get next tuple from it
@@ -152,7 +349,35 @@ impl NestedIndexJoinExecutor {
         Ok(None)
     }
 
-    // Modified helper method to return Result instead of Option
+    /// Creates an executor for the inner (right) relation based on current left tuple.
+    ///
+    /// Dynamically creates either an index scan or sequential scan executor
+    /// for the right relation, parameterized by the current left tuple's
+    /// join key values.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Extract key values from current left tuple
+    /// 2. Build comparison predicates for index lookup
+    /// 3. Search catalog for suitable index on right table
+    /// 4. If index found: create `IndexScanExecutor`
+    /// 5. If no index: fall back to `SeqScanExecutor`
+    ///
+    /// # Returns
+    ///
+    /// * `Some(())` - Executor created successfully
+    /// * `None` - Failed to create executor (no current left tuple or error)
+    ///
+    /// # Index Selection
+    ///
+    /// Selects an index whose key schema matches the number of join key
+    /// expressions. For composite keys, all key columns must be covered.
+    ///
+    /// # Fallback Behavior
+    ///
+    /// When no suitable index exists, creates a sequential scan with
+    /// predicate pushdown for the join condition. This is less efficient
+    /// but ensures correctness.
     fn create_right_executor(&mut self) -> Option<()> {
         // Get the current left tuple
         let (left_tuple, _) = self.current_left_tuple.as_ref()?;
@@ -248,6 +473,22 @@ impl NestedIndexJoinExecutor {
 }
 
 impl AbstractExecutor for NestedIndexJoinExecutor {
+    /// Initializes the nested index join executor.
+    ///
+    /// Creates and initializes the left (outer) relation executor. The right
+    /// (inner) relation executor is created dynamically during `next()` calls
+    /// based on the current left tuple's key values.
+    ///
+    /// # Initialization
+    ///
+    /// Only the left executor is created here because:
+    /// - It provides the outer loop of the nested join
+    /// - The right executor depends on the current left tuple's key values
+    /// - Creating the right executor per-left-tuple enables index optimization
+    ///
+    /// # Idempotency
+    ///
+    /// Multiple calls to `init()` are safe; reinitialization is skipped.
     fn init(&mut self) {
         if self.initialized {
             debug!("NestedIndexJoinExecutor already initialized");
@@ -278,6 +519,40 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
         self.initialized = true;
     }
 
+    /// Returns the next joined tuple from the nested index join.
+    ///
+    /// # Algorithm
+    ///
+    /// ```text
+    /// loop:
+    ///   if current_left_tuple exists and right not exhausted:
+    ///     get next matching right tuple via index
+    ///     if found and predicate satisfied:
+    ///       return combined tuple
+    ///     else:
+    ///       mark right exhausted
+    ///
+    ///   get next left tuple
+    ///   if found:
+    ///     reset right relation state
+    ///     clear processed RIDs
+    ///     continue loop
+    ///   else:
+    ///     return None (join complete)
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next joined tuple
+    /// * `Ok(None)` - No more join results
+    /// * `Err(DBError)` - Execution error
+    ///
+    /// # State Management
+    ///
+    /// For each new left tuple:
+    /// - Clears the processed RIDs list
+    /// - Resets the right exhausted flag
+    /// - Creates a new right executor for index lookup
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             debug!("NestedIndexJoinExecutor not initialized");
@@ -350,11 +625,29 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
         }
     }
 
+    /// Returns the output schema for the joined result.
+    ///
+    /// The output schema is the concatenation of left and right schemas:
+    /// `[left_columns..., right_columns...]`
+    ///
+    /// # Returns
+    ///
+    /// Reference to the combined output schema from the join plan.
     fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to:
+    /// - Catalog for table and index metadata lookup
+    /// - Buffer pool for page access
+    /// - Transaction context for MVCC operations
+    ///
+    /// # Returns
+    ///
+    /// Arc-wrapped RwLock-protected execution context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

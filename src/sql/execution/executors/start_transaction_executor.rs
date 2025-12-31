@@ -1,3 +1,95 @@
+//! # Start Transaction Executor
+//!
+//! This module implements the executor for the SQL `BEGIN` or `START TRANSACTION`
+//! statement, which initiates a new database transaction with configurable
+//! isolation level and access mode.
+//!
+//! ## SQL Syntax
+//!
+//! The executor supports various transaction start patterns:
+//!
+//! ```sql
+//! -- Basic transaction start (uses default isolation level)
+//! BEGIN;
+//! START TRANSACTION;
+//!
+//! -- Specify isolation level
+//! BEGIN ISOLATION LEVEL READ UNCOMMITTED;
+//! BEGIN ISOLATION LEVEL READ COMMITTED;
+//! BEGIN ISOLATION LEVEL REPEATABLE READ;
+//! BEGIN ISOLATION LEVEL SERIALIZABLE;
+//!
+//! -- Read-only transaction (optimization hint)
+//! BEGIN READ ONLY;
+//! START TRANSACTION READ ONLY;
+//!
+//! -- Combined options
+//! BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY;
+//! ```
+//!
+//! ## Transaction Lifecycle
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────────┐
+//! │                    Transaction Lifecycle                            │
+//! ├─────────────────────────────────────────────────────────────────────┤
+//! │                                                                     │
+//! │   BEGIN / START TRANSACTION                                         │
+//! │          │                                                          │
+//! │          ▼                                                          │
+//! │   ┌─────────────────────────────────────────┐                       │
+//! │   │  Transaction Active (ID assigned)       │                       │
+//! │   │  - Isolation level set                  │                       │
+//! │   │  - Read/write mode configured           │                       │
+//! │   │  - Locks can be acquired                │                       │
+//! │   └────────────────┬────────────────────────┘                       │
+//! │                    │                                                │
+//! │          ┌─────────┴─────────┐                                      │
+//! │          │                   │                                      │
+//! │          ▼                   ▼                                      │
+//! │       COMMIT             ROLLBACK                                   │
+//! │          │                   │                                      │
+//! │          ▼                   ▼                                      │
+//! │   ┌─────────────┐     ┌─────────────┐                               │
+//! │   │   Persist   │     │   Discard   │                               │
+//! │   │   Changes   │     │   Changes   │                               │
+//! │   └─────────────┘     └─────────────┘                               │
+//! │                                                                     │
+//! └─────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Isolation Levels
+//!
+//! The executor supports four SQL standard isolation levels:
+//!
+//! | Level | Dirty Read | Non-repeatable Read | Phantom Read |
+//! |-------|------------|---------------------|--------------|
+//! | READ UNCOMMITTED | Possible | Possible | Possible |
+//! | READ COMMITTED | Prevented | Possible | Possible |
+//! | REPEATABLE READ | Prevented | Prevented | Possible |
+//! | SERIALIZABLE | Prevented | Prevented | Prevented |
+//!
+//! ## Execution Model
+//!
+//! The executor performs these steps:
+//!
+//! 1. **Get isolation level**: From plan or use default (READ COMMITTED)
+//! 2. **Create transaction**: Via transaction manager with unique ID
+//! 3. **Create context**: New `TransactionContext` with the transaction
+//! 4. **Update execution context**: Replace old transaction context
+//!
+//! ## Concurrency Considerations
+//!
+//! - Multiple transactions can be started concurrently from different sessions
+//! - Each transaction gets a unique, monotonically increasing ID
+//! - The transaction manager ensures thread-safe transaction creation
+//! - Lock manager is shared across transactions for deadlock detection
+//!
+//! ## Error Handling
+//!
+//! - **Transaction manager shutdown**: Returns `Ok(None)` gracefully
+//! - **Other failures**: Returns `Err(DBError::Execution)` with details
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -11,14 +103,110 @@ use log::{debug, info};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-/// Executor for starting a new transaction
+/// Executor for starting a new database transaction.
+///
+/// `StartTransactionExecutor` handles the `BEGIN` or `START TRANSACTION` SQL
+/// statement, creating a new transaction with the specified isolation level
+/// and access mode, then updating the execution context to use it.
+///
+/// # Transaction Creation Flow
+///
+/// ```text
+/// StartTransactionExecutor::next()
+///           │
+///           ▼
+/// ┌─────────────────────────────┐
+/// │ Get isolation level         │
+/// │ (from plan or default)      │
+/// └─────────────┬───────────────┘
+///               │
+///               ▼
+/// ┌─────────────────────────────┐
+/// │ TransactionManager::begin() │
+/// │ - Assign unique txn_id      │
+/// │ - Set isolation level       │
+/// │ - Initialize txn state      │
+/// └─────────────┬───────────────┘
+///               │
+///               ▼
+/// ┌─────────────────────────────┐
+/// │ Create TransactionContext   │
+/// │ - Wrap new transaction      │
+/// │ - Attach lock manager       │
+/// │ - Attach txn manager        │
+/// └─────────────┬───────────────┘
+///               │
+///               ▼
+/// ┌─────────────────────────────┐
+/// │ Update ExecutionContext     │
+/// │ - Replace txn context       │
+/// │ - New txn now active        │
+/// └─────────────────────────────┘
+/// ```
+///
+/// # Example Usage
+///
+/// ```ignore
+/// // Start a serializable, read-only transaction
+/// let plan = StartTransactionPlanNode::new(
+///     Some(IsolationLevel::Serializable),
+///     true,  // read_only
+/// );
+///
+/// let mut executor = StartTransactionExecutor::new(context.clone(), plan);
+/// executor.init();
+/// executor.next()?;
+///
+/// // Now the execution context has a new transaction
+/// let new_txn = context.read().get_transaction_context();
+/// println!("New transaction ID: {}", new_txn.get_transaction_id());
+/// ```
+///
+/// # Fields
+///
+/// - `context`: Shared execution context to be updated with new transaction
+/// - `plan`: Plan node containing isolation level and read-only flag
+/// - `executed`: Ensures the transaction is started exactly once
 pub struct StartTransactionExecutor {
+    /// Shared execution context that will be updated with the new transaction.
     context: Arc<RwLock<ExecutionContext>>,
+
+    /// Plan node containing transaction options (isolation level, read-only).
     plan: StartTransactionPlanNode,
+
+    /// Flag ensuring single execution of transaction start.
     executed: bool,
 }
 
 impl StartTransactionExecutor {
+    /// Creates a new `StartTransactionExecutor` with the given context and plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context that will be updated with the
+    ///   new transaction once started
+    /// * `plan` - Plan node containing:
+    ///   - Optional isolation level (defaults to READ COMMITTED if not specified)
+    ///   - Read-only flag for optimization hints
+    ///
+    /// # Returns
+    ///
+    /// A new executor instance ready for initialization and execution.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Create executor for READ COMMITTED transaction
+    /// let plan = StartTransactionPlanNode::new(
+    ///     Some(IsolationLevel::ReadCommitted),
+    ///     false,
+    /// );
+    /// let executor = StartTransactionExecutor::new(context.clone(), plan);
+    ///
+    /// // Create executor with default isolation level
+    /// let default_plan = StartTransactionPlanNode::new(None, false);
+    /// let default_executor = StartTransactionExecutor::new(context.clone(), default_plan);
+    /// ```
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: StartTransactionPlanNode) -> Self {
         Self {
             context,
@@ -29,10 +217,61 @@ impl StartTransactionExecutor {
 }
 
 impl AbstractExecutor for StartTransactionExecutor {
+    /// Initializes the start transaction executor.
+    ///
+    /// For transaction control operations, initialization is minimal since
+    /// there are no child executors or complex state to set up. This method
+    /// primarily exists for trait compliance and logging.
     fn init(&mut self) {
         debug!("Initializing StartTransactionExecutor");
     }
 
+    /// Executes the transaction start operation.
+    ///
+    /// This method performs the core transaction creation logic:
+    ///
+    /// 1. **Determine isolation level**: Use plan's level or default (READ COMMITTED)
+    /// 2. **Create transaction**: Via transaction manager with unique ID
+    /// 3. **Build context**: Create new `TransactionContext` with lock manager
+    /// 4. **Update execution context**: Install new transaction as active
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(None)` - Transaction started successfully (transaction ops produce no tuples)
+    /// - `Ok(None)` - Transaction manager is shut down (graceful degradation)
+    /// - `Err(DBError::Execution)` - Other transaction start failures
+    ///
+    /// # Execution Semantics
+    ///
+    /// - **Exactly-once**: The `executed` flag ensures start happens only once
+    /// - **Idempotent after first**: Subsequent calls return `Ok(None)` immediately
+    /// - **Atomic context update**: The execution context is updated under write lock
+    ///
+    /// # Concurrency
+    ///
+    /// The transaction manager assigns unique IDs atomically, allowing multiple
+    /// concurrent transaction starts from different sessions:
+    ///
+    /// ```text
+    /// Session A: BEGIN → Transaction ID 100
+    /// Session B: BEGIN → Transaction ID 101  (concurrent, both succeed)
+    /// Session C: BEGIN → Transaction ID 102
+    /// ```
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut executor = StartTransactionExecutor::new(ctx, plan);
+    /// executor.init();
+    ///
+    /// // Start the transaction
+    /// executor.next()?;
+    ///
+    /// // Execution context now has the new transaction
+    /// let txn_id = ctx.read()
+    ///     .get_transaction_context()
+    ///     .get_transaction_id();
+    /// ```
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
             return Ok(None);
@@ -105,11 +344,31 @@ impl AbstractExecutor for StartTransactionExecutor {
         Ok(None)
     }
 
+    /// Returns the output schema for this executor.
+    ///
+    /// Transaction control operations like `BEGIN` do not produce data tuples,
+    /// so the output schema is empty (contains no columns).
+    ///
+    /// # Returns
+    ///
+    /// A reference to an empty schema from the underlying plan node.
     fn get_output_schema(&self) -> &Schema {
         // Transaction operations don't have output schemas
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// After successful transaction start, the execution context will contain
+    /// the newly created transaction. This allows callers to access:
+    ///
+    /// - **New transaction ID**: Via `get_transaction_context().get_transaction_id()`
+    /// - **Isolation level**: The level specified in the plan or default
+    /// - **Lock manager**: Shared across all transactions for coordination
+    ///
+    /// # Returns
+    ///
+    /// An `Arc`-wrapped, `RwLock`-protected reference to the execution context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

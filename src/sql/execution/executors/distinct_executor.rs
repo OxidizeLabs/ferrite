@@ -1,3 +1,58 @@
+//! # Distinct Executor Module
+//!
+//! This module implements the executor for SQL `DISTINCT` clauses, which
+//! removes duplicate tuples from query results.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! SELECT DISTINCT <column_list> FROM <table> ...
+//! ```
+//!
+//! ## Execution Strategy
+//!
+//! Uses **hash-based duplicate elimination**:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                   DistinctExecutor                          │
+//! │                                                             │
+//! │  ┌─────────────────────────────────────────────────────┐    │
+//! │  │ Child Executor                                      │    │
+//! │  │  └─ Produces tuples (may contain duplicates)        │    │
+//! │  └─────────────────────────────────────────────────────┘    │
+//! │                        │                                    │
+//! │                        ▼                                    │
+//! │  ┌─────────────────────────────────────────────────────┐    │
+//! │  │ HashSet<Vec<u8>>                                    │    │
+//! │  │  └─ Stores serialized tuple bytes                   │    │
+//! │  │  └─ O(1) duplicate detection                        │    │
+//! │  └─────────────────────────────────────────────────────┘    │
+//! │                        │                                    │
+//! │                        ▼                                    │
+//! │        Only first occurrence of each tuple                  │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Tuple Comparison
+//!
+//! Tuples are compared by serializing all column values to bytes:
+//!
+//! | Type      | Serialization                        |
+//! |-----------|--------------------------------------|
+//! | INTEGER   | Little-endian 4-byte representation  |
+//! | BIGINT    | Little-endian 8-byte representation  |
+//! | VARCHAR   | Length prefix + UTF-8 bytes          |
+//! | BOOLEAN   | Single byte (0 or 1)                 |
+//! | DECIMAL   | Little-endian 8-byte representation  |
+//! | NULL      | Special marker byte (0xFF)           |
+//!
+//! ## Memory Usage
+//!
+//! The executor stores one serialized copy of each unique tuple in memory.
+//! For large result sets with high cardinality, this can consume significant
+//! memory.
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -10,15 +65,60 @@ use parking_lot::RwLock;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// DistinctExecutor removes duplicate tuples from its child executor
+/// Executor for removing duplicate tuples from query results.
+///
+/// `DistinctExecutor` implements hash-based duplicate elimination by
+/// maintaining a set of serialized tuple representations. Only the first
+/// occurrence of each unique tuple is returned.
+///
+/// # Algorithm
+///
+/// 1. Pull tuple from child executor
+/// 2. Serialize tuple values to byte vector
+/// 3. Check if bytes exist in hash set
+/// 4. If new: insert bytes, return tuple
+/// 5. If duplicate: skip, pull next tuple
+///
+/// # Pipelining
+///
+/// Unlike aggregation, this executor is **not a pipeline breaker**. It
+/// produces tuples incrementally as it receives them from the child,
+/// filtering out duplicates along the way.
+///
+/// # Example
+///
+/// ```ignore
+/// // SELECT DISTINCT name FROM users
+/// let scan = SeqScanPlanNode::new(schema, table_oid, "users");
+/// let distinct = DistinctExecutor::new(output_schema, Box::new(scan_executor));
+/// ```
+///
+/// # NULL Handling
+///
+/// NULL values are treated as equal to each other for duplicate detection.
+/// Two tuples `(1, NULL)` and `(1, NULL)` are considered duplicates.
 pub struct DistinctExecutor {
+    /// Child executor providing input tuples (potentially with duplicates).
     child_executor: Box<dyn AbstractExecutor>,
+    /// Output schema (same as input schema).
     schema: Schema,
+    /// Set of serialized tuple bytes seen so far.
     seen_tuples: HashSet<Vec<u8>>,
+    /// Flag indicating whether `init()` has been called.
     initialized: bool,
 }
 
 impl DistinctExecutor {
+    /// Creates a new `DistinctExecutor` with the given schema and child.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema` - Output schema (should match child executor's output).
+    /// * `child_executor` - Child executor that may produce duplicate tuples.
+    ///
+    /// # Returns
+    ///
+    /// A new executor ready for initialization.
     pub fn new(schema: Schema, child_executor: Box<dyn AbstractExecutor>) -> Self {
         Self {
             child_executor,
@@ -28,7 +128,30 @@ impl DistinctExecutor {
         }
     }
 
-    /// Serialize tuple values to bytes for comparison
+    /// Serializes tuple values to a byte vector for duplicate detection.
+    ///
+    /// Creates a deterministic byte representation of all tuple values that
+    /// can be used as a hash set key. The serialization is designed to
+    /// ensure that equal tuples produce identical byte sequences.
+    ///
+    /// # Arguments
+    ///
+    /// * `tuple` - The tuple to serialize.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<u8>` containing the serialized tuple data.
+    ///
+    /// # Serialization Format
+    ///
+    /// Each value is serialized according to its type:
+    /// - **INTEGER**: 4 bytes, little-endian
+    /// - **BIGINT**: 8 bytes, little-endian
+    /// - **VARCHAR**: 4-byte length prefix + UTF-8 bytes
+    /// - **BOOLEAN**: 1 byte (0 = false, 1 = true)
+    /// - **DECIMAL**: 8 bytes, little-endian (f64 representation)
+    /// - **NULL**: 1 byte marker (0xFF)
+    /// - **Other**: Debug string with length prefix (fallback)
     fn serialize_tuple(&self, tuple: &Tuple) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -58,6 +181,10 @@ impl DistinctExecutor {
 }
 
 impl AbstractExecutor for DistinctExecutor {
+    /// Initializes the distinct executor and its child.
+    ///
+    /// Clears the seen tuples set and initializes the child executor.
+    /// This method is idempotent; subsequent calls have no effect.
     fn init(&mut self) {
         if self.initialized {
             trace!("DistinctExecutor already initialized");
@@ -76,6 +203,29 @@ impl AbstractExecutor for DistinctExecutor {
         trace!("DistinctExecutor initialized successfully");
     }
 
+    /// Returns the next unique tuple from the child executor.
+    ///
+    /// Pulls tuples from the child and filters out duplicates by checking
+    /// against the hash set of previously seen tuples. May consume multiple
+    /// child tuples before returning if duplicates are encountered.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next unique tuple with its RID
+    /// * `Ok(None)` - No more tuples from child executor
+    /// * `Err(DBError)` - Error from child executor
+    ///
+    /// # Performance
+    ///
+    /// - **Time**: O(1) average per unique tuple (hash lookup)
+    /// - **Space**: O(n) where n is the number of unique tuples
+    ///
+    /// # Example Flow
+    ///
+    /// ```text
+    /// Child produces: (1, "A"), (2, "B"), (1, "A"), (3, "C"), (2, "B")
+    /// DISTINCT returns: (1, "A"), (2, "B"), (3, "C")
+    /// ```
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             trace!("DistinctExecutor not initialized, initializing now");
@@ -112,10 +262,18 @@ impl AbstractExecutor for DistinctExecutor {
         }
     }
 
+    /// Returns the output schema for distinct results.
+    ///
+    /// The output schema is identical to the input schema since DISTINCT
+    /// only filters rows, not columns.
     fn get_output_schema(&self) -> &Schema {
         &self.schema
     }
 
+    /// Returns the execution context from the child executor.
+    ///
+    /// Delegates to the child since `DistinctExecutor` doesn't maintain
+    /// its own context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.child_executor.get_executor_context()
     }

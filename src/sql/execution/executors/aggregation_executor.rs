@@ -1,3 +1,56 @@
+//! # Aggregation Executor Module
+//!
+//! This module implements the aggregation executor for SQL `GROUP BY` and aggregate
+//! function processing. It supports standard SQL aggregate functions and handles
+//! both grouped and ungrouped aggregations.
+//!
+//! ## Supported Aggregate Functions
+//!
+//! | Function     | Description                              | NULL Handling           |
+//! |--------------|------------------------------------------|-------------------------|
+//! | `COUNT(*)`   | Counts all rows                          | Includes NULL rows      |
+//! | `COUNT(col)` | Counts non-NULL values in column         | Excludes NULL values    |
+//! | `SUM(col)`   | Computes sum of column values            | Ignores NULL values     |
+//! | `AVG(col)`   | Computes arithmetic mean                 | Ignores NULL values     |
+//! | `MIN(col)`   | Finds minimum value                      | Ignores NULL values     |
+//! | `MAX(col)`   | Finds maximum value                      | Ignores NULL values     |
+//!
+//! ## Execution Strategy
+//!
+//! The aggregation executor uses a **hash-based aggregation** strategy:
+//!
+//! 1. **Initialization Phase** (`init`):
+//!    - Consumes all tuples from the child executor
+//!    - Computes group keys from `GROUP BY` expressions
+//!    - Maintains running aggregates in a hash map keyed by group
+//!
+//! 2. **Output Phase** (`next`):
+//!    - Iterates over computed groups
+//!    - Finalizes aggregate values (e.g., computes AVG = SUM / COUNT)
+//!    - Returns one tuple per group
+//!
+//! ## Example Query Flow
+//!
+//! For a query like:
+//! ```sql
+//! SELECT department, SUM(salary), COUNT(*)
+//! FROM employees
+//! GROUP BY department
+//! ```
+//!
+//! The executor:
+//! 1. Scans all employee tuples from child executor
+//! 2. Groups by department, accumulating salary sums and counts
+//! 3. Returns one result tuple per department with final aggregates
+//!
+//! ## Empty Input Handling
+//!
+//! - **With `GROUP BY`**: Returns no rows for empty input
+//! - **Without `GROUP BY`**: Returns one row with identity values
+//!   - `COUNT`: 0
+//!   - `SUM`: 0 (or NULL depending on semantics)
+//!   - `MIN`/`MAX`: NULL
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -16,23 +69,75 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// A composite key representing a unique group in aggregation.
+///
+/// `GroupKey` holds the evaluated values of all `GROUP BY` expressions for a
+/// single group. Two tuples belong to the same group if and only if their
+/// `GroupKey` values are equal.
+///
+/// # Example
+///
+/// For `GROUP BY department, year`, a `GroupKey` might contain:
+/// ```text
+/// GroupKey { values: [Value("Engineering"), Value(2024)] }
+/// ```
+///
+/// # Hashing
+///
+/// Implements `Hash` and `Eq` to serve as a key in the aggregation hash map.
+/// The hash is computed over all values in order.
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct GroupKey {
-    values: Vec<Value>, // Values for each group by expression
+    /// The evaluated values for each `GROUP BY` expression, in order.
+    values: Vec<Value>,
 }
 
+/// Running aggregate values for a single group.
+///
+/// `AggregateValues` maintains the intermediate state of all aggregate
+/// computations for one group. Each position corresponds to an aggregate
+/// expression in the query.
+///
+/// # Aggregate State
+///
+/// - **SUM**: Running total
+/// - **COUNT**: Running count (as `i64`)
+/// - **MIN/MAX**: Current extreme value
+/// - **AVG**: Running sum (divided by count during finalization)
+///
+/// # Example
+///
+/// For `SELECT SUM(salary), COUNT(*), MAX(age) FROM ...`:
+/// ```text
+/// AggregateValues { values: [Value(150000), Value(3), Value(45)] }
+/// ```
 #[derive(Clone)]
 struct AggregateValues {
-    values: Vec<Value>, // One value per aggregate expression
+    /// One intermediate aggregate value per aggregate expression.
+    values: Vec<Value>,
 }
 
 impl GroupKey {
+    /// Creates a new `GroupKey` from the given values.
+    ///
+    /// # Arguments
+    ///
+    /// * `values` - Evaluated values for each `GROUP BY` expression.
     fn new(values: Vec<Value>) -> Self {
         Self { values }
     }
 }
 
 impl AggregateValues {
+    /// Creates a new `AggregateValues` with NULL initial values.
+    ///
+    /// All aggregates start as NULL and are updated as tuples are processed.
+    /// This correctly handles the case where a group has no non-NULL input
+    /// values for a particular aggregate.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_aggregates` - The number of aggregate expressions in the query.
     fn new(num_aggregates: usize) -> Self {
         Self {
             values: vec![Value::new(Val::Null); num_aggregates],
@@ -40,19 +145,84 @@ impl AggregateValues {
     }
 }
 
+/// Executor for SQL aggregation operations with optional grouping.
+///
+/// `AggregationExecutor` implements hash-based aggregation, consuming all input
+/// tuples during initialization and producing grouped aggregate results. It
+/// supports all standard SQL aggregate functions and handles `GROUP BY` clauses.
+///
+/// # Execution Model
+///
+/// Unlike most Volcano-style executors that process one tuple at a time,
+/// `AggregationExecutor` is a **pipeline breaker** that must consume all input
+/// before producing any output. This is because aggregate results cannot be
+/// computed until all group members are seen.
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────┐
+/// │                    AggregationExecutor                      │
+/// │  ┌──────────────┐    ┌──────────────────────────────────┐  │
+/// │  │  GROUP BY    │    │  Aggregate Hash Map               │  │
+/// │  │  Expressions │    │  ┌────────────────────────────┐  │  │
+/// │  └──────────────┘    │  │ Key("Eng") → [150k, 3, 45] │  │  │
+/// │                      │  │ Key("Sales") → [80k, 2, 38]│  │  │
+/// │  ┌──────────────┐    │  └────────────────────────────┘  │  │
+/// │  │  Aggregate   │    └──────────────────────────────────┘  │
+/// │  │  Expressions │                                          │
+/// │  └──────────────┘                                          │
+/// └─────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// # Thread Safety
+///
+/// The executor is `Send + Sync` compliant. The execution context is wrapped
+/// in `Arc<RwLock<_>>` for safe concurrent access.
+///
+/// # Example
+///
+/// ```ignore
+/// // Query: SELECT dept, SUM(salary) FROM employees GROUP BY dept
+/// let executor = AggregationExecutor::new(
+///     context,
+///     aggregation_plan,
+///     seq_scan_executor,
+/// );
+/// ```
 pub struct AggregationExecutor {
+    /// Child executor providing input tuples.
     child: Box<dyn AbstractExecutor>,
+    /// Expressions defining the `GROUP BY` columns.
     group_by_exprs: Vec<Arc<Expression>>,
+    /// Aggregate function expressions (SUM, COUNT, etc.).
     aggregate_exprs: Vec<Arc<Expression>>,
+    /// Hash map from group key to running aggregate values.
     groups: HashMap<GroupKey, AggregateValues>,
-    avg_counts: HashMap<(GroupKey, usize), i64>, // Track counts for AVG aggregates (group_key, agg_index) -> count
+    /// Tracks counts for AVG aggregates: `(group_key, agg_index) → count`.
+    /// Required because AVG = SUM / COUNT, computed during finalization.
+    avg_counts: HashMap<(GroupKey, usize), i64>,
+    /// Schema of output tuples (group columns + aggregate columns).
     output_schema: Schema,
+    /// Shared execution context for buffer pool, catalog, and transaction access.
     exec_ctx: Arc<RwLock<ExecutionContext>>,
+    /// Flag indicating whether `init()` has been called.
     initialized: bool,
+    /// Finalized groups ready for output, consumed by `next()`.
     groups_to_return: Vec<(GroupKey, AggregateValues)>,
 }
 
 impl AggregationExecutor {
+    /// Creates a new `AggregationExecutor` from a plan and child executor.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context for database resource access.
+    /// * `plan` - The aggregation plan node containing GROUP BY and aggregate
+    ///   expressions, along with the output schema.
+    /// * `child_executor` - The child executor providing input tuples to aggregate.
+    ///
+    /// # Returns
+    ///
+    /// A new uninitialized `AggregationExecutor`. Call `init()` before `next()`.
     pub fn new(
         context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<AggregationPlanNode>,
@@ -71,6 +241,34 @@ impl AggregationExecutor {
         }
     }
 
+    /// Updates aggregate values for a group with a new input tuple.
+    ///
+    /// This is the core aggregation logic that processes each input tuple and
+    /// updates the running aggregate state for the appropriate group.
+    ///
+    /// # Arguments
+    ///
+    /// * `agg_map` - Mutable reference to the group → aggregate values hash map.
+    /// * `avg_counts` - Mutable reference to the AVG count tracking map.
+    /// * `aggregates` - Slice of aggregate expressions to evaluate.
+    /// * `key` - The group key for this tuple.
+    /// * `tuple` - The input tuple to process.
+    /// * `schema` - Schema of the input tuple for expression evaluation.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Aggregate was successfully updated.
+    /// * `Err(String)` - An error occurred (e.g., unsupported aggregate type).
+    ///
+    /// # Aggregate Update Logic
+    ///
+    /// | Type         | Update Rule                                    |
+    /// |--------------|------------------------------------------------|
+    /// | SUM          | Add value to running sum                       |
+    /// | COUNT/COUNT* | Increment counter                              |
+    /// | MIN          | Keep smaller of current and new value          |
+    /// | MAX          | Keep larger of current and new value           |
+    /// | AVG          | Add to sum, increment count (finalize later)   |
     fn compute_aggregate(
         agg_map: &mut HashMap<GroupKey, AggregateValues>,
         avg_counts: &mut HashMap<(GroupKey, usize), i64>,
@@ -184,6 +382,25 @@ impl AggregationExecutor {
 }
 
 impl AbstractExecutor for AggregationExecutor {
+    /// Initializes the aggregation executor by consuming all child tuples.
+    ///
+    /// This method is a **pipeline breaker**: it fully materializes all input
+    /// from the child executor before returning. The aggregation cannot produce
+    /// results until all group members have been seen.
+    ///
+    /// # Initialization Steps
+    ///
+    /// 1. Initialize the child executor
+    /// 2. For each tuple from child:
+    ///    - Evaluate GROUP BY expressions to compute group key
+    ///    - Update aggregate values for that group
+    /// 3. Handle empty input case (no GROUP BY → return identity values)
+    /// 4. Sort groups for deterministic output ordering
+    ///
+    /// # Idempotency
+    ///
+    /// This method is idempotent; subsequent calls have no effect once
+    /// initialization is complete.
     fn init(&mut self) {
         if !self.initialized {
             self.child.init();
@@ -280,6 +497,30 @@ impl AbstractExecutor for AggregationExecutor {
         }
     }
 
+    /// Returns the next aggregated group as a tuple.
+    ///
+    /// Each call returns one group's results until all groups are exhausted.
+    /// Groups are returned in sorted order by group key for deterministic output.
+    ///
+    /// # Output Tuple Structure
+    ///
+    /// The output tuple contains:
+    /// 1. Group key values (from GROUP BY expressions), in order
+    /// 2. Aggregate results (from aggregate expressions), in order
+    ///
+    /// For example, `SELECT dept, SUM(salary), COUNT(*) ... GROUP BY dept`
+    /// produces tuples like: `(dept_value, sum_value, count_value)`.
+    ///
+    /// # AVG Finalization
+    ///
+    /// AVG aggregates are finalized here by dividing the accumulated sum by
+    /// the count. The result is converted to `Decimal` for precision.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next group's result tuple (RID is synthetic)
+    /// * `Ok(None)` - No more groups to return
+    /// * `Err(DBError)` - An error occurred during tuple construction
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if !self.initialized {
             self.init();
@@ -372,10 +613,28 @@ impl AbstractExecutor for AggregationExecutor {
         }
     }
 
+    /// Returns the output schema for aggregated tuples.
+    ///
+    /// The schema consists of:
+    /// 1. Columns from GROUP BY expressions (preserving original types)
+    /// 2. Columns from aggregate expressions (with appropriate result types)
+    ///
+    /// # Type Mapping
+    ///
+    /// | Aggregate | Result Type                          |
+    /// |-----------|--------------------------------------|
+    /// | COUNT     | BigInt                               |
+    /// | SUM       | Same as input column type            |
+    /// | AVG       | Decimal                              |
+    /// | MIN/MAX   | Same as input column type            |
     fn get_output_schema(&self) -> &Schema {
         &self.output_schema
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to the buffer pool manager, catalog, and transaction
+    /// context needed during aggregation.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.exec_ctx.clone()
     }

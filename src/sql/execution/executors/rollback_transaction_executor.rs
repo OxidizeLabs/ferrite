@@ -1,3 +1,122 @@
+//! # Rollback Transaction Executor
+//!
+//! This module implements the executor for the SQL `ROLLBACK` statement, which
+//! aborts the current transaction and discards all changes made since the
+//! transaction began (or since a specified savepoint).
+//!
+//! ## SQL Syntax
+//!
+//! The executor supports the following `ROLLBACK` statement variants:
+//!
+//! ```sql
+//! -- Full rollback: discard all transaction changes
+//! ROLLBACK;
+//!
+//! -- Rollback with transaction chaining
+//! ROLLBACK AND CHAIN;
+//!
+//! -- Partial rollback to a savepoint (not yet implemented)
+//! ROLLBACK TO SAVEPOINT savepoint_name;
+//!
+//! -- Partial rollback with chaining (not yet implemented)
+//! ROLLBACK TO SAVEPOINT savepoint_name AND CHAIN;
+//! ```
+//!
+//! ## Transaction Lifecycle
+//!
+//! A rollback operation is the counterpart to commit, used when a transaction
+//! cannot or should not be completed:
+//!
+//! ```text
+//! BEGIN TRANSACTION
+//!        │
+//!        ▼
+//!   ┌─────────────────────────────────────┐
+//!   │  Transaction Active                 │
+//!   │  - Acquire locks                    │
+//!   │  - Make modifications               │
+//!   │  - Execute queries                  │
+//!   └────────────┬────────────────────────┘
+//!                │
+//!        ┌───────┴───────┐
+//!        │               │
+//!   Error/Abort     Success
+//!        │               │
+//!        ▼               ▼
+//!    ROLLBACK         COMMIT
+//!        │               │
+//!        ▼               ▼
+//!   ┌─────────┐     ┌─────────┐
+//!   │ Discard │     │ Persist │
+//!   │ Changes │     │ Changes │
+//!   └────┬────┘     └─────────┘
+//!        │
+//!        ▼
+//!   Release Locks
+//! ```
+//!
+//! ## Rollback Options
+//!
+//! ### Full Rollback
+//!
+//! Discards all changes made by the current transaction and releases all locks:
+//!
+//! ```sql
+//! BEGIN;
+//! UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+//! UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+//! -- Something went wrong, abort the transfer
+//! ROLLBACK;  -- Both updates are discarded
+//! ```
+//!
+//! ### Transaction Chaining (`AND CHAIN`)
+//!
+//! Immediately starts a new transaction after rollback, preserving isolation level
+//! and other transaction characteristics:
+//!
+//! ```sql
+//! BEGIN ISOLATION LEVEL SERIALIZABLE;
+//! UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+//! -- Error detected, retry with fresh state
+//! ROLLBACK AND CHAIN;  -- New serializable transaction starts automatically
+//! ```
+//!
+//! ### Partial Rollback to Savepoint
+//!
+//! Rolls back only to a specific savepoint, keeping earlier changes intact
+//! (not yet implemented):
+//!
+//! ```sql
+//! BEGIN;
+//! INSERT INTO orders VALUES (1, 'pending');
+//! SAVEPOINT order_created;
+//! INSERT INTO order_items VALUES (1, 100, 2);
+//! -- Oops, wrong item
+//! ROLLBACK TO SAVEPOINT order_created;  -- Order exists, item discarded
+//! INSERT INTO order_items VALUES (1, 200, 1);  -- Correct item
+//! COMMIT;
+//! ```
+//!
+//! ## Execution Model
+//!
+//! The executor follows a single-shot execution pattern:
+//!
+//! 1. **Initialization**: Logs the rollback operation being prepared
+//! 2. **Execution**: Prepares rollback metadata and sets chain flag if requested
+//! 3. **Completion**: Returns `None` (transaction ops produce no tuples)
+//!
+//! The actual rollback (undo operations, lock release) is performed by the
+//! execution engine after this executor signals the rollback intent.
+//!
+//! ## Implementation Notes
+//!
+//! - This executor only **prepares** the rollback; actual undo is handled by
+//!   the transaction manager
+//! - Savepoint rollback is recognized but not yet implemented
+//! - The `executed` flag ensures the operation runs exactly once
+//! - Transaction chaining sets a context flag for the execution engine to
+//!   start a new transaction with the same characteristics
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -10,14 +129,102 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
-/// Executor for rolling back transactions
+/// Executor for rolling back (aborting) the current transaction.
+///
+/// `RollbackTransactionExecutor` handles the `ROLLBACK` SQL statement, which
+/// discards all changes made by the current transaction and releases any
+/// locks held. It supports transaction chaining and partial rollback to
+/// savepoints (savepoint support is planned but not yet implemented).
+///
+/// # Execution Semantics
+///
+/// Unlike data-producing executors, this executor:
+/// - Produces no output tuples (returns `None`)
+/// - Executes exactly once per invocation
+/// - Signals rollback intent to the execution engine
+/// - Optionally prepares for transaction chaining
+///
+/// # Rollback vs Commit
+///
+/// | Aspect | ROLLBACK | COMMIT |
+/// |--------|----------|--------|
+/// | Changes | Discarded (undone) | Persisted |
+/// | Locks | Released | Released |
+/// | Chaining | Supported | Supported |
+/// | Savepoints | Partial rollback possible | N/A |
+///
+/// # Example Usage
+///
+/// ```ignore
+/// // Error handling scenario with rollback
+/// let mut executor = RollbackTransactionExecutor::new(
+///     context.clone(),
+///     RollbackTransactionPlanNode::new(false, None),
+/// );
+/// executor.init();
+///
+/// // Execute rollback - all transaction changes will be undone
+/// let result = executor.next()?;
+/// assert!(result.is_none()); // Transaction operations produce no tuples
+///
+/// // With AND CHAIN - start new transaction after rollback
+/// let mut chained_executor = RollbackTransactionExecutor::new(
+///     context.clone(),
+///     RollbackTransactionPlanNode::new(true, None), // chain = true
+/// );
+/// chained_executor.init();
+/// chained_executor.next()?;
+/// // Execution engine will start a new transaction automatically
+/// ```
+///
+/// # Fields
+///
+/// - `context`: Shared execution context containing transaction state and catalog
+/// - `plan`: The rollback plan node with chain and savepoint options
+/// - `executed`: Flag ensuring single execution (rollback is idempotent but
+///   should only signal once)
 pub struct RollbackTransactionExecutor {
+    /// Shared execution context with transaction state and catalog access.
     context: Arc<RwLock<ExecutionContext>>,
+
+    /// The rollback plan containing chain and savepoint options.
     plan: RollbackTransactionPlanNode,
+
+    /// Tracks whether the rollback has been executed.
+    /// Ensures the operation runs exactly once.
     executed: bool,
 }
 
 impl RollbackTransactionExecutor {
+    /// Creates a new `RollbackTransactionExecutor` with the given execution context and plan.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context containing transaction state, catalog,
+    ///   and buffer pool manager
+    /// * `plan` - The rollback plan node specifying:
+    ///   - Whether to chain a new transaction (`AND CHAIN`)
+    ///   - Optional savepoint name for partial rollback
+    ///
+    /// # Returns
+    ///
+    /// A new executor instance ready for initialization and execution.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Simple rollback
+    /// let plan = RollbackTransactionPlanNode::new(false, None);
+    /// let executor = RollbackTransactionExecutor::new(context.clone(), plan);
+    ///
+    /// // Rollback with chaining
+    /// let chain_plan = RollbackTransactionPlanNode::new(true, None);
+    /// let chain_executor = RollbackTransactionExecutor::new(context.clone(), chain_plan);
+    ///
+    /// // Rollback to savepoint (partial rollback, not yet implemented)
+    /// let sp_plan = RollbackTransactionPlanNode::new(false, Some("checkpoint".to_string()));
+    /// let sp_executor = RollbackTransactionExecutor::new(context.clone(), sp_plan);
+    /// ```
     pub fn new(context: Arc<RwLock<ExecutionContext>>, plan: RollbackTransactionPlanNode) -> Self {
         debug!("Creating RollbackTransactionExecutor");
         Self {
@@ -29,10 +236,68 @@ impl RollbackTransactionExecutor {
 }
 
 impl AbstractExecutor for RollbackTransactionExecutor {
+    /// Initializes the rollback executor.
+    ///
+    /// For transaction operations, initialization is minimal since there are
+    /// no child executors to set up. This method primarily exists for trait
+    /// compliance and logging purposes.
+    ///
+    /// # Note
+    ///
+    /// The `next()` method can be called without prior initialization, as the
+    /// executor has no dependencies that require setup.
     fn init(&mut self) {
         debug!("Initializing RollbackTransactionExecutor");
     }
 
+    /// Executes the rollback operation and prepares for transaction termination.
+    ///
+    /// This method signals the intent to rollback the current transaction. The
+    /// actual undo operations (reverting changes, releasing locks) are performed
+    /// by the transaction manager after this executor completes.
+    ///
+    /// # Execution Flow
+    ///
+    /// 1. Check if already executed (return `None` if so)
+    /// 2. Retrieve transaction ID for logging
+    /// 3. Handle rollback options:
+    ///    - **Chain mode**: Set flag for execution engine to start new transaction
+    ///    - **Savepoint mode**: Log warning (not yet implemented)
+    /// 4. Return `None` (transaction operations produce no data tuples)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(None)` - Rollback operation prepared successfully (or already executed)
+    /// - Never returns `Ok(Some(...))` as transaction operations don't produce tuples
+    /// - Errors from context access could theoretically propagate (currently infallible)
+    ///
+    /// # Transaction Chaining
+    ///
+    /// When `AND CHAIN` is specified, this method sets a flag in the execution
+    /// context. After the transaction manager completes the rollback, it will
+    /// automatically begin a new transaction with the same characteristics
+    /// (isolation level, read-only mode, etc.).
+    ///
+    /// # Savepoint Rollback (Not Yet Implemented)
+    ///
+    /// When a savepoint name is provided, the intent is to perform a partial
+    /// rollback that only undoes changes made after the savepoint was created.
+    /// Currently, this is logged but not implemented.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut executor = RollbackTransactionExecutor::new(ctx, plan);
+    /// executor.init();
+    ///
+    /// // First call prepares the rollback
+    /// let result = executor.next()?;
+    /// assert!(result.is_none());
+    ///
+    /// // Subsequent calls are no-ops
+    /// let result2 = executor.next()?;
+    /// assert!(result2.is_none());
+    /// ```
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
             return Ok(None);
@@ -79,11 +344,30 @@ impl AbstractExecutor for RollbackTransactionExecutor {
         Ok(None)
     }
 
+    /// Returns the output schema for this executor.
+    ///
+    /// Transaction operations like `ROLLBACK` do not produce data tuples, so
+    /// the output schema is empty (contains no columns).
+    ///
+    /// # Returns
+    ///
+    /// A reference to an empty schema from the underlying plan node.
     fn get_output_schema(&self) -> &Schema {
         // Transaction operations don't have output schemas
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to the execution context containing:
+    /// - Transaction state and ID
+    /// - Chain flag (set when `AND CHAIN` is used)
+    /// - Catalog for metadata access
+    /// - Buffer pool manager
+    ///
+    /// # Returns
+    ///
+    /// An `Arc`-wrapped, `RwLock`-protected reference to the execution context.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }

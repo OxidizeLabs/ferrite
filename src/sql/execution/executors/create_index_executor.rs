@@ -1,3 +1,59 @@
+//! # Create Index Executor Module
+//!
+//! This module implements the executor for `CREATE INDEX` statements, which
+//! build secondary indexes on table columns to accelerate query lookups.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! CREATE INDEX [IF NOT EXISTS] <index_name>
+//! ON <table_name> (<column_list>)
+//! ```
+//!
+//! ## Index Types
+//!
+//! Currently supported index types:
+//!
+//! | Type           | Description                                       |
+//! |----------------|---------------------------------------------------|
+//! | B+ Tree Index  | Balanced tree for range queries and point lookups |
+//!
+//! ## Execution Flow
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────┐
+//! │               CreateIndexExecutor                       │
+//! │                                                         │
+//! │  1. Validate table exists                               │
+//! │  2. Check for existing index (IF NOT EXISTS)            │
+//! │  3. Create index metadata in catalog                    │
+//! │  4. Build index structure (B+ tree)                     │
+//! │                                                         │
+//! │  ┌─────────────────────────────────────────────────┐    │
+//! │  │ Catalog                                         │    │
+//! │  │  └─ IndexInfo                                   │    │
+//! │  │      ├─ index_oid: 42                           │    │
+//! │  │      ├─ index_name: "idx_users_email"           │    │
+//! │  │      ├─ table_name: "users"                     │    │
+//! │  │      └─ key_schema: (email VARCHAR)             │    │
+//! │  └─────────────────────────────────────────────────┘    │
+//! └─────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Output
+//!
+//! Index creation produces no output tuples. Success or failure is indicated
+//! through logging. The executor returns `None` after attempting creation.
+//!
+//! ## Error Handling
+//!
+//! | Condition             | Behavior                                    |
+//! |-----------------------|---------------------------------------------|
+//! | Table doesn't exist   | Logs warning, returns `None`                |
+//! | Index already exists  | With IF NOT EXISTS: logs info, returns      |
+//! |                       | Without: logs warning, returns              |
+//! | Catalog creation fail | Logs warning, allows retry                  |
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -11,13 +67,66 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for `CREATE INDEX` DDL statements.
+///
+/// `CreateIndexExecutor` handles the creation of secondary indexes on table
+/// columns. It validates preconditions (table existence, index uniqueness),
+/// creates index metadata in the catalog, and initializes the underlying
+/// index structure.
+///
+/// # Index Structure
+///
+/// Indexes are currently implemented as B+ trees, providing:
+/// - O(log n) point lookups
+/// - Efficient range scans
+/// - Ordered iteration over keys
+///
+/// # Concurrency
+///
+/// The executor acquires a write lock on the catalog during index creation.
+/// The index structure itself supports concurrent access after creation.
+///
+/// # Example
+///
+/// ```ignore
+/// // CREATE INDEX idx_email ON users (email)
+/// let plan = CreateIndexPlanNode::new(
+///     schema,
+///     "users".to_string(),
+///     "idx_email".to_string(),
+///     vec![1], // email column index
+///     false,   // not IF NOT EXISTS
+/// );
+/// let executor = CreateIndexExecutor::new(context, Arc::new(plan), false);
+/// ```
+///
+/// # Lifecycle
+///
+/// The executor logs its creation and destruction for debugging purposes
+/// via the `Drop` implementation.
 pub struct CreateIndexExecutor {
+    /// Shared execution context providing catalog access.
     context: Arc<RwLock<ExecutionContext>>,
+    /// Plan node containing index name, table name, and key columns.
     plan: Arc<CreateIndexPlanNode>,
+    /// Flag indicating whether index creation has been attempted.
     executed: bool,
 }
 
 impl CreateIndexExecutor {
+    /// Creates a new `CreateIndexExecutor` from a plan node.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - Shared execution context providing catalog access.
+    /// * `plan` - Plan node with index name, table name, key columns, and
+    ///   IF NOT EXISTS flag.
+    /// * `executed` - Initial execution state (typically `false`).
+    ///
+    /// # Returns
+    ///
+    /// A new executor ready for initialization. Debug logging captures the
+    /// index name and IF NOT EXISTS setting.
     pub fn new(
         context: Arc<RwLock<ExecutionContext>>,
         plan: Arc<CreateIndexPlanNode>,
@@ -39,6 +148,10 @@ impl CreateIndexExecutor {
 }
 
 impl AbstractExecutor for CreateIndexExecutor {
+    /// Initializes the executor for index creation.
+    ///
+    /// Resets the `executed` flag to allow re-execution if needed.
+    /// This enables retry logic for transient catalog failures.
     fn init(&mut self) {
         debug!(
             "Initializing CreateIndexExecutor for index '{}'",
@@ -47,6 +160,33 @@ impl AbstractExecutor for CreateIndexExecutor {
         self.executed = false;
     }
 
+    /// Attempts to create the index in the catalog.
+    ///
+    /// # Execution Steps
+    ///
+    /// 1. **Table validation**: Checks that the target table exists
+    /// 2. **Duplicate check**: Verifies no index with the same name exists
+    /// 3. **Index creation**: Creates the index metadata and B+ tree structure
+    ///
+    /// # Lock Acquisition
+    ///
+    /// Acquires locks in the following order to prevent deadlocks:
+    /// 1. Read lock on execution context (brief, to get catalog reference)
+    /// 2. Write lock on catalog (held during creation)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(None)` - Always returns `None` since DDL produces no tuples.
+    ///   Check logs to determine success or failure.
+    ///
+    /// # Retry Behavior
+    ///
+    /// | Condition             | `executed` set | Retryable |
+    /// |-----------------------|----------------|-----------|
+    /// | Table doesn't exist   | `true`         | No        |
+    /// | Index already exists  | `true`         | No        |
+    /// | Catalog creation fail | `false`        | Yes       |
+    /// | Success               | `true`         | No        |
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         if self.executed {
             debug!("CreateIndexExecutor already executed, returning None");
@@ -133,16 +273,26 @@ impl AbstractExecutor for CreateIndexExecutor {
         }
     }
 
+    /// Returns the output schema for index creation.
+    ///
+    /// DDL statements produce no tuples, so this returns the plan's
+    /// output schema (typically empty or for internal use).
     fn get_output_schema(&self) -> &Schema {
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to the catalog for index creation.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
 }
 
 impl Drop for CreateIndexExecutor {
+    /// Logs executor destruction for debugging.
+    ///
+    /// Helps trace executor lifecycle in complex query plans.
     fn drop(&mut self) {
         debug!(
             "Dropping CreateIndexExecutor for index '{}'",

@@ -1,3 +1,74 @@
+//! # Offset Executor
+//!
+//! Implements the `OFFSET` clause executor for skipping a specified number of rows.
+//!
+//! ## Overview
+//!
+//! The `OffsetExecutor` skips the first N tuples from its child executor before
+//! returning the remaining tuples. This is commonly used with `LIMIT` to implement
+//! pagination.
+//!
+//! ## SQL Syntax
+//!
+//! ```sql
+//! SELECT column1, column2, ...
+//! FROM table_name
+//! WHERE condition
+//! OFFSET count;
+//!
+//! -- Pagination example (skip first 20, take next 10)
+//! SELECT * FROM products ORDER BY price OFFSET 20 LIMIT 10;
+//! ```
+//!
+//! ## Execution Model
+//!
+//! The offset executor operates in two phases:
+//!
+//! ```text
+//! ┌────────────────────────────────────────────────────────────┐
+//! │                    OffsetExecutor                          │
+//! │                                                            │
+//! │  Phase 1: Skip Phase (first N calls to child)              │
+//! │  ┌─────────────────────────────────────────────────────┐   │
+//! │  │  while current_index < offset:                      │   │
+//! │  │      child.next() → discard                         │   │
+//! │  │      current_index++                                │   │
+//! │  └─────────────────────────────────────────────────────┘   │
+//! │                          │                                 │
+//! │                          ▼                                 │
+//! │  Phase 2: Pass-through Phase                               │
+//! │  ┌─────────────────────────────────────────────────────┐   │
+//! │  │  return child.next()  → forward directly            │   │
+//! │  └─────────────────────────────────────────────────────┘   │
+//! │                                                            │
+//! └────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Edge Cases
+//!
+//! | Scenario | Behavior |
+//! |----------|----------|
+//! | `OFFSET 0` | No tuples skipped, all returned |
+//! | `OFFSET N` (N < total) | First N skipped, rest returned |
+//! | `OFFSET N` (N >= total) | No tuples returned |
+//! | Empty input | No tuples returned |
+//!
+//! ## Common Query Patterns
+//!
+//! ```sql
+//! -- Pagination: Page 3 of 10 items per page
+//! SELECT * FROM items ORDER BY id OFFSET 20 LIMIT 10;
+//!
+//! -- Skip header row in imported data
+//! SELECT * FROM raw_import OFFSET 1;
+//! ```
+//!
+//! ## Performance Note
+//!
+//! OFFSET requires scanning and discarding the first N rows, which becomes
+//! expensive for large offset values. For deep pagination, consider using
+//! keyset/cursor-based pagination instead.
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -10,6 +81,35 @@ use log::debug;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
+/// Executor for SQL `OFFSET` clauses.
+///
+/// Skips the first N tuples from a child executor, then returns all
+/// remaining tuples. Commonly combined with `LimitExecutor` for pagination.
+///
+/// # Fields
+///
+/// * `context` - Shared execution context (inherited from parent)
+/// * `plan` - The offset plan node containing the offset value
+/// * `current_index` - Counter tracking how many tuples have been skipped
+/// * `initialized` - Whether `init()` has been called
+/// * `child_executor` - The child executor producing tuples to offset
+///
+/// # Example
+///
+/// ```ignore
+/// // Skip first 5 rows
+/// let offset_plan = Arc::new(OffsetNode::new(5, schema, children));
+/// let mut executor = OffsetExecutor::new(child_executor, context, offset_plan);
+/// executor.init();
+///
+/// // First call to next() skips 5 tuples internally, then returns tuple 6
+/// let result = executor.next()?;
+/// ```
+///
+/// # Performance
+///
+/// - **Time Complexity**: O(offset) for skip phase, O(1) per tuple after
+/// - **Space Complexity**: O(1) (only stores a counter)
 pub struct OffsetExecutor {
     context: Arc<RwLock<ExecutionContext>>,
     plan: Arc<OffsetNode>,
@@ -19,6 +119,29 @@ pub struct OffsetExecutor {
 }
 
 impl OffsetExecutor {
+    /// Creates a new `OffsetExecutor` with the specified offset.
+    ///
+    /// # Arguments
+    ///
+    /// * `child_executor` - The child executor producing tuples to offset
+    /// * `context` - Shared execution context for catalog and transaction access
+    /// * `plan` - The offset plan node containing the offset value
+    ///
+    /// # Returns
+    ///
+    /// A new uninitialized `OffsetExecutor`. Call `init()` before `next()`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let child = create_scan_executor();
+    /// let offset_plan = Arc::new(OffsetNode::new(10, schema, children));
+    /// let executor = OffsetExecutor::new(Box::new(child), context, offset_plan);
+    /// ```
+    ///
+    /// # Note
+    ///
+    /// An offset of 0 is valid and will return all tuples without skipping.
     pub fn new(
         child_executor: Box<dyn AbstractExecutor>,
         context: Arc<RwLock<ExecutionContext>>,
@@ -37,6 +160,15 @@ impl OffsetExecutor {
 }
 
 impl AbstractExecutor for OffsetExecutor {
+    /// Initializes the offset executor and its child.
+    ///
+    /// Propagates initialization to the child executor. This ensures the
+    /// entire executor tree is properly initialized before tuple retrieval.
+    ///
+    /// # Idempotency
+    ///
+    /// Multiple calls to `init()` are safe; the child is only initialized
+    /// once due to the `initialized` flag.
     fn init(&mut self) {
         if !self.initialized {
             // Initialize child executor
@@ -47,6 +179,39 @@ impl AbstractExecutor for OffsetExecutor {
         }
     }
 
+    /// Returns the next tuple after skipping the offset.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. **Skip Phase**: While `current_index < offset`:
+    ///    - Call `child.next()` and discard the result
+    ///    - Increment counter
+    ///    - If child exhausted, return `None`
+    ///
+    /// 2. **Pass-through Phase**: After skip completes:
+    ///    - Forward all remaining `child.next()` calls directly
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((tuple, rid)))` - Next tuple after offset
+    /// * `Ok(None)` - Child exhausted (during skip or after)
+    /// * `Err(DBError)` - Error from child executor
+    ///
+    /// # Lazy Skip
+    ///
+    /// The skip phase happens lazily on the first call to `next()`, not
+    /// during `init()`. This allows the executor to integrate naturally
+    /// into the Volcano iterator model.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // With OFFSET 2 and 5 rows in child:
+    /// executor.next()  // Skips rows 1, 2 internally, returns row 3
+    /// executor.next()  // Returns row 4
+    /// executor.next()  // Returns row 5
+    /// executor.next()  // Returns None
+    /// ```
     fn next(&mut self) -> Result<Option<(Arc<Tuple>, RID)>, DBError> {
         // Skip the first `offset` tuples
         while self.current_index < self.plan.get_offset() {
@@ -70,11 +235,29 @@ impl AbstractExecutor for OffsetExecutor {
         }
     }
 
+    /// Returns the output schema for this executor.
+    ///
+    /// The offset executor preserves the schema from its child executor,
+    /// as it only affects which rows are returned, not their structure.
+    ///
+    /// # Returns
+    ///
+    /// Reference to the output schema (same as child's schema).
     fn get_output_schema(&self) -> &Schema {
         debug!("Getting output schema: {:?}", self.plan.get_output_schema());
         self.plan.get_output_schema()
     }
 
+    /// Returns the shared execution context.
+    ///
+    /// Provides access to:
+    /// - Buffer pool manager for page access
+    /// - Catalog for table and index metadata
+    /// - Transaction context for MVCC operations
+    ///
+    /// # Returns
+    ///
+    /// Arc-wrapped RwLock-protected execution context for thread-safe access.
     fn get_executor_context(&self) -> Arc<RwLock<ExecutionContext>> {
         self.context.clone()
     }
