@@ -26,10 +26,10 @@ This document provides a comprehensive overview of Ferrite's architecture, a Rus
                               │   │   │   SQL Query                                             │   │   │
                               │   │   │       │                                                 │   │   │
                               │   │   │       ▼                                                 │   │   │
-                              │   │   │   ┌──────────┐    ┌──────────┐    ┌──────────────────┐  │   │   │
-                              │   │   │   │  Parser  │───►│  Binder  │───►│    Optimizer     │  │   │   │
-                              │   │   │   │(sqlparser)│    │          │    │                  │  │   │   │
-                              │   │   │   └──────────┘    └──────────┘    └──────────────────┘  │   │   │
+                              │   │   │   ┌───────────┐    ┌──────────┐    ┌─────────────────┐  │   │   │
+                              │   │   │   │  Parser   │───►│  Binder  │───►│    Optimizer    │  │   │   │
+                              │   │   │   │(sqlparser)│    │          │    │                 │  │   │   │
+                              │   │   │   └───────────┘    └──────────┘    └─────────────────┘  │   │   │
                               │   │   │                                            │            │   │   │
                               │   │   │                                            ▼            │   │   │
                               │   │   │                                   ┌──────────────────┐  │   │   │
@@ -43,14 +43,14 @@ This document provides a comprehensive overview of Ferrite's architecture, a Rus
                               │   │   │   │                                                 │   │   │   │
                               │   │   │   │   ┌────────────────────────────────────────┐    │   │   │   │
                               │   │   │   │   │              Executors                 │    │   │   │   │
-                              │   │   │   │   │  SeqScan, Filter, Projection, Join,   │    │   │   │   │
-                              │   │   │   │   │  Aggregation, Sort, Limit, TopN, ...  │    │   │   │   │
+                              │   │   │   │   │  SeqScan, Filter, Projection, Join,    │    │   │   │   │
+                              │   │   │   │   │  Aggregation, Sort, Limit, TopN, ...   │    │   │   │   │
                               │   │   │   │   └────────────────────────────────────────┘    │   │   │   │
                               │   │   │   │                                                 │   │   │   │
                               │   │   │   │   ┌────────────────────────────────────────┐    │   │   │   │
                               │   │   │   │   │            Expressions                 │    │   │   │   │
-                              │   │   │   │   │  Arithmetic, Comparison, Boolean,     │    │   │   │   │
-                              │   │   │   │   │  Aggregate, Window, Case, Cast, ...   │    │   │   │   │
+                              │   │   │   │   │  Arithmetic, Comparison, Boolean,      │    │   │   │   │
+                              │   │   │   │   │  Aggregate, Window, Case, Cast, ...    │    │   │   │   │
                               │   │   │   │   └────────────────────────────────────────┘    │   │   │   │
                               │   │   │   └─────────────────────────────────────────────────┘   │   │   │
                               │   │   └─────────────────────────────────────────────────────────┘   │   │
@@ -76,9 +76,9 @@ This document provides a comprehensive overview of Ferrite's architecture, a Rus
                               │   │                         ▼                                       │   │
                               │   │   ┌───────────────────────────────────────────────────────┐     │   │
                               │   │   │                     Catalog                           │     │   │
-                              │   │   │  ┌──────────┐  ┌──────────┐  ┌────────┐  ┌─────────┐  │     │   │
+                              │   │   │  ┌──────────┐  ┌──────────┐  ┌────────┐  ┌──────────┐ │     │   │
                               │   │   │  │ Database │  │  Schema  │  │ Column │  │Constraint│ │     │   │
-                              │   │   │  └──────────┘  └──────────┘  └────────┘  └─────────┘  │     │   │
+                              │   │   │  └──────────┘  └──────────┘  └────────┘  └──────────┘ │     │   │
                               │   │   └───────────────────────────────────────────────────────┘     │   │
                               │   └─────────────────────────────────────────────────────────────────┘   │
                               │                                 │                                       │
@@ -383,7 +383,7 @@ Ferrite implements pessimistic concurrency control with two-phase locking:
 │   │   │ SIX │  ✗  │  ✗  │  ✓  │  ✗  │  ✗  │                         │     │
 │   │   └─────┴─────┴─────┴─────┴─────┴─────┘                         │     │
 │   │                                                                 │     │
-│   │   Deadlock Detection: Wait-for graph cycle detection           │     │
+│   │   Deadlock Detection: Wait-for graph cycle detection            │     │
 │   │                                                                 │     │
 │   └─────────────────────────────────────────────────────────────────┘     │
 │                                    │                                      │
@@ -502,9 +502,9 @@ The storage layer manages all disk I/O and in-memory page caching:
 │                                                                           │
 │   Table Page (Slotted):                                                   │
 │   ┌─────────────────────────────────────────────────────────────────┐     │
-│   │  Header  │  Slot Array  │     Free Space     │     Tuples      │     │
-│   │          │  ────────►   │                    │   ◄────────     │     │
-│   │          │  [s1][s2][s3]│ ←── grows ──►      │  [T3][T2][T1]   │     │
+│   │  Header  │  Slot Array  │     Free Space     │     Tuples       │     │
+│   │          │  ────────►   │                    │   ◄────────      │     │
+│   │          │  [s1][s2][s3]│ ←── grows ──►      │  [T3][T2][T1]    │     │
 │   └─────────────────────────────────────────────────────────────────┘     │
 │                                                                           │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -1069,4 +1069,3 @@ ferrite.checkpoint   # Checkpoint metadata
 - [ZERO_COPY_ARCHITECTURE.md](./ZERO_COPY_ARCHITECTURE.md) - Zero-copy I/O design
 - [BENCHMARKING.md](./BENCHMARKING.md) - Performance benchmarks
 - [PERFORMANCE_TESTS.md](./PERFORMANCE_TESTS.md) - Performance testing guide
-
