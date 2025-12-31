@@ -166,6 +166,10 @@ use std::time::Instant;
 
 /// Type alias for the Arc-owned write guard.
 /// This is returned by `RwLock::write_arc()` when using the `arc_lock` feature.
+///
+/// Note: Reserved for explicit type documentation in latch crabbing; currently the
+/// guard type is inferred at use sites.
+#[allow(dead_code)]
 type InternalPageWriteGuard<K, C> = ArcRwLockWriteGuard<RawRwLock, BPlusTreeInternalPage<K, C>>;
 
 /// Trait alias for B+ tree key type requirements.
@@ -427,7 +431,7 @@ pub enum OptimisticResult<T> {
 /// - `held_write_locks`: Active write locks held during pessimistic traversal. These are
 ///   only populated in pessimistic mode and represent pages we still hold write latches on.
 ///   When a "safe" node is encountered, these are cleared to release ancestor latches early.
-///   
+///
 ///   **Important**: Unlike the previous `PageGuard`-based implementation, these locks are
 ///   *actually held* - the write latch is maintained for the lifetime of the `HeldWriteLock`.
 ///

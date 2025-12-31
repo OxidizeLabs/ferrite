@@ -493,7 +493,7 @@ mod tests {
 
     struct TestContext {
         _temp_dir: TempDir,
-        log_path: String,
+        _log_path: String,
         disk_manager: Arc<AsyncDiskManager>,
     }
 
@@ -535,7 +535,7 @@ mod tests {
 
             Self {
                 _temp_dir: temp_dir,
-                log_path,
+                _log_path: log_path,
                 disk_manager: disk_manager_arc,
             }
         }
@@ -780,7 +780,7 @@ mod tests {
             .to_string();
 
         let record = {
-            let mut r = LogRecord::new_transaction_record(7, INVALID_LSN, LogRecordType::Begin);
+            let r = LogRecord::new_transaction_record(7, INVALID_LSN, LogRecordType::Begin);
             r.set_lsn(7);
             r
         };

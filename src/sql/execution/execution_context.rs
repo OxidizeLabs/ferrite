@@ -211,6 +211,7 @@ type NLJCheckExecSet = VecDeque<ExecutorPair>;
 /// # Thread Safety
 ///
 /// All variants are thread-safe, and the enum itself implements `Send + Sync`.
+#[allow(clippy::large_enum_variant)] // Executors are not frequently moved; boxing would add indirection
 pub enum ExecutorType {
     /// Executor for aggregate operations (COUNT, SUM, AVG, etc.).
     Aggregation(AggregationExecutor),
@@ -454,6 +455,7 @@ impl ExecutorType {
     /// * `Ok(Some((tuple, rid)))` - The next tuple and its record ID
     /// * `Ok(None)` - No more tuples available (executor exhausted)
     /// * `Err(DBError)` - An error occurred during execution
+    #[allow(clippy::should_implement_trait)] // Volcano-model `next()` differs from Iterator
     pub fn next(
         &mut self,
     ) -> Result<

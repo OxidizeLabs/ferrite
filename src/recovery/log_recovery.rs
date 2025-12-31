@@ -816,6 +816,9 @@ impl TxnTable {
     ///
     /// # Returns
     /// `true` if the transaction is present, `false` otherwise.
+    ///
+    /// Reserved for diagnostic/debugging utilities in recovery analysis.
+    #[allow(dead_code)]
     fn contains_txn(&self, txn_id: TxnId) -> bool {
         self.table.contains_key(&txn_id)
     }

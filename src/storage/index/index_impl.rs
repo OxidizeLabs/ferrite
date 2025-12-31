@@ -169,6 +169,7 @@ impl IndexInfo {
     /// - `key_size`: The size of the index key, in bytes.
     /// - `is_primary_key`: Indicates if it is a primary key index.
     /// - `index_type`: The index type.
+    #[allow(clippy::too_many_arguments)] // Index metadata requires all these components
     pub fn new(
         key_schema: Schema,
         index_name: String,

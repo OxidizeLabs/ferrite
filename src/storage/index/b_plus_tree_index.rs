@@ -727,6 +727,7 @@ where
     ///
     /// The path is ordered from root to the parent of the leaf (not including the leaf itself).
     /// This enables O(1) parent lookups instead of O(n) BFS traversal.
+    #[allow(clippy::type_complexity)] // Return type reflects distinct semantic components
     fn find_leaf_page_with_path(
         &self,
         key: &K,

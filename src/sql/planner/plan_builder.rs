@@ -1769,6 +1769,7 @@ impl LogicalPlanBuilder {
     /// - REPEATABLE READ
     /// - SERIALIZABLE
     /// - SNAPSHOT
+    #[allow(clippy::too_many_arguments)] // Matches SQL AST structure
     pub fn build_start_transaction_plan(
         &self,
         modes: &Vec<TransactionMode>,
@@ -2218,6 +2219,7 @@ impl LogicalPlanBuilder {
     /// - View name is empty
     /// - View already exists (without IF NOT EXISTS)
     /// - Column count doesn't match query result
+    #[allow(clippy::too_many_arguments)] // Matches SQL AST CREATE VIEW syntax
     pub fn build_create_view_plan(
         &self,
         _or_alter: &bool,
@@ -3169,6 +3171,7 @@ impl LogicalPlanBuilder {
     /// - Only simple table updates supported (no JOINs)
     /// - Tuple assignments not supported
     /// - Column must exist in the table
+    #[allow(clippy::too_many_arguments)] // Matches SQL AST UPDATE syntax
     pub fn build_update_plan(
         &self,
         table: &TableWithJoins,

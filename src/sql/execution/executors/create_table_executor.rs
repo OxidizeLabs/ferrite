@@ -547,8 +547,8 @@ mod tests {
             let catalog_guard = catalog.read();
             let table = catalog_guard.get_table(name);
             // Note: Whether this succeeds depends on catalog's name validation
-            if table.is_some() {
-                assert_eq!(table.unwrap().get_table_name(), name);
+            if let Some(t) = table {
+                assert_eq!(t.get_table_name(), name);
             }
             drop(catalog_guard);
         }

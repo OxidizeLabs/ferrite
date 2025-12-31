@@ -591,6 +591,7 @@ impl SchemaManager {
     /// * `foreign_key` - Optional foreign key constraint
     /// * `check_constraint` - Optional CHECK expression
     /// * `default_value` - Optional default value
+    #[allow(clippy::too_many_arguments)] // Column creation requires all constraint info
     fn create_column_from_sql_type_with_constraints(
         &self,
         column_name: &str,

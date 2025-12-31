@@ -1290,11 +1290,11 @@ mod tests {
                 Column::new("value", TypeId::Integer),
             ]);
 
-            let mut tuple = Tuple::new(values, &schema, RID::new(0, 0));
+            let tuple = Tuple::new(values, &schema, RID::new(0, 0));
 
             // Capture more diagnostic information if insertion fails
             let result = table_heap
-                .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &mut tuple)
+                .insert_tuple(Arc::from(TupleMeta::new(txn_id)), &tuple)
                 .map_err(|e| {
                     // Add more diagnostic information about the table heap and buffer pool
                     let buffer_size = self.buffer_pool.get_pool_size();
@@ -1596,11 +1596,11 @@ mod tests {
 
             // Try to update with txn2 before txn1 commits - should fail
             let values = vec![Value::new(1), Value::new(200)];
-            let mut tuple_update = Tuple::new(&values, &schema, rid);
+            let tuple_update = Tuple::new(&values, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
-                &mut tuple_update,
+                &tuple_update,
                 rid,
                 txn_ctx2.clone(),
             );
@@ -1616,7 +1616,7 @@ mod tests {
             // Now txn2 should succeed in updating
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
-                &mut tuple_update,
+                &tuple_update,
                 rid,
                 txn_ctx2.clone(),
             );
@@ -2155,7 +2155,7 @@ mod tests {
                     ));
 
                     // Update the tuple
-                    let mut update_tuple = Tuple::new(
+                    let update_tuple = Tuple::new(
                         &[Value::new(1), Value::new(200)],
                         &writer_schema,
                         writer_rid,
@@ -2163,7 +2163,7 @@ mod tests {
 
                     let update_result = writer_table_heap.update_tuple(
                         &TupleMeta::new(txn.get_transaction_id()),
-                        &mut update_tuple,
+                        &update_tuple,
                         writer_rid,
                         txn_ctx.clone(),
                     );
@@ -2354,13 +2354,12 @@ mod tests {
 
                         // Create updated tuple with incremented counter
                         let new_values = vec![Value::new(1), Value::new(counter + 1)];
-                        let mut update_tuple =
-                            Tuple::new(&new_values, &updater_schema, updater_rid);
+                        let update_tuple = Tuple::new(&new_values, &updater_schema, updater_rid);
 
                         // Update the tuple
                         let update_result = updater_table_heap.update_tuple(
                             &TupleMeta::new(txn.get_transaction_id()),
-                            &mut update_tuple,
+                            &update_tuple,
                             updater_rid,
                             txn_ctx.clone(),
                         );
@@ -2609,13 +2608,12 @@ mod tests {
                 log::debug!("T1: Attempting to lock resource B (rid2) - may deadlock");
                 let result2 = t1_table_heap.get_tuple(t1_rid2, txn_ctx1.clone());
 
-                let status = if result2.is_ok() {
+                if let Ok((_, tuple)) = result2 {
                     log::debug!("T1: Successfully acquired lock on resource B (rid2)");
                     // Update resource B
-                    let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
-                    let id = match values.get(0) {
-                        Some(value) => value.as_integer().unwrap_or_else(|_| 2),
+                    let id = match values.first() {
+                        Some(value) => value.as_integer().unwrap_or(2),
                         None => 2, // Default value if extraction fails
                     };
 
@@ -2645,9 +2643,7 @@ mod tests {
                     );
                     t1_txn_manager.abort(txn1);
                     "T1: Failed to acquire second lock"
-                };
-
-                status
+                }
             });
 
             // Spawn thread 2
@@ -2699,22 +2695,21 @@ mod tests {
                 log::debug!("T2: Attempting to lock resource A (rid1) - may deadlock");
                 let result2 = t2_table_heap.get_tuple(t2_rid1, txn_ctx2.clone());
 
-                let status = if result2.is_ok() {
+                if let Ok((_, tuple)) = result2 {
                     log::debug!("T2: Successfully acquired lock on resource A (rid1)");
                     // Update resource A
-                    let (_, tuple) = result2.unwrap();
                     let values = tuple.get_values();
                     let id = match values.first() {
-                        Some(value) => value.as_integer().unwrap_or_else(|_| 1),
+                        Some(value) => value.as_integer().unwrap_or(1),
                         None => 1, // Default value if extraction fails
                     };
 
                     let new_values = vec![Value::new(id), Value::new(400)];
-                    let mut update_tuple = Tuple::new(&new_values, &t2_schema, t2_rid1);
+                    let update_tuple = Tuple::new(&new_values, &t2_schema, t2_rid1);
 
                     let update_result = t2_table_heap.update_tuple(
                         &TupleMeta::new(txn2.get_transaction_id()),
-                        &mut update_tuple,
+                        &update_tuple,
                         t2_rid1,
                         txn_ctx2.clone(),
                     );
@@ -2735,21 +2730,13 @@ mod tests {
                     );
                     t2_txn_manager.abort(txn2);
                     "T2: Failed to acquire second lock"
-                };
-
-                status
+                }
             });
 
             // Collect results with timeout to avoid blocking indefinitely if deadlock occurs
-            let t1_result = match handle1.await {
-                Ok(result) => result,
-                Err(_) => "T1: Thread panicked",
-            };
+            let t1_result = (handle1.await).unwrap_or("T1: Thread panicked");
 
-            let t2_result = match handle2.await {
-                Ok(result) => result,
-                Err(_) => "T2: Thread panicked",
-            };
+            let t2_result = (handle2.await).unwrap_or("T2: Thread panicked");
 
             log::debug!("Deadlock detection test results:");
             log::debug!("T1: {}", t1_result);
@@ -2826,11 +2813,11 @@ mod tests {
 
             // Update the tuple to trigger undo log creation
             let new_values = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple = Tuple::new(&new_values, &schema, rid);
+            let update_tuple = Tuple::new(&new_values, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn_id),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 txn_ctx.clone(),
             );
@@ -2980,9 +2967,7 @@ mod tests {
             // The tuple should either be rolled back to original values or be invisible
             let after_abort = txn_table_heap.get_tuple(rid, verify_ctx);
 
-            if after_abort.is_ok() {
-                let (_, tuple) = after_abort.unwrap();
-
+            if let Ok((_, tuple)) = after_abort {
                 // Check if the tuple was rolled back to its original values
                 // Note: Depending on implementation, the tuple might be marked as deleted instead
                 assert_eq!(
@@ -3060,11 +3045,11 @@ mod tests {
 
             // Update the tuple
             let values2 = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple = Tuple::new(&values2, &schema, rid);
+            let update_tuple = Tuple::new(&values2, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 txn_ctx2.clone(),
             );
@@ -3100,11 +3085,11 @@ mod tests {
 
             // Update the tuple
             let values3 = vec![Value::new(1), Value::new(300)];
-            let mut update_tuple = Tuple::new(&values3, &schema, rid);
+            let update_tuple = Tuple::new(&values3, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn3.get_transaction_id()),
-                &mut update_tuple,
+                &update_tuple,
                 rid,
                 txn_ctx3.clone(),
             );
@@ -3399,12 +3384,12 @@ mod tests {
             }
 
             // Commit remaining transactions
-            for i in 0..successful_updates {
+            for (i, txn) in transactions.iter().enumerate().take(successful_updates) {
                 if i % 2 != 0 {
                     // Only commit odd-indexed transactions that weren't committed earlier
                     let commit_result = ctx
                         .txn_manager()
-                        .commit(transactions[i].clone(), ctx.buffer_pool_manager())
+                        .commit(txn.clone(), ctx.buffer_pool_manager())
                         .await;
                     assert!(commit_result, "Commit failed at chain depth {}", i);
                 }
@@ -3541,7 +3526,7 @@ mod tests {
                     // Update the tuple to create an undo log
                     let new_values =
                         vec![Value::new(i as i32 + 1), Value::new((i as i32 + 1) * 200)];
-                    let mut update_tuple = Tuple::new(&new_values, &worker_schema, worker_rid);
+                    let update_tuple = Tuple::new(&new_values, &worker_schema, worker_rid);
 
                     let update_result = worker_table_heap.update_tuple(
                         &TupleMeta::new(txn.get_transaction_id()),
@@ -3804,7 +3789,7 @@ mod tests {
 
             // Try to update the uncommitted tuple
             let new_values3 = vec![Value::new(3), Value::new(200)];
-            let mut update_tuple3 = Tuple::new(&new_values3, &schema, rid3);
+            let update_tuple3 = Tuple::new(&new_values3, &schema, rid3);
 
             // This should fail or be blocked since txn3a hasn't committed yet
             let update_result3 = txn_table_heap.update_tuple(
@@ -4611,7 +4596,7 @@ mod tests {
 
             // Modify the tuple
             let new_values = vec![Value::new(1), Value::new(200)];
-            let mut update_tuple = Tuple::new(&new_values, &schema, rid);
+            let update_tuple = Tuple::new(&new_values, &schema, rid);
 
             let update_result = txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn.get_transaction_id()),
@@ -4674,7 +4659,7 @@ mod tests {
 
             // Modify the tuple to a third value
             let newer_values = vec![Value::new(1), Value::new(300)];
-            let mut update_tuple2 = Tuple::new(&newer_values, &schema, rid);
+            let update_tuple2 = Tuple::new(&newer_values, &schema, rid);
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(modifier_txn2.get_transaction_id()),
@@ -4988,7 +4973,7 @@ mod tests {
 
             // Transaction 1 updates tuple 1
             let new_values1 = vec![Value::new(1), Value::new(150)];
-            let mut update_tuple1 = Tuple::new(&new_values1, &schema, rid1);
+            let update_tuple1 = Tuple::new(&new_values1, &schema, rid1);
 
             let update_result1 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn1.get_transaction_id()),
@@ -4999,7 +4984,7 @@ mod tests {
 
             // Transaction 2 updates tuple 2
             let new_values2 = vec![Value::new(2), Value::new(250)];
-            let mut update_tuple2 = Tuple::new(&new_values2, &schema, rid2);
+            let update_tuple2 = Tuple::new(&new_values2, &schema, rid2);
 
             let update_result2 = txn_table_heap.update_tuple(
                 &TupleMeta::new(txn2.get_transaction_id()),

@@ -4070,11 +4070,11 @@ mod tests {
                     let old_rank = _initial_ranks.iter().find(|(key, _)| *key == i).unwrap().1;
                     let new_rank = cache.recency_rank(&i);
 
-                    if new_rank.is_some() {
+                    if let Some(rank) = new_rank {
                         // Item that was more recent than 2 should shift down by 1
                         // Item that was less recent than 2 should maintain relative position
                         if old_rank < old_rank_2 {
-                            assert_eq!(new_rank.unwrap(), old_rank + 1);
+                            assert_eq!(rank, old_rank + 1);
                         }
                     }
                 }
@@ -6125,8 +6125,8 @@ mod tests {
 
         #[test]
         fn test_arc_cyclic_reference_prevention() {
-            struct Node {
-                _next: Option<Arc<Node>>,
+            struct _Node {
+                _next: Option<Arc<_Node>>,
             }
 
             let mut cache = LRUCore::new(2);

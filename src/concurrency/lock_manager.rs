@@ -792,7 +792,7 @@ impl LockStateManager {
 
         // Release row locks first to avoid table-lock ordering issues.
         {
-            let mut row_locks = self.row_locks.lock();
+            let row_locks = self.row_locks.lock();
             for (_, rid) in row_locks_for_txn.iter() {
                 if let Some(queue) = row_locks.get(rid) {
                     let mut queue_guard = queue.lock();
@@ -806,7 +806,7 @@ impl LockStateManager {
 
         // Release table locks.
         {
-            let mut table_locks_map = self.table_lock_map.lock();
+            let table_locks_map = self.table_lock_map.lock();
             for oid in table_locks.iter() {
                 if let Some(queue) = table_locks_map.get(oid) {
                     let mut queue_guard = queue.lock();

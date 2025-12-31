@@ -3633,6 +3633,7 @@ impl Display for LogicalPlan {
 ///
 /// When the right column name is exactly "d.id", the column index is
 /// normalized to 0 (handles specific test case for department joins).
+#[allow(clippy::type_complexity)] // Return type reflects distinct semantic components
 fn extract_join_keys(
     predicate: &Arc<Expression>,
 ) -> Result<(Vec<Arc<Expression>>, Vec<Arc<Expression>>, Arc<Expression>), String> {

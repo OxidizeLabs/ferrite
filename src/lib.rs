@@ -1,22 +1,11 @@
+// Clippy configuration - see individual items for rationale
+//
+// Legitimate suppressions with documented reasoning:
 #![allow(
-    clippy::await_holding_lock,
-    clippy::too_many_arguments,
-    clippy::should_implement_trait,
-    clippy::large_enum_variant,
-    clippy::type_complexity,
-    clippy::only_used_in_recursion,
-    clippy::inherent_to_string,
-    clippy::field_reassign_with_default,
-    clippy::manual_div_ceil,
-    clippy::unnecessary_mut_passed,
-    clippy::unnecessary_unwrap,
-    clippy::let_and_return,
-    clippy::get_first,
-    clippy::unnecessary_lazy_evaluations,
-    clippy::needless_range_loop,
-    clippy::manual_unwrap_or
+    // Required: Lock guards held across await points is intentional in our BPM design.
+    // The async disk manager coordinates with held page locks by design.
+    clippy::await_holding_lock
 )]
-#![allow(dead_code, unused_mut)]
 
 pub mod buffer;
 pub mod catalog;

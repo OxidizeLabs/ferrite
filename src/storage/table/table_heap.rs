@@ -614,7 +614,7 @@ impl TableHeap {
                 // walk the version chain to find the latest committed version.
                 else {
                     let txn_manager = txn_ctx.get_transaction_manager();
-                    let mut current_link = txn_manager.get_undo_link(rid);
+                    let current_link = txn_manager.get_undo_link(rid);
 
                     if let Some(ref undo_link) = current_link {
                         let undo_log = match txn_manager.get_undo_log(undo_link.clone()) {

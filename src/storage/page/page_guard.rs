@@ -294,6 +294,10 @@ impl<P: PageTrait + ?Sized> Drop for PageGuard<P> {
 }
 
 impl PageGuard<dyn PageTrait> {
+    /// Creates an untyped page guard for dynamic dispatch scenarios.
+    ///
+    /// Note: Reserved for heterogeneous page collections; currently typed guards are preferred.
+    #[allow(dead_code)]
     pub(crate) fn new_untyped(
         page: Arc<RwLock<dyn PageTrait>>,
         page_id: PageId,

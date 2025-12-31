@@ -1302,7 +1302,7 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn get_unique_path() -> String {
+    fn _get_unique_path() -> String {
         let start = SystemTime::now();
         let since_epoch = start.duration_since(UNIX_EPOCH).unwrap();
         let timestamp =
@@ -1311,7 +1311,7 @@ mod tests {
     }
 
     /// Helper to clean up test files
-    fn cleanup_files(config: &DBConfig) {
+    fn _cleanup_files(config: &DBConfig) {
         let _ = fs::remove_file(&config.db_filename);
         let _ = fs::remove_file(&config.db_log_filename);
     }

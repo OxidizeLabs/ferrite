@@ -317,6 +317,7 @@ impl Database {
     /// - `table_names`: The mapping of table names to OIDs.
     /// - `index_names`: The mapping of index names to OIDs.
     /// - `txn_manager`: The transaction manager in use by the system.
+    #[allow(clippy::too_many_arguments)] // Recovery requires all state components
     pub fn with_existing_data(
         name: String,
         bpm: Arc<BufferPoolManager>,
@@ -471,6 +472,7 @@ impl Database {
     }
 
     /// Creates a new index, populates existing data of the table, and returns its metadata.
+    #[allow(clippy::too_many_arguments)] // Index creation requires all these parameters
     pub fn create_index(
         &mut self,
         index_name: &str,

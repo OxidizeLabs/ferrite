@@ -335,7 +335,7 @@ impl Catalog {
         );
         databases.insert("default".to_string(), default_db);
 
-        let mut catalog = Catalog {
+        let catalog = Catalog {
             bpm,
             databases,
             current_database: Some("default".to_string()),
@@ -657,7 +657,7 @@ impl Catalog {
     /// Rebuilds in-memory catalog maps by scanning the persisted system catalog tables.
     pub fn rebuild_from_system_catalog(&mut self) {
         let snapshot_path = Path::new("catalog.snapshot");
-        let mut scan = TableScanIterator::new(self.system.tables.clone());
+        let scan = TableScanIterator::new(self.system.tables.clone());
         let mut rebuilt: Vec<TableInfo> = Vec::new();
         let mut rows: Vec<TableCatalogRow> = Vec::new();
 

@@ -2328,6 +2328,10 @@ impl ExpressionParser {
     ///
     /// # Returns
     /// A tuple of (predicate_expression, join_operator) or an error.
+    ///
+    /// Note: Reserved for future planner integration; join handling currently goes
+    /// through a different code path.
+    #[allow(dead_code)]
     fn process_join_operator(
         &self,
         join_operator: &JoinOperator,

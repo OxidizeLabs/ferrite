@@ -259,13 +259,11 @@ mod tests {
         let catalog = Arc::new(RwLock::new(create_catalog(&ctx)));
         let transaction_context = ctx.transaction_context.clone();
 
-        let execution_context = Arc::new(RwLock::new(ExecutionContext::new(
+        Arc::new(RwLock::new(ExecutionContext::new(
             bpm,
             catalog,
             transaction_context,
-        )));
-
-        execution_context
+        )))
     }
 
     #[tokio::test]

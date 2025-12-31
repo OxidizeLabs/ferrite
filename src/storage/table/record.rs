@@ -1,3 +1,7 @@
+// NOTE: Record API methods are provided for completeness; not all are used yet.
+// As the query execution layer matures, these will be integrated into result processing.
+#![allow(dead_code)]
+
 //! # Record
 //!
 //! This module provides the `Record` type, which combines a `Tuple` with its

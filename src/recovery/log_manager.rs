@@ -1175,12 +1175,10 @@ mod tests {
                         begin_lsn,
                         LogRecordType::Commit,
                     ));
-                    let commit_lsn = ctx_clone
+                    ctx_clone
                         .write()
                         .log_manager
-                        .append_log_record(commit_record);
-
-                    commit_lsn
+                        .append_log_record(commit_record)
                 });
                 handles.push(handle);
             }

@@ -392,14 +392,10 @@ impl UndoLink {
     }
 }
 
-impl IsolationLevel {
+impl std::str::FromStr for IsolationLevel {
+    type Err = String;
+
     /// Parses an isolation level from a string (case-insensitive).
-    ///
-    /// # Parameters
-    /// - `s`: The string to parse.
-    ///
-    /// # Returns
-    /// `Some(IsolationLevel)` if the string matches a known level, `None` otherwise.
     ///
     /// # Recognized Strings
     /// - `"read uncommitted"` → `ReadUncommitted`
@@ -407,14 +403,14 @@ impl IsolationLevel {
     /// - `"repeatable read"` → `RepeatableRead`
     /// - `"serializable"` → `Serializable`
     /// - `"snapshot"` or `"snapshot isolation"` → `Snapshot`
-    pub fn from_str(s: &str) -> Option<Self> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "read uncommitted" => Some(IsolationLevel::ReadUncommitted),
-            "read committed" => Some(IsolationLevel::ReadCommitted),
-            "repeatable read" => Some(IsolationLevel::RepeatableRead),
-            "serializable" => Some(IsolationLevel::Serializable),
-            "snapshot" | "snapshot isolation" => Some(IsolationLevel::Snapshot),
-            _ => None,
+            "read uncommitted" => Ok(IsolationLevel::ReadUncommitted),
+            "read committed" => Ok(IsolationLevel::ReadCommitted),
+            "repeatable read" => Ok(IsolationLevel::RepeatableRead),
+            "serializable" => Ok(IsolationLevel::Serializable),
+            "snapshot" | "snapshot isolation" => Ok(IsolationLevel::Snapshot),
+            _ => Err(format!("Unknown isolation level: {}", s)),
         }
     }
 }
@@ -639,11 +635,10 @@ impl Transaction {
     /// A vector of `(table_oid, rid)` pairs representing all modified tuples.
     pub fn get_write_set(&self) -> Vec<(TableOidT, RID)> {
         let write_set_guard = self.write_set.lock().expect("write_set lock poisoned");
-        let write_set = write_set_guard
+        write_set_guard
             .iter()
             .flat_map(|(&table_oid, rids)| rids.iter().map(move |&rid| (table_oid, rid)))
-            .collect();
-        write_set
+            .collect()
     }
 
     /// Appends a scan predicate.
@@ -1257,62 +1252,62 @@ mod tests {
         fn test_isolation_level_from_str_valid_inputs() {
             // Test all valid isolation level strings with different casing
             assert_eq!(
-                IsolationLevel::from_str("read uncommitted"),
-                Some(IsolationLevel::ReadUncommitted)
+                "read uncommitted".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::ReadUncommitted)
             );
             assert_eq!(
-                IsolationLevel::from_str("READ UNCOMMITTED"),
-                Some(IsolationLevel::ReadUncommitted)
+                "READ UNCOMMITTED".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::ReadUncommitted)
             );
             assert_eq!(
-                IsolationLevel::from_str("Read Uncommitted"),
-                Some(IsolationLevel::ReadUncommitted)
-            );
-
-            assert_eq!(
-                IsolationLevel::from_str("read committed"),
-                Some(IsolationLevel::ReadCommitted)
-            );
-            assert_eq!(
-                IsolationLevel::from_str("READ COMMITTED"),
-                Some(IsolationLevel::ReadCommitted)
+                "Read Uncommitted".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::ReadUncommitted)
             );
 
             assert_eq!(
-                IsolationLevel::from_str("repeatable read"),
-                Some(IsolationLevel::RepeatableRead)
+                "read committed".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::ReadCommitted)
             );
             assert_eq!(
-                IsolationLevel::from_str("REPEATABLE READ"),
-                Some(IsolationLevel::RepeatableRead)
+                "READ COMMITTED".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::ReadCommitted)
             );
 
             assert_eq!(
-                IsolationLevel::from_str("serializable"),
-                Some(IsolationLevel::Serializable)
+                "repeatable read".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::RepeatableRead)
             );
             assert_eq!(
-                IsolationLevel::from_str("SERIALIZABLE"),
-                Some(IsolationLevel::Serializable)
+                "REPEATABLE READ".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::RepeatableRead)
+            );
+
+            assert_eq!(
+                "serializable".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::Serializable)
             );
             assert_eq!(
-                IsolationLevel::from_str("snapshot"),
-                Some(IsolationLevel::Snapshot)
+                "SERIALIZABLE".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::Serializable)
             );
             assert_eq!(
-                IsolationLevel::from_str("SNAPSHOT ISOLATION"),
-                Some(IsolationLevel::Snapshot)
+                "snapshot".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::Snapshot)
+            );
+            assert_eq!(
+                "SNAPSHOT ISOLATION".parse::<IsolationLevel>(),
+                Ok(IsolationLevel::Snapshot)
             );
         }
 
         #[test]
         fn test_isolation_level_from_str_invalid_inputs() {
             // Test invalid isolation level strings
-            assert_eq!(IsolationLevel::from_str(""), None);
-            assert_eq!(IsolationLevel::from_str("unknown"), None);
-            assert_eq!(IsolationLevel::from_str("read_uncommitted"), None); // with underscore
-            assert_eq!(IsolationLevel::from_str("readuncommitted"), None); // without space
-            assert_eq!(IsolationLevel::from_str("level1"), None);
+            assert!("".parse::<IsolationLevel>().is_err());
+            assert!("unknown".parse::<IsolationLevel>().is_err());
+            assert!("read_uncommitted".parse::<IsolationLevel>().is_err()); // with underscore
+            assert!("readuncommitted".parse::<IsolationLevel>().is_err()); // without space
+            assert!("level1".parse::<IsolationLevel>().is_err());
         }
 
         #[test]
@@ -1531,7 +1526,7 @@ mod tests {
         fn test_concurrent_scan_predicate_operations() {
             // Test concurrent modifications to scan predicates
             let txn = Arc::new(Transaction::new(1, IsolationLevel::ReadCommitted));
-            let thread_count = 5;
+            let thread_count: usize = 5;
             let mut handles = vec![];
 
             for i in 0..thread_count {
@@ -1566,7 +1561,7 @@ mod tests {
             let mut total_predicates = 0;
             for table_id in 0..3 {
                 let predicates = scan_predicates.get(&(table_id as u32)).unwrap();
-                let expected_count = (thread_count + 2) / 3 * 5; // Ceiling of (thread_count/3) * 5
+                let expected_count = thread_count.div_ceil(3) * 5; // Ceiling of (thread_count/3) * 5
                 assert!(
                     predicates.len() <= expected_count,
                     "Table {} has {} predicates, expected at most {}",

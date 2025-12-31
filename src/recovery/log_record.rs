@@ -275,6 +275,8 @@ impl LogRecord {
     /// + `log_record_type` (LogRecordType as i32).
     ///
     /// Note: Actual serialized size may differ due to bincode encoding.
+    /// Reserved for future serialization optimizations (fixed-size header parsing).
+    #[allow(dead_code)]
     const HEADER_SIZE: usize = size_of::<i32>()
         + size_of::<AtomicU64>()
         + size_of::<TxnId>()
@@ -571,18 +573,6 @@ impl LogRecord {
         self.log_record_type
     }
 
-    /// Gets a string representation of the log record.
-    pub fn to_string(&self) -> String {
-        format!(
-            "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
-            self.size,
-            self.lsn.load(Ordering::SeqCst),
-            self.txn_id,
-            self.prev_lsn,
-            self.log_record_type as i32
-        )
-    }
-
     /// Checks if the log record is a commit record.
     pub fn is_commit(&self) -> bool {
         self.log_record_type == LogRecordType::Commit
@@ -606,6 +596,20 @@ impl LogRecord {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
         let (record, _) = bincode::decode_from_slice(bytes, storage_bincode_config())?;
         Ok(record)
+    }
+}
+
+impl std::fmt::Display for LogRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Log[size:{}, LSN:{}, transID:{}, prevLSN:{}, LogType:{}]",
+            self.size,
+            self.lsn.load(Ordering::SeqCst),
+            self.txn_id,
+            self.prev_lsn,
+            self.log_record_type as i32
+        )
     }
 }
 
