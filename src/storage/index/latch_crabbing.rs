@@ -164,14 +164,6 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-/// Type alias for the Arc-owned write guard.
-/// This is returned by `RwLock::write_arc()` when using the `arc_lock` feature.
-///
-/// Note: Reserved for explicit type documentation in latch crabbing; currently the
-/// guard type is inferred at use sites.
-#[allow(dead_code)]
-type InternalPageWriteGuard<K, C> = ArcRwLockWriteGuard<RawRwLock, BPlusTreeInternalPage<K, C>>;
-
 /// Trait alias for B+ tree key type requirements.
 ///
 /// This combines all the bounds needed for keys in B+ tree operations,

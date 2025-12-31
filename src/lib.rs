@@ -14,7 +14,6 @@ pub mod client;
 pub mod common;
 pub mod concurrency;
 pub mod container;
-pub mod network;
 pub mod recovery;
 pub mod server;
 pub mod sql;

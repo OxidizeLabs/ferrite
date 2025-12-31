@@ -2725,63 +2725,6 @@ where
         Ok(true) // Rebalancing occurred
     }
 
-    /// Helper method to find the parent page ID of a given page using BFS.
-    ///
-    /// **Deprecated**: This method uses O(n) BFS traversal. Prefer using `find_leaf_page_with_path`
-    /// and `get_parent_from_path` for O(1) parent lookup during normal operations.
-    ///
-    /// This method is retained for edge cases where the path is not available
-    /// (e.g., debugging, validation, or recovery scenarios).
-    #[allow(dead_code)]
-    fn find_parent_page_id(
-        &self,
-        child_page_id: PageId,
-        root_page_id: PageId,
-    ) -> Result<PageId, BPlusTreeError> {
-        // If the child is the root, it has no parent
-        if child_page_id == root_page_id {
-            return Err(BPlusTreeError::BufferPoolError(
-                "Root page has no parent".to_string(),
-            ));
-        }
-
-        // Start search from the root
-        let mut queue = VecDeque::new();
-        queue.push_back(root_page_id);
-
-        // Breadth-first search for the parent
-        while let Some(page_id) = queue.pop_front() {
-            // Try to fetch as internal page
-            if let Some(page) = self
-                .buffer_pool_manager
-                .fetch_page::<BPlusTreeInternalPage<K, C>>(page_id)
-            {
-                let page_read = page.read();
-
-                // Check if any of the child pointers match our target
-                for i in 0..=page_read.get_size() {
-                    if page_read.get_value_at(i) == Some(child_page_id) {
-                        return Ok(page_id); // Found the parent
-                    }
-                }
-
-                // If not found, add all children to the queue
-                for i in 0..=page_read.get_size() {
-                    if let Some(next_page_id) = page_read.get_value_at(i) {
-                        queue.push_back(next_page_id);
-                    }
-                }
-            }
-            // If not an internal page, skip (e.g., if it's a leaf)
-        }
-
-        // If we get here, we couldn't find the parent
-        Err(BPlusTreeError::BufferPoolError(format!(
-            "Parent not found for page {}",
-            child_page_id
-        )))
-    }
-
     /// Perform a level-order traversal (breadth-first) for debugging or visualization
     pub fn print_tree(&self) -> Result<(), BPlusTreeError> {
         // Check if tree is initialized

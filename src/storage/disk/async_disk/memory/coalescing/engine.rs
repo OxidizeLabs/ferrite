@@ -554,31 +554,6 @@ impl CoalescingEngine {
         adjacent
     }
 
-    /// Merges adjacent writes into a coalesced write
-    #[allow(dead_code)]
-    fn merge_adjacent_writes(
-        &mut self,
-        page_id: PageId,
-        data: Vec<u8>,
-        adjacent_pages: Vec<PageId>,
-    ) -> IoResult<Vec<u8>> {
-        let now = Instant::now();
-
-        // Remove adjacent pages from pending writes (they're being coalesced)
-        for adj_page in adjacent_pages {
-            self.pending_writes.remove(&adj_page);
-            self.write_timestamps.remove(&adj_page);
-            self.access_frequencies.remove(&adj_page);
-        }
-
-        // Add the current page with tracking
-        self.pending_writes.insert(page_id, data.clone());
-        self.write_timestamps.insert(page_id, now);
-        self.access_frequencies.insert(page_id, 1);
-
-        Ok(data)
-    }
-
     /// Detects memory pressure as a ratio (0.0 to 1.0)
     fn detect_memory_pressure(&self, current_usage: usize) -> f64 {
         let max_usage = self.max_coalesce_size * 4096; // Assuming 4KB pages

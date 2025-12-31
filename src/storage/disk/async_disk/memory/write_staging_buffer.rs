@@ -409,16 +409,6 @@ impl WriteStagingBuffer {
         data.to_vec()
     }
 
-    /// Compresses data using custom SIMD-accelerated algorithm.
-    ///
-    /// Note: Reserved for future SIMD-optimized compression implementation.
-    #[allow(dead_code)]
-    fn compress_custom_simd(&self, data: &[u8]) -> Vec<u8> {
-        // In a real implementation, this would use SIMD instructions for compression
-        // For this example, we'll just return the original data
-        data.to_vec()
-    }
-
     /// Decompresses data
     pub fn decompress_data(&self, compressed: &[u8]) -> Vec<u8> {
         // In a real implementation, this would detect the compression algorithm and decompress

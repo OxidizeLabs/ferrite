@@ -294,32 +294,6 @@ impl<P: PageTrait + ?Sized> Drop for PageGuard<P> {
 }
 
 impl PageGuard<dyn PageTrait> {
-    /// Creates an untyped page guard for dynamic dispatch scenarios.
-    ///
-    /// Note: Reserved for heterogeneous page collections; currently typed guards are preferred.
-    #[allow(dead_code)]
-    pub(crate) fn new_untyped(
-        page: Arc<RwLock<dyn PageTrait>>,
-        page_id: PageId,
-        unpinner: Option<Arc<dyn PageUnpinner>>,
-    ) -> Self {
-        let pin_count = {
-            let mut page_guard = page.write();
-            page_guard.increment_pin_count();
-            page_guard.get_pin_count()
-        };
-        trace!(
-            "Created new untyped page guard for page {} with pin count {}",
-            page_id, pin_count
-        );
-        Self {
-            page,
-            page_id,
-            unpinner,
-            dirty: AtomicBool::new(false),
-        }
-    }
-
     pub fn read(&self) -> RwLockReadGuard<'_, dyn PageTrait> {
         self.page.read()
     }
