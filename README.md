@@ -394,6 +394,9 @@ For detailed guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
 - [ ] **Window Functions**
   - [ ] ROW_NUMBER, RANK, DENSE_RANK
   - [ ] LAG, LEAD, FIRST_VALUE, LAST_VALUE
+- [ ] **Documentation**
+  - [ ] Finish Module level documentation
+  - [ ] Finish Docstrings
 
 ### Phase 2: Beta Release
 
