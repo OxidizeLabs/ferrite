@@ -276,7 +276,7 @@ impl BufferPoolManager {
     /// Creates a new `BufferPoolManager` with the default cache configuration.
     ///
     /// This constructor enables disk manager caching and disables bypassing the disk cache
-    /// for pinned pages. For custom cache configuration, use [`new_with_cache_config`].
+    /// for pinned pages. For custom cache configuration, use `new_with_cache_config`.
     ///
     /// # Parameters
     /// - `pool_size`: Number of frames in the buffer pool

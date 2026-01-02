@@ -777,7 +777,7 @@ pub enum LogicalPlanType {
 /// # Implementation Notes
 ///
 /// The default implementation in [`LogicalPlan`] uses an iterative (non-recursive)
-/// approach via [`PlanConverter`] to avoid stack overflow on deep plan trees.
+/// approach via `PlanConverter` to avoid stack overflow on deep plan trees.
 ///
 /// # Example
 ///
@@ -3560,12 +3560,12 @@ impl<'a> PlanConverter<'a> {
 
 /// Implementation of logical-to-physical plan conversion for [`LogicalPlan`].
 ///
-/// Uses [`PlanConverter`] for iterative (non-recursive) conversion to avoid
+/// Uses `PlanConverter` for iterative (non-recursive) conversion to avoid
 /// stack overflow on deep plan trees.
 impl LogicalToPhysical for LogicalPlan {
     /// Converts this logical plan to a physical execution plan.
     ///
-    /// Creates a [`PlanConverter`] and performs iterative conversion of the
+    /// Creates a `PlanConverter` and performs iterative conversion of the
     /// entire plan tree, starting from the leaves and working up to the root.
     ///
     /// # Returns

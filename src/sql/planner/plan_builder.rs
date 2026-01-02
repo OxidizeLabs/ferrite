@@ -217,7 +217,7 @@ use std::sync::Arc;
 /// # Components
 ///
 /// - [`ExpressionParser`]: Parses SQL expressions into internal [`Expression`] types
-/// - [`SchemaManager`]: Handles type conversion, schema construction, and validation
+/// - `SchemaManager`: Handles type conversion, schema construction, and validation
 ///
 /// # Supported Statements
 ///
@@ -442,7 +442,7 @@ impl LogicalPlanBuilder {
 
     /// Builds a logical plan for a SELECT statement without ORDER BY.
     ///
-    /// Convenience method that delegates to [`build_select_plan_with_order_by`]
+    /// Convenience method that delegates to `build_select_plan_with_order_by`
     /// with `None` for the ORDER BY clause.
     ///
     /// # Arguments
@@ -1464,7 +1464,7 @@ impl LogicalPlanBuilder {
     /// # Join Processing
     ///
     /// For each `TableWithJoins` in the FROM clause:
-    /// 1. Process the base table and its explicit JOINs via [`process_table_with_joins`]
+    /// 1. Process the base table and its explicit JOINs via `process_table_with_joins`
     /// 2. Combine with previous result using CROSS JOIN (implicit comma join)
     pub fn prepare_join_scan(&self, select: &Select) -> Result<Box<LogicalPlan>, String> {
         if select.from.is_empty() {
