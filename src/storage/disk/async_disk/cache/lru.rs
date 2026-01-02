@@ -575,10 +575,9 @@ where
     /// - All nodes in HashMap are reachable from head
     /// - All forward/backward links are consistent
     /// - Head has no prev, tail has no next
-    #[cfg(debug_assertions)]
     fn validate_invariants(&self) {
         if self.map.is_empty() {
-            assert!(self.head.is_none() && self.tail.is_none());
+            debug_assert!(self.head.is_none() && self.tail.is_none());
             return;
         }
 
@@ -593,10 +592,10 @@ where
                 let node_ref = &*node.as_ptr();
 
                 // Check backward link consistency
-                assert_eq!(node_ref.prev, prev_node);
+                debug_assert_eq!(node_ref.prev, prev_node);
 
                 // Check that this node exists in the HashMap
-                assert!(self.map.contains_key(&node_ref.key));
+                debug_assert!(self.map.contains_key(&node_ref.key));
 
                 prev_node = Some(node);
                 current = node_ref.next;
@@ -604,10 +603,10 @@ where
         }
 
         // Verify counts match
-        assert_eq!(count, self.map.len());
+        debug_assert_eq!(count, self.map.len());
 
         // Verify tail is correct
-        assert_eq!(prev_node, self.tail);
+        debug_assert_eq!(prev_node, self.tail);
     }
 }
 
@@ -719,7 +718,6 @@ where
         self.head = None;
         self.tail = None;
 
-        #[cfg(debug_assertions)]
         self.validate_invariants();
     }
 }
