@@ -56,6 +56,27 @@ jobs:
       - name: Run tests
         run: cargo test --package ferrite --lib --verbose
 
+  # Run tests using Miri
+  miri:
+    name: Miri (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --verbose
+      - name: Install Miri
+        run: cargo miri setup
+      - name: Test with Miri lru
+        run: cargo miri test --package ferrite --lib storage::disk::async_disk::cache::lru --verbose
+      - name: Test with Miri table_page
+        run: cargo miri test --package ferrite --lib storage::page::page_types::table_page --verbose
+
   # Documentation build check
   docs:
     name: Documentation
