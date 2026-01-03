@@ -1,8 +1,9 @@
-use super::common::{TestContext, TestResultWriter};
 use ferrite::catalog::column::Column;
 use ferrite::catalog::schema::Schema;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
+
+use super::common::{TestContext, TestResultWriter};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_row_number_window_function() {

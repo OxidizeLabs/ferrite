@@ -1,10 +1,12 @@
-use crate::catalog::schema::Schema;
-use crate::sql::execution::expressions::abstract_expression::Expression;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use sqlparser::ast::JoinOperator;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+
+use sqlparser::ast::JoinOperator;
+
+use crate::catalog::schema::Schema;
+use crate::sql::execution::expressions::abstract_expression::Expression;
+use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestedIndexJoinNode {
@@ -121,12 +123,13 @@ impl Display for NestedIndexJoinNode {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::JoinConstraint;
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
     use crate::types_db::type_id::TypeId;
-    use sqlparser::ast::JoinConstraint;
 
     fn create_test_schema(prefix: &str) -> Schema {
         let columns = vec![

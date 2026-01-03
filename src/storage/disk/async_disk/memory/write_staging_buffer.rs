@@ -232,12 +232,13 @@
 //! - The `HashMap` buffer requires external synchronization (provided by `WriteManager`'s `Mutex`)
 //! - `WriteStagingBuffer` is designed to be wrapped in `Arc<Mutex<>>` by `WriteManager`
 
-use crate::common::config::PageId;
-use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
 use std::collections::HashMap;
 use std::io::Result as IoResult;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+use crate::common::config::PageId;
+use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
 
 /// Statistics about the write buffer
 #[derive(Debug)]

@@ -47,6 +47,11 @@
 //! - Schema: `(rows_deleted INTEGER)`
 //! - Returns `None` if zero rows were deleted
 
+use std::sync::Arc;
+
+use log::{debug, error, info, trace, warn};
+use parking_lot::RwLock;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
@@ -59,9 +64,6 @@ use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, error, info, trace, warn};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for SQL `DELETE` statements.
 ///
@@ -361,6 +363,10 @@ impl AbstractExecutor for DeleteExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -376,8 +382,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

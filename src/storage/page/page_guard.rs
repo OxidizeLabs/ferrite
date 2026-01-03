@@ -148,12 +148,14 @@
 //! let page_type = data.get_page_type();
 //! ```
 
-use crate::common::config::PageId;
-use crate::storage::page::{Page, PageTrait, PageType};
-use log::trace;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use log::trace;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use crate::common::config::PageId;
+use crate::storage::page::{Page, PageTrait, PageType};
 
 /// A callback interface used by `PageGuard` to notify the buffer pool manager
 /// when the guard is dropped (i.e., when the page should be unpinned).
@@ -324,17 +326,18 @@ impl PageGuard<dyn PageTrait> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-    use crate::storage::page::PAGE_TYPE_OFFSET;
-    use crate::storage::page::{BasicPage, PageTrait, PageType};
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
-    use tempfile::TempDir;
+    use crate::storage::page::{BasicPage, PAGE_TYPE_OFFSET, PageTrait, PageType};
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,

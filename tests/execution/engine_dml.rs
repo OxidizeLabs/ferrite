@@ -1,7 +1,8 @@
-use crate::common::logger::init_test_logger;
-use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
+
+use crate::common::logger::init_test_logger;
+use crate::common::tempdb::new_temp_db;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn insert_update_delete_basic() {

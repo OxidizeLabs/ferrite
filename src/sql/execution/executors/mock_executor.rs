@@ -62,6 +62,10 @@
 //! └────────────────────────────────────────┘
 //! ```
 
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -71,8 +75,6 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Test double executor that returns pre-defined tuples.
 ///

@@ -1,14 +1,14 @@
 // ==============================================
 // LFU PERFORMANCE TESTS (integration)
 // ==============================================
+use std::time::{Duration, Instant};
+
 use ferrite::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LFUCacheTrait, MutableCache,
 };
 use ferrite::storage::disk::async_disk::cache::lfu::LFUCache;
-use std::time::{Duration, Instant};
 
 mod lookup_performance {
-
     use super::*;
 
     #[test]
@@ -2478,9 +2478,10 @@ mod memory_efficiency {
 }
 
 mod complexity {
-    use super::*;
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
+
+    use super::*;
 
     /// Helper function to measure execution time of a closure
     fn measure_time<F, R>(operation: F) -> (R, Duration)

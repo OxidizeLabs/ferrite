@@ -189,11 +189,13 @@
 //! - After `next()` returns a record, `get_offset()` points to the **next** record
 //! - Direct I/O for database pages does not affect WAL offset layout
 
+use std::sync::Arc;
+
+use log::{debug, warn};
+
 use crate::common::config::DB_PAGE_SIZE;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::disk::async_disk::AsyncDiskManager;
-use log::{debug, warn};
-use std::sync::Arc;
 
 /// A robust iterator for traversing log records in a Write-Ahead Log (WAL) file.
 ///
@@ -483,13 +485,15 @@ impl LogIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::common::config::{INVALID_LSN, Lsn, TxnId};
     use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
     use crate::storage::disk::async_disk::DiskManagerConfig;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         _temp_dir: TempDir,

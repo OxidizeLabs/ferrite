@@ -13,6 +13,7 @@
 use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
+
 use xxhash_rust::xxh3::Xxh3;
 
 /// A [`Hasher`] implementation wrapping the XXH3 algorithm.

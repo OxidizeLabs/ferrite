@@ -71,6 +71,12 @@
 //! Invalid column references are handled gracefully by skipping the tuple
 //! and attempting the next one, rather than failing the entire query.
 
+use std::fmt::Display;
+use std::sync::Arc;
+
+use log::{debug, trace};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -80,10 +86,6 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::projection_plan::ProjectionNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, trace};
-use parking_lot::RwLock;
-use std::fmt::Display;
-use std::sync::Arc;
 
 /// Executor for SQL `SELECT` list projections.
 ///
@@ -337,22 +339,26 @@ impl Display for ProjectionExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::Catalog;
     use crate::catalog::column::Column;
+    use crate::common::logger::initialize_logger;
     use crate::concurrency::lock_manager::LockManager;
     use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::executors::mock_executor::MockExecutor;
     use crate::sql::execution::expressions::abstract_expression::Expression;
-    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-
-    use crate::common::logger::initialize_logger;
     use crate::sql::execution::expressions::arithmetic_expression::{
         ArithmeticExpression, ArithmeticOp,
     };
+    use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::comparison_expression::{
         ComparisonExpression, ComparisonType,
     };
@@ -362,9 +368,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

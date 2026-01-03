@@ -1,4 +1,8 @@
 #![allow(clippy::items_after_test_module)]
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -8,9 +12,6 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::Type;
 use crate::types_db::value::{Val, Value};
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CeilFloorOperation {

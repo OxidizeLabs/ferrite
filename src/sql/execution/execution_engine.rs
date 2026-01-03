@@ -155,14 +155,20 @@
 //! - Components like `BufferPoolManager` and `Catalog` are `Arc`-wrapped for sharing
 //! - Each connection typically owns its own `ExecutionEngine` instance
 
+use std::sync::Arc;
+
+use log::{debug, error, info};
+use parking_lot::RwLock;
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::common::exception::DBError;
 use crate::common::result_writer::ResultWriter;
 use crate::concurrency::transaction_manager_factory::TransactionManagerFactory;
 use crate::recovery::wal_manager::WALManager;
-use crate::sql::execution::check_option::CheckOption;
-use crate::sql::execution::check_option::CheckOptions;
+use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::PlanNode;
@@ -172,11 +178,6 @@ use crate::sql::planner::logical_plan::{LogicalPlan, LogicalToPhysical};
 use crate::sql::planner::query_planner::QueryPlanner;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, error, info};
-use parking_lot::RwLock;
-use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser;
-use std::sync::Arc;
 
 /// Top-level coordinator for SQL statement execution.
 ///
@@ -1074,6 +1075,11 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -1087,9 +1093,6 @@ mod tests {
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     /// Default buffer pool size for regular tests
     const DEFAULT_TEST_BUFFER_POOL_SIZE: usize = 10;

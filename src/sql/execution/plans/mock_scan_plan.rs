@@ -1,8 +1,9 @@
+use std::fmt::{Display, Formatter};
+
 use crate::catalog::schema::Schema;
 use crate::common::rid::RID;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::types_db::value::Value;
-use std::fmt::{Display, Formatter};
 
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct MockScanNode {

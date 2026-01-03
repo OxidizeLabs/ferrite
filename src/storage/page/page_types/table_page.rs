@@ -50,18 +50,21 @@
 //! `TablePage` itself is not thread-safe. Concurrent access should be coordinated
 //! through `PageGuard` and the buffer pool manager.
 
+use std::any::Any;
+use std::mem::size_of;
+
+use bincode::{Decode, Encode};
+use log::{debug, error};
+
 use crate::common::config::{
     DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE, storage_bincode_config,
 };
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
-use crate::storage::page::Page;
-use crate::storage::page::{PAGE_ID_OFFSET, PAGE_TYPE_OFFSET, PageTrait, PageType, PageTypeId};
+use crate::storage::page::{
+    PAGE_ID_OFFSET, PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId,
+};
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use bincode::{Decode, Encode};
-use log::{debug, error};
-use std::any::Any;
-use std::mem::size_of;
 
 /// Represents a table page using a slotted page format.
 /// Slotted pages store a forward-growing slot directory and backward-growing tuple bodies
@@ -1808,17 +1811,19 @@ mod capacity_tests {
 
 #[cfg(test)]
 mod serialization_tests {
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use log::{debug, error};
+    use parking_lot::Mutex;
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use log::{debug, error};
-    use parking_lot::Mutex;
-    use std::sync::Arc;
-    use std::thread;
-    use std::time::Duration;
 
     fn create_test_tuple() -> (TupleMeta, Tuple) {
         let schema = Schema::new(vec![

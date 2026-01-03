@@ -4,7 +4,8 @@
     clippy::unnecessary_mut_passed
 )]
 
-use crate::common::logger::init_test_logger;
+use std::sync::Arc;
+
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::column::Column;
@@ -16,8 +17,9 @@ use ferrite::storage::table::tuple::{Tuple, TupleMeta};
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
 use parking_lot::RwLock;
-use std::sync::Arc;
 use tempfile::TempDir;
+
+use crate::common::logger::init_test_logger;
 
 struct StorageTestContext {
     bpm: Arc<BufferPoolManager>,

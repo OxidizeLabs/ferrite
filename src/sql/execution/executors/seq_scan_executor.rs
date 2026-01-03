@@ -85,6 +85,11 @@
 //! - Deleted tuples are filtered out automatically
 //! - The iterator is created lazily during `init()`
 
+use std::sync::Arc;
+
+use log::{debug, error, trace};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -95,9 +100,6 @@ use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error, trace};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for full table sequential scans.
 ///
@@ -453,6 +455,9 @@ impl AbstractExecutor for SeqScanExecutor {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -466,10 +471,7 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
-    use crate::types_db::value::Val;
-    use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
+    use crate::types_db::value::{Val, Value};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

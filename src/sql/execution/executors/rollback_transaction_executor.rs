@@ -117,6 +117,11 @@
 //! - Transaction chaining sets a context flag for the execution engine to
 //!   start a new transaction with the same characteristics
 
+use std::sync::Arc;
+
+use log::{debug, info, warn};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -125,9 +130,6 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::rollback_transaction_plan::RollbackTransactionPlanNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info, warn};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for rolling back (aborting) the current transaction.
 ///
@@ -375,6 +377,12 @@ impl AbstractExecutor for RollbackTransactionExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::Duration;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -385,10 +393,6 @@ mod tests {
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-    use parking_lot::RwLock;
-    use std::thread;
-    use std::time::Duration;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

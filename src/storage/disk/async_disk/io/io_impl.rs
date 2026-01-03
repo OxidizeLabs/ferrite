@@ -229,14 +229,11 @@
 //! - `worker_manager`: Owned, requires `&mut self` for `start()` and `stop()`
 //! - All I/O methods take `&self`, safe for concurrent calls
 
-use crate::common::config::PageId;
-use crate::storage::disk::async_disk::io::completion::CompletionTracker;
-use crate::storage::disk::async_disk::io::metrics;
-use crate::storage::disk::direct_io::DirectIOConfig;
 use std::io::Result as IoResult;
 use std::sync::Arc;
+
 use tokio::fs::File;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 
 use super::executor::IOOperationExecutor;
 // Import our modular components
@@ -244,7 +241,10 @@ use super::operation_status::OperationResult;
 use super::operations::{IOOperationType, priorities};
 use super::queue::IOQueueManager;
 use super::worker::IOWorkerManager;
-use tokio::sync::oneshot;
+use crate::common::config::PageId;
+use crate::storage::disk::async_disk::io::completion::CompletionTracker;
+use crate::storage::disk::async_disk::io::metrics;
+use crate::storage::disk::direct_io::DirectIOConfig;
 
 // All the modular components are now in separate files
 
@@ -654,9 +654,10 @@ impl AsyncIOEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_async_io_engine_with_completion_tracking() {

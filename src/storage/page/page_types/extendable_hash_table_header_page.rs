@@ -50,14 +50,16 @@
 //! The header can hold up to [`HTABLE_HEADER_ARRAY_SIZE`] (2^9 = 512) directory
 //! page references, controlled by [`HTABLE_HEADER_MAX_DEPTH`].
 
-use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
-use crate::common::exception::PageError;
-use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
-use log::{debug, info};
 use std::any::Any;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::mem::size_of;
+
+use log::{debug, info};
+
+use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId};
+use crate::common::exception::PageError;
+use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 
 pub const HTABLE_HEADER_PAGE_METADATA_SIZE: usize = size_of::<u32>();
 pub const HTABLE_HEADER_MAX_DEPTH: u32 = 9;
@@ -347,16 +349,18 @@ impl Display for ExtendableHTableHeaderPage {
 
 #[cfg(test)]
 mod basic_behavior {
+    use std::sync::Arc;
+
+    use log::info;
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::page::PageTrait;
     use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
-    use log::info;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,

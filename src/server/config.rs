@@ -3,9 +3,10 @@
 //! This module provides `ServerConfig` for loading and managing database server
 //! configuration from TOML files.
 
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+
+use serde::{Deserialize, Serialize};
 
 /// Configuration settings for the Ferrite database server.
 ///

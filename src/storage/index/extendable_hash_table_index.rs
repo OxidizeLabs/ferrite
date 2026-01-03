@@ -74,11 +74,8 @@
 //! use std::sync::Arc;
 //!
 //! // Create hash index
-//! let index = ExtendableHashTableIndex::try_new(
-//!     metadata,
-//!     buffer_pool_manager,
-//!     HashFunction::new(),
-//! )?;
+//! let index =
+//!     ExtendableHashTableIndex::try_new(metadata, buffer_pool_manager, HashFunction::new())?;
 //!
 //! // Insert entry
 //! let tuple = Tuple::new(&[Value::from(42)], &schema, rid);
@@ -104,6 +101,11 @@
 //! The underlying `DiskExtendableHashTable` is protected by a `parking_lot::Mutex`,
 //! ensuring exclusive access during insert/delete/lookup operations.
 
+use std::sync::Arc;
+
+use log::warn;
+use parking_lot::{Mutex, RwLock};
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
@@ -114,9 +116,6 @@ use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::index::{Index, IndexInfo};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use log::warn;
-use parking_lot::{Mutex, RwLock};
-use std::sync::Arc;
 
 /// An index implementation backed by [`DiskExtendableHashTable`].
 ///
@@ -249,6 +248,8 @@ impl Index for ExtendableHashTableIndex {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
@@ -258,7 +259,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::IndexType;
     use crate::types_db::type_id::TypeId;
-    use tempfile::TempDir;
 
     async fn create_test_index() -> ExtendableHashTableIndex {
         initialize_logger();

@@ -143,9 +143,10 @@
 //! - For high-throughput systems, consider periodic watermark updates
 //!   instead of per-operation updates
 
-use crate::common::config::Timestamp;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::common::config::Timestamp;
 
 /// Tracks active transaction timestamps and maintains the low watermark.
 ///
@@ -1191,11 +1192,13 @@ mod tests {
 
 #[cfg(test)]
 mod concurrency_tests {
-    use super::*;
-    use parking_lot::Mutex;
     use std::sync::Arc;
     use std::thread;
+
+    use parking_lot::Mutex;
     use tokio::sync::mpsc;
+
+    use super::*;
 
     #[test]
     fn test_concurrent_get_next_ts() {

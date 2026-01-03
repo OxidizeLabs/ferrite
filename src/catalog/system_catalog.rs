@@ -162,15 +162,17 @@
 //! - Thread-safe access is provided by the underlying `TableHeap` and buffer pool
 //! - Multiple readers can scan system tables concurrently
 
+use std::sync::Arc;
+
+use bincode::{Decode, Encode};
+use log::debug;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, PageId, TableOidT, storage_bincode_config};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use bincode::{Decode, Encode};
-use log::debug;
-use std::sync::Arc;
 
 /// Reserved OID for the `__tables` system catalog table.
 pub const SYS_TABLES_OID: TableOidT = 1;

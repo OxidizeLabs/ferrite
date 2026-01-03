@@ -1,11 +1,12 @@
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrimType {

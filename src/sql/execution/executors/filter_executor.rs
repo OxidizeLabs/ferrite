@@ -50,6 +50,11 @@
 //! - **WHERE**: Pipelined - processes tuples one at a time
 //! - **HAVING**: Pipeline breaker - collects all tuples before evaluation
 
+use std::sync::Arc;
+
+use log::{debug, error};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -64,9 +69,6 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use log::{debug, error};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for `WHERE` and `HAVING` clause filtering.
 ///
@@ -557,6 +559,9 @@ impl AbstractExecutor for FilterExecutor {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -584,8 +589,6 @@ mod tests {
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

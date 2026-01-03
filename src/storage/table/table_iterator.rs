@@ -172,14 +172,16 @@
 //! - `Arc` wrappers for shared ownership of heap and transaction context
 //! - Iterator is not `Sync` (single-threaded iteration)
 
+use std::sync::Arc;
+
+use log::debug;
+
 use crate::common::config::{INVALID_PAGE_ID, PageId};
 use crate::common::rid::RID;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableInfo;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use log::debug;
-use std::sync::Arc;
 
 /// Table iterator for scanning through table pages
 ///
@@ -471,6 +473,13 @@ impl Iterator for TableIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+    use tokio;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -485,11 +494,6 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;
     use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use tempfile::TempDir;
-    use tokio;
 
     struct AsyncTestContext {
         bpm: Arc<BufferPoolManager>,

@@ -143,11 +143,19 @@
 //! - `V: ValueType` - Value type (typically `RID`)
 //! - `C: KeyComparator<K>` - Comparison function for keys
 
+use std::any::Any;
+use std::cmp::Ordering;
+use std::collections::VecDeque;
+use std::fmt::{Debug, Display};
+use std::marker::PhantomData;
+use std::sync::Arc;
+
+use log::debug;
+use thiserror::Error;
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
-use crate::common::{
-    config::{INVALID_PAGE_ID, PageId},
-    rid::RID,
-};
+use crate::common::config::{INVALID_PAGE_ID, PageId};
+use crate::common::rid::RID;
 use crate::storage::index::IndexInfo;
 use crate::storage::index::latch_crabbing::{
     HeldWriteLock, LatchContext, LockingProtocol, NodeSafety, OperationType, OptimisticResult,
@@ -156,19 +164,10 @@ use crate::storage::index::latch_crabbing::{
 use crate::storage::index::types::comparators::{I32Comparator, i32_comparator};
 use crate::storage::index::types::{KeyComparator, KeyType, ValueType};
 use crate::storage::page::page_guard::PageGuard;
-use crate::storage::page::page_types::{
-    b_plus_tree_header_page::BPlusTreeHeaderPage, b_plus_tree_internal_page::BPlusTreeInternalPage,
-    b_plus_tree_leaf_page::BPlusTreeLeafPage,
-};
+use crate::storage::page::page_types::b_plus_tree_header_page::BPlusTreeHeaderPage;
+use crate::storage::page::page_types::b_plus_tree_internal_page::BPlusTreeInternalPage;
+use crate::storage::page::page_types::b_plus_tree_leaf_page::BPlusTreeLeafPage;
 use crate::types_db::type_id::TypeId;
-use log::debug;
-use std::any::Any;
-use std::cmp::Ordering;
-use std::collections::VecDeque;
-use std::fmt::{Debug, Display};
-use std::marker::PhantomData;
-use std::sync::Arc;
-use thiserror::Error;
 
 // Error type for B+Tree operations
 #[derive(Debug, Error)]
@@ -3193,9 +3192,8 @@ where
             stats.leaf_level = Some(current_depth);
         } else if stats.leaf_level != Some(current_depth) {
             return Err(BPlusTreeError::ConversionError(format!(
-                "Leaves at different levels: expected {}, found {}",
-                stats.leaf_level.unwrap(),
-                current_depth
+                "Leaves at different levels: expected {:?}, found {}",
+                stats.leaf_level, current_depth
             )));
         }
 
@@ -3430,15 +3428,17 @@ pub fn create_index(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::{IndexInfo, IndexType};
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

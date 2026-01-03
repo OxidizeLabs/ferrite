@@ -216,6 +216,15 @@
 //! - Expression references use `Arc<Expression>` for shared ownership
 //! - Recursion depth tracking uses `thread_local!` for safety
 
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Display, Formatter};
+use std::sync::Arc;
+use std::{ptr, thread_local};
+
+use log::debug;
+use sqlparser::ast::{ExceptionWhen, Ident, JoinOperator, Statement, TransactionModifier};
+
 use crate::catalog::schema::Schema;
 use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::transaction::IsolationLevel;
@@ -249,14 +258,6 @@ use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::sql::execution::plans::window_plan::{WindowFunction, WindowFunctionType, WindowNode};
-use log::debug;
-use sqlparser::ast::{ExceptionWhen, Ident, JoinOperator, Statement, TransactionModifier};
-use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
-use std::fmt::{self, Display, Formatter};
-use std::ptr;
-use std::sync::Arc;
-use std::thread_local;
 
 // Add thread-local variable for tracking recursion depth
 thread_local! {
@@ -3794,6 +3795,8 @@ fn extract_table_alias_from_schema(schema: &Schema) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::{BinaryOperator, JoinConstraint, JoinOperator};
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::sql::execution::expressions::aggregate_expression::{
@@ -3806,7 +3809,6 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use sqlparser::ast::{BinaryOperator, JoinConstraint, JoinOperator};
 
     #[test]
     fn test_create_table_plan() {

@@ -5,10 +5,11 @@
 //! - Execute SQL queries
 //! - Handle query results
 
+use std::error::Error;
+
 use ferrite::common::db_instance::{DBConfig, DBInstance};
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
-use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

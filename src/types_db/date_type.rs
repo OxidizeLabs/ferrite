@@ -1,7 +1,8 @@
+use chrono::NaiveDate;
+
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use chrono::NaiveDate;
 
 /// Implementation for DateType (stored as i32 days from Unix epoch)
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]

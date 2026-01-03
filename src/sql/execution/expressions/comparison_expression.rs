@@ -1,3 +1,9 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
+use log::debug;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -7,10 +13,6 @@ use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Val::Null;
 use crate::types_db::value::Value;
-use log::debug;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ComparisonType {

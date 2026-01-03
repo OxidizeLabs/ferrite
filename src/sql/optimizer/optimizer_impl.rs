@@ -161,6 +161,11 @@
 //! - Read lock for index lookups, write lock for index creation
 //! - Optimization itself is single-threaded per query
 
+use std::sync::Arc;
+
+use log::{debug, info, trace, warn};
+use parking_lot::RwLock;
+
 use crate::catalog::Catalog;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
@@ -168,13 +173,9 @@ use crate::sql::execution::check_option::{CheckOption, CheckOptions};
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::logic_expression::{LogicExpression, LogicType};
 use crate::sql::planner::logical_plan::{LogicalPlan, LogicalPlanType};
-use crate::types_db::value::Val;
-use log::{debug, info, trace, warn};
-use parking_lot::RwLock;
-use std::sync::Arc;
-
 // Additional imports for constraint index creation
 use crate::storage::index::IndexType;
+use crate::types_db::value::Val;
 
 /// Rule-based query optimizer that transforms logical plans into more efficient forms.
 ///

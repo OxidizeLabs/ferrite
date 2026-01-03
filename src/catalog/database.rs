@@ -207,6 +207,15 @@
 //! );
 //! ```
 
+use core::fmt;
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use log::{info, warn};
+use parking_lot::RwLock;
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
@@ -217,13 +226,6 @@ use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::{IndexInfo, IndexType};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
-use core::fmt;
-use log::{info, warn};
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A static atomic counter for generating unique database IDs
 static NEXT_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
@@ -635,8 +637,9 @@ impl Database {
         index_info: &Arc<IndexInfo>,
         table_info: &Arc<TableInfo>,
     ) {
-        use crate::storage::table::table_iterator::TableScanIterator;
         use log::debug;
+
+        use crate::storage::table::table_iterator::TableScanIterator;
 
         debug!(
             "Populating index '{}' with existing table data",

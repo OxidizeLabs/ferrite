@@ -209,10 +209,11 @@
 //! - **Type Safety**: `PrepareOk` returns expected parameter types for validation
 //! - **Isolation Levels**: Passed as enum in `BeginTransaction` for explicit control
 
+use bincode::{Decode, Encode};
+
 use crate::concurrency::transaction::IsolationLevel;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use bincode::{Decode, Encode};
 
 /// Client request to the database server.
 ///

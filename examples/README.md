@@ -87,4 +87,3 @@ db.execute_transaction(
 - See the [documentation](../docs/) for architecture details
 - Check [CONTRIBUTING.md](../CONTRIBUTING.md) for development guidelines
 - Read the [README](../README.md) for project overview
-

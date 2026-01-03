@@ -175,20 +175,21 @@
 //! - **Default values** are stored as `Value` (may need evaluation at insert time)
 //! - **Type compatibility** is strict (no implicit coercion rules)
 
-use crate::catalog::column::Column;
-use crate::catalog::column::ForeignKeyConstraint;
-use crate::catalog::schema::Schema;
-use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use log;
 use log::debug;
 use sqlparser::ast::{
     ColumnDef, ColumnOption, ColumnOptionDef, DataType, ExactNumberInfo, Expr, ObjectName,
     ReferentialAction,
 };
-use std::collections::HashSet;
-use std::sync::Arc;
+
+use crate::catalog::column::{Column, ForeignKeyConstraint};
+use crate::catalog::schema::Schema;
+use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
+use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
 
 /// Result type for parsing column constraint options.
 ///
@@ -1440,13 +1441,14 @@ impl SchemaManager {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::{ColumnDef, DataType, Ident, StructBracketKind, Value};
+    use sqlparser::tokenizer::{Location, Span};
+
     use super::*;
     use crate::sql::execution::expressions::aggregate_expression::{
         AggregateExpression, AggregationType,
     };
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
-    use sqlparser::ast::{ColumnDef, DataType, Ident, StructBracketKind, Value};
-    use sqlparser::tokenizer::{Location, Span};
 
     #[test]
     fn test_convert_sql_types() {

@@ -1,8 +1,9 @@
+use std::cmp::PartialEq;
+use std::fmt;
+
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use std::cmp::PartialEq;
-use std::fmt;
 
 /// Represents a vector of integers in the database type system.
 #[derive(Debug, Clone, PartialEq)]

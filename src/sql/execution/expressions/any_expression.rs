@@ -1,3 +1,8 @@
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
+use sqlparser::ast::BinaryOperator;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -6,9 +11,6 @@ use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use sqlparser::ast::BinaryOperator;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 /// Expression that evaluates a comparison between a value and a list/subquery using ANY/SOME semantics
 /// e.g. x > ANY(1,2,3) or x = SOME(SELECT y FROM t)
@@ -214,11 +216,12 @@ impl Display for AnyExpression {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::BinaryOperator;
+
     use super::*;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::column_value_expression::ColumnRefExpression;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use sqlparser::ast::BinaryOperator;
 
     fn create_test_schema() -> Schema {
         Schema::new(vec![

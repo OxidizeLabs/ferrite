@@ -1,7 +1,8 @@
-use crate::common::logger::init_test_logger;
-use crate::common::tempdb::new_temp_db;
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
+
+use crate::common::logger::init_test_logger;
+use crate::common::tempdb::new_temp_db;
 
 /// Test suite for join operations covering all join types and edge cases
 /// Migrated from src/sql/execution/execution_engine.rs join_tests module

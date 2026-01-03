@@ -144,11 +144,13 @@
 //! immutably. Mutable operations like `set_primary_key_columns` are used during
 //! schema construction phases.
 
-use crate::catalog::column::Column;
-use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
+
+use bincode::{Decode, Encode};
+
+use crate::catalog::column::Column;
 
 /// Represents the structure of a database table.
 ///
@@ -616,9 +618,10 @@ impl AsRef<Schema> for Schema {
 
 #[cfg(test)]
 mod unit_tests {
+    use bincode::config;
+
     use super::*;
     use crate::types_db::type_id::TypeId;
-    use bincode::config;
 
     #[test]
     fn schema_serialization() {

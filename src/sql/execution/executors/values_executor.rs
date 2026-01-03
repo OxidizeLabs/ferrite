@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use log::{debug, error};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -6,9 +11,6 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 pub struct ValuesExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -93,6 +95,10 @@ impl AbstractExecutor for ValuesExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -104,17 +110,16 @@ mod tests {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
 
     mod helpers {
+        use tempfile::TempDir;
+
         use super::*;
         use crate::catalog::Catalog;
         use crate::common::logger::initialize_logger;
         use crate::sql::execution::plans::abstract_plan::PlanNode;
         use crate::sql::execution::transaction_context::TransactionContext;
         use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-        use tempfile::TempDir;
 
         pub fn create_test_schema() -> Schema {
             Schema::new(vec![

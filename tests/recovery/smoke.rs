@@ -1,8 +1,9 @@
-use crate::common::logger::init_test_logger;
-use crate::common::tempdb::temp_db_config;
 use ferrite::common::db_instance::{DBConfig, DBInstance};
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
+
+use crate::common::logger::init_test_logger;
+use crate::common::tempdb::temp_db_config;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recovery_smoke_reopen_triggers_recovery() {

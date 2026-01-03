@@ -6,11 +6,13 @@
 //! - Provide simple in-process metrics (atomics) and a Prometheus-text export
 //!   without introducing new external dependencies.
 
-use crate::common::config::PageId;
-use log::warn;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+use log::warn;
+
+use crate::common::config::PageId;
 
 #[derive(Debug, Clone)]
 pub struct LockObservabilityConfig {

@@ -145,6 +145,12 @@
 //! - **Thread Safety**: Lock-free for most operations
 //! - **Compile Time**: Slightly increased due to monomorphization
 
+use std::collections::VecDeque;
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::{Mutex, RwLock};
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::sql::execution::check_option::{CheckOption, CheckOptions};
@@ -176,11 +182,6 @@ use crate::sql::execution::executors::update_executor::UpdateExecutor;
 use crate::sql::execution::executors::values_executor::ValuesExecutor;
 use crate::sql::execution::executors::window_executor::WindowExecutor;
 use crate::sql::execution::transaction_context::TransactionContext;
-use log::debug;
-use parking_lot::Mutex;
-use parking_lot::RwLock;
-use std::collections::VecDeque;
-use std::sync::Arc;
 
 /// A pair of executors used for nested-loop join optimization checks.
 ///

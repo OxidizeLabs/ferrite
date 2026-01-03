@@ -1,7 +1,8 @@
+use std::fmt::{Display, Formatter};
+
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::fmt::{Display, Formatter};
 
 /// Represents a delete operation in the query execution plan.
 #[derive(Debug, Clone, PartialEq)]

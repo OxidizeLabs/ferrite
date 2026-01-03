@@ -1,3 +1,7 @@
+use std::fmt;
+use std::fmt::Display;
+use std::sync::Arc;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -5,9 +9,6 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use std::fmt;
-use std::fmt::Display;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MockExpression {

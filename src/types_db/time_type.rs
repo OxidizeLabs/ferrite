@@ -1,7 +1,8 @@
+use chrono::NaiveTime;
+
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use chrono::NaiveTime;
 
 /// Implementation for TimeType (stored as i32 seconds from midnight)
 #[derive(Clone, Eq, Ord, PartialEq, PartialOrd, Debug)]

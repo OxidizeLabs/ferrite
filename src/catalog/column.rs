@@ -162,12 +162,14 @@
 //! struct is typically used immutably after construction; mutable access
 //! (e.g., `set_offset`) is used during schema building phases.
 
-use crate::types_db::type_id::TypeId;
-use crate::types_db::value::Value;
-use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
+
+use bincode::{Decode, Encode};
+
+use crate::types_db::type_id::TypeId;
+use crate::types_db::value::Value;
 
 /// Represents a column in a database table schema.
 ///

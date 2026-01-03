@@ -246,6 +246,12 @@
 //! | `ApplyDelete` | Mark deleted | Restore tuple |
 //! | `NewPage` | Allocate page | (no undo) |
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use log::{debug, info, warn};
+use parking_lot::RwLock;
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::recovery::log_iterator::LogIterator;
@@ -255,10 +261,6 @@ use crate::storage::disk::async_disk::AsyncDiskManager;
 use crate::storage::page::page_impl::PageTrait;
 use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::tuple::TupleMeta;
-use log::{debug, info, warn};
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Orchestrates the ARIES recovery protocol to restore the database to a
 /// consistent state after a crash.
@@ -890,20 +892,21 @@ impl DirtyPageTable {
 
 #[cfg(test)]
 mod tests {
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::schema::Schema;
     use crate::common::logger::initialize_logger;
     use crate::common::rid::RID;
-    use crate::concurrency::transaction::IsolationLevel;
-    use crate::concurrency::transaction::Transaction;
+    use crate::concurrency::transaction::{IsolationLevel, Transaction};
     use crate::recovery::wal_manager::WALManager;
     use crate::storage::disk::async_disk::DiskManagerConfig;
     use crate::storage::table::tuple::Tuple;
-    use std::thread::sleep;
-    use std::time::Duration;
-    use tempfile::TempDir;
 
     struct TestContext {
         wal_manager: WALManager,

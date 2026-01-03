@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use log::{debug, error, info, trace, warn};
+use parking_lot::RwLock;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
@@ -10,9 +15,6 @@ use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, error, info, trace, warn};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 pub struct UpdateExecutor {
     context: Arc<RwLock<ExecutionContext>>,
@@ -207,6 +209,8 @@ impl AbstractExecutor for UpdateExecutor {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -232,7 +236,6 @@ mod tests {
     use crate::storage::index::types::KeyType;
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::types::Type;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

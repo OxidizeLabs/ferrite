@@ -54,6 +54,11 @@
 //! Fetched tuples are checked for visibility using the transaction context.
 //! Deleted tuples are automatically skipped.
 
+use std::sync::Arc;
+
+use log::{debug, error, info};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -69,9 +74,6 @@ use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Val, Value};
-use log::{debug, error, info};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for index-based table scans.
 ///
@@ -625,6 +627,10 @@ impl AbstractExecutor for IndexScanExecutor {
 
 #[cfg(test)]
 mod index_scan_executor_tests {
+    use std::sync::Arc;
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -644,8 +650,6 @@ mod index_scan_executor_tests {
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::{CmpBool, Type};
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         execution_context: Arc<RwLock<ExecutionContext>>,

@@ -45,6 +45,11 @@
 //! Commit operations produce no output tuples. The executor returns `None`
 //! immediately, and the execution engine handles the actual commit.
 
+use std::sync::Arc;
+
+use log::{debug, info};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -53,9 +58,6 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::commit_transaction_plan::CommitTransactionPlanNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for `COMMIT` transaction statements.
 ///

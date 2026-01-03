@@ -1,3 +1,10 @@
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
+use std::sync::Arc;
+
+use log::{debug, trace};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -9,12 +16,6 @@ use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
-use log::{debug, trace};
-use parking_lot::RwLock;
-use std::cmp::Ordering;
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
-use std::sync::Arc;
 
 /// Wrapper type for tuple and sort keys to implement custom ordering
 #[derive(Eq)]
@@ -205,6 +206,8 @@ impl AbstractExecutor for TopNExecutor {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -223,7 +226,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

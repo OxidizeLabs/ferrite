@@ -187,10 +187,12 @@
 //! - **Ordering**: `Ord` compares page_id first, then slot_num (useful for sequential scans)
 //! - **Default**: Returns invalid RID using `INVALID_PAGE_ID` sentinel value
 
-use crate::common::config::{INVALID_PAGE_ID, PageId};
-use bincode::{Decode, Encode};
 use std::fmt;
 use std::hash::Hash;
+
+use bincode::{Decode, Encode};
+
+use crate::common::config::{INVALID_PAGE_ID, PageId};
 
 /// Record ID (RID) - identifies a record's physical location in a table.
 ///

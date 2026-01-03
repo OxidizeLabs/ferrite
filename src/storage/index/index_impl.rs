@@ -114,6 +114,12 @@
 //! own synchronization (e.g., `RwLock` for in-memory trees, latch crabbing
 //! for disk-based trees).
 
+use core::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::config::IndexOidT;
 use crate::common::rid::RID;
@@ -122,10 +128,6 @@ use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::index_iterator_mem::IndexIterator;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use core::fmt;
-use parking_lot::RwLock;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum IndexType {

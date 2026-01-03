@@ -51,21 +51,6 @@ repos:
       #   types: [rust]
       #   pass_filenames: false
 
-      - id: check-println
-        name: check for println usage
-        description: Check for println! calls in main code
-        entry: bash
-        args:
-          - -c
-          - |
-            if git diff --cached --name-only | grep -E "\.(rs)$" | grep -v test | grep -v bench | grep -v main.rs | grep -v cli.rs | xargs grep -l "println!" 2>/dev/null; then
-              echo "Warning: Found println! calls in main code. Consider using log crate."
-            fi
-        language: system
-        types: [rust]
-        verbose: true
-        pass_filenames: false
-
   # Security audit (optional, can be slow)
   - repo: local
     hooks:

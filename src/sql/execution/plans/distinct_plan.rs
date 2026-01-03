@@ -1,6 +1,7 @@
+use std::fmt::{Display, Formatter};
+
 use crate::catalog::schema::Schema;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DistinctNode {

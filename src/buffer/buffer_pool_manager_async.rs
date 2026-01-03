@@ -138,12 +138,15 @@
 //! use std::sync::Arc;
 //!
 //! // Create buffer pool with async disk manager
-//! let bpm = Arc::new(BufferPoolManager::new_with_config(
-//!     100,  // pool size
-//!     "db.file".to_string(),
-//!     "db.log".to_string(),
-//!     DiskManagerConfig::default(),
-//! ).await?);
+//! let bpm = Arc::new(
+//!     BufferPoolManager::new_with_config(
+//!         100, // pool size
+//!         "db.file".to_string(),
+//!         "db.log".to_string(),
+//!         DiskManagerConfig::default(),
+//!     )
+//!     .await?,
+//! );
 //!
 //! // Create a new page
 //! let guard = bpm.new_page::<BasicPage>()?;
@@ -201,20 +204,21 @@
 //! - **Pinning/Unpinning**: Prevents eviction of pages in use by execution threads
 //! - **Replacement Policy**: Uses `LRUKReplacer` for access-frequency-based eviction
 //! - **Cache Coordination**: Manages L1/L2 cache interaction and efficiency
-use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
-use crate::common::config::{DB_PAGE_SIZE, FrameId, INVALID_PAGE_ID, PageId};
-use crate::common::exception::DeletePageError;
-use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-use crate::storage::page::page_guard::{PageGuard, PageUnpinner};
-use crate::storage::page::{PAGE_TYPE_OFFSET, PageType};
-use crate::storage::page::{Page, PageTrait};
-use log::{error, info, trace, warn};
-use parking_lot::{RwLock, RwLockReadGuard};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use log::{error, info, trace, warn};
+use parking_lot::{RwLock, RwLockReadGuard};
+
+use crate::buffer::lru_k_replacer::{AccessType, LRUKReplacer};
+use crate::common::config::{DB_PAGE_SIZE, FrameId, INVALID_PAGE_ID, PageId};
+use crate::common::exception::DeletePageError;
+use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
+use crate::storage::page::page_guard::{PageGuard, PageUnpinner};
+use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType};
 
 // Type aliases for complex types
 
@@ -357,7 +361,8 @@ impl BufferPoolManager {
     ///     "data.db".to_string(),
     ///     "data.log".to_string(),
     ///     DiskManagerConfig::default(),
-    /// ).await?;
+    /// )
+    /// .await?;
     /// ```
     pub async fn new_with_config(
         pool_size: usize,
@@ -1663,9 +1668,11 @@ impl BufferPoolManager {
     ///
     /// # Example
     /// ```rust,no_run
-    /// let result = bpm.run_async_operation("flush_specific_page", async {
-    ///     bpm.flush_page_async(page_id).await
-    /// }).await?;
+    /// let result = bpm
+    ///     .run_async_operation("flush_specific_page", async {
+    ///         bpm.flush_page_async(page_id).await
+    ///     })
+    ///     .await?;
     /// ```
     pub async fn run_async_operation<F, T>(
         &self,
@@ -1831,10 +1838,12 @@ impl PageUnpinner for BufferPoolManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::storage::page::{BasicPage, PageTrait, PageType};
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     /// Test context for async buffer pool manager tests.
     ///

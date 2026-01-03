@@ -1,9 +1,10 @@
-use crate::catalog::schema::Schema;
-use crate::sql::execution::expressions::abstract_expression::Expression;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+
+use crate::catalog::schema::Schema;
+use crate::sql::execution::expressions::abstract_expression::Expression;
+use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
 /// Represents the sort order direction for ORDER BY clauses
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

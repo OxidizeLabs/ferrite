@@ -1,5 +1,8 @@
 #![allow(clippy::field_reassign_with_default)]
 
+use std::error;
+use std::sync::Arc;
+
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use env_logger::Builder;
@@ -11,8 +14,6 @@ use ferrite::common::logger::initialize_logger;
 use ferrite::server::{ServerConfig, ServerHandle};
 use log::info;
 use rustyline::DefaultEditor;
-use std::error;
-use std::sync::Arc;
 use tokio::signal;
 
 #[derive(Parser)]

@@ -223,15 +223,19 @@
 //!   first_page_id                                        last_page_id
 //! ```
 
+use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::RwLock;
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::schema::Schema;
 use crate::common::config::{INVALID_PAGE_ID, INVALID_TXN_ID, PageId, TableOidT};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
-use crate::concurrency::transaction::IsolationLevel;
-use crate::concurrency::transaction::UndoLink;
-use crate::concurrency::transaction::UndoLog;
+use crate::concurrency::transaction::{IsolationLevel, UndoLink, UndoLog};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::page::page_guard::PageGuard;
@@ -240,10 +244,6 @@ use crate::storage::page::{Page, PageTrait};
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta, TupleVisibility};
 use crate::types_db::value::Value;
-use log::debug;
-use parking_lot::RwLock;
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 // Page Management
 pub struct TablePageManager {

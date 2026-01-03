@@ -37,19 +37,20 @@
 //! All commands produce a single-column result with schema:
 //! - Column: `result` (VARCHAR) - Human-readable status message
 
+use std::sync::Arc;
+
+use log::warn;
+use parking_lot::RwLock;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
-use crate::storage::table::tuple::Tuple;
-use crate::storage::table::tuple::TupleMeta;
+use crate::storage::table::tuple::{Tuple, TupleMeta};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::warn;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for database administrative commands.
 ///

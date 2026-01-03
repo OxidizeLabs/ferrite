@@ -1,12 +1,13 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 /// Expression that represents an assignment in an UPDATE statement
 /// Encapsulates both the target column and the value expression

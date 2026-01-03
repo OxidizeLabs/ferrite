@@ -56,6 +56,11 @@
 //! Table creation produces no output tuples. Success is indicated by `Ok(None)`,
 //! while failures return `Err(DBError)`.
 
+use std::sync::Arc;
+
+use log::{debug, info};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -64,9 +69,6 @@ use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::create_table_plan::CreateTablePlanNode;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for `CREATE TABLE` DDL statements.
 ///
@@ -298,6 +300,8 @@ impl Drop for CreateTableExecutor {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -310,7 +314,6 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

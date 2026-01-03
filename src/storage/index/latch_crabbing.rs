@@ -147,22 +147,22 @@
 //! - `LatchContext` is `Send` when its locks are
 //! - Locks are released in LIFO order when context drops (safe for deadlock prevention)
 
-use crate::common::config::PageId;
-use crate::storage::index::btree_observability;
-use crate::storage::index::types::{KeyComparator, KeyType};
-use crate::storage::page::page_guard::PageGuard;
-use crate::storage::page::page_types::{
-    b_plus_tree_internal_page::BPlusTreeInternalPage, b_plus_tree_leaf_page::BPlusTreeLeafPage,
-};
-use log::trace;
-use parking_lot::lock_api::ArcRwLockWriteGuard;
-use parking_lot::{RawRwLock, RwLock};
 use std::fmt::{Debug, Display};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use log::trace;
+use parking_lot::lock_api::ArcRwLockWriteGuard;
+use parking_lot::{RawRwLock, RwLock};
+
+use crate::common::config::PageId;
+use crate::storage::index::btree_observability;
+use crate::storage::index::types::{KeyComparator, KeyType};
+use crate::storage::page::page_guard::PageGuard;
+use crate::storage::page::page_types::b_plus_tree_internal_page::BPlusTreeInternalPage;
+use crate::storage::page::page_types::b_plus_tree_leaf_page::BPlusTreeLeafPage;
 
 /// Trait alias for B+ tree key type requirements.
 ///
@@ -715,8 +715,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::cmp::Ordering;
+
+    use super::*;
 
     // Test LatchContext basic functionality
     #[test]

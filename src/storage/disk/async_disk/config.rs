@@ -2,9 +2,10 @@
 //!
 //! This module contains the configuration structures and enums for the async disk manager.
 
+use std::time::Duration;
+
 use crate::common::config::PageId;
 use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
-use std::time::Duration;
 
 /// Configuration for the disk manager with optimizations
 #[derive(Debug, Clone)]
@@ -78,9 +79,9 @@ pub enum DurabilityLevel {
 /// Priority levels for I/O operations
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IOPriority {
-    Low = 1,
-    Normal = 2,
-    High = 3,
+    Low      = 1,
+    Normal   = 2,
+    High     = 3,
     Critical = 4,
 }
 

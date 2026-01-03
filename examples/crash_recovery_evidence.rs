@@ -8,12 +8,13 @@
 //!   cargo run --example crash_recovery_evidence -- crash  /path/to/db.db /path/to/db.log
 //!   cargo run --example crash_recovery_evidence -- verify /path/to/db.db /path/to/db.log
 
+use std::env;
+use std::sync::Arc;
+
 use ferrite::common::db_instance::{DBConfig, DBInstance};
 use ferrite::common::result_writer::ResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 use ferrite::types_db::value::{Val, Value};
-use std::env;
-use std::sync::Arc;
 
 #[derive(Default)]
 struct CaptureWriter {

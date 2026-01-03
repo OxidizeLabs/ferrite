@@ -81,6 +81,11 @@
 //! - Deleted tuples are skipped using a loop (not recursion) to avoid stack overflow
 //! - The plan node owns the `TableInfo` and provides the `scan()` method
 
+use std::sync::Arc;
+
+use log::{debug, error};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -90,9 +95,6 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::table_scan_plan::TableScanNode;
 use crate::storage::table::table_iterator::TableScanIterator;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for sequential table scans using the Volcano iterator model.
 ///
@@ -328,6 +330,9 @@ impl AbstractExecutor for TableScanExecutor {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -342,8 +347,6 @@ mod tests {
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

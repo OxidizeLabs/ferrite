@@ -168,21 +168,22 @@
 //!    or terminates with `INVALID_TXN_ID`
 //! 4. **Write set completeness**: All modified RIDs must be in the write set
 
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use std::{fmt, thread};
+
+use bincode::{Decode, Encode};
+use log;
+use log::debug;
+use parking_lot::RwLock;
+
 use crate::common::config::{
     INVALID_LSN, INVALID_TXN_ID, Lsn, TXN_START_ID, TableOidT, TimeStampOidT, Timestamp, TxnId,
 };
 use crate::common::rid::RID;
 use crate::concurrency::watermark::Watermark;
 use crate::sql::execution::expressions::abstract_expression::Expression;
-use crate::storage::table::tuple::Tuple;
-use crate::storage::table::tuple::TupleMeta;
-use bincode::{Decode, Encode};
-use log;
-use log::debug;
-use parking_lot::RwLock;
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
-use std::{fmt, thread};
+use crate::storage::table::tuple::{Tuple, TupleMeta};
 
 /// Transaction state representing the current phase of a transaction's lifecycle.
 ///
@@ -912,6 +913,9 @@ mod tests {
     }
 
     mod basic_behaviour {
+        use std::sync::Arc;
+        use std::thread;
+
         use crate::common::config::{INVALID_LSN, INVALID_TXN_ID, TXN_START_ID, TimeStampOidT};
         use crate::common::rid::RID;
         use crate::concurrency::transaction::tests::create_test_tuple;
@@ -921,8 +925,6 @@ mod tests {
         use crate::sql::execution::expressions::abstract_expression::Expression::Mock;
         use crate::sql::execution::expressions::mock_expression::MockExpression;
         use crate::types_db::value::Value;
-        use std::sync::Arc;
-        use std::thread;
 
         #[test]
         fn test_transaction_basic_properties() {

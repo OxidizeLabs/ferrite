@@ -1,8 +1,9 @@
+use std::sync::Arc;
+
 use ferrite::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LRUCacheTrait, MutableCache,
 };
 use ferrite::storage::disk::async_disk::cache::lru::{ConcurrentLRUCache, LRUCore};
-use std::sync::Arc;
 
 #[cfg(test)]
 mod integration_tests {

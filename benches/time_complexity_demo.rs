@@ -1,10 +1,10 @@
 #![allow(clippy::all)]
 #![allow(unused_parens)]
 
-use criterion::BatchSize;
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::collections::HashMap;
 use std::hint::black_box;
+
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 // =================================================================================
 // SIMPLE FUNCTIONS WITH DIFFERENT TIME COMPLEXITIES
 // =================================================================================

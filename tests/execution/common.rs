@@ -1,4 +1,5 @@
-use crate::common::logger::init_test_logger;
+use std::sync::Arc;
+
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -11,15 +12,15 @@ use ferrite::recovery::log_manager::LogManager;
 use ferrite::recovery::wal_manager::WALManager;
 use ferrite::sql::execution::execution_context::ExecutionContext;
 use ferrite::sql::execution::execution_engine::ExecutionEngine;
-use ferrite::storage::disk::async_disk::AsyncDiskManager;
-use ferrite::storage::disk::async_disk::DiskManagerConfig;
+use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use ferrite::storage::table::table_heap::TableInfo;
 use ferrite::storage::table::transactional_table_heap::TransactionalTableHeap;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
 use parking_lot::RwLock;
-use std::sync::Arc;
 use tempfile::TempDir;
+
+use crate::common::logger::init_test_logger;
 
 pub struct TestContext {
     pub engine: ExecutionEngine,

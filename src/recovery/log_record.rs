@@ -170,12 +170,12 @@ use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use bincode::{Decode, Encode};
 use log::error;
 
 use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId, storage_bincode_config};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
-use bincode::{Decode, Encode};
 
 /// The type of the log record, identifying the operation being logged.
 ///

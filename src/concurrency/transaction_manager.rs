@@ -212,9 +212,14 @@
 //! // tm.abort(txn);
 //! ```
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+use parking_lot::RwLock;
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
-use crate::common::config::TableOidT;
-use crate::common::config::{INVALID_TS, INVALID_TXN_ID, PageId, Timestamp, TxnId};
+use crate::common::config::{INVALID_TS, INVALID_TXN_ID, PageId, TableOidT, Timestamp, TxnId};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::{
@@ -226,10 +231,6 @@ use crate::storage::page::page_types::table_page::TablePage;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::{Tuple, TupleMeta};
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Per-page version tracking for MVCC.
 ///
@@ -1180,6 +1181,10 @@ impl TransactionManager {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -1192,8 +1197,6 @@ mod tests {
     use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use std::thread;
-    use tempfile::TempDir;
 
     /// Test context that holds shared components
     struct TestContext {

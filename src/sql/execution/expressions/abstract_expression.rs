@@ -1,3 +1,9 @@
+use std::fmt;
+use std::fmt::Display;
+use std::sync::Arc;
+
+use sqlparser::ast::BinaryOperator;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -54,10 +60,6 @@ use crate::sql::execution::expressions::window_expression::WindowExpression;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use sqlparser::ast::BinaryOperator;
-use std::fmt;
-use std::fmt::Display;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {

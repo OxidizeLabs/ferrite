@@ -255,12 +255,13 @@
 //! "The LRU-K page replacement algorithm for database disk buffering."
 //! ACM SIGMOD Record, 22(2), 297-306.
 
-use crate::storage::disk::async_disk::cache::cache_traits::{
-    CoreCache, LRUKCacheTrait, MutableCache,
-};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LRUKCacheTrait, MutableCache,
+};
 
 /// LRU-K Cache implementation.
 ///
@@ -612,10 +613,11 @@ where
 #[cfg(test)]
 mod tests {
     mod basic_behavior {
-        use super::super::*;
-        use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait};
         use std::thread;
         use std::time::Duration;
+
+        use super::super::*;
+        use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait};
 
         #[test]
         fn test_basic_lru_k_insertion_and_retrieval() {
@@ -763,12 +765,13 @@ mod tests {
 
     // Edge Cases Tests
     mod edge_cases {
+        use std::thread;
+        use std::time::Duration;
+
         use super::super::*;
         use crate::storage::disk::async_disk::cache::cache_traits::{
             CoreCache, LRUKCacheTrait, MutableCache,
         };
-        use std::thread;
-        use std::time::Duration;
 
         #[test]
         fn test_empty_cache_operations() {
@@ -903,12 +906,13 @@ mod tests {
 
     // LRU-K-Specific Operations Tests
     mod lru_k_operations {
+        use std::thread;
+        use std::time::Duration;
+
         use super::super::*;
         use crate::storage::disk::async_disk::cache::cache_traits::{
             CoreCache, LRUKCacheTrait, MutableCache,
         };
-        use std::thread;
-        use std::time::Duration;
 
         #[test]
         fn test_pop_lru_k_basic() {

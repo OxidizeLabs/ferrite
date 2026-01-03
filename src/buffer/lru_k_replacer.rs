@@ -75,11 +75,13 @@
 //! - O'Neil, E. J., O'Neil, P. E., & Weikum, G. (1993). "The LRU-K Page Replacement
 //!   Algorithm for Database Disk Buffering." ACM SIGMOD Record.
 
-use crate::common::config::FrameId;
-use log::{debug, error, trace};
-use parking_lot::{Mutex as ParkingMutex, RwLock};
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use log::{debug, error, trace};
+use parking_lot::{Mutex as ParkingMutex, RwLock};
+
+use crate::common::config::FrameId;
 
 /// The type of access operation on a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -378,11 +380,13 @@ impl LRUKReplacer {
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    use parking_lot::Mutex;
     use std::sync::Arc;
     use std::thread::sleep;
     use std::time::Duration;
+
+    use parking_lot::Mutex;
+
+    use super::*;
 
     #[test]
     fn evict_single_frame() {
@@ -583,8 +587,9 @@ mod unit_tests {
 
 #[cfg(test)]
 mod basic_behaviour {
-    use super::*;
     use std::sync::{Arc, Mutex};
+
+    use super::*;
 
     #[test]
     fn basic_eviction_order() {
@@ -697,10 +702,12 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod concurrency {
-    use super::*;
-    use parking_lot::Mutex;
     use std::sync::Arc;
     use std::thread;
+
+    use parking_lot::Mutex;
+
+    use super::*;
 
     #[test]
     fn concurrent_access() {
@@ -743,9 +750,11 @@ mod concurrency {
 
 #[cfg(test)]
 mod edge_cases {
-    use super::*;
-    use parking_lot::Mutex;
     use std::sync::Arc;
+
+    use parking_lot::Mutex;
+
+    use super::*;
 
     #[test]
     fn evict_from_empty() {

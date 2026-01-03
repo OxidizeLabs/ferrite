@@ -285,14 +285,16 @@
 //! - Multiple workers can safely share a single executor instance
 //! - All execute methods take `&self`, safe for concurrent calls
 
-use super::operations::IOOperationType;
-use crate::common::config::{DB_PAGE_SIZE, PageId};
-use crate::storage::disk::direct_io::{AlignedBuffer, DirectIOConfig};
 use std::io::Result as IoResult;
 use std::sync::Arc;
+
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Mutex;
+
+use super::operations::IOOperationType;
+use crate::common::config::{DB_PAGE_SIZE, PageId};
+use crate::storage::disk::direct_io::{AlignedBuffer, DirectIOConfig};
 
 /// I/O operation executor responsible for executing operations
 ///
@@ -619,9 +621,10 @@ impl IOOperationExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
+
+    use super::*;
 
     async fn create_test_executor() -> (IOOperationExecutor, String, String) {
         use std::sync::atomic::{AtomicU64, Ordering};

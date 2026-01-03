@@ -1,7 +1,8 @@
-use crate::catalog::schema::Schema;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
+
+use crate::catalog::schema::Schema;
+use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LimitNode {
@@ -52,6 +53,8 @@ impl Display for LimitNode {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
@@ -60,7 +63,6 @@ mod tests {
     use crate::sql::execution::plans::values_plan::ValuesNode;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use std::sync::Arc;
 
     fn create_test_schema() -> Schema {
         Schema::new(vec![

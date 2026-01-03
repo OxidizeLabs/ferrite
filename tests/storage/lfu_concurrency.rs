@@ -2,13 +2,14 @@
 // LFU CONCURRENCY TESTS (integration)
 // ==============================================
 
-use ferrite::storage::disk::async_disk::cache::cache_traits::CoreCache;
-use ferrite::storage::disk::async_disk::cache::cache_traits::LFUCacheTrait;
-use ferrite::storage::disk::async_disk::cache::cache_traits::MutableCache;
-use ferrite::storage::disk::async_disk::cache::lfu::LFUCache;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+use ferrite::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LFUCacheTrait, MutableCache,
+};
+use ferrite::storage::disk::async_disk::cache::lfu::LFUCache;
 
 type ThreadSafeLFUCache<K, V> = Arc<Mutex<LFUCache<K, V>>>;
 
@@ -717,10 +718,11 @@ mod thread_safety {
 }
 
 mod stress_testing {
-    use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;
     use std::time::{Duration, Instant};
+
+    use super::*;
 
     #[test]
     fn test_high_contention_scenario() {

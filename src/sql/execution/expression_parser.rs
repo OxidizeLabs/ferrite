@@ -148,6 +148,19 @@
 //! making it safe to use across threads. The parser itself is stateless and
 //! can be called concurrently for different expressions.
 
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::RwLock;
+use sqlparser::ast::{
+    AccessExpr, BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg,
+    FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
+    JoinOperator, ObjectName, ObjectNamePart, OrderByExpr, Query, Select, SelectItem, SetExpr,
+    Subscript as SQLSubscript, TableFactor, TableObject, Value as SQLValue, ValueWithSpan,
+    WindowType,
+};
+use sqlparser::tokenizer::{Location, Span};
+
 use crate::catalog::Catalog;
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
@@ -177,8 +190,7 @@ use crate::sql::execution::expressions::constant_value_expression::ConstantExpre
 use crate::sql::execution::expressions::convert_expression::ConvertExpression;
 use crate::sql::execution::expressions::datetime_expression::DateTimeField;
 use crate::sql::execution::expressions::exists_expression::ExistsExpression;
-use crate::sql::execution::expressions::extract_expression::ExtractExpression;
-use crate::sql::execution::expressions::extract_expression::ExtractField;
+use crate::sql::execution::expressions::extract_expression::{ExtractExpression, ExtractField};
 use crate::sql::execution::expressions::function_expression::FunctionExpression;
 use crate::sql::execution::expressions::function_types::{
     self, AggregateFunctionType, FunctionType, ScalarFunctionType,
@@ -187,8 +199,7 @@ use crate::sql::execution::expressions::grouping_sets_expression::{
     GroupingSetsExpression, GroupingType,
 };
 use crate::sql::execution::expressions::in_expression::InExpression;
-use crate::sql::execution::expressions::interval_expression::IntervalExpression;
-use crate::sql::execution::expressions::interval_expression::IntervalField;
+use crate::sql::execution::expressions::interval_expression::{IntervalExpression, IntervalField};
 use crate::sql::execution::expressions::is_check_expression::{IsCheckExpression, IsCheckType};
 use crate::sql::execution::expressions::is_distinct_expression::IsDistinctExpression;
 use crate::sql::execution::expressions::like_expression::LikeExpression;
@@ -202,8 +213,7 @@ use crate::sql::execution::expressions::position_expression::PositionExpression;
 use crate::sql::execution::expressions::qualified_wildcard_expression::QualifiedWildcardExpression;
 use crate::sql::execution::expressions::regex_expression::{RegexExpression, RegexOperator};
 use crate::sql::execution::expressions::struct_expression::{StructExpression, StructField};
-use crate::sql::execution::expressions::subquery_expression::SubqueryExpression;
-use crate::sql::execution::expressions::subquery_expression::SubqueryType;
+use crate::sql::execution::expressions::subquery_expression::{SubqueryExpression, SubqueryType};
 use crate::sql::execution::expressions::subscript_expression::{
     Subscript as InternalSubscript, SubscriptExpression,
 };
@@ -217,17 +227,6 @@ use crate::sql::execution::plans::sort_plan::{OrderBySpec, OrderDirection};
 use crate::sql::execution::plans::window_plan::WindowFunctionType;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::debug;
-use parking_lot::RwLock;
-use sqlparser::ast::{
-    AccessExpr, BinaryOperator, CastFormat, CeilFloorKind, DataType, Expr, Function, FunctionArg,
-    FunctionArgExpr, FunctionArgumentClause, FunctionArguments, GroupByExpr, JoinConstraint,
-    JoinOperator, ObjectName, ObjectNamePart, OrderByExpr, Query, Select, SelectItem, SetExpr,
-    Subscript as SQLSubscript, TableFactor, TableObject, Value as SQLValue, ValueWithSpan,
-    WindowType,
-};
-use sqlparser::tokenizer::{Location, Span};
-use std::sync::Arc;
 
 /// Result type for window specification parsing.
 ///
@@ -4220,6 +4219,9 @@ impl ExpressionParser {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::Ident;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -4230,8 +4232,6 @@ mod tests {
     use crate::sql::execution::expressions::comparison_expression::ComparisonType;
     use crate::sql::execution::expressions::logic_expression::LogicType;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-    use sqlparser::ast::Ident;
-    use tempfile::TempDir;
 
     struct TestContext {
         _temp_dir: TempDir,

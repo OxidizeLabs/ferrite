@@ -1,8 +1,9 @@
-use crate::catalog::schema::Schema;
-use crate::types_db::value::Value;
 use std::cmp::Ordering;
 use std::convert::TryInto;
 use std::marker::PhantomData;
+
+use crate::catalog::schema::Schema;
+use crate::types_db::value::Value;
 
 /// A generic key used for indexing with opaque data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd)]

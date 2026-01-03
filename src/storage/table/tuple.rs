@@ -189,14 +189,15 @@
 //! - Both implement `bincode::Encode/Decode` for serialization
 //! - Page-level locking protects concurrent access to stored tuples
 
+use std::fmt::{Debug, Display, Formatter};
+use std::io;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::config::{Timestamp, TxnId, storage_bincode_config};
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::types_db::value::Value;
-use std::fmt::{Debug, Display, Formatter};
-use std::io;
 
 /// MVCC visibility result for a particular tuple *version* at a reader's snapshot.
 ///

@@ -26,6 +26,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -640,9 +641,10 @@ impl MetricsCollector {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use super::*;
     use crate::storage::disk::async_disk::config::DiskManagerConfig;
-    use std::sync::atomic::Ordering;
 
     fn create_test_collector() -> MetricsCollector {
         let config = DiskManagerConfig::default();

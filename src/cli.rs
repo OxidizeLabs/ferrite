@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
+use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
+
 use crate::common::db_instance::{DBConfig, DBInstance};
 use crate::common::exception::DBError;
 use crate::common::result_writer::CliResultWriter;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::transaction_context::TransactionContext;
-use rustyline::DefaultEditor;
-use rustyline::error::ReadlineError;
-use std::sync::Arc;
 
 pub struct CLI {
     db: DBInstance,

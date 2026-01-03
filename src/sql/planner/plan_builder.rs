@@ -158,7 +158,7 @@
 //! // Build a SELECT plan
 //! let query = sqlparser::parser::Parser::parse_sql(
 //!     &GenericDialect {},
-//!     "SELECT * FROM users WHERE id = 1"
+//!     "SELECT * FROM users WHERE id = 1",
 //! )?;
 //!
 //! if let Statement::Query(query) = &query[0] {
@@ -189,6 +189,13 @@
 //! - Join constraint requirements
 //! - Expression type compatibility
 
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::RwLock;
+use sqlparser::ast::RenameTableNameKind::{As, To};
+use sqlparser::ast::*;
+
 use super::logical_plan::{LogicalPlan, LogicalPlanType};
 use super::schema_manager::SchemaManager;
 use crate::catalog::Catalog;
@@ -202,11 +209,6 @@ use crate::sql::execution::expressions::column_value_expression::ColumnRefExpres
 use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::debug;
-use parking_lot::RwLock;
-use sqlparser::ast::RenameTableNameKind::{As, To};
-use sqlparser::ast::*;
-use std::sync::Arc;
 
 /// The main component for transforming SQL AST into logical plans.
 ///

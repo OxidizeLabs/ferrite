@@ -289,11 +289,12 @@
 //! - Cleanup is rate-limited (100ms minimum interval) to prevent thrashing
 //! - All state mutations are done through `&mut self` methods
 
-use super::size_analyzer::{CoalescedSizeInfo, SizeAnalyzer};
-use crate::common::config::PageId;
 use std::collections::{HashMap, HashSet};
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::time::{Duration, Instant};
+
+use super::size_analyzer::{CoalescedSizeInfo, SizeAnalyzer};
+use crate::common::config::PageId;
 
 /// Result of coalescing operation
 #[derive(Debug)]
@@ -743,8 +744,9 @@ pub struct CoalescingStats {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
+
+    use super::*;
 
     #[test]
     fn test_coalescing_engine_creation() {

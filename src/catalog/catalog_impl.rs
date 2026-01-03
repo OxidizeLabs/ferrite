@@ -180,6 +180,17 @@
 //! - **Schema serialization**: Uses `bincode` for compact schema storage in
 //!   system catalog rows
 
+use core::fmt;
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
+
+use bincode::{decode_from_slice, encode_to_vec};
+use log::{info, warn};
+use parking_lot::RwLock;
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::catalog::column::Column;
 use crate::catalog::database::Database;
@@ -195,15 +206,6 @@ use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::storage::table::table_iterator::TableScanIterator;
 use crate::storage::table::tuple::TupleMeta;
 use crate::types_db::value::Value;
-use bincode::{decode_from_slice, encode_to_vec};
-use core::fmt;
-use log::{info, warn};
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::fs;
-use std::path::Path;
-use std::sync::Arc;
 
 /// Parameters for creating a catalog with existing data.
 ///
@@ -835,14 +837,15 @@ impl Display for Catalog {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::column::Column;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
 
     /// Test context for catalog tests.
     ///

@@ -1,9 +1,11 @@
-use crate::types_db::type_id::TypeId;
-use crate::types_db::types::{CmpBool, Type, get_type_size};
-use bincode::{Decode, Encode};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+
+use bincode::{Decode, Encode};
+
+use crate::types_db::type_id::TypeId;
+use crate::types_db::types::{CmpBool, Type, get_type_size};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, Decode)]
 pub enum Val {
@@ -2424,10 +2426,11 @@ impl Hash for Value {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
     use crate::container::hash_function::HashFunction;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Size, Val, Value};
-    use std::hash::{DefaultHasher, Hash, Hasher};
 
     #[test]
     fn test_typeid_hash() {
@@ -2915,9 +2918,10 @@ mod basic_behavior_tests {
 
 #[cfg(test)]
 mod concurrency_tests {
-    use super::*;
     use std::sync::Arc;
     use std::thread;
+
+    use super::*;
 
     #[test]
     fn test_concurrent_value_creation() {

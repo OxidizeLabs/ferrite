@@ -1,7 +1,8 @@
+use ferrite::concurrency::transaction::IsolationLevel;
+
 use super::common::TestResultWriter;
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::new_temp_db;
-use ferrite::concurrency::transaction::IsolationLevel;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn select_basic_projection() {

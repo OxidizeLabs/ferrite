@@ -1,11 +1,5 @@
 #![allow(clippy::all)]
 
-use criterion::{
-    AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, SamplingMode, Throughput,
-    criterion_group, criterion_main,
-};
-use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 use std::fs::{OpenOptions, create_dir_all};
 use std::hash::Hash;
 use std::hint::black_box;
@@ -13,6 +7,13 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use criterion::{
+    AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, SamplingMode, Throughput,
+    criterion_group, criterion_main,
+};
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 
 // =================================================================================
 // TIME COMPLEXITY BENCHMARKS

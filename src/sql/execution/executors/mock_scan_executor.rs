@@ -61,6 +61,11 @@
 //! The executor supports multiple scans by calling `init()` again, which
 //! resets the cursor to the beginning of the generated tuples.
 
+use std::sync::Arc;
+
+use log::{debug, info};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::config::PageId;
 use crate::common::exception::DBError;
@@ -72,9 +77,6 @@ use crate::sql::execution::plans::mock_scan_plan::MockScanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, info};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Test executor that auto-generates mock tuples based on schema.
 ///
@@ -301,6 +303,8 @@ impl AbstractExecutor for MockScanExecutor {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -313,7 +317,6 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

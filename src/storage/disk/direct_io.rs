@@ -151,12 +151,13 @@
 //! | Zero alignment config       | `Err(InvalidInput)` - invalid configuration |
 //! | Non-power-of-two alignment  | `Err(InvalidInput)` - invalid configuration |
 
-use log::{debug, warn};
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::fs::{File, OpenOptions};
 use std::io::{Error as IoError, ErrorKind, Result as IoResult, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
+
+use log::{debug, warn};
 
 /// Configuration for direct I/O operations
 #[derive(Debug, Clone)]
@@ -659,8 +660,9 @@ pub fn sync_file(file: &mut File, force_sync: bool) -> IoResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::NamedTempFile;
+
+    use super::*;
 
     #[test]
     fn test_aligned_buffer_creation() {

@@ -288,14 +288,16 @@
 //! - Background cleanup task is aborted
 //! - Pending operations' receivers will receive `RecvError` (sender dropped)
 
-use super::metrics::IOMetrics;
-use super::operation_status::{OperationId, OperationResult, OperationStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+
 use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
 use tokio::time::sleep;
+
+use super::metrics::IOMetrics;
+use super::operation_status::{OperationId, OperationResult, OperationStatus};
 
 /// Notification event for operation completion
 #[derive(Debug, Clone)]
@@ -921,10 +923,12 @@ impl Drop for CompletionTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashSet;
     use std::sync::Arc;
+
     use tokio::time::{sleep, timeout};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_basic_operation_lifecycle() {

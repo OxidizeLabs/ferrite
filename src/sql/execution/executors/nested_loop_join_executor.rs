@@ -94,6 +94,12 @@
 //! - **Extensibility**: New join types only require changes to `JoinTypeHandler`
 //! - **Reusability**: `TupleCombiner` can be reused in hash/merge joins
 
+use std::sync::Arc;
+
+use log::{debug, info};
+use parking_lot::RwLock;
+use sqlparser::ast::JoinOperator as JoinType;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -104,10 +110,6 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::nested_loop_join_plan::NestedLoopJoinNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Val, Value};
-use log::{debug, info};
-use parking_lot::RwLock;
-use sqlparser::ast::JoinOperator as JoinType;
-use std::sync::Arc;
 
 // =============================================================================
 // 1. JOIN STATE MANAGEMENT
@@ -1374,13 +1376,15 @@ impl AbstractExecutor for NestedLoopJoinExecutor {
  */
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use sqlparser::ast::JoinConstraint;
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use sqlparser::ast::JoinConstraint;
-    use std::sync::Arc;
     // =============================================================================
     // HELPER FUNCTIONS
     // =============================================================================

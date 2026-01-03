@@ -79,6 +79,7 @@
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
+//!
 //! use parking_lot::RwLock;
 //!
 //! // Create planner with catalog
@@ -109,14 +110,16 @@
 //! during plan construction. The planner itself requires `&mut self` for planning
 //! operations due to internal state in the `LogicalPlanBuilder`.
 
-use super::logical_plan::LogicalPlan;
-use crate::catalog::Catalog;
-use crate::sql::planner::plan_builder::LogicalPlanBuilder;
+use std::sync::Arc;
+
 use parking_lot::RwLock;
 use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
-use std::sync::Arc;
+
+use super::logical_plan::LogicalPlan;
+use crate::catalog::Catalog;
+use crate::sql::planner::plan_builder::LogicalPlanBuilder;
 
 /// Entry point for SQL query planning and logical plan construction.
 ///
@@ -162,9 +165,10 @@ use std::sync::Arc;
 ///
 /// ```rust,no_run
 /// use std::sync::Arc;
-/// use parking_lot::RwLock;
+///
 /// use ferrite::catalog::Catalog;
 /// use ferrite::sql::planner::query_planner::QueryPlanner;
+/// use parking_lot::RwLock;
 ///
 /// // Create a shared catalog
 /// let catalog = Arc::new(RwLock::new(Catalog::new()));
@@ -215,9 +219,10 @@ impl QueryPlanner {
     ///
     /// ```rust,no_run
     /// use std::sync::Arc;
-    /// use parking_lot::RwLock;
+    ///
     /// use ferrite::catalog::Catalog;
     /// use ferrite::sql::planner::query_planner::QueryPlanner;
+    /// use parking_lot::RwLock;
     ///
     /// let catalog = Arc::new(RwLock::new(Catalog::new()));
     /// let planner = QueryPlanner::new(catalog);

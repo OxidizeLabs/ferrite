@@ -103,6 +103,11 @@
 //! - Incomparable values (both NULL) are treated as equal
 //! - Sort continues to next key if current key comparison is inconclusive
 
+use std::sync::Arc;
+
+use log::{debug, error, trace};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -112,9 +117,6 @@ use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::sort_plan::{OrderDirection, SortNode};
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error, trace};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for sorting query results according to `ORDER BY` specifications.
 ///
@@ -478,6 +480,8 @@ impl AbstractExecutor for SortExecutor {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -498,7 +502,6 @@ mod tests {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;
     use crate::types_db::value::Value;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

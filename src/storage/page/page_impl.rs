@@ -132,10 +132,11 @@
 //! The `PageTrait` requires `Send + Sync` to allow pages to be shared across
 //! threads when properly synchronized.
 
-use crate::common::config::*;
-use crate::common::exception::PageError;
 use std::any::Any;
 use std::fmt::Debug;
+
+use crate::common::config::*;
+use crate::common::exception::PageError;
 
 // Constants for page type identification
 pub const PAGE_TYPE_INVALID: u8 = 0;
@@ -157,16 +158,16 @@ pub const PAGE_ID_OFFSET: usize = 1;
 #[derive(Debug, PartialEq, Copy, Clone)]
 #[repr(u8)]
 pub enum PageType {
-    Invalid = PAGE_TYPE_INVALID,
-    Basic = PAGE_TYPE_BASIC,
-    Table = PAGE_TYPE_TABLE,
+    Invalid            = PAGE_TYPE_INVALID,
+    Basic              = PAGE_TYPE_BASIC,
+    Table              = PAGE_TYPE_TABLE,
     HashTableDirectory = PAGE_TYPE_HASH_TABLE_DIRECTORY,
-    HashTableBucket = PAGE_TYPE_HASH_TABLE_BUCKET,
-    HashTableHeader = PAGE_TYPE_HASH_TABLE_HEADER,
-    BTreeHeader = PAGE_TYPE_BTREE_HEADER,
-    BTreeInternal = PAGE_TYPE_BTREE_INTERNAL,
-    BTreeLeaf = PAGE_TYPE_BTREE_LEAF,
-    BTreeNode = PAGE_TYPE_BTREE_NODE,
+    HashTableBucket    = PAGE_TYPE_HASH_TABLE_BUCKET,
+    HashTableHeader    = PAGE_TYPE_HASH_TABLE_HEADER,
+    BTreeHeader        = PAGE_TYPE_BTREE_HEADER,
+    BTreeInternal      = PAGE_TYPE_BTREE_INTERNAL,
+    BTreeLeaf          = PAGE_TYPE_BTREE_LEAF,
+    BTreeNode          = PAGE_TYPE_BTREE_NODE,
 }
 
 // Keep PageTrait as the main trait for dynamic dispatch
@@ -607,9 +608,10 @@ mod tests {
 
     #[test]
     fn test_concurrent_pin_operations() {
-        use parking_lot::RwLock;
         use std::sync::Arc;
         use std::thread;
+
+        use parking_lot::RwLock;
 
         let page = Arc::new(RwLock::new(BasicPage::new(1)));
         let mut handles = vec![];

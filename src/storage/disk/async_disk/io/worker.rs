@@ -248,15 +248,17 @@
 //! - Calls `abort_all()` on the `JoinSet` to stop them immediately
 //! - Does NOT wait for graceful shutdown (use `shutdown()` before drop)
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
+
 use super::executor::IOOperationExecutor;
 use super::operations::IOOperation;
 use super::queue::IOQueueManager;
 use crate::storage::disk::async_disk::io::completion::CompletionTracker;
 use crate::storage::disk::async_disk::io::operation_status::OperationResult;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 
 /// Worker task manager responsible for managing worker threads
 ///
@@ -597,13 +599,15 @@ impl Drop for IOWorkerManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::common::config::DB_PAGE_SIZE;
-    use crate::storage::disk::async_disk::io::operations::{IOOperationType, priorities};
     use std::sync::Arc;
+
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
     use tokio::sync::Mutex;
+
+    use super::*;
+    use crate::common::config::DB_PAGE_SIZE;
+    use crate::storage::disk::async_disk::io::operations::{IOOperationType, priorities};
 
     async fn create_test_components() -> (
         IOQueueManager,

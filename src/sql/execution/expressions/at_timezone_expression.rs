@@ -1,3 +1,11 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
+use std::sync::Arc;
+
+use chrono::DateTime;
+use chrono_tz::Tz;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -5,12 +13,6 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use chrono::DateTime;
-use chrono_tz::Tz;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::str::FromStr;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AtTimeZoneExpression {

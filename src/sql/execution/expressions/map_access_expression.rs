@@ -1,3 +1,7 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -5,9 +9,6 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum MapAccessKey {
@@ -219,13 +220,14 @@ impl Display for MapAccessExpression {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
-    use serde_json::json;
 
     fn create_test_schema() -> Schema {
         Schema::new(vec![])

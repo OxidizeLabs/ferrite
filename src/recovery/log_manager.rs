@@ -176,20 +176,20 @@
 //! 2. `stop_flag` is set to prevent false durability signals
 //! 3. Callers waiting on commit will detect the flag and stop waiting
 
-use crate::common::config::{INVALID_LSN, Lsn};
-use crate::recovery::log_record::LogRecord;
-use crate::storage::disk::async_disk::AsyncDiskManager;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
+use std::{io, thread};
+
 use log::{debug, error, info, trace, warn};
 use parking_lot::Mutex;
-use std::io;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
-use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+
+use crate::common::config::{INVALID_LSN, Lsn};
+use crate::recovery::log_record::LogRecord;
+use crate::storage::disk::async_disk::AsyncDiskManager;
 
 /// Coordinates Write-Ahead Logging (WAL) for durability and crash recovery.
 ///
@@ -642,13 +642,15 @@ impl LogManager {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::common::config::TxnId;
     use crate::common::logger::initialize_logger;
     use crate::recovery::log_record::{LogRecord, LogRecordType};
     use crate::storage::disk::async_disk::DiskManagerConfig;
-    use std::time::Duration;
-    use tempfile::TempDir;
 
     struct TestContext {
         log_manager: LogManager,
@@ -824,9 +826,10 @@ mod tests {
 
     /// Tests for threading and concurrency
     mod threading_tests {
+        use parking_lot::RwLock;
+
         use super::*;
         use crate::common::config::PageId;
-        use parking_lot::RwLock;
 
         #[tokio::test(flavor = "multi_thread")]
         async fn test_flush_thread_lifecycle() {

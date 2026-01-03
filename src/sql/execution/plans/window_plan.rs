@@ -1,9 +1,10 @@
-use crate::catalog::schema::Schema;
-use crate::sql::execution::expressions::abstract_expression::Expression;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
+
+use crate::catalog::schema::Schema;
+use crate::sql::execution::expressions::abstract_expression::Expression;
+use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
 /// WindowFunctionType enumerates all the possible window functions in our system
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

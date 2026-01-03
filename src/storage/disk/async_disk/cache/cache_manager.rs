@@ -230,6 +230,13 @@
 //! - Tracks savings (bytes avoided by not storing duplicates)
 //! - Useful for databases with repeated patterns (e.g., zero-filled pages)
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::Instant;
+
+use tokio::sync::RwLock;
+
 use super::fifo::FIFOCache;
 use super::lfu::LFUCache;
 use super::lru_k::LRUKCache;
@@ -239,11 +246,6 @@ use crate::storage::disk::async_disk::cache::cache_traits::{
 };
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
-use tokio::sync::RwLock;
 
 /// Cached page data with associated metadata for cache management decisions.
 ///

@@ -195,8 +195,9 @@
 //! - Operations are typically created on one thread and processed on another
 //! - All data is owned (no references), enabling safe queue transfers
 
-use crate::common::config::PageId;
 use std::time::Instant;
+
+use crate::common::config::PageId;
 
 /// Types of I/O operations supported by the async I/O engine
 #[derive(Debug, Clone)]

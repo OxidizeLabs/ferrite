@@ -115,6 +115,13 @@
 //! | Concurrency | `RwLock` per node | Latch crabbing |
 //! | Use Case | Testing, small datasets | Production workloads |
 
+use std::cmp::PartialEq;
+use std::fmt::Debug;
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::RwLock;
+
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
 use crate::storage::index::index_iterator_mem::IndexIterator;
@@ -122,11 +129,6 @@ use crate::storage::index::{Index, IndexInfo};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use log::debug;
-use parking_lot::RwLock;
-use std::cmp::PartialEq;
-use std::fmt::Debug;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
@@ -1259,11 +1261,12 @@ mod unit_tests {
 
 #[cfg(test)]
 mod basic_behavior_tests {
+    use std::collections::HashSet;
+
     use super::test_utils::*;
     use super::*;
     use crate::common::logger::initialize_logger;
     use crate::types_db::value::{Val, Value};
-    use std::collections::HashSet;
 
     #[test]
     fn test_basic_insertion() {
@@ -1451,11 +1454,12 @@ mod basic_behavior_tests {
 
 #[cfg(test)]
 mod advanced_tests {
+    use rand::prelude::*;
+    use rand::rng;
+
     use super::test_utils::*;
     use super::*;
     use crate::common::logger::initialize_logger;
-    use rand::prelude::*;
-    use rand::rng;
 
     #[test]
     fn test_insertion_ascending() {

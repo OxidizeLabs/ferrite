@@ -251,20 +251,23 @@
 //! - Single lock acquisition for entire batch
 //! - Async page flushing integration
 
+use std::sync::Arc;
+
+use log::{debug, info, warn};
+
 use crate::catalog::schema::Schema;
 use crate::common::config::{INVALID_PAGE_ID, INVALID_TS, TableOidT};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockMode;
-use crate::concurrency::transaction::UndoLog;
-use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState, UndoLink};
+use crate::concurrency::transaction::{
+    IsolationLevel, Transaction, TransactionState, UndoLink, UndoLog,
+};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::table_heap::TableHeap;
 use crate::storage::table::table_iterator::TableIterator;
 use crate::storage::table::tuple::{Tuple, TupleMeta, TupleVisibility};
 use crate::types_db::value::Value;
-use log::{debug, info, warn};
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct TransactionalTableHeap {
@@ -937,6 +940,9 @@ impl TransactionalTableHeap {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -947,8 +953,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
 
     struct TestContext {
         txn_heap: Arc<TransactionalTableHeap>,

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::schema::Schema;
@@ -10,7 +12,6 @@ use ferrite::storage::index::types::comparators::{I32Comparator, i32_comparator}
 use ferrite::storage::index::{IndexInfo, IndexType};
 use ferrite::storage::page::page_types::b_plus_tree_internal_page::BPlusTreeInternalPage;
 use parking_lot::RwLock;
-use std::sync::Arc;
 use tempfile::TempDir;
 
 struct TestContext {

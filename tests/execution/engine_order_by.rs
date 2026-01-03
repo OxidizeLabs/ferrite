@@ -1,9 +1,9 @@
-use crate::execution::common::TestContext;
-use crate::execution::common::TestResultWriter;
 use ferrite::catalog::column::Column;
 use ferrite::catalog::schema::Schema;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
+
+use crate::execution::common::{TestContext, TestResultWriter};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 // #[ignore = "Causes stack overflow in the logical plan to physical plan conversion"]

@@ -1,8 +1,9 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use crate::catalog::schema::Schema;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 /// Represents a plan node that starts a transaction with specified isolation level and read-only status
 #[derive(Debug, Clone, PartialEq)]
@@ -71,9 +72,10 @@ impl Display for StartTransactionPlanNode {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write;
+
     use super::*;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
-    use std::fmt::Write;
 
     #[test]
     fn test_start_transaction_creation() {

@@ -54,6 +54,11 @@
 //! |                       | Without: logs warning, returns              |
 //! | Catalog creation fail | Logs warning, allows retry                  |
 
+use std::sync::Arc;
+
+use log::{debug, info, warn};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -63,9 +68,6 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::create_index_plan::CreateIndexPlanNode;
 use crate::storage::index::IndexType;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info, warn};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for `CREATE INDEX` DDL statements.
 ///
@@ -303,6 +305,9 @@ impl Drop for CreateIndexExecutor {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -316,8 +321,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::index::IndexType;
     use crate::types_db::type_id::TypeId;
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

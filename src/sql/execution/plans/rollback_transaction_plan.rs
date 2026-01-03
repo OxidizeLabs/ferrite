@@ -1,7 +1,8 @@
-use crate::catalog::schema::Schema;
-use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
+
+use crate::catalog::schema::Schema;
+use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 
 /// Represents a plan node that rolls back a transaction
 #[derive(Debug, Clone, PartialEq)]
@@ -69,9 +70,10 @@ impl Display for RollbackTransactionPlanNode {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write;
+
     use super::*;
     use crate::sql::execution::plans::abstract_plan::PlanNode;
-    use std::fmt::Write;
 
     #[test]
     fn test_rollback_transaction_creation() {

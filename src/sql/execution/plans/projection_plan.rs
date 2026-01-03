@@ -1,8 +1,9 @@
+use std::fmt::{self, Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::fmt::{self, Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionNode {
@@ -89,6 +90,11 @@ impl AbstractPlanNode for ProjectionNode {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -100,9 +106,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::table::table_heap::{TableHeap, TableInfo};
     use crate::types_db::type_id::TypeId;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

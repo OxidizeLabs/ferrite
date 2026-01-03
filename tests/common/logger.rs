@@ -1,5 +1,6 @@
-use ferrite::common::logger as core_logger;
 use std::sync::Once;
+
+use ferrite::common::logger as core_logger;
 
 static INIT: Once = Once::new();
 

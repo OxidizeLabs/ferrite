@@ -134,15 +134,16 @@
 //! - `Schema` is wrapped in `Arc` for cheap cloning and sharing
 //! - Records are typically owned by a single thread (query executor)
 
+use std::fmt::{Debug, Display, Formatter};
+use std::io;
+use std::sync::Arc;
+
 use crate::catalog::schema::Schema;
 use crate::common::config::storage_bincode_config;
 use crate::common::exception::TupleError;
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use std::fmt::{Debug, Display, Formatter};
-use std::io;
-use std::sync::Arc;
 
 /// Represents a tuple that has been stored in the database with a record ID.
 #[allow(dead_code)]

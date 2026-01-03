@@ -1,35 +1,20 @@
-use crate::types_db::array_type;
-use crate::types_db::bigint_type;
-use crate::types_db::binary_type;
-use crate::types_db::boolean_type;
-use crate::types_db::const_len_type;
-use crate::types_db::date_type;
-use crate::types_db::decimal_type;
-use crate::types_db::enum_type;
-use crate::types_db::float_type;
-use crate::types_db::integer_type;
-use crate::types_db::interval_type;
-use crate::types_db::invalid_type;
-use crate::types_db::json_type;
-use crate::types_db::point_type;
-use crate::types_db::smallint_type;
-use crate::types_db::struct_type;
-use crate::types_db::time_type;
-use crate::types_db::timestamp_type;
-use crate::types_db::tinyint_type;
-use crate::types_db::type_id::TypeId;
-use crate::types_db::uuid_type;
-use crate::types_db::value::{Val, Value};
-use crate::types_db::varlen_type;
-use crate::types_db::vector_type;
 use std::mem::size_of;
 use std::sync::Arc;
+
+use crate::types_db::type_id::TypeId;
+use crate::types_db::value::{Val, Value};
+use crate::types_db::{
+    array_type, bigint_type, binary_type, boolean_type, const_len_type, date_type, decimal_type,
+    enum_type, float_type, integer_type, interval_type, invalid_type, json_type, point_type,
+    smallint_type, struct_type, time_type, timestamp_type, tinyint_type, uuid_type, varlen_type,
+    vector_type,
+};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum CmpBool {
     CmpFalse = 0,
-    CmpTrue = 1,
-    CmpNull = 2,
+    CmpTrue  = 1,
+    CmpNull  = 2,
 }
 
 pub trait Type {

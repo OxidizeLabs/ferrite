@@ -211,16 +211,18 @@
 //! - **Error Recovery**: Connection errors require reconnection
 //! - **Logging**: Debug-level logging for request/response tracing
 
+use std::sync::Arc;
+
+use log::{debug, error};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+
 use crate::common::exception::DBError;
 use crate::concurrency::transaction::IsolationLevel;
 use crate::server::{DatabaseRequest, DatabaseResponse, QueryResults};
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::{debug, error};
-use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 /// Represents a client's session with the database (server-side state).
 ///

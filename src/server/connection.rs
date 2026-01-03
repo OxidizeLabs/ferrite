@@ -207,15 +207,17 @@
 //! - **Error Recovery**: Errors are logged and returned to client; connection continues
 //! - **Clean Disconnect**: Session cleanup runs even on error paths
 
-use crate::common::db_instance::DBInstance;
-use crate::common::exception::DBError;
-use crate::server::DatabaseResponse;
-use log::{debug, error, info, warn};
 use std::error::Error as StdError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use log::{debug, error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+
+use crate::common::db_instance::DBInstance;
+use crate::common::exception::DBError;
+use crate::server::DatabaseResponse;
 
 /// Atomic counter for generating unique client IDs.
 ///

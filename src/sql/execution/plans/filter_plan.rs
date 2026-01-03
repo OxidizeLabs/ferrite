@@ -1,11 +1,12 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::expressions::filter_expression::{FilterExpression, FilterType};
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterNode {
@@ -154,6 +155,8 @@ impl Display for FilterNode {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
@@ -167,7 +170,6 @@ mod tests {
     use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use std::sync::Arc;
 
     mod helpers {
         use super::*;

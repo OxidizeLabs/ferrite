@@ -207,13 +207,15 @@
 //! - **Error Handling**: Connection errors logged to stderr, don't crash server
 //! - **Address**: Binds to `127.0.0.1` (localhost only) for security
 
-use crate::common::db_instance::DBInstance;
-use crate::server::connection::handle_connection;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
+
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
+
+use crate::common::db_instance::DBInstance;
+use crate::server::connection::handle_connection;
 
 /// Handle for managing the database server lifecycle.
 ///

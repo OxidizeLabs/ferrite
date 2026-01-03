@@ -184,12 +184,14 @@
 //! - **Message Flushing**: `write_message()` flushes pending table first
 //! - **Lazy Table Creation**: Table created on first row write
 
+use std::sync::{Arc, Mutex};
+
+use colored::Colorize;
+use prettytable::{Cell, Row, Table, format};
+
 use crate::catalog::schema::Schema;
 use crate::server::QueryResults;
 use crate::types_db::value::Value;
-use colored::Colorize;
-use prettytable::{Cell, Row, Table, format};
-use std::sync::{Arc, Mutex};
 
 /// Trait for writing query results in a tabular format.
 ///

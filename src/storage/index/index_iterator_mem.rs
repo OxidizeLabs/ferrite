@@ -118,13 +118,15 @@
 //! - `DoubleEndedIterator` only works within the current batch
 //! - Single-column index keys only (per B+ tree limitation)
 
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::RwLock;
+
 use crate::common::rid::RID;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use log::debug;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// An iterator over entries in a B+ tree index.
 #[derive(Debug)]

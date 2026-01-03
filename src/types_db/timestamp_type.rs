@@ -1,7 +1,8 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // Implementation for TimestampType
 #[derive(Debug)]
@@ -187,9 +188,10 @@ pub static TIMESTAMP_TYPE_INSTANCE: TimestampType = TimestampType;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::thread::sleep;
     use std::time::Duration;
+
+    use super::*;
 
     #[test]
     fn test_timestamp_comparisons() {

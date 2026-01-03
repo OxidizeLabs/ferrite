@@ -271,11 +271,11 @@
 //! - **Update Semantics**: Updating existing key preserves insertion position
 //! - **Zero Capacity**: Supported - rejects all insertions
 
-use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use std::collections::HashMap;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::sync::Arc;
+
+use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
 
 /// FIFO (First In, First Out) Cache.
 ///
@@ -518,9 +518,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
     use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-    use std::collections::HashSet;
 
     // Basic FIFO Behavior Tests
     mod basic_behavior {

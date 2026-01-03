@@ -90,6 +90,11 @@
 //! - **Transaction manager shutdown**: Returns `Ok(None)` gracefully
 //! - **Other failures**: Returns `Err(DBError::Execution)` with details
 
+use std::sync::Arc;
+
+use log::{debug, info};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -99,9 +104,6 @@ use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::start_transaction_plan::StartTransactionPlanNode;
 use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, info};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for starting a new database transaction.
 ///
@@ -376,6 +378,12 @@ impl AbstractExecutor for StartTransactionExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::Duration;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -385,10 +393,6 @@ mod tests {
     use crate::concurrency::transaction::IsolationLevel;
     use crate::concurrency::transaction_manager::TransactionManager;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-    use parking_lot::RwLock;
-    use std::thread;
-    use std::time::Duration;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

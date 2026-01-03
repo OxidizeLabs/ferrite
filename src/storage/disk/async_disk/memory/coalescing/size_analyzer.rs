@@ -219,9 +219,10 @@
 //! - Safe for concurrent use from multiple threads
 //! - Implements `Default` for easy construction
 
-use crate::common::config::PageId;
 use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+
+use crate::common::config::PageId;
 
 /// Represents a contiguous range of pages for coalescing calculations
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -588,8 +589,9 @@ impl Default for SizeAnalyzer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
+
+    use super::*;
 
     #[test]
     fn test_size_analyzer_creation() {

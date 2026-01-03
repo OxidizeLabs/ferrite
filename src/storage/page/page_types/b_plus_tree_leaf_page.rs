@@ -54,13 +54,14 @@
 //!
 //! Leaf pages serialize their contents using [`bincode`] for persistence.
 
+use std::any::Any;
+use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
+
 use crate::common::config::{DB_PAGE_SIZE, PageId, storage_bincode_config};
 use crate::common::exception::PageError;
 use crate::storage::index::types::{KeyComparator, KeyType};
 use crate::storage::page::{Page, PageTrait, PageType, PageTypeId};
-use std::any::Any;
-use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
 
 /// Leaf page structure for B+ Tree
 pub struct BPlusTreeLeafPage<K, V, C>

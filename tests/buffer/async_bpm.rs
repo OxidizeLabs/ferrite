@@ -1,12 +1,14 @@
 #![allow(dead_code)]
 
-use crate::common::logger::init_test_logger;
+use std::sync::Arc;
+
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use parking_lot::RwLock;
-use std::sync::Arc;
 use tempfile::TempDir;
+
+use crate::common::logger::init_test_logger;
 
 struct AsyncTestContext {
     bpm: Arc<BufferPoolManager>,

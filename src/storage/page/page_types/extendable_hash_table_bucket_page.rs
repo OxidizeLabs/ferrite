@@ -44,14 +44,15 @@
 //! Entries are serialized using [`bincode`] for persistence. The format stores
 //! the local depth, size, max size, followed by length-prefixed key-value pairs.
 
+use std::any::Any;
+use std::fmt::Debug;
+use std::mem::size_of;
+
 use crate::common::config::{DB_PAGE_SIZE, PageId, storage_bincode_config};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
 use crate::types_db::value::Value;
-use std::any::Any;
-use std::fmt::Debug;
-use std::mem::size_of;
 
 pub const HTABLE_BUCKET_PAGE_METADATA_SIZE: usize = size_of::<u32>() * 2;
 pub const BUCKET_HEADER_SIZE: usize = size_of::<PageId>() + size_of::<u16>() * 2;
@@ -317,17 +318,19 @@ impl PageTrait for ExtendableHTableBucketPage {
 
 #[cfg(test)]
 mod basic_behavior {
+    use std::sync::Arc;
+    use std::thread;
+
+    use log::info;
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
-    use log::info;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use std::thread;
-    use tempfile::TempDir;
 
     pub struct TestContext {
         bpm: Arc<BufferPoolManager>,

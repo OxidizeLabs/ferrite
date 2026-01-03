@@ -289,6 +289,13 @@
 //! - **Prepared Statements**: Server-side caching with parameter type validation
 //! - **Debug Mode**: Optional verbose logging for client operations
 
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
+
+use log::{debug, error, info, warn};
+use parking_lot::{Mutex, RwLock};
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
 use crate::buffer::lru_k_replacer::LRUKReplacer;
 use crate::catalog::Catalog;
@@ -308,12 +315,6 @@ use crate::sql::execution::transaction_context::TransactionContext;
 use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use log::error;
-use log::{debug, info, warn};
-use parking_lot::{Mutex, RwLock};
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
 
 /// Configuration options for initializing a database instance.
 ///
@@ -1298,9 +1299,10 @@ impl DBInstance {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
 
     fn _get_unique_path() -> String {
         let start = SystemTime::now();

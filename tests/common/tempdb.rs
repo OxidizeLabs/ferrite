@@ -1,7 +1,8 @@
-use ferrite::common::db_instance::{DBConfig, DBInstance};
 use std::error::Error;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use ferrite::common::db_instance::{DBConfig, DBInstance};
 
 fn unique_suffix() -> String {
     let nanos = SystemTime::now()

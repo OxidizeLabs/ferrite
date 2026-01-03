@@ -1,5 +1,6 @@
-use crate::types_db::value::{Val, Value};
 use bincode::{Decode, Encode};
+
+use crate::types_db::value::{Val, Value};
 
 // Every possible SQL type ID
 // NOTE: `TypeId` derives `bincode::Encode/Decode`. Changing variant order/shape will change the
@@ -7,29 +8,29 @@ use bincode::{Decode, Encode};
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Encode, Decode)]
 pub enum TypeId {
-    Boolean = 0,
-    TinyInt = 1,
-    SmallInt = 2,
-    Integer = 3,
-    BigInt = 4,
-    Decimal = 5,
-    Float = 6,
+    Boolean   = 0,
+    TinyInt   = 1,
+    SmallInt  = 2,
+    Integer   = 3,
+    BigInt    = 4,
+    Decimal   = 5,
+    Float     = 6,
     Timestamp = 7,
-    Date = 8,
-    Time = 9,
-    Interval = 10,
-    VarChar = 11,
-    Char = 12,
-    Binary = 13,
-    JSON = 14,
-    UUID = 15,
-    Vector = 16,
-    Array = 17,
-    Enum = 18,
-    Point = 19,
+    Date      = 8,
+    Time      = 9,
+    Interval  = 10,
+    VarChar   = 11,
+    Char      = 12,
+    Binary    = 13,
+    JSON      = 14,
+    UUID      = 15,
+    Vector    = 16,
+    Array     = 17,
+    Enum      = 18,
+    Point     = 19,
     #[default]
-    Invalid = 20,
-    Struct = 21,
+    Invalid   = 20,
+    Struct    = 21,
 }
 
 impl TypeId {

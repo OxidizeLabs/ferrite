@@ -158,17 +158,18 @@
 //! - Deadlock detection runs on a separate background thread
 //! - Lock manager implements `Send` and `Sync`
 
-use crate::common::config::{INVALID_TXN_ID, TableOidT, TxnId};
-use crate::common::exception::LockError;
-use crate::common::rid::RID;
-use crate::concurrency::transaction::IsolationLevel;
-use crate::concurrency::transaction::{Transaction, TransactionState};
-use parking_lot::lock_api::MutexGuard;
-use parking_lot::{Condvar, Mutex, RawMutex};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{fmt, thread};
+
+use parking_lot::lock_api::MutexGuard;
+use parking_lot::{Condvar, Mutex, RawMutex};
+
+use crate::common::config::{INVALID_TXN_ID, TableOidT, TxnId};
+use crate::common::exception::LockError;
+use crate::common::rid::RID;
+use crate::concurrency::transaction::{IsolationLevel, Transaction, TransactionState};
 
 /// Lock modes for multi-granularity locking protocol.
 ///
@@ -1435,11 +1436,12 @@ impl fmt::Display for LockMode {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RawMutex;
+    use parking_lot::lock_api::MutexGuard;
+
     use super::*;
     use crate::common::logger::initialize_logger;
     use crate::concurrency::transaction::IsolationLevel;
-    use parking_lot::RawMutex;
-    use parking_lot::lock_api::MutexGuard;
 
     pub struct TestContext {
         lock_manager: Arc<Mutex<LockManager>>,

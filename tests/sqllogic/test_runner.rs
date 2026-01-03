@@ -1,5 +1,11 @@
 #![allow(dead_code, clippy::unnecessary_map_or, clippy::collapsible_if)]
 
+use std::error::Error;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, Once};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
 use ferrite::catalog::schema::Schema;
 use ferrite::common::db_instance::{DBConfig, DBInstance};
 use ferrite::common::exception::DBError;
@@ -8,13 +14,6 @@ use ferrite::common::result_writer::ResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 use ferrite::types_db::value::Value;
 use sqllogictest::{DB, DBOutput, DefaultColumnType};
-use std::error::Error;
-use std::fs;
-use std::path::PathBuf;
-use std::sync::Once;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // Add color constants at the top of the file
 const GREEN: &str = "\x1b[32m";
@@ -332,10 +331,12 @@ fn setup_test_logging() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use sqllogictest::{MakeConnection, Runner};
     use std::fs;
     use std::path::Path;
+
+    use sqllogictest::{MakeConnection, Runner};
+
+    use super::*;
 
     struct TestSuiteStats {
         name: String,

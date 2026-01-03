@@ -1,3 +1,7 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ArithmeticExpressionError::{DivisionByZero, Overflow, Unknown};
@@ -6,9 +10,6 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArithmeticOp {
@@ -1322,6 +1323,8 @@ mod basic_functionality {
 
 #[cfg(test)]
 mod display_and_formatting {
+    use std::sync::Arc;
+
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::sql::execution::expressions::abstract_expression::Expression;
@@ -1332,7 +1335,6 @@ mod display_and_formatting {
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use std::sync::Arc;
 
     #[test]
     fn test_display_formatting() {
@@ -1449,6 +1451,8 @@ mod display_and_formatting {
 
 #[cfg(test)]
 mod specific_data_types {
+    use std::sync::Arc;
+
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
@@ -1460,7 +1464,6 @@ mod specific_data_types {
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use std::sync::Arc;
 
     #[test]
     fn test_bigint_operations() {
@@ -1528,6 +1531,8 @@ mod specific_data_types {
 
 #[cfg(test)]
 mod extended_numeric_types {
+    use std::sync::Arc;
+
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
@@ -1539,7 +1544,6 @@ mod extended_numeric_types {
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use std::sync::Arc;
 
     #[test]
     fn test_tinyint_operations() {
@@ -1715,6 +1719,8 @@ mod extended_numeric_types {
 
 #[cfg(test)]
 mod mixed_type_operations {
+    use std::sync::Arc;
+
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
@@ -1726,7 +1732,6 @@ mod mixed_type_operations {
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use std::sync::Arc;
 
     #[test]
     fn test_mixed_numeric_type_operations() {
@@ -1917,6 +1922,8 @@ mod mixed_type_operations {
 
 #[cfg(test)]
 mod invalid_operations {
+    use std::sync::Arc;
+
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
@@ -1929,7 +1936,6 @@ mod invalid_operations {
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use std::sync::Arc;
 
     #[test]
     fn test_invalid_type_combinations() {
@@ -2130,6 +2136,8 @@ mod invalid_operations {
 
 #[cfg(test)]
 mod type_inference {
+    use std::sync::Arc;
+
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
@@ -2142,7 +2150,6 @@ mod type_inference {
     use crate::types_db::type_id::TypeId;
     use crate::types_db::type_id::TypeId::{BigInt, SmallInt};
     use crate::types_db::value::{Val, Value};
-    use std::sync::Arc;
 
     #[test]
     fn test_type_inference_comprehensive() {
@@ -2351,6 +2358,8 @@ mod type_inference {
 
 #[cfg(test)]
 mod edge_cases {
+    use std::sync::Arc;
+
     use crate::catalog::column::Column;
     use crate::catalog::schema::Schema;
     use crate::common::rid::RID;
@@ -2363,7 +2372,6 @@ mod edge_cases {
     use crate::storage::table::tuple::Tuple;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use std::sync::Arc;
 
     #[test]
     fn test_edge_case_decimal_operations() {
@@ -2555,10 +2563,11 @@ mod edge_cases {
 
 #[cfg(test)]
 mod performance_tests {
+    use std::time::Instant;
+
     use super::*;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
-    use std::time::Instant;
 
     #[test]
     fn test_deep_nested_expressions_performance() {

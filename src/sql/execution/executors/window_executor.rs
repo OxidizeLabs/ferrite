@@ -1,3 +1,10 @@
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BinaryHeap, HashMap};
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -9,12 +16,6 @@ use crate::sql::execution::plans::window_plan::{WindowFunctionType, WindowNode};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::Value;
-use log::debug;
-use parking_lot::RwLock;
-use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 // Type aliases for complex types
 type TupleWithPartitionAndSort = (Vec<Value>, Vec<Value>, Arc<Tuple>, RID);
@@ -269,6 +270,8 @@ impl AbstractExecutor for WindowExecutor {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -288,9 +291,7 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::types::Type;
-    use crate::types_db::value::Val;
-    use crate::types_db::value::Value;
-    use tempfile::TempDir;
+    use crate::types_db::value::{Val, Value};
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

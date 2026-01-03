@@ -3,8 +3,9 @@
 //! This module defines the `DiskHashTable` trait, a generic interface for
 //! disk-based hash table implementations that support transactional operations.
 
-use crate::concurrency::transaction::Transaction;
 use std::vec::Vec;
+
+use crate::concurrency::transaction::Transaction;
 
 /// A generic trait for disk-based hash table implementations.
 ///

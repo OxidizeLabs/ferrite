@@ -98,12 +98,13 @@
 //! The `TransactionContext` works with any isolation level — the isolation semantics
 //! are enforced by the underlying `Transaction` and `LockManager`, not by this wrapper.
 
+use std::sync::Arc;
+
 use crate::common::config::{TableOidT, TxnId};
 use crate::common::rid::RID;
 use crate::concurrency::lock_manager::LockManager;
 use crate::concurrency::transaction::Transaction;
 use crate::concurrency::transaction_manager::TransactionManager;
-use std::sync::Arc;
 
 /// A convenience wrapper bundling transaction-related components for query execution.
 ///

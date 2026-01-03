@@ -1,5 +1,6 @@
-use crate::storage::index::types::key_types::KeyType;
 use std::cmp::Ordering;
+
+use crate::storage::index::types::key_types::KeyType;
 
 /// Type for i32 comparators
 pub type I32Comparator = fn(&i32, &i32) -> Ordering;

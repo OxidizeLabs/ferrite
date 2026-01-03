@@ -131,14 +131,16 @@
 //!   └─────────────────┘
 //! ```
 
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
 use crate::common::config::INVALID_LSN;
 use crate::common::rid::RID;
 use crate::concurrency::transaction::Transaction;
 use crate::recovery::log_manager::LogManager;
 use crate::recovery::log_record::{LogRecord, LogRecordType};
 use crate::storage::table::tuple::Tuple;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// High-level facade for Write-Ahead Logging operations.
 ///

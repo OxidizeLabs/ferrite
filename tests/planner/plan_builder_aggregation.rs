@@ -1,22 +1,21 @@
 #![allow(clippy::all, unused_must_use, unused_variables, dead_code)]
 
-use crate::common::logger::init_test_logger;
+use std::sync::Arc;
+
+use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
 use ferrite::sql::execution::expressions::abstract_expression::Expression;
 use ferrite::sql::execution::expressions::aggregate_expression::AggregationType;
-use ferrite::sql::execution::plans::abstract_plan::AbstractPlanNode;
+use ferrite::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode};
 use ferrite::sql::planner::logical_plan::{LogicalPlanType, LogicalToPhysical};
 use ferrite::sql::planner::query_planner::QueryPlanner;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use ferrite::types_db::type_id::TypeId;
-use ferrite::{
-    buffer::buffer_pool_manager_async::BufferPoolManager,
-    sql::execution::plans::abstract_plan::PlanNode,
-};
 use parking_lot::RwLock;
-use std::sync::Arc;
 use tempfile::TempDir;
+
+use crate::common::logger::init_test_logger;
 
 struct TestContext {
     catalog: Arc<RwLock<Catalog>>,

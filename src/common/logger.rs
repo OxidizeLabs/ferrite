@@ -1,6 +1,7 @@
+use std::sync::Once;
+
 use env_logger::Builder;
 use log::LevelFilter;
-use std::sync::Once;
 
 static INIT: Once = Once::new();
 
@@ -27,8 +28,9 @@ pub fn initialize_logger() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use log::{debug, info};
+
+    use super::*;
 
     #[test]
     fn test_logging_levels() {

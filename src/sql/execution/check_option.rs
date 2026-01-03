@@ -120,7 +120,7 @@ pub enum CheckOption {
     /// When enabled, the optimizer will attempt to convert expensive nested
     /// loop joins into more efficient index-based joins when an appropriate
     /// index exists on the join key.
-    EnableNljCheck = 0,
+    EnableNljCheck  = 0,
 
     /// Enables merging of Sort + Limit operations into TopN.
     ///
@@ -298,10 +298,12 @@ impl CheckOptions {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use parking_lot::RwLock;
     use std::sync::Arc;
     use std::thread;
+
+    use parking_lot::RwLock;
+
+    use super::*;
 
     #[test]
     fn test_check_options_new() {

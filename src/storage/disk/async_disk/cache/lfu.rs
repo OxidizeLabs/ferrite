@@ -256,11 +256,12 @@
 //! - **Frequency Overflow**: Theoretically possible at `usize::MAX` accesses
 //! - **Single HashMap**: Reduces allocations vs. separate frequency tracking
 
+use std::collections::HashMap;
+use std::hash::Hash;
+
 use crate::storage::disk::async_disk::cache::cache_traits::{
     CoreCache, LFUCacheTrait, MutableCache,
 };
-use std::collections::HashMap;
-use std::hash::Hash;
 
 /// LFU (Least Frequently Used) Cache.
 ///

@@ -1,12 +1,13 @@
 // ==============================================
 // FIFO CONCURRENCY TESTS (integration)
 // ==============================================
-use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 
 mod thread_safe_wrapper {
     use super::*;

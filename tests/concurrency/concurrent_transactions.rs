@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use ferrite::buffer::buffer_pool_manager_async::BufferPoolManager;
 use ferrite::buffer::lru_k_replacer::LRUKReplacer;
 use ferrite::catalog::Catalog;
@@ -12,8 +15,6 @@ use ferrite::sql::execution::execution_engine::ExecutionEngine;
 use ferrite::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
 use futures::future;
 use parking_lot::RwLock;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
 
 pub struct ConcurrentTestContext {

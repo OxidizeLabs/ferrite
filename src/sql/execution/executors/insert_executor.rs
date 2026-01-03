@@ -77,6 +77,11 @@
 //! Insert operations are automatically instrumented with performance metrics
 //! including row counts, operation duration, and bulk vs. single insert tracking.
 
+use std::sync::Arc;
+
+use log::{debug, error, info, trace, warn};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::config::BATCH_INSERT_THRESHOLD;
 use crate::common::exception::DBError;
@@ -89,9 +94,6 @@ use crate::sql::execution::plans::insert_plan::InsertNode;
 use crate::sql::planner::schema_manager::SchemaManager;
 use crate::storage::table::transactional_table_heap::TransactionalTableHeap;
 use crate::storage::table::tuple::Tuple;
-use log::{debug, error, info, trace, warn};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for SQL `INSERT` statements.
 ///
@@ -705,6 +707,9 @@ impl AbstractExecutor for InsertExecutor {
 
 #[cfg(test)]
 mod tests {
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -722,8 +727,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use parking_lot::RwLock;
-    use tempfile::TempDir;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

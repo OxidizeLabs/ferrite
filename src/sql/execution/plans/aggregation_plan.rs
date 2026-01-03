@@ -1,10 +1,11 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::schema::Schema;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 impl Display for AggregationType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {

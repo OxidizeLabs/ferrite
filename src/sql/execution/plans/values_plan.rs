@@ -1,13 +1,15 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
+use log::debug;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::ValuesError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::{Size, Val, Value};
-use log::debug;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuesNode {
@@ -234,12 +236,13 @@ impl Display for ValueRow {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::catalog::column::Column;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use std::sync::Arc;
 
     // Test fixtures
     fn create_test_schema() -> Schema {

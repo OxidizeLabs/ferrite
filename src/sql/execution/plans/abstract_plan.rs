@@ -1,3 +1,9 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
@@ -51,10 +57,6 @@ use crate::sql::execution::plans::topn_plan::TopNNode;
 use crate::sql::execution::plans::update_plan::UpdateNode;
 use crate::sql::execution::plans::values_plan::ValuesNode;
 use crate::sql::execution::plans::window_plan::WindowNode;
-use parking_lot::RwLock;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanType {
@@ -843,6 +845,13 @@ impl Display for PlanNode {
 
 #[cfg(test)]
 mod basic_behaviour {
+    use std::error::Error;
+    use std::sync::Arc;
+
+    use log::info;
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::Catalog;
@@ -853,11 +862,6 @@ mod basic_behaviour {
     use crate::sql::planner::query_planner::QueryPlanner;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
-    use log::info;
-    use parking_lot::RwLock;
-    use std::error::Error;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,
@@ -1092,6 +1096,13 @@ mod basic_behaviour {
 
 #[cfg(test)]
 mod complex_behaviour {
+    use std::error::Error;
+    use std::sync::Arc;
+
+    use log::info;
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::catalog::Catalog;
@@ -1102,11 +1113,6 @@ mod complex_behaviour {
     use crate::sql::planner::query_planner::QueryPlanner;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
-    use log::info;
-    use parking_lot::RwLock;
-    use std::error::Error;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         catalog: Arc<RwLock<Catalog>>,

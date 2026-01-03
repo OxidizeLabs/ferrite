@@ -152,13 +152,14 @@
 //! should use its own validator instance. The caches use `HashMap` which
 //! requires exclusive (`&mut self`) access for validation.
 
+use std::collections::HashMap;
+
 use crate::catalog::column::{Column, ForeignKeyConstraint, ReferentialAction};
 use crate::catalog::schema::Schema;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::Type;
 use crate::types_db::value::Value;
-use std::collections::HashMap;
 
 /// Describes a specific constraint violation detected during validation.
 ///

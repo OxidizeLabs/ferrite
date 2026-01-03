@@ -179,9 +179,12 @@
 //! - **Insert retry limit**: Failed splits after `MAX_INSERT_RETRIES` cause insert
 //!   to return `false`.
 
+use std::sync::Arc;
+
+use log::{debug, info};
+
 use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
-use crate::common::config::INVALID_PAGE_ID;
-use crate::common::config::PageId;
+use crate::common::config::{INVALID_PAGE_ID, PageId};
 use crate::common::rid::RID;
 use crate::container::hash_function::HashFunction;
 use crate::storage::page::PageTrait;
@@ -190,8 +193,6 @@ use crate::storage::page::page_types::extendable_hash_table_bucket_page::Extenda
 use crate::storage::page::page_types::extendable_hash_table_directory_page::ExtendableHTableDirectoryPage;
 use crate::storage::page::page_types::extendable_hash_table_header_page::ExtendableHTableHeaderPage;
 use crate::types_db::value::Value;
-use log::{debug, info};
-use std::sync::Arc;
 
 /// Implementation of an extendable hash table backed by a buffer pool manager.
 ///
@@ -738,14 +739,16 @@ impl DiskExtendableHashTable {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
     use crate::common::logger::initialize_logger;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

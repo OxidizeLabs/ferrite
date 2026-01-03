@@ -49,8 +49,9 @@
 //!
 //! Block page IDs are protected by a `Mutex` for concurrent access.
 
-use crate::common::config::PageId;
 use std::sync::Mutex;
+
+use crate::common::config::PageId;
 
 pub type LsnT = u32;
 pub type PageIdT = u32;

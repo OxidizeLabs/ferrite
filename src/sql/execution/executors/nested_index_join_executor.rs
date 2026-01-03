@@ -81,6 +81,11 @@
 //! The output schema is the concatenation of left and right schemas:
 //! `[left_col1, left_col2, ..., right_col1, right_col2, ...]`
 
+use std::sync::Arc;
+
+use log::{debug, trace};
+use parking_lot::RwLock;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
@@ -101,9 +106,6 @@ use crate::sql::execution::plans::seq_scan_plan::SeqScanPlanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Val;
-use log::{debug, trace};
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for index-optimized nested loop joins.
 ///
@@ -655,6 +657,9 @@ impl AbstractExecutor for NestedIndexJoinExecutor {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::{JoinConstraint, JoinOperator};
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -679,8 +684,6 @@ mod tests {
     use crate::storage::table::tuple::TupleMeta;
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::{Val, Value};
-    use sqlparser::ast::{JoinConstraint, JoinOperator};
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

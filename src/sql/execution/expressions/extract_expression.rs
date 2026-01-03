@@ -1,3 +1,9 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
+use chrono::{Datelike, NaiveDateTime, Timelike};
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -5,10 +11,6 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
-use chrono::{Datelike, NaiveDateTime, Timelike};
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExtractField {

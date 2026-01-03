@@ -56,12 +56,14 @@
 //! that the node maintains all B+ tree properties (sorted keys, correct pointer
 //! count, size constraints).
 
+use std::any::Any;
+use std::fmt::{Debug, Formatter};
+
+use log::debug;
+
 use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
-use log::debug;
-use std::any::Any;
-use std::fmt::{Debug, Formatter};
 
 /// Internal page structure for B+ Tree
 pub struct BPlusTreeInternalPage<KeyType, KeyComparator> {

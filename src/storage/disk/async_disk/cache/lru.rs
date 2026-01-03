@@ -302,15 +302,17 @@
 //! - `Node`: Manually implements `Send + Sync` (protected by outer lock)
 //! - Values: `Arc<V>` enables safe sharing across threads
 
-use crate::storage::disk::async_disk::cache::cache_traits::{
-    CoreCache, LRUCacheTrait, MutableCache,
-};
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::sync::Arc;
+
+use parking_lot::RwLock;
+
+use crate::storage::disk::async_disk::cache::cache_traits::{
+    CoreCache, LRUCacheTrait, MutableCache,
+};
 
 /// Node in the doubly-linked list for LRU tracking
 /// Zero-copy design: Keys are Copy types, Values are Arc-wrapped for sharing
@@ -4885,10 +4887,11 @@ mod tests {
         }
 
         mod state_consistency {
-            use super::*;
             use std::collections::HashSet;
             use std::ptr::NonNull;
             use std::sync::Arc;
+
+            use super::*;
 
             fn count_nodes<K, V>(cache: &LRUCore<K, V>) -> usize
             where
@@ -5834,10 +5837,11 @@ mod tests {
     // MEMORY SAFETY TESTS MODULE
     // ==============================================
     mod memory_safety {
-        use super::*;
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::thread;
+
+        use super::*;
 
         // Helper to track object lifecycle
         struct LifeCycleTracker {

@@ -189,11 +189,13 @@
 //! - Safe for concurrent dequeue from multiple workers
 //! - Implements `Default` for easy construction
 
-use super::operations::{IOOperation, IOOperationType};
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Instant;
+
 use tokio::sync::Mutex;
+
+use super::operations::{IOOperation, IOOperationType};
 
 /// Priority queue type for I/O operations
 pub type PriorityQueue<T> = Arc<Mutex<BinaryHeap<T>>>;
@@ -225,7 +227,6 @@ impl IOQueueManager {
     /// * `operation_type` - The type of I/O operation to perform
     /// * `priority` - Priority level (higher numbers = higher priority)
     /// * `id` - Unique operation identifier (typically allocated by a tracker)
-    ///
     pub async fn enqueue_operation(&self, operation_type: IOOperationType, priority: u8, id: u64) {
         let operation = IOOperation {
             priority,
@@ -298,9 +299,11 @@ impl Default for IOQueueManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::time::Duration;
+
     use tokio::time::timeout;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_queue_priority_ordering() {

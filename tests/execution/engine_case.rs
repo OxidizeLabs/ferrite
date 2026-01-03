@@ -1,8 +1,9 @@
-use crate::execution::common::{TestContext, TestResultWriter};
 use ferrite::catalog::column::Column;
 use ferrite::catalog::schema::Schema;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::{Val, Value};
+
+use crate::execution::common::{TestContext, TestResultWriter};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_case_when_simple() {

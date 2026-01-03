@@ -1,12 +1,13 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
 use crate::sql::execution::expressions::abstract_expression::{Expression, ExpressionOps};
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Value;
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TupleExpression {
@@ -91,12 +92,13 @@ impl Display for TupleExpression {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::Value as SQLValue;
+
     use super::*;
     use crate::common::rid::RID;
     use crate::sql::execution::expressions::constant_value_expression::ConstantExpression;
     use crate::sql::execution::expressions::literal_value_expression::LiteralValueExpression;
     use crate::types_db::type_id::TypeId;
-    use sqlparser::ast::Value as SQLValue;
 
     #[test]
     fn test_tuple_expression_evaluate() {

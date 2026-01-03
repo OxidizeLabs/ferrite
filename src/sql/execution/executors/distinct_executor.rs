@@ -53,6 +53,12 @@
 //! For large result sets with high cardinality, this can consume significant
 //! memory.
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use log::{debug, trace};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -60,10 +66,6 @@ use crate::sql::execution::execution_context::ExecutionContext;
 use crate::sql::execution::executors::abstract_executor::AbstractExecutor;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::value::Val;
-use log::{debug, trace};
-use parking_lot::RwLock;
-use std::collections::HashSet;
-use std::sync::Arc;
 
 /// Executor for removing duplicate tuples from query results.
 ///
@@ -281,6 +283,11 @@ impl AbstractExecutor for DistinctExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -297,9 +304,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use parking_lot::RwLock;
-    use std::sync::Arc;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

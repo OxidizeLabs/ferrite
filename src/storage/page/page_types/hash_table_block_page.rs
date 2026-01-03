@@ -50,11 +50,13 @@
 //! - `ValueType`: The value type (must be `Clone + Default + PartialEq`)
 //! - `KeyComparator`: A function `Fn(&K, &K) -> bool` for key equality
 
-use crate::storage::page::page_types::hash_table_page_defs::{MappingType, block_array_size};
-use log::info;
 use std::marker::PhantomData;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, Ordering};
+
+use log::info;
+
+use crate::storage::page::page_types::hash_table_page_defs::{MappingType, block_array_size};
 
 /**
  * Store indexed key and value together within block page. Supports

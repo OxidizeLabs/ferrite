@@ -12,9 +12,9 @@ A clear and concise description of what the bug is.
 
 ## Steps to Reproduce
 
-1. 
-2. 
-3. 
+1.
+2.
+3.
 
 ## Expected Behavior
 
@@ -49,4 +49,3 @@ If possible, provide a minimal code example or SQL script that reproduces the is
 ## Additional Context
 
 Add any other context about the problem here.
-

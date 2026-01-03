@@ -1,10 +1,11 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
 use crate::catalog::schema::Schema;
 use crate::common::config::TableOidT;
 use crate::sql::execution::expressions::abstract_expression::Expression;
 use crate::sql::execution::plans::abstract_plan::{AbstractPlanNode, PlanNode, PlanType};
-use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateNode {

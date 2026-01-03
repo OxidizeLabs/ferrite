@@ -51,6 +51,12 @@
 //!   - `SUM`: 0 (or NULL depending on semantics)
 //!   - `MIN`/`MAX`: NULL
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use log::{debug, error};
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -61,13 +67,8 @@ use crate::sql::execution::expressions::aggregate_expression::AggregationType;
 use crate::sql::execution::plans::aggregation_plan::AggregationPlanNode;
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
-use crate::types_db::types::CmpBool;
-use crate::types_db::types::Type;
+use crate::types_db::types::{CmpBool, Type};
 use crate::types_db::value::{Val, Value};
-use log::{debug, error};
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 /// A composite key representing a unique group in aggregation.
 ///
@@ -642,6 +643,9 @@ impl AbstractExecutor for AggregationExecutor {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -658,8 +662,6 @@ mod tests {
     use crate::sql::execution::transaction_context::TransactionContext;
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::value::Val::{BigInt, Integer};
-    use chrono::Utc;
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

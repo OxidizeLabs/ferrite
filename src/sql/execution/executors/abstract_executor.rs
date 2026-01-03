@@ -39,13 +39,15 @@
 //! The execution engine calls `next()` on the root executor, which recursively
 //! pulls tuples from its children until the query is complete.
 
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
 use crate::sql::execution::execution_context::ExecutionContext;
 use crate::storage::table::tuple::Tuple;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// The core trait for all query executors in the Volcano iterator model.
 ///

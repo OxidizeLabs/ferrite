@@ -1,3 +1,8 @@
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+
+use sqlparser::ast::Value as SQLValue;
+
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
 use crate::common::exception::ExpressionError;
@@ -5,9 +10,6 @@ use crate::sql::execution::expressions::abstract_expression::{Expression, Expres
 use crate::storage::table::tuple::Tuple;
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
-use sqlparser::ast::Value as SQLValue;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 
 /// Expression that represents a literal value from SQL
 /// e.g., numbers, strings, booleans, NULL
@@ -175,9 +177,10 @@ impl Display for LiteralValueExpression {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::Value as SQLValue;
+
     use super::*;
     use crate::common::rid::RID;
-    use sqlparser::ast::Value as SQLValue;
 
     #[test]
     fn test_create_from_sql_value() {

@@ -177,6 +177,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
 use tokio::sync::Mutex;
 
 /// Coordinates flush operations and timing
@@ -286,8 +287,9 @@ impl FlushCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::time::sleep;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_flush_coordinator_creation() {

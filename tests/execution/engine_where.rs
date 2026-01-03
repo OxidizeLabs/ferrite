@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 
-use crate::common::logger::init_test_logger;
-use crate::common::tempdb::new_temp_db;
 use ferrite::catalog::column::Column;
 use ferrite::catalog::schema::Schema;
 use ferrite::common::result_writer::ResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
 use ferrite::types_db::type_id::TypeId;
 use ferrite::types_db::value::Value;
+
+use crate::common::logger::init_test_logger;
+use crate::common::tempdb::new_temp_db;
 
 /// Test-specific result writer that allows inspection of results
 struct TestResultWriter {

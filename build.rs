@@ -75,9 +75,8 @@
 //! include!(concat!(env!("OUT_DIR"), "/sqllogic_tests.rs"));
 //! ```
 
-use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 /// Entry point for the build script.
 ///

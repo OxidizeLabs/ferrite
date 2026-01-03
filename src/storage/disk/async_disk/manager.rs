@@ -235,11 +235,22 @@
 //! - OS buffer cache is beneficial for sequential writes
 //! - Durability is ensured via explicit `sync_log()` calls
 
+use std::future::Future;
+use std::io;
+use std::io::Result as IoResult;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use log::{debug, error, info, trace, warn};
+use tokio::fs::File;
+use tokio::sync::{Mutex, RwLock, oneshot};
+use tokio::task::JoinHandle;
+
 use super::config::DiskManagerConfig;
 use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::recovery::log_record::LogRecord;
-use crate::storage::disk::async_disk::cache::cache_manager::CacheManager;
-use crate::storage::disk::async_disk::cache::cache_manager::CacheStatistics;
+use crate::storage::disk::async_disk::cache::cache_manager::{CacheManager, CacheStatistics};
 use crate::storage::disk::async_disk::config::{FsyncPolicy, IOPriority};
 use crate::storage::disk::async_disk::io::AsyncIOEngine;
 use crate::storage::disk::async_disk::memory::{
@@ -254,17 +265,6 @@ use crate::storage::disk::async_disk::metrics::dashboard::{
 use crate::storage::disk::async_disk::metrics::prediction::TrendData;
 use crate::storage::disk::async_disk::metrics::snapshot::MetricsSnapshot;
 use crate::storage::disk::async_disk::scheduler::{IOTask, IOTaskType, WorkStealingScheduler};
-use log::{debug, error, info, trace, warn};
-use std::future::Future;
-use std::io;
-use std::io::Result as IoResult;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
-use tokio::fs::File;
-use tokio::sync::oneshot;
-use tokio::sync::{Mutex, RwLock};
-use tokio::task::JoinHandle;
 
 /// Asynchronous Disk Manager that provides high-performance I/O operations
 /// with advanced features like caching, compression, and metrics collection.
@@ -1454,12 +1454,13 @@ impl AsyncDiskManager {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
+
     use super::*;
     use crate::storage::disk::async_disk::compression::CompressionAlgorithm;
     use crate::storage::disk::async_disk::config::{
         DiskManagerConfig, DurabilityLevel, FsyncPolicy,
     };
-    use tempfile::TempDir;
 
     fn page_with_prefix(prefix: &[u8]) -> Vec<u8> {
         let mut page = vec![0u8; DB_PAGE_SIZE as usize];

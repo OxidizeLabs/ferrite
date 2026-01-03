@@ -49,6 +49,11 @@
 //! Uses `DiskExtendableHashTable` for the build phase, which supports
 //! spilling to disk for large datasets that exceed memory.
 
+use std::sync::Arc;
+
+use log::debug;
+use parking_lot::RwLock;
+
 use crate::catalog::schema::Schema;
 use crate::common::exception::DBError;
 use crate::common::rid::RID;
@@ -60,9 +65,6 @@ use crate::sql::execution::expressions::abstract_expression::ExpressionOps;
 use crate::sql::execution::plans::abstract_plan::AbstractPlanNode;
 use crate::sql::execution::plans::hash_join_plan::HashJoinNode;
 use crate::storage::table::tuple::Tuple;
-use log::debug;
-use parking_lot::RwLock;
-use std::sync::Arc;
 
 /// Executor for hash-based equi-join operations.
 ///
@@ -351,6 +353,9 @@ impl AbstractExecutor for HashJoinExecutor {
 
 #[cfg(test)]
 mod tests {
+    use sqlparser::ast::{JoinConstraint, JoinOperator};
+    use tempfile::TempDir;
+
     use super::*;
     use crate::buffer::buffer_pool_manager_async::BufferPoolManager;
     use crate::buffer::lru_k_replacer::LRUKReplacer;
@@ -366,8 +371,6 @@ mod tests {
     use crate::storage::disk::async_disk::{AsyncDiskManager, DiskManagerConfig};
     use crate::types_db::type_id::TypeId;
     use crate::types_db::value::Value;
-    use sqlparser::ast::{JoinConstraint, JoinOperator};
-    use tempfile::TempDir;
 
     struct TestContext {
         bpm: Arc<BufferPoolManager>,

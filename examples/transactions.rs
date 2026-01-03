@@ -5,10 +5,11 @@
 //! - Work with different isolation levels
 //! - Handle transaction commit and rollback
 
+use std::error::Error;
+
 use ferrite::common::db_instance::{DBConfig, DBInstance};
 use ferrite::common::result_writer::CliResultWriter;
 use ferrite::concurrency::transaction::IsolationLevel;
-use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

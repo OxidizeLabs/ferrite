@@ -164,13 +164,15 @@
 //! - Configuration fields are immutable after creation (use `set_*` for updates)
 //! - Safe for concurrent `apply_durability()` calls from multiple tasks
 
-use crate::common::config::PageId;
-use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
-use parking_lot::Mutex;
 use std::future::Future;
 use std::io::Result as IoResult;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+use parking_lot::Mutex;
+
+use crate::common::config::PageId;
+use crate::storage::disk::async_disk::config::{DurabilityLevel, FsyncPolicy};
 
 /// Interface for performing durability operations
 pub trait DurabilityProvider {

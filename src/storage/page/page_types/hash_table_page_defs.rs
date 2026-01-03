@@ -31,10 +31,11 @@
 //! while leaving room for directory metadata (page_id, lsn, global_depth,
 //! local_depths array).
 
+use std::mem::size_of;
+
 use crate::common::config::DB_PAGE_SIZE;
 use crate::storage::page::page_types::hash_table_block_page::HashTableBlockPage;
 use crate::storage::page::page_types::hash_table_bucket_page::HashTableBucketPage;
-use std::mem::size_of;
 
 pub type MappingType<KeyType, ValueType> = (KeyType, ValueType);
 
@@ -51,13 +52,6 @@ pub type HashTableBlockType<KeyType, ValueType, KeyComparator> =
  * approximate calculation based on the size of MappingType (which is a std::pair of KeyType and ValueType). For each
  * key/value pair, we need two additional bits for occupied_ and readable_. 4 * BUSTUB_PAGE_SIZE / (4 * sizeof
  * (MappingType) + 1) = BUSTUB_PAGE_SIZE/(sizeof (MappingType) + 0.25) because 0.25 bytes = 2 bits is the space required
- * to maintain the occupied and readable flags for a key value pair.
- */
-/**
- * BLOCK_ARRAY_SIZE is the number of (key, value) pairs that can be stored in a linear probe hash block page. It is an
- * approximate calculation based on the size of MappingType (which is a std::pair of KeyType and ValueType). For each
- * key/value pair, we need two additional bits for occupied_ and readable_. 4 * DB_PAGE_SIZE / (4 * sizeof
- * (MappingType) + 1) = DB_PAGE_SIZE/(sizeof (MappingType) + 0.25) because 0.25 bytes = 2 bits is the space required
  * to maintain the occupied and readable flags for a key value pair.
  */
 pub const fn block_array_size<KeyType, ValueType>() -> usize {
