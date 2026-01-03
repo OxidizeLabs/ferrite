@@ -32,8 +32,8 @@ pub enum AlertType {
 /// Alert severity levels
 #[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq)]
 pub enum AlertSeverity {
-    Info      = 1,
-    Warning   = 2,
-    Critical  = 3,
+    Info = 1,
+    Warning = 2,
+    Critical = 3,
     Emergency = 4,
 }

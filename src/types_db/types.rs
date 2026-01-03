@@ -13,8 +13,8 @@ use crate::types_db::{
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum CmpBool {
     CmpFalse = 0,
-    CmpTrue  = 1,
-    CmpNull  = 2,
+    CmpTrue = 1,
+    CmpNull = 2,
 }
 
 pub trait Type {

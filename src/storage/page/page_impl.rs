@@ -158,16 +158,16 @@ pub const PAGE_ID_OFFSET: usize = 1;
 #[derive(Debug, PartialEq, Copy, Clone)]
 #[repr(u8)]
 pub enum PageType {
-    Invalid            = PAGE_TYPE_INVALID,
-    Basic              = PAGE_TYPE_BASIC,
-    Table              = PAGE_TYPE_TABLE,
+    Invalid = PAGE_TYPE_INVALID,
+    Basic = PAGE_TYPE_BASIC,
+    Table = PAGE_TYPE_TABLE,
     HashTableDirectory = PAGE_TYPE_HASH_TABLE_DIRECTORY,
-    HashTableBucket    = PAGE_TYPE_HASH_TABLE_BUCKET,
-    HashTableHeader    = PAGE_TYPE_HASH_TABLE_HEADER,
-    BTreeHeader        = PAGE_TYPE_BTREE_HEADER,
-    BTreeInternal      = PAGE_TYPE_BTREE_INTERNAL,
-    BTreeLeaf          = PAGE_TYPE_BTREE_LEAF,
-    BTreeNode          = PAGE_TYPE_BTREE_NODE,
+    HashTableBucket = PAGE_TYPE_HASH_TABLE_BUCKET,
+    HashTableHeader = PAGE_TYPE_HASH_TABLE_HEADER,
+    BTreeHeader = PAGE_TYPE_BTREE_HEADER,
+    BTreeInternal = PAGE_TYPE_BTREE_INTERNAL,
+    BTreeLeaf = PAGE_TYPE_BTREE_LEAF,
+    BTreeNode = PAGE_TYPE_BTREE_NODE,
 }
 
 // Keep PageTrait as the main trait for dynamic dispatch

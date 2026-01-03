@@ -79,9 +79,9 @@ pub enum DurabilityLevel {
 /// Priority levels for I/O operations
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IOPriority {
-    Low      = 1,
-    Normal   = 2,
-    High     = 3,
+    Low = 1,
+    Normal = 2,
+    High = 3,
     Critical = 4,
 }
 

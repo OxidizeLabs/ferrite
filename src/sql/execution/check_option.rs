@@ -120,7 +120,7 @@ pub enum CheckOption {
     /// When enabled, the optimizer will attempt to convert expensive nested
     /// loop joins into more efficient index-based joins when an appropriate
     /// index exists on the join key.
-    EnableNljCheck  = 0,
+    EnableNljCheck = 0,
 
     /// Enables merging of Sort + Limit operations into TopN.
     ///
