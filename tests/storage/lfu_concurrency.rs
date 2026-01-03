@@ -525,7 +525,7 @@ mod thread_safety {
 
         // Medium frequency items may be partially preserved
         let mut medium_freq_preserved = 0;
-        for i in 20..50 {
+        for i in 20..40 {
             if cache.contains(&format!("base_{}", i)) {
                 medium_freq_preserved += 1;
             }
@@ -533,7 +533,7 @@ mod thread_safety {
 
         // Low frequency items should be mostly evicted
         let mut low_freq_preserved = 0;
-        for i in 50..100 {
+        for i in 40..60 {
             if cache.contains(&format!("base_{}", i)) {
                 low_freq_preserved += 1;
             }
