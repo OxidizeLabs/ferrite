@@ -22,8 +22,8 @@ async fn test_case_when_simple() {
 
     // Insert a small amount of test data where we can easily calculate the expected results
     let test_data = vec![
-        // c values chosen to make it easy to verify against average
-        // average of c values will be 150
+        // c values chosen to make it easy to verify against
+        // the average of c values will be 150
         vec![
             Value::new(100),
             Value::new(10),
@@ -373,7 +373,7 @@ async fn test_case_when_with_subquery() {
 async fn test_case_when_basic() {
     let mut ctx = TestContext::new("test_case_when_basic").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("grade", TypeId::Integer),
@@ -420,7 +420,7 @@ async fn test_case_when_basic() {
 async fn test_case_when_multiple_conditions() {
     let mut ctx = TestContext::new("test_case_when_multiple_conditions").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("age", TypeId::Integer),
@@ -478,7 +478,7 @@ async fn test_case_when_multiple_conditions() {
     // Verify categories
     if rows.len() >= 4 {
         assert_eq!(rows[0][2].to_string(), "Junior"); // Alice: 25, 40000 -> Junior
-        assert_eq!(rows[1][2].to_string(), "Mid Level"); // Bob: 35, 60000 -> Mid Level
+        assert_eq!(rows[1][2].to_string(), "Mid Level"); // Bob: 35, 60000 -> Mid-Level
         assert_eq!(rows[2][2].to_string(), "Senior High"); // Charlie: 45, 80000 -> Senior High
         assert_eq!(rows[3][2].to_string(), "Junior"); // Diana: 30, 50000 -> Junior (30 is NOT > 30, 50000 is NOT > 55000)
     }
@@ -488,7 +488,7 @@ async fn test_case_when_multiple_conditions() {
 async fn test_case_when_with_null_values() {
     let mut ctx = TestContext::new("test_case_when_with_null_values").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("score", TypeId::Integer),
@@ -540,7 +540,7 @@ async fn test_case_when_with_null_values() {
 async fn test_case_when_with_aggregations() {
     let mut ctx = TestContext::new("test_case_when_with_aggregations").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("department", TypeId::VarChar),
         Column::new("salary", TypeId::Integer),
@@ -588,7 +588,7 @@ async fn test_case_when_with_aggregations() {
 async fn test_case_when_with_arithmetic() {
     let mut ctx = TestContext::new("test_case_when_with_arithmetic").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("quantity", TypeId::Integer),
@@ -635,7 +635,7 @@ async fn test_case_when_with_arithmetic() {
 async fn test_case_when_nested() {
     let mut ctx = TestContext::new("test_case_when_nested").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("age", TypeId::Integer),
@@ -683,7 +683,7 @@ async fn test_case_when_nested() {
 async fn test_case_when_different_data_types() {
     let mut ctx = TestContext::new("test_case_when_different_data_types").await;
 
-    // Create test table with various data types
+    // Create a test table with various data types
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("name", TypeId::VarChar),
@@ -744,7 +744,7 @@ async fn test_case_when_different_data_types() {
 async fn test_case_when_with_in_clause() {
     let mut ctx = TestContext::new("test_case_when_with_in_clause").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("department_id", TypeId::Integer),
@@ -791,7 +791,7 @@ async fn test_case_when_with_in_clause() {
 async fn test_case_when_edge_cases() {
     let mut ctx = TestContext::new("test_case_when_edge_cases").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("value", TypeId::Integer),
@@ -815,12 +815,12 @@ async fn test_case_when_edge_cases() {
     let rows = writer.get_rows();
     assert_eq!(rows.len(), 0, "Expected 0 rows from empty table");
 
-    // Insert single row
+    // Insert a single row
     let test_data = vec![vec![Value::new(1), Value::new(75)]];
     ctx.insert_tuples(table_name, test_data, table_schema)
         .unwrap();
 
-    // Test CASE WHEN on single row
+    // Test CASE WHEN on a single row
     let sql =
         "SELECT id, CASE WHEN value > 50 THEN 'High' ELSE 'Low' END as category FROM edge_cases";
     let mut writer = TestResultWriter::new();
@@ -843,7 +843,7 @@ async fn test_case_when_edge_cases() {
 async fn test_case_when_performance() {
     let mut ctx = TestContext::new("test_case_when_performance").await;
 
-    // Create test table
+    // Create a test table
     let table_schema = Schema::new(vec![
         Column::new("id", TypeId::Integer),
         Column::new("category", TypeId::VarChar),
