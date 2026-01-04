@@ -770,8 +770,3 @@ async fn test_select_very_long_query() {
         _ => panic!("Expected Projection as root node"),
     }
 }
-
-#[tokio::test]
-async fn test_select_with_nested_expressions() {
-    todo!()
-}

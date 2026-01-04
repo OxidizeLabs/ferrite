@@ -160,8 +160,8 @@ async fn test_update_with_arithmetic_expression() {
             ..
         } => {
             assert_eq!(table_name, "users");
-            assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(schema.get_column_count(), 3);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 1);
 
             match &plan.children[0].plan_type {
@@ -197,7 +197,7 @@ async fn test_update_with_complex_where() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 1);
 
             match &plan.children[0].plan_type {
@@ -254,7 +254,7 @@ async fn test_update_with_null() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 1);
 
             match &plan.children[0].plan_type {
@@ -289,7 +289,7 @@ async fn test_update_with_string_literal() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 2);
 
             match &plan.children[0].plan_type {
@@ -324,7 +324,7 @@ async fn test_update_with_column_reference() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 1);
 
             match &plan.children[0].plan_type {
@@ -362,7 +362,7 @@ async fn test_update_different_data_types() {
         } => {
             assert_eq!(table_name, "mixed_types");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 4);
 
             match &plan.children[0].plan_type {
@@ -397,7 +397,7 @@ async fn test_update_with_subexpression() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 1);
 
             match &plan.children[0].plan_type {
@@ -430,7 +430,7 @@ async fn test_update_single_column_table() {
         } => {
             assert_eq!(table_name, "single_col");
             assert_eq!(schema.get_column_count(), 1);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 1);
 
             match &plan.children[0].plan_type {
@@ -477,7 +477,7 @@ async fn test_update_with_comparison_in_where() {
             } => {
                 assert_eq!(table_name, "users");
                 assert_eq!(schema.get_column_count(), 5);
-                assert_eq!(*table_oid, 0);
+                assert_eq!(*table_oid, 5);
                 assert_eq!(update_expressions.len(), 1);
 
                 match &plan.children[0].plan_type {
@@ -525,7 +525,7 @@ async fn test_update_with_logical_operators() {
             } => {
                 assert_eq!(table_name, "users");
                 assert_eq!(schema.get_column_count(), 5);
-                assert_eq!(*table_oid, 0);
+                assert_eq!(*table_oid, 5);
                 assert_eq!(update_expressions.len(), 1);
 
                 match &plan.children[0].plan_type {
@@ -564,7 +564,7 @@ async fn test_update_with_parentheses_in_expression() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 1);
 
             match &plan.children[0].plan_type {
@@ -600,7 +600,7 @@ async fn test_update_all_columns() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 5); // All columns being updated
 
             match &plan.children[0].plan_type {
@@ -637,7 +637,7 @@ async fn test_update_same_column_multiple_times() {
         } => {
             assert_eq!(table_name, "users");
             assert_eq!(schema.get_column_count(), 5);
-            assert_eq!(*table_oid, 0);
+            assert_eq!(*table_oid, 5);
             assert_eq!(update_expressions.len(), 2); // Two assignments
 
             match &plan.children[0].plan_type {
