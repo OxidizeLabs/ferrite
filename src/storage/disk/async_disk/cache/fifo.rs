@@ -72,7 +72,7 @@
 //!   └────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! ## FIFO vs Other Policies
+//! ## FIFO vs. Other Policies
 //!
 //! ```text
 //!   Access pattern: A, B, C, A, A, A, D  (A accessed 4 times, others 1 each)
@@ -121,11 +121,11 @@
 //!
 //! ## Key Components
 //!
-//! | Component          | Type                    | Purpose                       |
+//! | Component | Type | Purpose |
 //! |--------------------|-------------------------|-------------------------------|
-//! | `cache`            | `HashMap<Arc<K>,Arc<V>>`| O(1) key-value storage        |
-//! | `insertion_order`  | `VecDeque<Arc<K>>`      | Tracks insertion order        |
-//! | `capacity`         | `usize`                 | Maximum entries               |
+//! | `cache` | `HashMap<Arc<K>,Arc<V>>`| O(1) key-value storage |
+//! | `insertion_order` | `VecDeque<Arc<K>>` | Tracks insertion order |
+//! | `capacity` | `usize` | Maximum entries |
 //!
 //! ## Core Operations (CoreCache)
 //!
@@ -143,12 +143,12 @@
 //!
 //! ## FIFO-Specific Operations (FIFOCacheTrait)
 //!
-//! | Method                | Complexity | Description                          |
+//! | Method | Complexity | Description |
 //! |-----------------------|------------|--------------------------------------|
-//! | `pop_oldest()`        | O(1)*      | Remove and return oldest entry       |
-//! | `peek_oldest()`       | O(n)*      | Peek at oldest without removing      |
-//! | `pop_oldest_batch(n)` | O(n)       | Remove n oldest entries              |
-//! | `age_rank(&k)`        | O(n)       | Get position (0 = oldest)            |
+//! | `pop_oldest()` | O(1)* | Remove and return the oldest entry |
+//! | `peek_oldest()` | O(n)* | Peek at oldest without removing |
+//! | `pop_oldest_batch(n)` | O(n) | Remove the n oldest entries |
+//! | `age_rank(&k)` | O(n) | Get position (0 = oldest) |
 //!
 //! \* May need to skip stale entries
 //!
@@ -168,12 +168,12 @@
 //!
 //! ## Trade-offs
 //!
-//! | Aspect           | Pros                              | Cons                            |
+//! | Aspect | Pros | Cons |
 //! |------------------|-----------------------------------|---------------------------------|
-//! | Simplicity       | No access tracking needed         | Can evict hot items             |
-//! | Predictability   | Deterministic eviction order      | Ignores access patterns         |
-//! | Performance      | O(1) get (no order update)        | O(n) for age_rank, peek         |
-//! | Memory           | Arc enables zero-copy sharing     | Arc overhead per entry          |
+//! | Simplicity | No access tracking needed | Can evict hot items |
+//! | Predictability | Deterministic eviction order | Ignores access patterns |
+//! | Performance | O(1) get (no order update) | O(n) for age_rank, peek |
+//! | Memory | Arc enables zero-copy sharing | Arc overhead per entry |
 //!
 //! ## When to Use
 //!
@@ -248,12 +248,12 @@
 //!
 //! ## Comparison with Other Policies
 //!
-//! | Policy   | Eviction Basis     | Get Time | Evict Time | Best For              |
+//! | Policy | Eviction Basis | Get Time | Evict Time | Best For |
 //! |----------|--------------------|----------|------------|-----------------------|
-//! | FIFO     | Insertion order    | O(1)     | O(1)       | Predictable behavior  |
-//! | LRU      | Recency            | O(1)*    | O(1)       | Temporal locality     |
-//! | LFU      | Frequency          | O(1)     | O(n)       | Stable access patterns|
-//! | LRU-K    | K-th access        | O(1)     | O(n)       | Scan resistance       |
+//! | FIFO | Insertion order | O(1) | O(1) | Predictable behavior |
+//! | LRU | Recency | O(1)* | O(1) | Temporal locality |
+//! | LFU | Frequency | O(1) | O(n) | Stable access patterns|
+//! | LRU-K | K-th access | O(1) | O(n) | Scan resistance |
 //!
 //! \* LRU get requires order update
 //!
@@ -358,14 +358,14 @@ where
     /// Evicts the oldest valid entry from the cache.
     /// Skips over any stale entries (keys that were lazily deleted).
     fn evict_oldest(&mut self) {
-        // Keep popping from front until we find a valid key or the queue is empty
+        // Keep popping from the front until we find a valid key or the queue is empty
         while let Some(oldest_key) = self.insertion_order.pop_front() {
             if self.cache.contains_key(&oldest_key) {
                 // Found a valid key, remove it and stop
                 self.cache.remove(&oldest_key);
                 break;
             }
-            // Skip stale entries (keys that were already removed from cache)
+            // Skip stale entries (keys that were already removed from the cache)
         }
     }
 }
@@ -383,7 +383,7 @@ where
         let key_arc = Arc::new(key);
         let value_arc = Arc::new(value);
 
-        // If key already exists, update the value
+        // If the key already exists, update the value
         if let std::collections::hash_map::Entry::Occupied(mut e) =
             self.cache.entry(key_arc.clone())
         {
@@ -401,7 +401,7 @@ where
                 });
         }
 
-        // If cache is at capacity, remove the oldest valid item (FIFO)
+        // If the cache is at capacity, remove the oldest valid item (FIFO)
         if self.cache.len() >= self.capacity {
             self.evict_oldest();
         }
@@ -474,13 +474,13 @@ where
 
                 return Some((key, value));
             }
-            // Skip stale entries (keys that were already removed from cache)
+            // Skip stale entries (keys that were already removed from the cache)
         }
         None
     }
 
     fn peek_oldest(&self) -> Option<(&K, &V)> {
-        // Find the first valid entry in insertion order
+        // Find the first valid entry in the insertion order
         for key_arc in &self.insertion_order {
             if let Some(value_arc) = self.cache.get(key_arc) {
                 return Some((key_arc.as_ref(), value_arc.as_ref()));
@@ -551,10 +551,10 @@ mod tests {
             cache.insert("second", "value2");
             assert_eq!(cache.len(), 2);
 
-            // Insert third item - should evict "first" (oldest)
+            // Insert a third item - should evict "first" (oldest)
             cache.insert("third", "value3");
             assert_eq!(cache.len(), 2);
-            assert!(!cache.contains(&"first")); // First item should be evicted
+            assert!(!cache.contains(&"first")); // The first item should be evicted
             assert!(cache.contains(&"second"));
             assert!(cache.contains(&"third"));
         }
@@ -568,7 +568,7 @@ mod tests {
                 cache.insert(format!("key{}", i), format!("value{}", i));
             }
 
-            // Should only contain last 3 items due to FIFO eviction
+            // Should only contain the last 3 items due to FIFO eviction
             assert_eq!(cache.len(), 3);
             assert!(!cache.contains(&"key1".to_string()));
             assert!(!cache.contains(&"key2".to_string()));
@@ -584,7 +584,7 @@ mod tests {
             cache.insert("key1", "original");
             cache.insert("key2", "value2");
 
-            // Update existing key - should return old value
+            // Update the existing key - should return an old value
             let old_value = cache.insert("key1", "updated");
             assert_eq!(old_value, Some("original"));
             assert_eq!(cache.get(&"key1"), Some(&"updated"));
@@ -595,7 +595,7 @@ mod tests {
         fn test_insertion_order_preservation() {
             let mut cache = FIFOCache::new(4);
 
-            // Insert items in specific order
+            // Insert items in a specific order
             cache.insert("first", 1);
             cache.insert("second", 2);
             cache.insert("third", 3);
@@ -615,7 +615,7 @@ mod tests {
             assert_eq!(cache.age_rank(&"third"), Some(1));
             assert_eq!(cache.age_rank(&"fourth"), Some(2)); // still newest
 
-            // Insert new item and verify it becomes newest
+            // Insert a new item and verify it becomes newest
             cache.insert("fifth", 5);
             assert_eq!(cache.age_rank(&"second"), Some(0));
             assert_eq!(cache.age_rank(&"third"), Some(1));
@@ -637,7 +637,7 @@ mod tests {
         fn test_key_operations_consistency() {
             let mut cache = FIFOCache::new(3);
 
-            // Test consistency between contains, get, and len
+            // Test consistency between contents, get, and len
             assert_eq!(cache.len(), 0);
             assert!(!cache.contains(&"key1"));
             assert_eq!(cache.get(&"key1"), None);
@@ -650,7 +650,7 @@ mod tests {
             assert!(!cache.contains(&"key2"));
             assert_eq!(cache.get(&"key2"), None);
 
-            // Insert second item
+            // Insert the second item
             cache.insert("key2", "value2");
             assert_eq!(cache.len(), 2);
             assert!(cache.contains(&"key1"));
@@ -736,7 +736,7 @@ mod tests {
             assert_eq!(cache.len(), 1);
             assert_eq!(cache.get(&"only"), Some(&"value1"));
 
-            // Insert second item - should evict first
+            // Insert the second item - should evict the first
             cache.insert("second", "value2");
             assert_eq!(cache.len(), 1);
             assert!(!cache.contains(&"only"));
@@ -773,13 +773,13 @@ mod tests {
         fn test_duplicate_key_handling() {
             let mut cache = FIFOCache::new(3);
 
-            // Insert initial key
+            // Insert the initial key
             assert_eq!(cache.insert("key1", "value1"), None);
             assert_eq!(cache.len(), 1);
             assert!(cache.contains(&"key1"));
             assert_eq!(cache.get(&"key1"), Some(&"value1"));
 
-            // Insert same key again - should update, not add new entry
+            // Insert the same key again - should update, not add a new entry
             assert_eq!(cache.insert("key1", "value1_updated"), Some("value1"));
             assert_eq!(cache.len(), 1); // Length should remain the same
             assert_eq!(cache.get(&"key1"), Some(&"value1_updated"));
@@ -789,7 +789,7 @@ mod tests {
             cache.insert("key3", "value3");
             assert_eq!(cache.len(), 3);
 
-            // Update existing key multiple times
+            // Update the existing key multiple times
             assert_eq!(cache.insert("key2", "value2_v2"), Some("value2"));
             assert_eq!(cache.insert("key2", "value2_v3"), Some("value2_v2"));
             assert_eq!(cache.len(), 3); // Should still be 3
@@ -855,7 +855,7 @@ mod tests {
             assert_eq!(cache.len(), 2); // Still at capacity
             assert_eq!(cache.get(&"key2"), Some(&"value2_updated"));
 
-            // Test pop operations at boundary
+            // Test pop operations at the boundary
             assert_eq!(cache.pop_oldest(), Some(("key2", "value2_updated")));
             assert_eq!(cache.len(), 1); // One below capacity
 
@@ -868,11 +868,11 @@ mod tests {
             assert_eq!(cache.len(), 0);
 
             // Test filling back to capacity
-            cache.insert("new1", "newval1");
-            cache.insert("new2", "newval2");
+            cache.insert("new1", "new_val1");
+            cache.insert("new2", "new_val2");
             assert_eq!(cache.len(), 2); // Back to capacity
 
-            // Test batch operations at boundary
+            // Test batch operations at the boundary
             let batch = cache.pop_oldest_batch(3); // Request more than available
             assert_eq!(batch.len(), 2); // Should get exactly what's available
             assert_eq!(cache.len(), 0); // Should be empty
@@ -888,7 +888,7 @@ mod tests {
             assert_eq!(cache.peek_oldest(), None);
             assert_eq!(cache.pop_oldest(), None);
 
-            // Fill step by step, verifying state at each step
+            // Fill step by step, verifying the state at each step
 
             // Step 1: Insert first item
             cache.insert("item1", 1);
@@ -897,7 +897,7 @@ mod tests {
             assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
             assert_eq!(cache.age_rank(&"item1"), Some(0));
 
-            // Step 2: Insert second item
+            // Step 2: Insert a second item
             cache.insert("item2", 2);
             assert_eq!(cache.len(), 2);
             assert!(cache.contains(&"item1"));
@@ -906,7 +906,7 @@ mod tests {
             assert_eq!(cache.age_rank(&"item1"), Some(0));
             assert_eq!(cache.age_rank(&"item2"), Some(1));
 
-            // Step 3: Insert third item
+            // Step 3: Insert a third item
             cache.insert("item3", 3);
             assert_eq!(cache.len(), 3);
             assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
@@ -939,7 +939,7 @@ mod tests {
             // Verify oldest is still first
             assert_eq!(cache.peek_oldest(), Some((&"item1", &1)));
 
-            // Test that we're truly at capacity - next insert should evict
+            // Test that we're truly at capacity - the next insert should evict
             cache.insert("item5", 5);
             assert_eq!(cache.len(), 4); // Still at capacity
             assert!(!cache.contains(&"item1")); // First item evicted
@@ -998,7 +998,7 @@ mod tests {
             assert_eq!(batch_cache.len(), 0);
             assert_eq!(batch_cache.peek_oldest(), None);
 
-            // Method 3: Empty using clear operation
+            // Method 3: Empty using a clear operation
             let mut clear_cache = create_test_cache();
             clear_cache.clear();
             assert_eq!(clear_cache.len(), 0);
@@ -1031,7 +1031,7 @@ mod tests {
             partial_cache.insert("f", 6);
             assert_eq!(partial_cache.len(), 4); // Back to full
 
-            // Verify correct order maintained
+            // Verify the correct order maintained
             assert_eq!(partial_cache.peek_oldest(), Some((&"c", &3))); // "c" should be oldest
             assert_eq!(partial_cache.age_rank(&"c"), Some(0));
             assert_eq!(partial_cache.age_rank(&"d"), Some(1));
@@ -1057,7 +1057,7 @@ mod tests {
             assert_eq!(cache.len(), 2);
             assert!(!cache.contains(&"first"));
 
-            // Next pop should return second oldest
+            // The next pop should return second oldest
             assert_eq!(cache.pop_oldest(), Some(("second", "value2")));
             assert_eq!(cache.len(), 1);
         }
@@ -1074,7 +1074,7 @@ mod tests {
             assert_eq!(cache.len(), 2); // Should not change length
             assert!(cache.contains(&"first")); // Should still be present
 
-            // Multiple peeks should return same result
+            // Multiple peeks should return the same result
             assert_eq!(cache.peek_oldest(), Some((&"first", &"value1")));
         }
 
@@ -1102,7 +1102,7 @@ mod tests {
                 cache.insert(format!("key{}", i), format!("value{}", i));
             }
 
-            // Pop batch of 3 items
+            // Pop a batch of 3 items
             let batch = cache.pop_oldest_batch(3);
             assert_eq!(batch.len(), 3);
             assert_eq!(batch[0], ("key1".to_string(), "value1".to_string()));
@@ -1132,7 +1132,7 @@ mod tests {
         fn test_pop_oldest_empty_cache() {
             let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
 
-            // Pop from empty cache should return None
+            // Pop from the empty cache should return None
             assert_eq!(cache.pop_oldest(), None);
             assert_eq!(cache.len(), 0);
 
@@ -1158,7 +1158,7 @@ mod tests {
         fn test_peek_oldest_empty_cache() {
             let cache: FIFOCache<String, String> = FIFOCache::new(5);
 
-            // Peek at empty cache should return None
+            // Peek at the empty cache should return None
             assert_eq!(cache.peek_oldest(), None);
             assert_eq!(cache.len(), 0);
 
@@ -1196,7 +1196,7 @@ mod tests {
             assert_eq!(cache.age_rank(&"second"), Some(1));
             assert_eq!(cache.age_rank(&"third"), Some(2));
 
-            // Trigger eviction by adding fourth item
+            // Trigger eviction by adding a fourth item
             cache.insert("fourth", 4);
 
             // "first" should be evicted, ranks should shift
@@ -1280,7 +1280,7 @@ mod tests {
             assert_eq!(all_batch[2], ("key4", "value4"));
             assert_eq!(cache.len(), 0);
 
-            // Verify cache is completely empty
+            // Verify the cache is completely empty
             assert_eq!(cache.peek_oldest(), None);
             assert_eq!(cache.pop_oldest(), None);
 
@@ -1326,11 +1326,11 @@ mod tests {
 
             // The insertion_order VecDeque still has 3 entries, but "key1" is now stale
             assert_eq!(cache.insertion_order_len(), 3);
-            assert!(!cache.contains(&"key1")); // key1 is not in cache anymore
+            assert!(!cache.contains(&"key1")); // key1 is not in the cache anymore
             assert!(cache.contains(&"key2")); // key2 is still valid
             assert!(cache.contains(&"key3")); // key3 is still valid
 
-            // Add another item to get back to capacity (so next insert will trigger eviction)
+            // Add another item to get back to capacity (so the next insert will trigger eviction)
             cache.insert("temp", "temp_value");
             assert_eq!(cache.len(), 3);
 
@@ -1338,7 +1338,7 @@ mod tests {
             // This should skip over the stale "key1" entry and evict "key2" instead
             cache.insert("key4", "value4");
 
-            // Verify the eviction skipped stale entry and evicted the next valid entry
+            // Verifies the eviction skipped stale entry and evicted the next valid entry
             assert_eq!(cache.len(), 3); // Should remain at capacity
             assert!(!cache.contains(&"key1")); // Still not present (was stale)
             assert!(!cache.contains(&"key2")); // Should be evicted (oldest valid)
@@ -1461,7 +1461,7 @@ mod tests {
             cache.insert("stale3", "v3");
             cache.insert("valid", "valid_value");
 
-            // Remove first three to create consecutive stale entries
+            // Remove the first three to create consecutive stale entries
             cache.remove_from_cache_only(&"stale1");
             cache.remove_from_cache_only(&"stale2");
             cache.remove_from_cache_only(&"stale3");
@@ -1555,7 +1555,7 @@ mod tests {
             // Now we have test3, fill3 in HashMap (2 valid items)
             assert_eq!(cache.len(), 2);
 
-            // Add items to get back to capacity so next insert will trigger eviction
+            // Add items to get back to capacity so the next insert will trigger eviction
             cache.insert("temp1", "t1");
             cache.insert("temp2", "t2");
             assert_eq!(cache.len(), 4); // At capacity
