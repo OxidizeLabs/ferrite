@@ -1,6 +1,3 @@
-#![allow(clippy::all)]
-#![allow(unused_parens)]
-
 use std::collections::HashMap;
 use std::hint::black_box;
 
@@ -100,7 +97,7 @@ fn benchmark_linear_time(c: &mut Criterion) {
 
     // Test different data sizes - should show linear growth
     for size in [100, 500, 1_000, 5_000, 10_000] {
-        let data: Vec<i32> = (0..size).map(|i| i).collect();
+        let data: Vec<i32> = (0..size).collect();
         // Search for element that doesn't exist (worst case)
         let target = size + 1;
 
@@ -121,7 +118,7 @@ fn benchmark_quadratic_time(c: &mut Criterion) {
 
     // Use smaller sizes for quadratic algorithms
     for size in [50, 100, 200, 400, 800] {
-        let data: Vec<i32> = (0..size).map(|i| i).rev().collect(); // Worst case for bubble sort
+        let data: Vec<i32> = (0..size).rev().collect(); // Worst case for bubble sort
         let target = data[0] + data[1]; // Sum that exists
 
         group.bench_with_input(BenchmarkId::new("bubble_sort", size), &size, |b, _| {
@@ -145,7 +142,7 @@ fn benchmark_linearithmic_time(c: &mut Criterion) {
 
     // Test different data sizes for sorting
     for size in [100, 500, 1_000, 5_000, 10_000, 50_000] {
-        let data: Vec<i32> = (0..size).map(|i| (size - i)).collect(); // Reverse sorted (challenging)
+        let data: Vec<i32> = (0..size).map(|i| size - i).collect(); // Reverse sorted (challenging)
 
         group.bench_with_input(BenchmarkId::new("efficient_sort", size), &size, |b, _| {
             b.iter_batched(
@@ -191,7 +188,7 @@ fn benchmark_complexity_comparison(c: &mut Criterion) {
     });
 
     // Use smaller size for quadratic to avoid timeout
-    let small_data: Vec<i32> = (0..100).map(|i| (100 - i)).collect();
+    let small_data: Vec<i32> = (0..100).map(|i| 100 - i).collect();
     group.bench_function("O(n²)_bubble_sort", |b| {
         b.iter(|| black_box(bubble_sort(small_data.clone())))
     });

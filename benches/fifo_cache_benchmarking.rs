@@ -1,5 +1,3 @@
-#![allow(clippy::all)]
-
 use std::fs::{OpenOptions, create_dir_all};
 use std::hash::Hash;
 use std::hint::black_box;
@@ -576,7 +574,7 @@ mod fastrand {
     use std::cell::Cell;
 
     thread_local! {
-        static RNG: Cell<u64> = Cell::new(0x4d595df4d0f33173);
+        static RNG: Cell<u64> = const { Cell::new(0x4d595df4d0f33173) };
     }
 
     pub fn u64(range: std::ops::Range<u64>) -> u64 {
