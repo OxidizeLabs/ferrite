@@ -5,7 +5,7 @@
 //!
 //! ## Key Features
 //!
-//! - **Atomic Counters**: Lock-free tracking of total, completed, failed, and cancelled operations.
+//! - **Atomic Counters**: Lock-free tracking of total, completed, failed, and canceled operations.
 //! - **Throughput Tracking**: Monitors bytes read/written to calculate I/O bandwidth usage.
 //! - **Latency Analysis**:
 //!     - Tracks total, minimum, and maximum operation durations.

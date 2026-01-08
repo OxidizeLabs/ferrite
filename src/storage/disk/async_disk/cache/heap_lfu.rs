@@ -88,7 +88,7 @@
 //!   ═══════════════════════════════════════════════════════════════════════════
 //! ```
 //!
-//! ## Comparison: Standard LFU vs Heap LFU
+//! ## Comparison: Standard LFU vs. Heap LFU
 //!
 //! ```text
 //!   Standard LFUCache:

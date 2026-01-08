@@ -12,31 +12,31 @@
 //!          │
 //!          │ read_page(), write_page(), append_log(), sync(), ...
 //!          ▼
-//!   ┌─────────────────────────────────────────────────────────────────────────┐
-//!   │                         AsyncIOEngine                                   │
-//!   │                                                                         │
-//!   │   ┌─────────────────────────────────────────────────────────────────┐   │
-//!   │   │  Components                                                     │   │
-//!   │   │                                                                 │   │
-//!   │   │  ┌──────────────────┐  ┌──────────────────┐                     │   │
-//!   │   │  │ IOQueueManager   │  │CompletionTracker │                     │   │
-//!   │   │  │ (Arc<>)          │  │ (Arc<>)          │                     │   │
-//!   │   │  │                  │  │                  │                     │   │
-//!   │   │  │ Priority queue   │  │ Track operations │                     │   │
-//!   │   │  │ BinaryHeap       │  │ Oneshot channels │                     │   │
-//!   │   │  └────────┬─────────┘  └──────────────────┘                     │   │
-//!   │   │           │                                                     │   │
-//!   │   │           │ dequeue                                             │   │
-//!   │   │           ▼                                                     │   │
-//!   │   │  ┌──────────────────┐  ┌──────────────────┐                     │   │
-//!   │   │  │IOWorkerManager   │  │IOOperationExecutor│                    │   │
-//!   │   │  │                  │  │ (Arc<>)          │                     │   │
-//!   │   │  │ Worker pool      │  │                  │                     │   │
-//!   │   │  │ Concurrency      │──►│ Execute I/O     │                     │   │
-//!   │   │  │ Semaphore        │  │ Direct I/O      │                     │   │
-//!   │   │  └──────────────────┘  └──────────────────┘                     │   │
-//!   │   └─────────────────────────────────────────────────────────────────┘   │
-//!   └─────────────────────────────────────────────────────────────────────────┘
+//!   ┌──────────────────────────────────────────────────────────────────────────┐
+//!   │                         AsyncIOEngine                                    │
+//!   │                                                                          │
+//!   │   ┌──────────────────────────────────────────────────────────────────┐   │
+//!   │   │  Components                                                      │   │
+//!   │   │                                                                  │   │
+//!   │   │  ┌──────────────────┐  ┌──────────────────┐                      │   │
+//!   │   │  │ IOQueueManager   │  │CompletionTracker │                      │   │
+//!   │   │  │ (Arc<>)          │  │ (Arc<>)          │                      │   │
+//!   │   │  │                  │  │                  │                      │   │
+//!   │   │  │ Priority queue   │  │ Track operations │                      │   │
+//!   │   │  │ BinaryHeap       │  │ Oneshot channels │                      │   │
+//!   │   │  └────────┬─────────┘  └──────────────────┘                      │   │
+//!   │   │           │                                                      │   │
+//!   │   │           │ dequeue                                              │   │
+//!   │   │           ▼                                                      │   │
+//!   │   │  ┌──────────────────┐  ┌───────────────────┐                     │   │
+//!   │   │  │IOWorkerManager   │  │IOOperationExecutor│                     │   │
+//!   │   │  │                  │  │ (Arc<>)           │                     │   │
+//!   │   │  │ Worker pool      │  │                   │                     │   │
+//!   │   │  │ Concurrency      │─►│ Execute I/O       │                     │   │
+//!   │   │  │ Semaphore        │  │ Direct I/O        │                     │   │
+//!   │   │  └──────────────────┘  └───────────────────┘                     │   │
+//!   │   └──────────────────────────────────────────────────────────────────┘   │
+//!   └──────────────────────────────────────────────────────────────────────────┘
 //!          │
 //!          │ Returns oneshot::Receiver<OperationResult>
 //!          ▼
@@ -231,7 +231,6 @@
 
 use std::io::Result as IoResult;
 use std::sync::Arc;
-
 use tokio::fs::File;
 use tokio::sync::{Mutex, oneshot};
 
@@ -654,31 +653,30 @@ impl AsyncIOEngine {
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::disk::async_disk::io::AsyncIOEngine;
+    use crate::storage::disk::async_disk::io::operations::{IOOperationType, priorities};
+    use crate::storage::disk::async_disk::io::queue::IOQueueManager;
+    use std::sync::Arc;
+    use tempfile::TempDir;
     use tokio::fs::File;
-    use tokio::io::AsyncWriteExt;
-
-    use super::*;
+    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn test_async_io_engine_with_completion_tracking() {
-        // Create temporary files for testing
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_path = format!("/tmp/test_db_{}_{}.dat", std::process::id(), unique_id);
-        let log_path = format!("/tmp/test_log_{}_{}.dat", std::process::id(), unique_id);
-
-        // Create test files
-        let mut db_file = File::create(&db_path).await.unwrap();
-        let mut log_file = File::create(&log_path).await.unwrap();
-
-        // Write some initial data to ensure the files exist
-        db_file.write_all(&vec![0u8; 4096]).await.unwrap();
-        log_file.write_all(b"initial log data").await.unwrap();
-
-        // Close and reopen files
-        drop(db_file);
-        drop(log_file);
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir
+            .path()
+            .join("test_async_io_engine_with_completion_tracking.db")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join("test_async_io_engine_with_completion_tracking.log")
+            .to_str()
+            .unwrap()
+            .to_string();
 
         let db_file = Arc::new(Mutex::new(
             File::options()

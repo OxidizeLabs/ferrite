@@ -1,8 +1,8 @@
 //! # Advanced Cache Manager
 //!
 //! The `CacheManager` implements a sophisticated multi-level caching system designed to optimize
-//! disk I/O performance for the Async Disk Manager. It employs a tiered architecture to
-//! handle different data access patterns efficiently, distinguishing between hot, warm, and cold data.
+//! disk I/O performance for the Async Disk Manager. It uses a tiered architecture to handle
+//! different data access patterns efficiently, distinguishing between hot, warm, and cold data.
 //!
 //! ## System-Level Architecture
 //!

@@ -121,11 +121,11 @@
 //!
 //! ## Key Components
 //!
-//! | Component | Type | Purpose |
-//! |--------------------|-------------------------|-------------------------------|
-//! | `cache` | `HashMap<Arc<K>,Arc<V>>`| O(1) key-value storage |
-//! | `insertion_order` | `VecDeque<Arc<K>>` | Tracks insertion order |
-//! | `capacity` | `usize` | Maximum entries |
+//! | Component         | Type                     | Purpose                       |
+//! |-------------------|--------------------------|-------------------------------|
+//! | `cache`           | `HashMap<Arc<K>,Arc<V>>` | O(1) key-value storage        |
+//! | `insertion_order` | `VecDeque<Arc<K>>`       | Tracks insertion order        |
+//! | `capacity`        | `usize`                  | Maximum entries               |
 //!
 //! ## Core Operations (CoreCache)
 //!
@@ -143,12 +143,12 @@
 //!
 //! ## FIFO-Specific Operations (FIFOCacheTrait)
 //!
-//! | Method | Complexity | Description |
+//! | Method                | Complexity | Description                          |
 //! |-----------------------|------------|--------------------------------------|
-//! | `pop_oldest()` | O(1)* | Remove and return the oldest entry |
-//! | `peek_oldest()` | O(n)* | Peek at oldest without removing |
-//! | `pop_oldest_batch(n)` | O(n) | Remove the n oldest entries |
-//! | `age_rank(&k)` | O(n) | Get position (0 = oldest) |
+//! | `pop_oldest()`        | O(1)*      | Remove and return the oldest entry   |
+//! | `peek_oldest()`       | O(n)*      | Peek at oldest without removing      |
+//! | `pop_oldest_batch(n)` | O(n)       | Remove the n oldest entries          |
+//! | `age_rank(&k)`        | O(n)       | Get position (0 = oldest)            |
 //!
 //! \* May need to skip stale entries
 //!
@@ -168,12 +168,12 @@
 //!
 //! ## Trade-offs
 //!
-//! | Aspect | Pros | Cons |
+//! | Aspect           | Pros                              | Cons                            |
 //! |------------------|-----------------------------------|---------------------------------|
-//! | Simplicity | No access tracking needed | Can evict hot items |
-//! | Predictability | Deterministic eviction order | Ignores access patterns |
-//! | Performance | O(1) get (no order update) | O(n) for age_rank, peek |
-//! | Memory | Arc enables zero-copy sharing | Arc overhead per entry |
+//! | Simplicity       | No access tracking needed         | Can evict hot items             |
+//! | Predictability   | Deterministic eviction order      | Ignores access patterns         |
+//! | Performance      | O(1) get (no order update)        | O(n) for age_rank, peek         |
+//! | Memory           | Arc enables zero-copy sharing     | Arc overhead per entry.         |
 //!
 //! ## When to Use
 //!
@@ -248,12 +248,12 @@
 //!
 //! ## Comparison with Other Policies
 //!
-//! | Policy | Eviction Basis | Get Time | Evict Time | Best For |
-//! |----------|--------------------|----------|------------|-----------------------|
-//! | FIFO | Insertion order | O(1) | O(1) | Predictable behavior |
-//! | LRU | Recency | O(1)* | O(1) | Temporal locality |
-//! | LFU | Frequency | O(1) | O(n) | Stable access patterns|
-//! | LRU-K | K-th access | O(1) | O(n) | Scan resistance |
+//! | Policy   | Eviction Basis     | Get Time | Evict Time | Best For               |
+//! |----------|--------------------|----------|------------|------------------------|
+//! | FIFO     | Insertion order    | O(1)     | O(1)       | Predictable behavior   |
+//! | LRU      | Recency            | O(1)*    | O(1)       | Temporal locality      |
+//! | LFU      | Frequency          | O(1)     | O(n)       | Stable access patterns |
+//! | LRU-K    | K-th access        | O(1)     | O(n)       | Scan resistance        |
 //!
 //! \* LRU get requires order update
 //!

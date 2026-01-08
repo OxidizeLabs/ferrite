@@ -104,7 +104,7 @@
 //!   }
 //! ```
 //!
-//! ## Direct I/O vs Buffered I/O
+//! ## Direct I/O vs. Buffered I/O
 //!
 //! ```text
 //!   Database File (db_file)              Log File (log_file)
@@ -621,26 +621,27 @@ impl IOOperationExecutor {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::TempDir;
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
 
     use super::*;
 
-    async fn create_test_executor() -> (IOOperationExecutor, String, String) {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-
-        let db_path = format!(
-            "/tmp/test_executor_db_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
-        let log_path = format!(
-            "/tmp/test_executor_log_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
+    async fn create_test_executor(name: &str) -> (IOOperationExecutor, String, String) {
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir
+            .path()
+            .join(format!("{name}.db"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join(format!("{name}.log"))
+            .to_str()
+            .unwrap()
+            .to_string();
 
         // Create and initialize test files
         let mut db_file = File::create(&db_path).await.unwrap();
@@ -675,21 +676,21 @@ mod tests {
         (executor, db_path, log_path)
     }
 
-    async fn create_large_test_executor() -> (IOOperationExecutor, String, String) {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-
-        let db_path = format!(
-            "/tmp/test_executor_large_db_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
-        let log_path = format!(
-            "/tmp/test_executor_large_log_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
+    async fn create_large_test_executor(name: &str) -> (IOOperationExecutor, String, String) {
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir
+            .path()
+            .join(format!("{name}.db"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join(format!("{name}.log"))
+            .to_str()
+            .unwrap()
+            .to_string();
 
         // Create large test files
         let mut db_file = File::create(&db_path).await.unwrap();
@@ -726,7 +727,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_page_operations() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) = create_test_executor("test_page_operations").await;
 
         // Test page write
         let test_data = vec![42u8; 4096];
@@ -749,7 +750,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_operations() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) = create_test_executor("test_log_operations").await;
 
         // Test log append
         let log_data = b"test log entry";
@@ -779,7 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_operations() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) = create_test_executor("test_sync_operations").await;
 
         // Test database sync
         executor.execute_sync().await.unwrap();
@@ -794,7 +795,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_operation_type_execution_write_and_read() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_test_executor("test_operation_type_execution_write_and_read").await;
 
         let test_data = vec![123u8; 4096];
         let write_result = executor
@@ -819,7 +821,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_page_boundary_conditions() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_test_executor("test_page_boundary_conditions").await;
 
         // Test writing to page beyond current file size
         let test_data = vec![77u8; 4096];
@@ -843,7 +846,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_sequential_operations() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_test_executor("test_log_sequential_operations").await;
 
         let mut expected_offset = 11; // After "initial log"
 
@@ -877,7 +881,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_operations() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_test_executor("test_concurrent_operations").await;
+
         let executor = Arc::new(executor);
 
         let mut handles = Vec::new();
@@ -915,7 +921,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_log_operations() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_test_executor("test_concurrent_log_operations").await;
+
         let executor = Arc::new(executor);
 
         let mut handles = Vec::new();
@@ -956,7 +964,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_large_data_operations() {
-        let (executor, db_path, log_path) = create_large_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_large_test_executor("test_large_data_operations").await;
 
         // Test writing large page data
         let large_data = vec![0x55u8; 4096];
@@ -982,7 +991,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_integrity() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) = create_test_executor("test_data_integrity").await;
 
         // Write different patterns to multiple pages
         let patterns = [
@@ -1020,7 +1029,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_overwrite_integrity() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_test_executor("test_log_overwrite_integrity").await;
 
         // Write initial log entry
         let initial_data = b"initial log entry";
@@ -1061,7 +1071,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_handles_access() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) = create_test_executor("test_file_handles_access").await;
 
         // Test that we can get references to file handles
         let db_handle = executor.db_file();
@@ -1080,7 +1090,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_edge_case_empty_operations() {
-        let (executor, db_path, log_path) = create_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_test_executor("test_edge_case_empty_operations").await;
 
         // Test writing empty data
         let empty_data = vec![];
@@ -1102,7 +1113,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_stress_many_operations() {
-        let (executor, db_path, log_path) = create_large_test_executor().await;
+        let (executor, db_path, log_path) =
+            create_large_test_executor("test_stress_many_operations").await;
         let executor = Arc::new(executor);
 
         let num_operations = 100;

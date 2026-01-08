@@ -18,18 +18,18 @@
 //!   │   ┌─────────────────────────────────────────────────────────────────┐   │
 //!   │   │  worker_tasks: JoinSet<()>                                      │   │
 //!   │   │                                                                 │   │
-//!   │   │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │   │
-//!   │   │  │Worker 0 │  │Worker 1 │  │Worker 2 │  │  ...    │            │   │
-//!   │   │  │ (task)  │  │ (task)  │  │ (task)  │  │         │            │   │
-//!   │   │  └────┬────┘  └────┬────┘  └────┬────┘  └─────────┘            │   │
-//!   │   │       │            │            │                              │   │
-//!   │   │       └────────────┼────────────┘                              │   │
-//!   │   │                    │                                           │   │
-//!   │   │                    ▼                                           │   │
-//!   │   │       ┌────────────────────────────┐                           │   │
-//!   │   │       │ concurrency_limiter        │                           │   │
-//!   │   │       │ (Semaphore, max_ops)       │                           │   │
-//!   │   │       └────────────────────────────┘                           │   │
+//!   │   │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐             │   │
+//!   │   │  │Worker 0 │  │Worker 1 │  │Worker 2 │  │  ...    │             │   │
+//!   │   │  │ (task)  │  │ (task)  │  │ (task)  │  │         │             │   │
+//!   │   │  └────┬────┘  └────┬────┘  └────┬────┘  └─────────┘             │   │
+//!   │   │       │            │            │                               │   │
+//!   │   │       └────────────┼────────────┘                               │   │
+//!   │   │                    │                                            │   │
+//!   │   │                    ▼                                            │   │
+//!   │   │       ┌────────────────────────────┐                            │   │
+//!   │   │       │ concurrency_limiter        │                            │   │
+//!   │   │       │ (Semaphore, max_ops)       │                            │   │
+//!   │   │       └────────────────────────────┘                            │   │
 //!   │   └─────────────────────────────────────────────────────────────────┘   │
 //!   │                                                                         │
 //!   │   ┌─────────────────────────────────────────────────────────────────┐   │
@@ -75,7 +75,7 @@
 //!   │                              ┌───────────────┼───────────────┐          │
 //!   │                              │ Some(op)      │ None          │          │
 //!   │                              ▼               ▼               │          │
-//!   │                        process_operation  sleep(1ms)        │          │
+//!   │                        process_operation  sleep(1ms)         │          │
 //!   │                              │               │               │          │
 //!   │                              └───────────────┴───────────────┘          │
 //!   └───────────────────────────────┬─────────────────────────────────────────┘
@@ -600,7 +600,7 @@ impl Drop for IOWorkerManager {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-
+    use tempfile::TempDir;
     use tokio::fs::File;
     use tokio::io::AsyncWriteExt;
     use tokio::sync::Mutex;
@@ -609,28 +609,29 @@ mod tests {
     use crate::common::config::DB_PAGE_SIZE;
     use crate::storage::disk::async_disk::io::operations::{IOOperationType, priorities};
 
-    async fn create_test_components() -> (
+    async fn create_test_components(
+        name: &str,
+    ) -> (
         IOQueueManager,
         IOOperationExecutor,
         CompletionTracker,
         String,
         String,
     ) {
-        // Use a more unique identifier to prevent test interference
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-
-        let db_path = format!(
-            "/tmp/test_worker_db_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
-        let log_path = format!(
-            "/tmp/test_worker_log_{}_{}.dat",
-            std::process::id(),
-            unique_id
-        );
+        // Create a temporary directory
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir
+            .path()
+            .join(format!("{name}.db"))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let log_path = temp_dir
+            .path()
+            .join(format!("{name}.log"))
+            .to_str()
+            .unwrap()
+            .to_string();
 
         println!("Test files: db: {}, log: {}", db_path, log_path);
 
@@ -696,7 +697,7 @@ mod tests {
     #[tokio::test]
     async fn test_worker_lifecycle() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_worker_lifecycle").await;
 
         let mut worker_manager = IOWorkerManager::new(16);
 
@@ -727,7 +728,7 @@ mod tests {
     #[tokio::test]
     async fn test_operation_processing() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_operation_processing").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -776,7 +777,7 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_workers() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_multiple_workers").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -830,7 +831,7 @@ mod tests {
     #[tokio::test]
     async fn test_force_shutdown() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_force_shutdown").await;
 
         let mut worker_manager = IOWorkerManager::new(16);
         worker_manager.start_workers(
@@ -853,7 +854,7 @@ mod tests {
     #[tokio::test]
     async fn test_operation_error_handling() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_operation_error_handling").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -898,7 +899,7 @@ mod tests {
     #[tokio::test]
     async fn test_concurrency_limiting() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_concurrency_limiting").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -948,7 +949,7 @@ mod tests {
     #[tokio::test]
     async fn test_queue_overflow_handling() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_queue_overflow_handling").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1002,7 +1003,7 @@ mod tests {
     #[tokio::test]
     async fn test_priority_handling() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_priority_handling").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1069,7 +1070,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_queue_handling() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_empty_queue_handling").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1117,7 +1118,7 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_during_operations() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_shutdown_during_operations").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1185,7 +1186,7 @@ mod tests {
     #[tokio::test]
     async fn test_different_operation_types() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_different_operation_types").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1261,7 +1262,7 @@ mod tests {
     #[tokio::test]
     async fn test_worker_restart_after_shutdown() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_worker_restart_after_shutdown").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1318,7 +1319,7 @@ mod tests {
     #[tokio::test]
     async fn test_metrics_accuracy() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_metrics_accuracy").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1393,7 +1394,7 @@ mod tests {
     #[tokio::test]
     async fn test_semaphore_exhaustion() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_semaphore_exhaustion").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1447,7 +1448,7 @@ mod tests {
     #[tokio::test]
     async fn test_default_constructor() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_default_constructor").await;
 
         let mut worker_manager = IOWorkerManager::default();
 
@@ -1473,7 +1474,7 @@ mod tests {
     #[tokio::test]
     async fn test_concurrent_shutdown_calls() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_concurrent_shutdown_calls").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
@@ -1488,7 +1489,7 @@ mod tests {
         );
 
         // Call shutdown multiple times concurrently
-        let worker_manager = Arc::new(tokio::sync::Mutex::new(worker_manager));
+        let worker_manager = Arc::new(Mutex::new(worker_manager));
 
         let mut shutdown_tasks = Vec::new();
         for _ in 0..3 {
@@ -1515,7 +1516,7 @@ mod tests {
     #[tokio::test]
     async fn test_large_data_operations() {
         let (queue_manager, executor, completion_tracker, db_path, log_path) =
-            create_test_components().await;
+            create_test_components("test_large_data_operations").await;
 
         let queue_manager = Arc::new(queue_manager);
         let executor = Arc::new(executor);
