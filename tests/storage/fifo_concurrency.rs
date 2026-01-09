@@ -7,18 +7,17 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use ferrite::storage::disk::async_disk::cache::fifo::InstrumentedFifoCache;
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 
 mod thread_safe_wrapper {
     use super::*;
 
     // Helper type for thread-safe testing
-    type ThreadSafeInstrumentedFifoCache<K, V> = Arc<Mutex<InstrumentedFifoCache<K, V>>>;
+    type ThreadSafeFIFOCache<K, V> = Arc<Mutex<FIFOCache<K, V>>>;
 
     #[test]
     fn test_basic_thread_safe_operations() {
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(100)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(100)));
         let num_threads = 8;
         let operations_per_thread = 250;
         let success_count = Arc::new(AtomicUsize::new(0));
@@ -114,8 +113,7 @@ mod thread_safe_wrapper {
 
     #[test]
     fn test_read_heavy_workload() {
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(200)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(200)));
         let num_reader_threads = 12;
         let num_writer_threads = 2;
         let reads_per_thread = 500;
@@ -228,8 +226,7 @@ mod thread_safe_wrapper {
 
     #[test]
     fn test_write_heavy_workload() {
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(150)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(150)));
         let num_threads = 10;
         let writes_per_thread = 200;
         let total_writes = Arc::new(AtomicUsize::new(0));
@@ -312,8 +309,7 @@ mod thread_safe_wrapper {
 
     #[test]
     fn test_mixed_operations_concurrency() {
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(100)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(100)));
         let num_threads = 16;
         let operations_per_thread = 150;
         let operation_counts = Arc::new(AtomicUsize::new(0));
@@ -418,8 +414,7 @@ mod thread_safe_wrapper {
 
     #[test]
     fn test_deadlock_prevention() {
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(50)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(50)));
         let num_threads = 20;
         let timeout_duration = Duration::from_secs(10);
         let start_time = Instant::now();
@@ -489,8 +484,7 @@ mod thread_safe_wrapper {
 
     #[test]
     fn test_fairness_across_threads() {
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(80)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(80)));
         let num_threads = 8;
         let target_operations = 200;
         let test_duration = Duration::from_secs(5);
@@ -576,13 +570,12 @@ mod stress_testing {
     use super::*;
 
     // Helper type for thread-safe testing
-    type ThreadSafeInstrumentedFifoCache<K, V> = Arc<Mutex<InstrumentedFifoCache<K, V>>>;
+    type ThreadSafeFIFOCache<K, V> = Arc<Mutex<FIFOCache<K, V>>>;
 
     #[test]
     fn test_high_contention_scenario() {
         // Many threads accessing same small set of keys
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(50)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(50)));
         let num_threads = 20;
         let operations_per_thread = 500;
         let hot_keys = 10; // Small set of hotly contested keys
@@ -663,8 +656,7 @@ mod stress_testing {
     #[test]
     fn test_cache_thrashing_scenario() {
         // Rapid insertions causing constant evictions (cache thrashing)
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(100)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(100)));
         let num_threads = 15;
         let operations_per_thread = 300;
         let key_space_multiplier = 10; // 10x more keys than capacity
@@ -756,8 +748,7 @@ mod stress_testing {
     #[test]
     fn test_long_running_stability() {
         // Verify stability over extended periods with continuous load
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(200)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(200)));
         let num_threads = 8;
         let test_duration = Duration::from_secs(15); // Extended test
         let stability_check_interval = Duration::from_secs(3);
@@ -888,8 +879,8 @@ mod stress_testing {
     fn test_memory_pressure_scenario() {
         // Test behavior with large cache and memory-intensive operations
         let large_capacity = 5000;
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(large_capacity)));
+        let cache: ThreadSafeFIFOCache<String, String> =
+            Arc::new(Mutex::new(FIFOCache::new(large_capacity)));
         let num_threads = 12;
         let operations_per_thread = 500;
 
@@ -971,8 +962,7 @@ mod stress_testing {
     #[test]
     fn test_rapid_thread_creation_destruction() {
         // Test with threads being created and destroyed rapidly
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(150)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(150)));
         let num_thread_waves = 20;
         let threads_per_wave = 10;
         let operations_per_thread = 50;
@@ -1053,8 +1043,7 @@ mod stress_testing {
     #[test]
     fn test_burst_load_handling() {
         // Test handling of sudden burst loads
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(300)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(300)));
         let burst_threads = 25;
         let operations_per_burst_thread = 100;
         let background_threads = 5;
@@ -1180,8 +1169,7 @@ mod stress_testing {
     #[test]
     fn test_gradual_load_increase() {
         // Test behavior as load gradually increases
-        let cache: ThreadSafeInstrumentedFifoCache<String, String> =
-            Arc::new(Mutex::new(InstrumentedFifoCache::new(200)));
+        let cache: ThreadSafeFIFOCache<String, String> = Arc::new(Mutex::new(FIFOCache::new(200)));
         let max_threads = 20;
         let operations_per_thread = 100;
         let ramp_up_steps = 10;

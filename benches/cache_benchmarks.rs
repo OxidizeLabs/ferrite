@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use ferrite::storage::disk::async_disk::cache::cache_traits::CoreCache;
-use ferrite::storage::disk::async_disk::cache::fifo::InstrumentedFifoCache;
+use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
 use std::hint::black_box;
 
 fn benchmark_fifo_cache_operations(c: &mut Criterion) {
@@ -17,7 +17,7 @@ fn benchmark_fifo_cache_operations(c: &mut Criterion) {
             &size,
             |b, &size| {
                 // Setup
-                let mut cache = InstrumentedFifoCache::new(size);
+                let mut cache = FIFOCache::new(size);
 
                 // Fill cache to 80% capacity
                 let fill_count = (size as f64 * 0.8) as usize;
@@ -58,7 +58,7 @@ fn benchmark_fifo_eviction_complexity(c: &mut Criterion) {
                 b.iter_batched(
                     // Setup for each iteration
                     || {
-                        let mut cache = InstrumentedFifoCache::new(size);
+                        let mut cache = FIFOCache::new(size);
 
                         // Fill cache to capacity
                         for i in 0..size {
@@ -103,7 +103,7 @@ fn benchmark_cache_comparison(c: &mut Criterion) {
     // Compare different cache operations
     group.bench_function("fifo_insert", |b| {
         b.iter_batched(
-            || InstrumentedFifoCache::new(size),
+            || FIFOCache::new(size),
             |mut cache| {
                 for i in 0..100 {
                     cache.insert(
@@ -118,7 +118,7 @@ fn benchmark_cache_comparison(c: &mut Criterion) {
     });
 
     group.bench_function("fifo_get_hit", |b| {
-        let mut cache = InstrumentedFifoCache::new(size);
+        let mut cache = FIFOCache::new(size);
         for i in 0..100 {
             cache.insert(format!("key_{}", i), format!("value_{}", i));
         }
@@ -131,7 +131,7 @@ fn benchmark_cache_comparison(c: &mut Criterion) {
     });
 
     group.bench_function("fifo_get_miss", |b| {
-        let mut cache = InstrumentedFifoCache::new(size);
+        let mut cache = FIFOCache::new(size);
         for i in 0..100 {
             cache.insert(format!("key_{}", i), format!("value_{}", i));
         }
