@@ -271,7 +271,9 @@
 //! - **Update Semantics**: Updating existing key preserves insertion position
 //! - **Zero Capacity**: Supported - rejects all insertions
 
-use std::collections::{HashMap, VecDeque};
+use std::cell::Cell;
+use std::collections::{HashMap, VecDeque, hash_map};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -282,7 +284,16 @@ use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCache
 /// Evicts the oldest (first inserted) item when capacity is reached.
 /// See module-level documentation for details.
 #[derive(Debug)]
-pub struct FIFOCache<K, V>
+pub struct InstrumentedFifoCache<K, V>
+where
+    K: Eq + Hash,
+{
+    inner: FIFOCacheInner<K, V>,
+    metrics: FifoMetrics,
+}
+
+#[derive(Debug)]
+pub struct FIFOCacheInner<K, V>
 where
     K: Eq + Hash,
 {
@@ -291,41 +302,193 @@ where
     insertion_order: VecDeque<Arc<K>>, // Tracks the order of insertion
 }
 
-impl<K, V> FIFOCache<K, V>
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FifoMetricsSnapshot {
+    pub get_calls: u64,
+    pub get_hits: u64,
+    pub get_misses: u64,
+
+    pub insert_calls: u64,
+    pub insert_updates: u64,
+    pub insert_new: u64,
+
+    pub evict_calls: u64,
+    pub evicted_entries: u64,
+    pub stale_skips: u64, // queue entries popped that were already removed from map
+    pub evict_scan_steps: u64, // how many pop_front iterations inside eviction
+
+    pub pop_oldest_calls: u64,
+    pub pop_oldest_found: u64,
+    pub pop_oldest_empty_or_stale: u64,
+
+    pub peek_oldest_calls: u64,
+    pub peek_oldest_found: u64,
+
+    pub age_rank_calls: u64,
+    pub age_rank_found: u64,
+    pub age_rank_scan_steps: u64,
+
+    // gauges captured at snapshot time
+    pub cache_len: usize,
+    pub insertion_order_len: usize,
+    pub capacity: usize,
+}
+
+#[derive(Debug)]
+struct FifoMetrics {
+    get_calls: u64,
+    get_hits: u64,
+    get_misses: u64,
+    insert_calls: u64,
+    insert_updates: u64,
+    insert_new: u64,
+    evict_calls: u64,
+    evicted_entries: u64,
+    stale_skips: u64,
+    evict_scan_steps: u64,
+    pop_oldest_calls: u64,
+    pop_oldest_found: u64,
+    pop_oldest_empty_or_stale: u64,
+    peek_oldest_calls: MetricsCell,
+    peek_oldest_found: MetricsCell,
+    age_rank_calls: MetricsCell,
+    age_rank_scan_steps: MetricsCell,
+    age_rank_found: MetricsCell,
+}
+
+impl FifoMetrics {
+    fn new() -> FifoMetrics {
+        Self {
+            get_calls: 0,
+            get_hits: 0,
+            get_misses: 0,
+            insert_calls: 0,
+            insert_updates: 0,
+            insert_new: 0,
+            evict_calls: 0,
+            evicted_entries: 0,
+            stale_skips: 0,
+            evict_scan_steps: 0,
+            pop_oldest_calls: 0,
+            pop_oldest_found: 0,
+            pop_oldest_empty_or_stale: 0,
+            peek_oldest_calls: MetricsCell::new(),
+            peek_oldest_found: MetricsCell::new(),
+            age_rank_calls: MetricsCell::new(),
+            age_rank_scan_steps: MetricsCell::new(),
+            age_rank_found: MetricsCell::new(),
+        }
+    }
+}
+
+/// A metrics-only cell.
+///
+/// # Safety
+/// This type is only safe if all accesses are externally synchronized.
+/// In this system, it is protected by an RwLock at a higher level.
+#[repr(transparent)]
+#[derive(Debug)]
+struct MetricsCell(Cell<u64>);
+
+impl MetricsCell {
+    #[inline]
+    fn new() -> Self {
+        Self(Cell::new(0))
+    }
+
+    #[inline]
+    fn get(&self) -> u64 {
+        self.0.get()
+    }
+
+    #[inline]
+    fn incr(&self) {
+        self.0.set(self.0.get() + 1);
+    }
+}
+
+// SAFETY:
+// All access to MetricsCell is externally synchronized by an RwLock.
+// Metrics are observational and do not affect correctness.
+unsafe impl Sync for MetricsCell {}
+unsafe impl Send for MetricsCell {}
+
+impl<K, V> FIFOCacheInner<K, V>
 where
     K: Eq + Hash,
 {
-    /// Creates a new FIFO cache with the given capacity
-    pub fn new(capacity: usize) -> Self {
-        FIFOCache {
+    fn new(capacity: usize) -> Self {
+        Self {
             capacity,
             cache: HashMap::with_capacity(capacity),
             insertion_order: VecDeque::with_capacity(capacity),
+        }
+    }
+}
+
+impl<K, V> InstrumentedFifoCache<K, V>
+where
+    K: Eq + Hash,
+    V: Debug,
+{
+    /// Creates a new FIFO cache with the given capacity
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            inner: FIFOCacheInner::new(capacity),
+            metrics: FifoMetrics::new(),
         }
     }
 
     /// Returns the number of items currently in the cache.
     /// This is a duplicate of the CoreCache::len() method but provides direct access.
     pub fn current_size(&self) -> usize {
-        self.cache.len()
+        self.inner.cache.len()
     }
 
     /// Returns the insertion order length (may include stale entries).
     /// This is primarily for testing and debugging purposes.
     pub fn insertion_order_len(&self) -> usize {
-        self.insertion_order.len()
+        self.inner.insertion_order.len()
     }
 
     /// Checks if the internal cache HashMap contains a specific `Arc<K>`.
     /// This is primarily for testing stale entry behavior.
     pub fn cache_contains_key(&self, key: &Arc<K>) -> bool {
-        self.cache.contains_key(key)
+        self.inner.cache.contains_key(key)
     }
 
     /// Returns an iterator over the insertion order keys.
     /// This is primarily for testing and debugging purposes.
     pub fn insertion_order_iter(&self) -> impl Iterator<Item = &Arc<K>> {
-        self.insertion_order.iter()
+        self.inner.insertion_order.iter()
+    }
+
+    /// Returns snapshot metrics from the cache
+    /// Can be used to help understand the state of the cache
+    pub fn metrics_snapshot(&self) -> FifoMetricsSnapshot {
+        FifoMetricsSnapshot {
+            get_calls: self.metrics.get_calls,
+            get_hits: self.metrics.get_hits,
+            get_misses: self.metrics.get_misses,
+            insert_calls: self.metrics.insert_calls,
+            insert_updates: self.metrics.insert_updates,
+            insert_new: self.metrics.insert_new,
+            evict_calls: self.metrics.evict_calls,
+            evicted_entries: self.metrics.evicted_entries,
+            stale_skips: self.metrics.stale_skips,
+            evict_scan_steps: self.metrics.evict_scan_steps,
+            pop_oldest_calls: self.metrics.pop_oldest_calls,
+            pop_oldest_found: self.metrics.pop_oldest_found,
+            pop_oldest_empty_or_stale: self.metrics.pop_oldest_empty_or_stale,
+            peek_oldest_calls: self.metrics.peek_oldest_calls.get(),
+            peek_oldest_found: self.metrics.peek_oldest_found.get(),
+            age_rank_calls: self.metrics.age_rank_calls.get(),
+            age_rank_found: self.metrics.age_rank_found.get(),
+            age_rank_scan_steps: self.metrics.age_rank_scan_steps.get(),
+            cache_len: self.inner.cache.len(),
+            insertion_order_len: self.inner.insertion_order.len(),
+            capacity: self.inner.capacity,
+        }
     }
 
     /// Manually removes a key from the cache HashMap only (for testing stale entries).
@@ -334,10 +497,10 @@ where
     #[cfg(test)]
     pub fn remove_from_cache_only(&mut self, key: &K) -> Option<Arc<V>> {
         // Find the Arc<K> that matches this key
-        let arc_key = self.cache.keys().find(|k| k.as_ref() == key).cloned();
+        let arc_key = self.inner.cache.keys().find(|k| k.as_ref() == key).cloned();
 
         if let Some(arc_key) = arc_key {
-            self.cache.remove(&arc_key)
+            self.inner.cache.remove(&arc_key)
         } else {
             None
         }
@@ -346,37 +509,46 @@ where
     /// Returns the current cache HashMap capacity (for testing memory usage).
     #[cfg(test)]
     pub fn cache_capacity(&self) -> usize {
-        self.cache.capacity()
+        self.inner.cache.capacity()
     }
 
     /// Returns the current insertion order VecDeque capacity (for testing memory usage).
     #[cfg(test)]
     pub fn insertion_order_capacity(&self) -> usize {
-        self.insertion_order.capacity()
+        self.inner.insertion_order.capacity()
     }
 
     /// Evicts the oldest valid entry from the cache.
     /// Skips over any stale entries (keys that were lazily deleted).
     fn evict_oldest(&mut self) {
+        self.metrics.evict_calls += 1;
         // Keep popping from the front until we find a valid key or the queue is empty
-        while let Some(oldest_key) = self.insertion_order.pop_front() {
-            if self.cache.contains_key(&oldest_key) {
+        while let Some(oldest_key) = self.inner.insertion_order.pop_front() {
+            self.metrics.evict_scan_steps += 1;
+
+            if self.inner.cache.contains_key(&oldest_key) {
                 // Found a valid key, remove it and stop
-                self.cache.remove(&oldest_key);
+                self.inner.cache.remove(&oldest_key);
+                self.metrics.evicted_entries += 1;
                 break;
             }
             // Skip stale entries (keys that were already removed from the cache)
+            self.metrics.stale_skips += 1;
         }
     }
 }
 
-impl<K, V> CoreCache<K, V> for FIFOCache<K, V>
+impl<K, V> CoreCache<K, V> for InstrumentedFifoCache<K, V>
 where
     K: Eq + Hash,
+    V: Debug,
 {
     fn insert(&mut self, key: K, value: V) -> Option<V> {
+        // Update cache metrics
+        self.metrics.insert_calls += 1;
+
         // If capacity is 0, cannot store anything
-        if self.capacity == 0 {
+        if self.inner.capacity == 0 {
             return None;
         }
 
@@ -384,93 +556,85 @@ where
         let value_arc = Arc::new(value);
 
         // If the key already exists, update the value
-        if let std::collections::hash_map::Entry::Occupied(mut e) =
-            self.cache.entry(key_arc.clone())
-        {
-            return Some(e.insert(value_arc))
-                .map(|old_value_arc| {
-                    // Try to unwrap the Arc to get the original value
-                    match Arc::try_unwrap(old_value_arc) {
-                        Ok(old_value) => old_value,
-                        Err(_) => {
-                            // If unwrap fails, there are external references to this Arc<V>
-                            // This violates our cache's ownership model
-                            panic!("Failed to unwrap Arc<V> in insert - there are external references to the value");
-                        }
-                    }
-                });
+        if let hash_map::Entry::Occupied(mut e) = self.inner.cache.entry(key_arc.clone()) {
+            self.metrics.insert_updates += 1;
+
+            return Some(e.insert(value_arc)).map(|old_value_arc| {
+                Arc::try_unwrap(old_value_arc).expect("external Arc<V> references detected")
+            });
         }
 
+        self.metrics.insert_new += 1;
+
         // If the cache is at capacity, remove the oldest valid item (FIFO)
-        if self.cache.len() >= self.capacity {
+        if self.inner.cache.len() >= self.inner.capacity {
             self.evict_oldest();
         }
 
         // Add the new key to the insertion order and cache
         // Only the Arc pointers are cloned (8 bytes each), not the actual data
-        self.insertion_order.push_back(key_arc.clone());
-        self.cache.insert(key_arc, value_arc);
+        self.inner.insertion_order.push_back(key_arc.clone());
+        self.inner.cache.insert(key_arc, value_arc);
         None
     }
 
     fn get(&mut self, key: &K) -> Option<&V> {
+        self.metrics.get_calls += 1;
+
         // In FIFO, getting an item doesn't change its position
         // Use HashMap's O(1) lookup by leveraging Borrow trait
         // HashMap<Arc<K>, V> supports lookups with &K when K implements Borrow
-        self.cache.get(key).map(|v| v.as_ref())
+        match self.inner.cache.get(key) {
+            Some(v) => {
+                self.metrics.get_hits += 1;
+                Some(v.as_ref())
+            },
+            None => {
+                self.metrics.get_misses += 1;
+                None
+            },
+        }
     }
 
     fn contains(&self, key: &K) -> bool {
         // Use HashMap's O(1) lookup by leveraging Borrow trait
         // HashMap<Arc<K>, V> supports lookups with &K when K implements Borrow
-        self.cache.contains_key(key)
+        self.inner.cache.contains_key(key)
     }
 
     fn len(&self) -> usize {
-        self.cache.len()
+        self.inner.cache.len()
     }
 
     fn capacity(&self) -> usize {
-        self.capacity
+        self.inner.capacity
     }
 
     fn clear(&mut self) {
-        self.cache.clear();
-        self.insertion_order.clear();
+        self.inner.cache.clear();
+        self.inner.insertion_order.clear();
     }
 }
 
-impl<K, V> FIFOCacheTrait<K, V> for FIFOCache<K, V>
+impl<K, V> FIFOCacheTrait<K, V> for InstrumentedFifoCache<K, V>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + Debug,
+    V: Debug,
 {
     fn pop_oldest(&mut self) -> Option<(K, V)> {
+        self.metrics.pop_oldest_calls += 1;
+
         // Use the existing evict_oldest logic but return the key-value pair
-        while let Some(oldest_key_arc) = self.insertion_order.pop_front() {
-            if let Some(value_arc) = self.cache.remove(&oldest_key_arc) {
+        while let Some(oldest_key_arc) = self.inner.insertion_order.pop_front() {
+            if let Some(value_arc) = self.inner.cache.remove(&oldest_key_arc) {
+                self.metrics.pop_oldest_found += 1;
+
                 // Try to unwrap both Arcs to get the original key and value
                 // This should succeed since we just removed them from the cache
-                let key = match Arc::try_unwrap(oldest_key_arc) {
-                    Ok(key) => key,
-                    Err(_) => {
-                        // If unwrap fails, it means there are external references to this Arc<K>
-                        // This violates our cache's ownership model and shouldn't happen in normal usage
-                        panic!(
-                            "Failed to unwrap Arc<K> in pop_oldest - there are external references to the key"
-                        );
-                    },
-                };
-
-                let value = match Arc::try_unwrap(value_arc) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        // If unwrap fails, it means there are external references to this Arc<V>
-                        // This violates our cache's ownership model and shouldn't happen in normal usage
-                        panic!(
-                            "Failed to unwrap Arc<V> in pop_oldest - there are external references to the value"
-                        );
-                    },
-                };
+                let key =
+                    Arc::try_unwrap(oldest_key_arc).expect("external Arc<K> references detected");
+                let value =
+                    Arc::try_unwrap(value_arc).expect("external Arc<V> references detected");
 
                 return Some((key, value));
             }
@@ -480,9 +644,11 @@ where
     }
 
     fn peek_oldest(&self) -> Option<(&K, &V)> {
+        self.metrics.peek_oldest_calls.incr();
+
         // Find the first valid entry in the insertion order
-        for key_arc in &self.insertion_order {
-            if let Some(value_arc) = self.cache.get(key_arc) {
+        for key_arc in &self.inner.insertion_order {
+            if let Some(value_arc) = self.inner.cache.get(key_arc) {
                 return Some((key_arc.as_ref(), value_arc.as_ref()));
             }
         }
@@ -504,8 +670,8 @@ where
     fn age_rank(&self, key: &K) -> Option<usize> {
         // Find position in insertion order, accounting for stale entries
         let mut rank = 0;
-        for insertion_key_arc in &self.insertion_order {
-            if self.cache.contains_key(insertion_key_arc) {
+        for insertion_key_arc in &self.inner.insertion_order {
+            if self.inner.cache.contains_key(insertion_key_arc) {
                 if insertion_key_arc.as_ref() == key {
                     return Some(rank);
                 }
@@ -529,7 +695,7 @@ mod tests {
 
         #[test]
         fn test_basic_fifo_insertion_and_retrieval() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Test basic insertion and retrieval
             assert_eq!(cache.insert("key1", "value1"), None);
@@ -544,7 +710,7 @@ mod tests {
 
         #[test]
         fn test_fifo_eviction_order() {
-            let mut cache = FIFOCache::new(2);
+            let mut cache = InstrumentedFifoCache::new(2);
 
             // Fill cache to capacity
             cache.insert("first", "value1");
@@ -561,7 +727,7 @@ mod tests {
 
         #[test]
         fn test_capacity_enforcement() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Fill beyond capacity
             for i in 1..=5 {
@@ -579,7 +745,7 @@ mod tests {
 
         #[test]
         fn test_update_existing_key() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             cache.insert("key1", "original");
             cache.insert("key2", "value2");
@@ -593,7 +759,7 @@ mod tests {
 
         #[test]
         fn test_insertion_order_preservation() {
-            let mut cache = FIFOCache::new(4);
+            let mut cache = InstrumentedFifoCache::new(4);
 
             // Insert items in a specific order
             cache.insert("first", 1);
@@ -635,7 +801,7 @@ mod tests {
 
         #[test]
         fn test_key_operations_consistency() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Test consistency between contents, get, and len
             assert_eq!(cache.len(), 0);
@@ -716,7 +882,7 @@ mod tests {
 
         #[test]
         fn test_empty_cache_operations() {
-            let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
+            let mut cache: InstrumentedFifoCache<String, String> = InstrumentedFifoCache::new(5);
 
             assert_eq!(cache.get(&"nonexistent".to_string()), None);
             assert!(!cache.contains(&"nonexistent".to_string()));
@@ -730,7 +896,7 @@ mod tests {
 
         #[test]
         fn test_single_item_cache() {
-            let mut cache = FIFOCache::new(1);
+            let mut cache = InstrumentedFifoCache::new(1);
 
             cache.insert("only", "value1");
             assert_eq!(cache.len(), 1);
@@ -745,7 +911,7 @@ mod tests {
 
         #[test]
         fn test_zero_capacity_cache() {
-            let mut cache = FIFOCache::new(0);
+            let mut cache = InstrumentedFifoCache::new(0);
 
             // Should not be able to store anything
             cache.insert("key", "value");
@@ -756,7 +922,7 @@ mod tests {
 
         #[test]
         fn test_clear_operation() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             cache.insert("key1", "value1");
             cache.insert("key2", "value2");
@@ -771,7 +937,7 @@ mod tests {
 
         #[test]
         fn test_duplicate_key_handling() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Insert the initial key
             assert_eq!(cache.insert("key1", "value1"), None);
@@ -825,7 +991,7 @@ mod tests {
 
         #[test]
         fn test_boundary_conditions() {
-            let mut cache = FIFOCache::new(2);
+            let mut cache = InstrumentedFifoCache::new(2);
 
             // Test exactly at capacity
             cache.insert("key1", "value1");
@@ -880,7 +1046,7 @@ mod tests {
 
         #[test]
         fn test_empty_to_full_transition() {
-            let mut cache = FIFOCache::new(4);
+            let mut cache = InstrumentedFifoCache::new(4);
 
             // Start empty
             assert_eq!(cache.len(), 0);
@@ -951,7 +1117,7 @@ mod tests {
         fn test_full_to_empty_transition() {
             // Helper function to create cache with same initial state (avoids cloning)
             let create_test_cache = || {
-                let mut cache = FIFOCache::new(3);
+                let mut cache = InstrumentedFifoCache::new(3);
                 cache.insert("item1", 1);
                 cache.insert("item2", 2);
                 cache.insert("item3", 3);
@@ -1015,7 +1181,7 @@ mod tests {
             }
 
             // Test partial emptying and refilling
-            let mut partial_cache = FIFOCache::new(4);
+            let mut partial_cache = InstrumentedFifoCache::new(4);
             partial_cache.insert("a", 1);
             partial_cache.insert("b", 2);
             partial_cache.insert("c", 3);
@@ -1046,7 +1212,7 @@ mod tests {
 
         #[test]
         fn test_pop_oldest() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             cache.insert("first", "value1");
             cache.insert("second", "value2");
@@ -1064,7 +1230,7 @@ mod tests {
 
         #[test]
         fn test_peek_oldest() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             cache.insert("first", "value1");
             cache.insert("second", "value2");
@@ -1080,7 +1246,7 @@ mod tests {
 
         #[test]
         fn test_age_rank() {
-            let mut cache = FIFOCache::new(4);
+            let mut cache = InstrumentedFifoCache::new(4);
 
             cache.insert("first", "value1"); // rank 0 (oldest)
             cache.insert("second", "value2"); // rank 1
@@ -1096,7 +1262,7 @@ mod tests {
 
         #[test]
         fn test_pop_oldest_batch() {
-            let mut cache = FIFOCache::new(5);
+            let mut cache = InstrumentedFifoCache::new(5);
 
             for i in 1..=5 {
                 cache.insert(format!("key{}", i), format!("value{}", i));
@@ -1117,7 +1283,7 @@ mod tests {
 
         #[test]
         fn test_pop_oldest_batch_more_than_available() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             cache.insert("key1", "value1");
             cache.insert("key2", "value2");
@@ -1130,7 +1296,7 @@ mod tests {
 
         #[test]
         fn test_pop_oldest_empty_cache() {
-            let mut cache: FIFOCache<String, String> = FIFOCache::new(5);
+            let mut cache: InstrumentedFifoCache<String, String> = InstrumentedFifoCache::new(5);
 
             // Pop from the empty cache should return None
             assert_eq!(cache.pop_oldest(), None);
@@ -1156,7 +1322,7 @@ mod tests {
 
         #[test]
         fn test_peek_oldest_empty_cache() {
-            let cache: FIFOCache<String, String> = FIFOCache::new(5);
+            let cache: InstrumentedFifoCache<String, String> = InstrumentedFifoCache::new(5);
 
             // Peek at the empty cache should return None
             assert_eq!(cache.peek_oldest(), None);
@@ -1168,7 +1334,7 @@ mod tests {
             assert_eq!(cache.len(), 0);
 
             // Test peek after clear
-            let mut test_cache = FIFOCache::new(3);
+            let mut test_cache = InstrumentedFifoCache::new(3);
             test_cache.insert("key1".to_string(), "value1".to_string());
             test_cache.insert("key2".to_string(), "value2".to_string());
 
@@ -1184,7 +1350,7 @@ mod tests {
 
         #[test]
         fn test_age_rank_after_eviction() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Fill cache
             cache.insert("first", 1);
@@ -1242,7 +1408,7 @@ mod tests {
 
         #[test]
         fn test_batch_operations_edge_cases() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Test batch with count = 0
             cache.insert("key1", "value1");
@@ -1255,7 +1421,8 @@ mod tests {
             assert!(cache.contains(&"key2"));
 
             // Test batch on empty cache
-            let mut empty_cache: FIFOCache<String, String> = FIFOCache::new(5);
+            let mut empty_cache: InstrumentedFifoCache<String, String> =
+                InstrumentedFifoCache::new(5);
             let empty_batch = empty_cache.pop_oldest_batch(3);
             assert_eq!(empty_batch.len(), 0);
             assert_eq!(empty_cache.len(), 0);
@@ -1311,7 +1478,7 @@ mod tests {
 
         #[test]
         fn test_stale_entry_skipping_during_eviction() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Fill cache to capacity
             cache.insert("key1", "value1");
@@ -1357,7 +1524,7 @@ mod tests {
 
         #[test]
         fn test_insertion_order_consistency_with_stale_entries() {
-            let mut cache = FIFOCache::new(4);
+            let mut cache = InstrumentedFifoCache::new(4);
 
             // Fill cache
             cache.insert("a", 1);
@@ -1408,7 +1575,7 @@ mod tests {
 
         #[test]
         fn test_lazy_deletion_behavior() {
-            let mut cache = FIFOCache::new(3);
+            let mut cache = InstrumentedFifoCache::new(3);
 
             // Test 1: Stale entries accumulate until cleanup operations
             cache.insert("temp1", "value1");
@@ -1483,7 +1650,7 @@ mod tests {
 
         #[test]
         fn test_stale_entry_cleanup_during_operations() {
-            let mut cache = FIFOCache::new(4);
+            let mut cache = InstrumentedFifoCache::new(4);
 
             // Setup: Create cache with mix of valid and future stale entries
             cache.insert("will_be_stale1", "stale1");

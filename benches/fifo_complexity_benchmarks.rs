@@ -3,7 +3,7 @@ use criterion::{
     criterion_group, criterion_main,
 };
 use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
-use ferrite::storage::disk::async_disk::cache::fifo::FIFOCache;
+use ferrite::storage::disk::async_disk::cache::fifo::InstrumentedFifoCache;
 use std::hint::black_box;
 
 fn generate_cache_sizes() -> Vec<usize> {
@@ -46,7 +46,7 @@ fn benchmark_insert_time_complexity(c: &mut Criterion) {
             |b, &cache_size| {
                 b.iter_batched(
                     || {
-                        let mut cache = FIFOCache::new(cache_size);
+                        let mut cache = InstrumentedFifoCache::new(cache_size);
                         // Pre-fill to capacity-1 to avoid eviction effects
                         for i in 0..(cache_size - 1) {
                             cache.insert(i, i);
@@ -82,7 +82,7 @@ fn benchmark_get_time_complexity(c: &mut Criterion) {
             &cache_size,
             |b, &cache_size| {
                 // Setup: Create cache filled with data
-                let mut cache = FIFOCache::new(cache_size);
+                let mut cache = InstrumentedFifoCache::new(cache_size);
                 for i in 0..cache_size {
                     cache.insert(format!("key_{}", i), format!("value_{}", i));
                 }
@@ -114,7 +114,7 @@ fn benchmark_contains_time_complexity(c: &mut Criterion) {
             BenchmarkId::new("contains_operations", cache_size),
             &cache_size,
             |b, &cache_size| {
-                let mut cache = FIFOCache::new(cache_size);
+                let mut cache = InstrumentedFifoCache::new(cache_size);
                 for i in 0..cache_size {
                     cache.insert(format!("key_{}", i), format!("value_{}", i));
                 }
@@ -145,7 +145,7 @@ fn benchmark_eviction_time_complexity(c: &mut Criterion) {
             |b, &cache_size| {
                 b.iter_batched(
                     || {
-                        let mut cache = FIFOCache::new(cache_size);
+                        let mut cache = InstrumentedFifoCache::new(cache_size);
                         // Fill to capacity
                         for i in 0..cache_size {
                             cache.insert(format!("key_{}", i), format!("value_{}", i));
@@ -182,7 +182,7 @@ fn benchmark_eviction_time_complexity(c: &mut Criterion) {
                         cache.insert(key, value);
                         black_box(cache)
                     },
-                    criterion::BatchSize::SmallInput,
+                    BatchSize::SmallInput,
                 );
             },
         );
@@ -201,7 +201,7 @@ fn benchmark_age_rank_time_complexity(c: &mut Criterion) {
             BenchmarkId::new("age_rank_operations", cache_size),
             &cache_size,
             |b, &cache_size| {
-                let mut cache = FIFOCache::new(cache_size);
+                let mut cache = InstrumentedFifoCache::new(cache_size);
                 for i in 0..cache_size {
                     cache.insert(format!("key_{}", i), format!("value_{}", i));
                 }
@@ -231,7 +231,7 @@ fn benchmark_clear_time_complexity(c: &mut Criterion) {
             |b, &cache_size| {
                 b.iter_batched(
                     || {
-                        let mut cache = FIFOCache::new(cache_size);
+                        let mut cache = InstrumentedFifoCache::new(cache_size);
                         // Fill cache with data
                         for i in 0..cache_size {
                             cache.insert(
@@ -271,7 +271,7 @@ fn benchmark_memory_usage_patterns(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         // Create empty cache
-                        FIFOCache::<String, String>::new(cache_size)
+                        InstrumentedFifoCache::<String, String>::new(cache_size)
                     },
                     |mut cache| {
                         // Fill cache to capacity and measure allocation behavior
@@ -305,7 +305,7 @@ fn benchmark_memory_pressure_scenarios(c: &mut Criterion) {
             &value_size,
             |b, &value_size| {
                 b.iter_batched(
-                    || FIFOCache::<String, String>::new(1000),
+                    || InstrumentedFifoCache::<String, String>::new(1000),
                     |mut cache| {
                         let large_value = "x".repeat(value_size);
                         // Fill cache with large values to create memory pressure
@@ -337,7 +337,7 @@ fn benchmark_realistic_workloads(c: &mut Criterion) {
     // Small cache performance
     group.bench_function("small_cache_mixed_workload", |b| {
         b.iter_batched(
-            || FIFOCache::new(100),
+            || InstrumentedFifoCache::new(100),
             |mut cache| {
                 let mut hits = 0;
                 // Mixed workload: 33% inserts, 67% gets
@@ -360,7 +360,7 @@ fn benchmark_realistic_workloads(c: &mut Criterion) {
     // Medium cache performance
     group.bench_function("medium_cache_mixed_workload", |b| {
         b.iter_batched(
-            || FIFOCache::new(1000),
+            || InstrumentedFifoCache::new(1000),
             |mut cache| {
                 let mut hits = 0;
                 // Complex workload: 40% inserts, 60% gets
@@ -383,7 +383,7 @@ fn benchmark_realistic_workloads(c: &mut Criterion) {
     // Large cache performance
     group.bench_function("large_cache_batch_workload", |b| {
         b.iter_batched(
-            || FIFOCache::new(10000),
+            || InstrumentedFifoCache::new(10000),
             |mut cache| {
                 let mut hits = 0;
                 // Batch workload
@@ -462,7 +462,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
                     b.iter_batched(
                         || {
                             // Fresh cache per measurement
-                            let mut cache = FIFOCache::new(cache_size);
+                            let mut cache = InstrumentedFifoCache::new(cache_size);
                             // Prefill to ~80% to simulate realistic hit/miss behavior
                             let prefill = (cache_size as f64 * 0.8) as usize;
                             for (i, _item) in keys.iter().enumerate().take(prefill.min(working_set))
@@ -519,7 +519,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
                     b.iter_batched(
                         || {
                             // Fresh cache per measurement
-                            let mut cache = FIFOCache::new(cache_size);
+                            let mut cache = InstrumentedFifoCache::new(cache_size);
                             // Prefill to ~60% for random to bias toward more misses
                             let prefill = (cache_size as f64 * 0.6) as usize;
                             for (i, _item) in keys.iter().enumerate().take(prefill.min(working_set))
@@ -561,7 +561,7 @@ fn benchmark_eviction_scenarios(c: &mut Criterion) {
     // Heavy eviction - small cache, large key space
     group.bench_function("heavy_eviction", |b| {
         b.iter_batched(
-            || FIFOCache::new(500),
+            || InstrumentedFifoCache::new(500),
             |mut cache| {
                 // 10x more keys than capacity - forces constant eviction
                 for i in 0..15000 {
@@ -585,7 +585,7 @@ fn benchmark_eviction_scenarios(c: &mut Criterion) {
     group.bench_function("light_eviction", |b| {
         b.iter_batched(
             || {
-                let mut cache = FIFOCache::new(2000);
+                let mut cache = InstrumentedFifoCache::new(2000);
                 // Pre-populate with working set
                 for i in 0..1500 {
                     cache.insert(format!("stable_{}", i), format!("data_{}", i));
@@ -633,7 +633,7 @@ fn benchmark_fifo_operations(c: &mut Criterion) {
 
     // peek_oldest performance
     group.bench_function("peek_oldest", |b| {
-        let mut cache = FIFOCache::new(1000);
+        let mut cache = InstrumentedFifoCache::new(1000);
         for i in 0..1000 {
             cache.insert(format!("key_{}", i), format!("value_{}", i));
         }
@@ -645,7 +645,7 @@ fn benchmark_fifo_operations(c: &mut Criterion) {
     group.bench_function("pop_oldest", |b| {
         b.iter_batched(
             || {
-                let mut cache = FIFOCache::new(1000);
+                let mut cache = InstrumentedFifoCache::new(1000);
                 for i in 0..1000 {
                     cache.insert(format!("key_{}", i), format!("value_{}", i));
                 }
@@ -664,7 +664,7 @@ fn benchmark_fifo_operations(c: &mut Criterion) {
             |b, &batch_size| {
                 b.iter_batched(
                     || {
-                        let mut cache = FIFOCache::new(1000);
+                        let mut cache = InstrumentedFifoCache::new(1000);
                         for i in 0..1000 {
                             cache.insert(format!("key_{}", i), format!("value_{}", i));
                         }

@@ -121,7 +121,7 @@
 //! | `CacheManager`        | Central cache coordinator with three tiers           |
 //! | `LRUKCache`           | Hot cache with LRU-K (K=2) eviction                  |
 //! | `LFUCache`            | Warm cache with frequency-based eviction             |
-//! | `FIFOCache`           | Cold cache with FIFO eviction                        |
+//! | `InstrumentedFifoCache`           | Cold cache with FIFO eviction                        |
 //! | `AdmissionController` | Regulates cache entry based on memory pressure       |
 //! | `PrefetchEngine`      | Sequential and pattern-based prefetch prediction     |
 //! | `DeduplicationEngine` | Identifies duplicate page content                    |
@@ -237,7 +237,7 @@ use std::time::Instant;
 
 use tokio::sync::RwLock;
 
-use super::fifo::FIFOCache;
+use super::fifo::InstrumentedFifoCache;
 use super::lfu::LFUCache;
 use super::lru_k::LRUKCache;
 use crate::common::config::{DB_PAGE_SIZE, PageId};
@@ -818,7 +818,7 @@ pub struct CacheManager {
 
     /// L3 Cold Cache: FIFO based cache for newly inserted pages.
     /// Low overhead, ideal for one-time sequential scans.
-    cold_cache: Arc<RwLock<FIFOCache<PageId, PageData>>>,
+    cold_cache: Arc<RwLock<InstrumentedFifoCache<PageId, PageData>>>,
 
     /// Configured capacity for hot cache (number of entries).
     hot_cache_size: usize,
@@ -911,7 +911,7 @@ impl CacheManager {
         // Use LRU-K cache for hot cache (L1)
         let hot_cache = Arc::new(RwLock::new(LRUKCache::with_k(hot_cache_size, 2)));
         let warm_cache = Arc::new(RwLock::new(LFUCache::new(warm_cache_size)));
-        let cold_cache = Arc::new(RwLock::new(FIFOCache::new(cold_cache_size)));
+        let cold_cache = Arc::new(RwLock::new(InstrumentedFifoCache::new(cold_cache_size)));
 
         let prefetch_engine = Arc::new(RwLock::new(PrefetchEngine {
             access_patterns: HashMap::new(),
@@ -1069,11 +1069,10 @@ impl CacheManager {
 
         // Check L3 cold cache (FIFO)
         if let Ok(mut cold_cache) = self.cold_cache.try_write()
-            && let Some(page_data) =
-                <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(
-                    &mut cold_cache,
-                    &page_id,
-                )
+            && let Some(page_data) = <InstrumentedFifoCache<PageId, PageData> as CoreCache<
+                PageId,
+                PageData,
+            >>::get(&mut cold_cache, &page_id)
         {
             // Promote to warm cache on hit - clone the PageData (cheap with Arc)
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -1279,7 +1278,7 @@ impl CacheManager {
                     temperature: temperature.clone(),
                 };
                 if let Ok(mut cache) = self.cold_cache.try_write() {
-                    <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
+                    <InstrumentedFifoCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
                         &mut cache, page_id, page_data,
                     );
                 }
@@ -1515,7 +1514,7 @@ impl CacheManager {
         };
 
         let cold_used = if let Ok(cache) = self.cold_cache.try_read() {
-            <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
+            <InstrumentedFifoCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
         } else {
             0
         };
@@ -1585,14 +1584,16 @@ impl CacheManager {
             // High memory pressure - reduce cold cache size
             if let Ok(mut cold_cache) = self.cold_cache.try_write() {
                 let target_size = self.cold_cache_size / 2;
-                let current_size =
-                    <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cold_cache);
+                let current_size = <InstrumentedFifoCache<PageId, PageData> as CoreCache<
+                    PageId,
+                    PageData,
+                >>::len(&cold_cache);
                 if current_size > target_size {
                     // For FIFO cache, we can't easily evict specific items
                     // Instead, we'll clear part of the cache
                     if current_size > target_size * 2 {
                         let evicted_count = current_size as u64;
-                        <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(
+                        <InstrumentedFifoCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(
                             &mut cold_cache,
                         );
                         self.demotion_count
@@ -1669,7 +1670,7 @@ impl CacheManager {
         };
 
         let cold_used = if let Ok(cache) = self.cold_cache.try_read() {
-            <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
+            <InstrumentedFifoCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
         } else {
             0
         };
@@ -1966,7 +1967,7 @@ impl CacheManager {
     pub fn perform_specialized_maintenance(&self) {
         // Use FIFO-specific operations for cold cache
         if let Ok(cold_cache) = self.cold_cache.try_read()
-            && let Some((oldest_key, _)) = <FIFOCache<PageId, PageData> as FIFOCacheTrait<
+            && let Some((oldest_key, _)) = <InstrumentedFifoCache<PageId, PageData> as FIFOCacheTrait<
                 PageId,
                 PageData,
             >>::peek_oldest(&cold_cache)
@@ -2095,15 +2096,14 @@ impl CacheManager {
 
         if let Ok(cold_cache) = self.cold_cache.try_read() {
             // Check if page is in cold cache and get FIFO specific details
-            if <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(
+            if <InstrumentedFifoCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(
                 &cold_cache,
                 &page_id,
             ) {
-                let age_rank =
-                    <FIFOCache<PageId, PageData> as FIFOCacheTrait<PageId, PageData>>::age_rank(
-                        &cold_cache,
-                        &page_id,
-                    );
+                let age_rank = <InstrumentedFifoCache<PageId, PageData> as FIFOCacheTrait<
+                    PageId,
+                    PageData,
+                >>::age_rank(&cold_cache, &page_id);
 
                 return Some(PageAccessDetails {
                     cache_level: "Cold".to_string(),
