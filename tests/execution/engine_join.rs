@@ -219,6 +219,7 @@ async fn test_full_outer_join_operations() {
     assert!(success, "Full outer join query execution failed");
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore] // Marked as ignore in original implementation
 async fn test_cross_join_operations() {

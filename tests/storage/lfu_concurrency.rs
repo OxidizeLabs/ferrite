@@ -1,6 +1,7 @@
 // ==============================================
 // LFU CONCURRENCY TESTS (integration)
 // ==============================================
+#![cfg(not(miri))]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

@@ -107,6 +107,7 @@ impl ConcurrentTestContext {
     }
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_inserts() {
     let ctx = Arc::new(ConcurrentTestContext::new("concurrent_inserts").await);
@@ -183,6 +184,7 @@ async fn test_concurrent_inserts() {
     ctx.transaction_factory.commit_transaction(txn_ctx).await;
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_concurrent_updates() {
     let ctx = Arc::new(ConcurrentTestContext::new("concurrent_updates").await);
@@ -260,6 +262,7 @@ async fn test_concurrent_updates() {
     );
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_deadlock_detection() {
     let ctx = Arc::new(ConcurrentTestContext::new("deadlock_detection").await);
