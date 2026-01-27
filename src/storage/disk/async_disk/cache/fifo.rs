@@ -684,10 +684,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use super::*;
     use crate::storage::disk::async_disk::cache::cache_traits::{CoreCache, FIFOCacheTrait};
+    use crate::storage::disk::async_disk::cache::fifo::FIFOCache;
+    use std::collections::HashSet;
 
     // Basic FIFO Behavior Tests
     mod basic_behavior {
@@ -873,6 +872,24 @@ mod tests {
             assert_eq!(cache.get(&"key4"), None);
             assert_eq!(cache.peek_oldest(), None);
             assert_eq!(cache.pop_oldest(), None);
+        }
+
+        #[test]
+        fn test_basic_fifo_metrics() {
+            let mut cache = FIFOCache::new(3);
+
+            // Test basic insertion and retrieval
+            assert_eq!(cache.insert("key1", "value1"), None);
+            assert_eq!(cache.insert("key2", "value2"), None);
+            assert_eq!(cache.insert("key3", "value3"), None);
+
+            assert_eq!(cache.get(&"key1"), Some(&"value1"));
+            assert_eq!(cache.get(&"key2"), Some(&"value2"));
+            assert_eq!(cache.get(&"key3"), Some(&"value3"));
+            assert_eq!(cache.len(), 3);
+
+            assert_eq!(cache.metrics.insert_new, 3);
+            assert_eq!(cache.metrics.get_calls, 3);
         }
     }
 
