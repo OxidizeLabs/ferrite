@@ -24,7 +24,7 @@ mockall = { version = "0.14", optional = true }
 # Time and random utilities
 chrono = "0.4"
 chrono-tz = "0.10"
-rand = "0.9"
+rand = "0.10"
 
 # Serialization and hashing
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
