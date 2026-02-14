@@ -1,6 +1,7 @@
 // ==============================================
 // LRU-K PERFORMANCE TESTS (integration)
 // ==============================================
+#![cfg(not(miri))]
 
 // Lookup Performance Tests
 mod lookup_performance {

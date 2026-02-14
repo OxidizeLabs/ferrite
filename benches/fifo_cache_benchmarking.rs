@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::fs::{OpenOptions, create_dir_all};
 use std::hash::Hash;
 use std::hint::black_box;
@@ -636,7 +637,7 @@ fn build_random_ops(total_ops: usize, working_set: usize, insert_every: usize) -
     ops
 }
 
-fn prefill_cache<K: Clone + Eq + Hash, V: Clone>(
+fn prefill_cache<K: Clone + Eq + Hash, V: Clone + Debug>(
     cache: &mut FIFOCache<K, V>,
     keys: &[K],
     values: &[V],
@@ -648,7 +649,7 @@ fn prefill_cache<K: Clone + Eq + Hash, V: Clone>(
     }
 }
 
-fn run_ops_once<K: Clone + Eq + Hash, V: Clone>(
+fn run_ops_once<K: Clone + Eq + Hash, V: Clone + Debug>(
     cache: &mut FIFOCache<K, V>,
     keys: &[K],
     ops: &[Op],

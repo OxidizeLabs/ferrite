@@ -7,7 +7,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/ferritedb/ferrite"
-keywords = ["database", "dbms", "rust", "sql", "storage-engine"]
+keywords = ["database", "dbms", "sql", "storage-engine", "oltp"]
 categories = ["database-implementations", "asynchronous", "concurrency"]
 
 [dependencies]
@@ -162,3 +162,10 @@ mocking = ["dep:mockall"]
 # Development and testing features
 dev = ["server", "mocking"]
 full = ["cli", "client", "server"]
+
+# Patch section to fix Windows compilation issues
+# Issue: https://github.com/rust-lang/stacker/issues/87 (fixed but not yet released)
+[patch.crates-io]
+# Override stacker 0.1.22 which has a broken Windows backend
+# Using a commit with the fix until a new version is published
+stacker = { git = "https://github.com/rust-lang/stacker" }

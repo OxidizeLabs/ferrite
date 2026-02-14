@@ -1,6 +1,8 @@
 // ==============================================
 // LFU PERFORMANCE TESTS (integration)
 // ==============================================
+#![cfg(not(miri))]
+
 use std::time::{Duration, Instant};
 
 use ferrite::storage::disk::async_disk::cache::cache_traits::{

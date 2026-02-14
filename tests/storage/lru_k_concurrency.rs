@@ -1,3 +1,8 @@
+// ==============================================
+// LRU-K CONCURRENCY TESTS (integration)
+// ==============================================
+#![cfg(not(miri))]
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -5,10 +10,6 @@ use std::time::Duration;
 
 use ferrite::storage::disk::async_disk::cache::cache_traits::{CoreCache, LRUKCacheTrait};
 use ferrite::storage::disk::async_disk::cache::lru_k::LRUKCache;
-
-// ==============================================
-// LRU-K CONCURRENCY TESTS (integration)
-// ==============================================
 
 // Thread Safety Tests
 mod thread_safety {

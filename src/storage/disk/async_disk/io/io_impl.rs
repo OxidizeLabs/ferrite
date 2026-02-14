@@ -682,6 +682,8 @@ mod tests {
             File::options()
                 .read(true)
                 .write(true)
+                .create(true)
+                .truncate(true)
                 .open(&db_path)
                 .await
                 .unwrap(),
@@ -690,6 +692,8 @@ mod tests {
             File::options()
                 .read(true)
                 .write(true)
+                .create(true)
+                .truncate(true)
                 .open(&log_path)
                 .await
                 .unwrap(),

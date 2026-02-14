@@ -1,13 +1,14 @@
+// ==============================================
+// LRU CONCURRENCY TESTS (integration)
+// ==============================================
+#![cfg(not(miri))]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use ferrite::storage::disk::async_disk::cache::lru::ConcurrentLRUCache;
-
-// ==============================================
-// LRU CONCURRENCY TESTS (integration)
-// ==============================================
 
 mod thread_safety {
     use super::*;
