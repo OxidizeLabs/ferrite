@@ -49,7 +49,7 @@ tokio = { version = "1.49", default-features = false, features = [
 futures = "0.3"
 
 # SQL parsing and processing
-sqlparser = "0.60"
+sqlparser = "0.61"
 regex = "1.12"
 hex = "0.4"
 
