@@ -148,7 +148,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::column::Column;
 
@@ -170,7 +170,7 @@ use crate::catalog::column::Column;
 /// ];
 /// let schema = Schema::new(columns);
 /// ```
-#[derive(Debug, Clone, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schema {
     /// The ordered list of columns in this schema.
     columns: Vec<Column>,
@@ -618,8 +618,6 @@ impl AsRef<Schema> for Schema {
 
 #[cfg(test)]
 mod unit_tests {
-    use bincode::config;
-
     use super::*;
     use crate::types_db::type_id::TypeId;
 
@@ -631,10 +629,8 @@ mod unit_tests {
         ];
         let schema = Schema::new(columns);
 
-        let config = config::standard();
-        let serialized = bincode::encode_to_vec(&schema, config).unwrap();
-        let (deserialized, _): (Schema, usize) =
-            bincode::decode_from_slice(&serialized, config).unwrap();
+        let serialized = postcard::to_allocvec(&schema).unwrap();
+        let deserialized: Schema = postcard::from_bytes(&serialized).unwrap();
 
         assert_eq!(schema, deserialized);
     }
@@ -786,10 +782,8 @@ mod unit_tests {
         schema.set_primary_key_columns(vec![0]);
 
         // Test that primary keys are preserved during serialization
-        let config = config::standard();
-        let serialized = bincode::encode_to_vec(&schema, config).unwrap();
-        let (deserialized, _): (Schema, usize) =
-            bincode::decode_from_slice(&serialized, config).unwrap();
+        let serialized = postcard::to_allocvec(&schema).unwrap();
+        let deserialized: Schema = postcard::from_bytes(&serialized).unwrap();
 
         assert_eq!(
             schema.get_primary_key_columns(),

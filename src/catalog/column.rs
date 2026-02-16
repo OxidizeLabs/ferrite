@@ -166,7 +166,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::Value;
@@ -176,7 +176,7 @@ use crate::types_db::value::Value;
 /// A column captures type information, storage parameters, and SQL constraints.
 /// Columns are typically created using constructors like [`Column::new`] or the
 /// [`ColumnBuilder`] for more complex configurations.
-#[derive(Debug, Clone, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Column {
     /// The name of the column.
     column_name: String,
@@ -237,7 +237,7 @@ pub struct ColumnSqlInfo {
 ///
 /// Defines a reference to a column in another table with optional
 /// referential actions for DELETE and UPDATE operations.
-#[derive(Debug, Clone, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForeignKeyConstraint {
     /// The name of the referenced table.
     pub referenced_table: String,
@@ -253,7 +253,7 @@ pub struct ForeignKeyConstraint {
 ///
 /// Specifies what happens to dependent rows when a referenced row is
 /// deleted or updated.
-#[derive(Debug, Clone, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ReferentialAction {
     /// Delete or update dependent rows automatically.
     Cascade,
@@ -1101,9 +1101,8 @@ mod unit_tests {
     #[test]
     fn test_serialization_consistency() {
         let original = Column::new("test", TypeId::Integer);
-        let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
-        let (deserialized, _): (Column, usize) =
-            bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
+        let serialized = postcard::to_allocvec(&original).unwrap();
+        let deserialized: Column = postcard::from_bytes(&serialized).unwrap();
 
         assert_eq!(original, deserialized);
         assert_eq!(original.get_name(), deserialized.get_name());
@@ -1166,9 +1165,8 @@ mod unit_tests {
     #[test]
     fn test_primary_key_serialization() {
         let original = Column::new_primary_key("id", TypeId::Integer);
-        let serialized = bincode::encode_to_vec(&original, bincode::config::standard()).unwrap();
-        let (deserialized, _): (Column, usize) =
-            bincode::decode_from_slice(&serialized, bincode::config::standard()).unwrap();
+        let serialized = postcard::to_allocvec(&original).unwrap();
+        let deserialized: Column = postcard::from_bytes(&serialized).unwrap();
 
         assert!(deserialized.is_primary_key());
         assert_eq!(original.get_name(), deserialized.get_name());

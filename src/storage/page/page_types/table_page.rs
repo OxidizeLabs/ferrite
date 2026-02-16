@@ -53,12 +53,10 @@
 use std::any::Any;
 use std::mem::size_of;
 
-use bincode::{Decode, Encode};
 use log::{debug, error};
+use serde::{Deserialize, Serialize};
 
-use crate::common::config::{
-    DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE, storage_bincode_config,
-};
+use crate::common::config::{DB_PAGE_SIZE, INVALID_PAGE_ID, PageId, TUPLE_MAX_SERIALIZED_SIZE};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::{
@@ -109,7 +107,7 @@ pub struct TablePage {
     pin_count: i32,
 }
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TablePageHeader {
     page_id: PageId,
     next_page_id: PageId,
@@ -255,7 +253,7 @@ impl TablePage {
         }
 
         // Then serialize the tuple to get its actual size
-        let tuple_data = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
+        let tuple_data = match postcard::to_allocvec(tuple) {
             Ok(data) => data,
             Err(_) => return None,
         };
@@ -304,8 +302,7 @@ impl TablePage {
         }
 
         // Serialize the new tuple data
-        let tuple_data = bincode::encode_to_vec(tuple, storage_bincode_config())
-            .map_err(|_| PageError::SerializationError)?;
+        let tuple_data = postcard::to_allocvec(tuple).map_err(|_| PageError::SerializationError)?;
         let new_size = tuple_data.len() as u16;
 
         // Get current tuple info
@@ -490,11 +487,8 @@ impl TablePage {
         let end = start + *size as usize;
 
         // Deserialize tuple data
-        match bincode::decode_from_slice::<Tuple, _>(
-            &self.data[start..end],
-            storage_bincode_config(),
-        ) {
-            Ok((mut tuple, _)) => {
+        match postcard::from_bytes::<Tuple>(&self.data[start..end]) {
+            Ok(mut tuple) => {
                 // Tuple RID is not persisted; set it from the caller-provided RID.
                 tuple.set_rid(*rid);
 
@@ -590,7 +584,7 @@ impl TablePage {
             .tuple_info
             .iter()
             .map(|(_, _, meta)| {
-                4 + bincode::encode_to_vec(meta, storage_bincode_config())
+                4 + postcard::to_allocvec(meta)
                     .expect("Failed to serialize meta")
                     .len()
             })
@@ -631,8 +625,7 @@ impl TablePage {
             offset += 4;
 
             // Write tuple meta
-            let meta_bytes = bincode::encode_to_vec(meta, storage_bincode_config())
-                .expect("Failed to serialize meta");
+            let meta_bytes = postcard::to_allocvec(meta).expect("Failed to serialize meta");
 
             // Check if we have room for meta plus end magic
             if offset + meta_bytes.len() + 4 > buffer.len() {
@@ -735,12 +728,12 @@ impl TablePage {
                 i, tuple_offset, size
             );
 
-            // Read meta - use actual decoding to get the exact size consumed
-            let meta_result: Result<(TupleMeta, usize), _> =
-                bincode::decode_from_slice(&bytes[offset..], storage_bincode_config());
-
-            let (meta, meta_size) =
-                meta_result.map_err(|e| format!("Failed to deserialize meta: {}", e))?;
+            // Read meta - serialize to vec to determine exact encoded size
+            let meta: TupleMeta = postcard::from_bytes(&bytes[offset..])
+                .map_err(|e| format!("Failed to deserialize meta: {}", e))?;
+            let meta_size = postcard::to_allocvec(&meta)
+                .map_err(|e| format!("Failed to compute meta size: {}", e))?
+                .len();
 
             debug!("Deserialized meta with size {} bytes", meta_size);
             offset += meta_size;
@@ -839,7 +832,7 @@ impl TablePage {
         }
 
         // Serialize the new tuple data
-        let tuple_data = bincode::encode_to_vec(tuple, storage_bincode_config())
+        let tuple_data = postcard::to_allocvec(tuple)
             .map_err(|e| format!("Failed to serialize tuple: {}", e))?;
 
         // Get current tuple info
@@ -879,7 +872,7 @@ impl TablePage {
             .iter()
             .map(|(_, _, meta)| {
                 // 2 bytes offset + 2 bytes size + encoded meta
-                4 + bincode::encode_to_vec(meta, storage_bincode_config())
+                4 + postcard::to_allocvec(meta)
                     .expect("TupleMeta encoding should not fail")
                     .len()
             })
@@ -895,9 +888,7 @@ impl TablePage {
     }
 
     fn metadata_footprint_with_new(&self, meta: &TupleMeta) -> Option<usize> {
-        let meta_len = bincode::encode_to_vec(meta, storage_bincode_config())
-            .ok()?
-            .len();
+        let meta_len = postcard::to_allocvec(meta).ok()?.len();
         Some(
             1 // page type
                 + TablePageHeader::size()
@@ -945,7 +936,7 @@ impl TablePage {
     // Add a method to check if tuple is too large for any page
     pub fn is_tuple_too_large(&self, tuple: &Tuple) -> bool {
         // Get serialized size directly from the tuple to be more accurate
-        let serialized_size = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
+        let serialized_size = match postcard::to_allocvec(tuple) {
             Ok(data) => data.len(),
             Err(_) => return true, // If we can't serialize it, consider it too large
         };
@@ -1001,7 +992,7 @@ impl TablePage {
         }
 
         // Serialize tuple data
-        let tuple_data = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
+        let tuple_data = match postcard::to_allocvec(tuple) {
             Ok(data) => {
                 debug!("Serialized tuple data length: {}", data.len());
                 data
@@ -1086,7 +1077,7 @@ impl TablePage {
         // Skip RID validation - use the provided RID
 
         // Serialize tuple data
-        let tuple_data = match bincode::encode_to_vec(tuple, storage_bincode_config()) {
+        let tuple_data = match postcard::to_allocvec(tuple) {
             Ok(data) => {
                 debug!("Serialized tuple data length: {}", data.len());
                 data
@@ -1554,7 +1545,7 @@ mod tuple_operation_tests {
         // [PAGE_TYPE (1)] [header] [start magic (4)] [tuple offset+size (4)] [meta bytes] [end magic (4)]
         let header_start = PAGE_TYPE_OFFSET + 1;
         let header_size = TablePageHeader::size();
-        let meta_bytes = bincode::encode_to_vec(meta, storage_bincode_config()).unwrap();
+        let meta_bytes = postcard::to_allocvec(&meta).unwrap();
 
         let meta_start = header_start + header_size + 4 + 4;
         let expected_end_magic_offset = meta_start + meta_bytes.len();

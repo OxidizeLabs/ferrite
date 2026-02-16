@@ -298,8 +298,21 @@ where
 
 impl<K, V, C> BPlusTreeIndex<K, V, C>
 where
-    K: KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>,
-    V: ValueType + Send + Sync + 'static + PartialEq + bincode::Encode + bincode::Decode<()>,
+    K: KeyType
+        + Send
+        + Sync
+        + Debug
+        + Display
+        + 'static
+        + serde::Serialize
+        + serde::de::DeserializeOwned,
+    V: ValueType
+        + Send
+        + Sync
+        + 'static
+        + PartialEq
+        + serde::Serialize
+        + serde::de::DeserializeOwned,
     C: KeyComparator<K> + Fn(&K, &K) -> Ordering + Send + Sync + 'static + Clone,
 {
     /// Create a new B+ Tree index

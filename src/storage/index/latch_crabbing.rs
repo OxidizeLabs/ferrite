@@ -169,12 +169,19 @@ use crate::storage::page::page_types::b_plus_tree_leaf_page::BPlusTreeLeafPage;
 /// This combines all the bounds needed for keys in B+ tree operations,
 /// reducing repetition across generic implementations.
 pub trait BPlusTreeKeyBound:
-    KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>
+    KeyType + Send + Sync + Debug + Display + 'static + serde::Serialize + serde::de::DeserializeOwned
 {
 }
 
 impl<T> BPlusTreeKeyBound for T where
-    T: KeyType + Send + Sync + Debug + Display + 'static + bincode::Encode + bincode::Decode<()>
+    T: KeyType
+        + Send
+        + Sync
+        + Debug
+        + Display
+        + 'static
+        + serde::Serialize
+        + serde::de::DeserializeOwned
 {
 }
 
@@ -619,7 +626,7 @@ pub trait NodeSafety {
 impl<K, V, C> NodeSafety for BPlusTreeLeafPage<K, V, C>
 where
     K: BPlusTreeKeyBound,
-    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
+    V: Clone + Send + Sync + 'static + serde::Serialize + serde::de::DeserializeOwned,
     C: BPlusTreeComparatorBound<K>,
 {
     fn is_safe_for(&self, operation: OperationType) -> bool {
@@ -671,7 +678,7 @@ where
 pub struct TraversalResult<K, V, C>
 where
     K: BPlusTreeKeyBound,
-    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
+    V: Clone + Send + Sync + 'static + serde::Serialize + serde::de::DeserializeOwned,
     C: BPlusTreeComparatorBound<K>,
 {
     /// The leaf page found
@@ -690,7 +697,7 @@ where
 impl<K, V, C> TraversalResult<K, V, C>
 where
     K: BPlusTreeKeyBound,
-    V: Clone + Send + Sync + 'static + bincode::Encode + bincode::Decode<()>,
+    V: Clone + Send + Sync + 'static + serde::Serialize + serde::de::DeserializeOwned,
     C: BPlusTreeComparatorBound<K>,
 {
     /// Create a new traversal result.

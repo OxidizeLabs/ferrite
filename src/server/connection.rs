@@ -217,7 +217,7 @@ use tokio::net::TcpStream;
 
 use crate::common::db_instance::DBInstance;
 use crate::common::exception::DBError;
-use crate::server::DatabaseResponse;
+use crate::server::{DatabaseRequest, DatabaseResponse};
 
 /// Atomic counter for generating unique client IDs.
 ///
@@ -467,7 +467,7 @@ async fn handle_client_request(
     client_id: u64,
 ) -> Result<DatabaseResponse, Box<dyn StdError>> {
     debug!("{}", format_log(client_id, "Request", "Parsing request"));
-    let (request, _) = bincode::decode_from_slice(data, bincode::config::standard())?;
+    let request: DatabaseRequest = postcard::from_bytes(data)?;
 
     debug!(
         "{}",
@@ -509,7 +509,7 @@ async fn send_response(
     stream: &mut TcpStream,
     response: DatabaseResponse,
 ) -> Result<(), Box<dyn StdError>> {
-    let data = bincode::encode_to_vec(&response, bincode::config::standard())?;
+    let data = postcard::to_allocvec(&response)?;
 
     // Send data in chunks if needed
     let mut offset = 0;

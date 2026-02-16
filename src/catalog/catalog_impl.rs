@@ -187,7 +187,6 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use bincode::{decode_from_slice, encode_to_vec};
 use log::{info, warn};
 use parking_lot::RwLock;
 
@@ -198,7 +197,7 @@ use crate::catalog::schema::Schema;
 use crate::catalog::system_catalog::{
     SYS_TABLES_OID, SystemCatalogSchemas, SystemCatalogTables, TableCatalogRow,
 };
-use crate::common::config::{IndexOidT, TableOidT, storage_bincode_config};
+use crate::common::config::{IndexOidT, TableOidT};
 use crate::concurrency::transaction_manager::TransactionManager;
 use crate::storage::index::b_plus_tree::BPlusTree;
 use crate::storage::index::{IndexInfo, IndexType};
@@ -666,8 +665,7 @@ impl Catalog {
         // Load snapshot first if available to seed faster rebuild
         if snapshot_path.exists()
             && let Ok(bytes) = fs::read(snapshot_path)
-            && let Ok((snapshot_rows, _)) =
-                decode_from_slice::<Vec<TableCatalogRow>, _>(&bytes, storage_bincode_config())
+            && let Ok(snapshot_rows) = postcard::from_bytes::<Vec<TableCatalogRow>>(&bytes)
         {
             for row in snapshot_rows {
                 if row.table_oid <= SYS_TABLES_OID {
@@ -698,7 +696,7 @@ impl Catalog {
         }
 
         if !rows.is_empty()
-            && let Ok(bytes) = encode_to_vec(&rows, storage_bincode_config())
+            && let Ok(bytes) = postcard::to_allocvec(&rows)
         {
             let _ = fs::write(snapshot_path, bytes);
         }
@@ -708,17 +706,16 @@ impl Catalog {
     ///
     /// Deserializes the schema from the row and reopens the table heap.
     fn row_to_table_info(&self, row: &TableCatalogRow) -> Option<TableInfo> {
-        let (schema, _): (Schema, usize) =
-            match decode_from_slice::<Schema, _>(&row.schema_bin, storage_bincode_config()) {
-                Ok(res) => res,
-                Err(err) => {
-                    warn!(
-                        "Failed to decode schema for table {}: {}",
-                        row.table_oid, err
-                    );
-                    return None;
-                },
-            };
+        let schema: Schema = match postcard::from_bytes::<Schema>(&row.schema_bin) {
+            Ok(res) => res,
+            Err(err) => {
+                warn!(
+                    "Failed to decode schema for table {}: {}",
+                    row.table_oid, err
+                );
+                return None;
+            },
+        };
 
         let heap = Arc::new(TableHeap::reopen(
             self.bpm.clone(),
@@ -742,9 +739,7 @@ impl Catalog {
     /// Serializes the schema and inserts a row into the system tables heap
     /// for persistence.
     fn record_system_table(&self, table_info: &TableInfo, schema: &Schema) {
-        let encoded_schema =
-            bincode::encode_to_vec(schema, crate::common::config::storage_bincode_config())
-                .unwrap_or_default();
+        let encoded_schema = postcard::to_allocvec(schema).unwrap_or_default();
 
         let row = TableCatalogRow {
             table_oid: table_info.get_table_oidt(),
@@ -780,9 +775,7 @@ impl Catalog {
         unique: bool,
         index_type: IndexType,
     ) {
-        let encoded_schema =
-            bincode::encode_to_vec(key_schema, crate::common::config::storage_bincode_config())
-                .unwrap_or_default();
+        let encoded_schema = postcard::to_allocvec(key_schema).unwrap_or_default();
         let row = crate::catalog::system_catalog::IndexCatalogRow {
             index_oid,
             index_name: index_info.get_index_name().clone(),

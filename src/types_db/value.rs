@@ -2,12 +2,12 @@ use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 use crate::types_db::type_id::TypeId;
 use crate::types_db::types::{CmpBool, Type, get_type_size};
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Val {
     Boolean(bool),
     TinyInt(i8),
@@ -33,13 +33,13 @@ pub enum Val {
     Struct,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Encode, Decode)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Size {
     Length(usize),
     ElemTypeId(TypeId),
 }
 
-#[derive(Clone, Encode, Decode)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Value {
     pub value_: Val,
     pub size_: Size,
@@ -2499,28 +2499,21 @@ mod unit_tests {
     fn test_serialize_val() {
         // Test serialization of different Val variants
         let val_boolean = Val::Boolean(true);
-        let config = bincode::config::standard();
-        let serialized_boolean =
-            bincode::encode_to_vec(&val_boolean, config).expect("Serialization failed");
-        // We won't check exact binary representation as it may differ between bincode versions
+        let serialized_boolean = postcard::to_allocvec(&val_boolean).expect("Serialization failed");
 
         let val_integer = Val::Integer(42);
-        let serialized_integer =
-            bincode::encode_to_vec(&val_integer, config).expect("Serialization failed");
+        let serialized_integer = postcard::to_allocvec(&val_integer).expect("Serialization failed");
 
         let val_string = Val::VarLen("Hello".to_string());
-        let serialized_string =
-            bincode::encode_to_vec(&val_string, config).expect("Serialization failed");
+        let serialized_string = postcard::to_allocvec(&val_string).expect("Serialization failed");
 
         let val_vector = Val::Vector(vec![
             Value::from(Val::Integer(1)),
             Value::from(Val::Integer(2)),
         ]);
-        let serialized_vector =
-            bincode::encode_to_vec(&val_vector, config).expect("Serialization failed");
+        let serialized_vector = postcard::to_allocvec(&val_vector).expect("Serialization failed");
 
-        // Instead of checking exact binary representation which depends on bincode version,
-        // just verify data was serialized successfully
+        // Verify data was serialized successfully
         assert!(!serialized_boolean.is_empty());
         assert!(!serialized_integer.is_empty());
         assert!(!serialized_string.is_empty());
@@ -2529,38 +2522,32 @@ mod unit_tests {
 
     #[test]
     fn test_deserialize_val() {
-        let config = bincode::config::standard();
-
-        // Create test data with encode_to_vec and then decode it
+        // Create test data with to_allocvec and then decode it
         let val_boolean_original = Val::Boolean(true);
-        let binary_boolean =
-            bincode::encode_to_vec(&val_boolean_original, config).expect("Encoding failed");
-        let (deserialized_boolean, _): (Val, usize) =
-            bincode::decode_from_slice(&binary_boolean, config).expect("Deserialization failed");
+        let binary_boolean = postcard::to_allocvec(&val_boolean_original).expect("Encoding failed");
+        let deserialized_boolean: Val =
+            postcard::from_bytes(&binary_boolean).expect("Deserialization failed");
         assert_eq!(deserialized_boolean, Val::Boolean(true));
 
         let val_integer_original = Val::Integer(42);
-        let binary_integer =
-            bincode::encode_to_vec(&val_integer_original, config).expect("Encoding failed");
-        let (deserialized_integer, _): (Val, usize) =
-            bincode::decode_from_slice(&binary_integer, config).expect("Deserialization failed");
+        let binary_integer = postcard::to_allocvec(&val_integer_original).expect("Encoding failed");
+        let deserialized_integer: Val =
+            postcard::from_bytes(&binary_integer).expect("Deserialization failed");
         assert_eq!(deserialized_integer, Val::Integer(42));
 
         let val_string_original = Val::VarLen("Hello".to_string());
-        let binary_string =
-            bincode::encode_to_vec(&val_string_original, config).expect("Encoding failed");
-        let (deserialized_string, _): (Val, usize) =
-            bincode::decode_from_slice(&binary_string, config).expect("Deserialization failed");
+        let binary_string = postcard::to_allocvec(&val_string_original).expect("Encoding failed");
+        let deserialized_string: Val =
+            postcard::from_bytes(&binary_string).expect("Deserialization failed");
         assert_eq!(deserialized_string, Val::VarLen("Hello".to_string()));
 
         let val_vector_original = Val::Vector(vec![
             Value::from(Val::Integer(1)),
             Value::from(Val::Integer(2)),
         ]);
-        let binary_vector =
-            bincode::encode_to_vec(&val_vector_original, config).expect("Encoding failed");
-        let (deserialized_vector, _): (Val, usize) =
-            bincode::decode_from_slice(&binary_vector, config).expect("Deserialization failed");
+        let binary_vector = postcard::to_allocvec(&val_vector_original).expect("Encoding failed");
+        let deserialized_vector: Val =
+            postcard::from_bytes(&binary_vector).expect("Deserialization failed");
         assert_eq!(
             deserialized_vector,
             Val::Vector(vec![
@@ -2581,8 +2568,7 @@ mod unit_tests {
             struct_data: None,
         };
 
-        let config = bincode::config::standard();
-        let serialized = bincode::encode_to_vec(&value, config).expect("Serialization failed");
+        let serialized = postcard::to_allocvec(&value).expect("Serialization failed");
 
         // Simply verify the serialization produced non-empty data
         assert!(!serialized.is_empty());
@@ -2599,10 +2585,9 @@ mod unit_tests {
             struct_data: None,
         };
 
-        let config = bincode::config::standard();
-        let serialized = bincode::encode_to_vec(&value, config).expect("Serialization failed");
-        let (deserialized_value, _): (Value, usize) =
-            bincode::decode_from_slice(&serialized, config).expect("Deserialization failed");
+        let serialized = postcard::to_allocvec(&value).expect("Serialization failed");
+        let deserialized_value: Value =
+            postcard::from_bytes(&serialized).expect("Deserialization failed");
         assert_eq!(deserialized_value, value);
     }
 
@@ -2617,11 +2602,9 @@ mod unit_tests {
             struct_data: None,
         };
 
-        let config = bincode::config::standard();
-        let serialized =
-            bincode::encode_to_vec(&original_value, config).expect("Serialization failed");
-        let (deserialized, _): (Value, usize) =
-            bincode::decode_from_slice(&serialized, config).expect("Deserialization failed");
+        let serialized = postcard::to_allocvec(&original_value).expect("Serialization failed");
+        let deserialized: Value =
+            postcard::from_bytes(&serialized).expect("Deserialization failed");
         assert_eq!(original_value, deserialized);
     }
 

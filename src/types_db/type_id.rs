@@ -1,12 +1,14 @@
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 use crate::types_db::value::{Val, Value};
 
 // Every possible SQL type ID
-// NOTE: `TypeId` derives `bincode::Encode/Decode`. Changing variant order/shape will change the
+// NOTE: `TypeId` derives `Serialize/Deserialize`. Changing variant order/shape will change the
 // serialized representation.
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Encode, Decode)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub enum TypeId {
     Boolean = 0,
     TinyInt = 1,

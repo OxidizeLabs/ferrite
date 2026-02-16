@@ -1,8 +1,6 @@
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use bincode::config as bincode_config;
-
 /** Cycle detection is performed every CYCLE_DETECTION_INTERVAL milliseconds. */
 pub static CYCLE_DETECTION_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -54,28 +52,7 @@ pub const TXN_START_ID: TxnId = 1 << 63; // first txn id
 
 pub const VARCHAR_DEFAULT_LENGTH: usize = 64; // default length for varchar when constructing the column
 
-/// Bincode configuration for persisted (on-disk) encodings.
-///
-/// Keep this centralized so tuple/page/index encodings don’t accidentally diverge across call sites.
-/// NOTE: Changing this is an on-disk format change.
-#[inline]
-pub(crate) fn storage_bincode_config() -> impl bincode_config::Config {
-    // Pin the on-disk encoding policy explicitly.
-    //
-    // Using `standard()` alone is a policy choice that may change across bincode versions.
-    // We explicitly choose:
-    // - little-endian encoding
-    // - fixed-width integer encoding
-    //
-    // NOTE: Changing any of these is an on-disk format change.
-    // NOTE: We intentionally return an opaque config (`impl Config`) from call sites by letting
-    // bincode infer the concrete type; the concrete type changes when we change knobs (e.g.
-    // varint vs fixint), but call sites should not need to care.
-    //
-    // Unfortunately `bincode::config::Configuration` is an alias with a default integer encoding,
-    // so returning it directly would force that default. Keep the signature flexible by
-    // returning the inferred concrete type via `impl Config`.
-    bincode_config::standard()
-        .with_little_endian()
-        .with_fixed_int_encoding()
-}
+// Postcard uses a fixed configuration: little-endian varint encoding.
+// No configuration object is needed - all encoding is deterministic.
+// This comment is kept for documentation purposes so callers know the
+// on-disk format is tied to postcard's wire format.

@@ -172,10 +172,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::{fmt, thread};
 
-use bincode::{Decode, Encode};
 use log;
 use log::debug;
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 
 use crate::common::config::{
     INVALID_LSN, INVALID_TXN_ID, Lsn, TXN_START_ID, TableOidT, TimeStampOidT, Timestamp, TxnId,
@@ -208,7 +208,7 @@ pub enum TransactionState {
 ///
 /// Higher isolation levels provide stronger consistency guarantees but may
 /// reduce concurrency. See module-level documentation for visibility rules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum IsolationLevel {
     /// Allows dirty reads; sees uncommitted changes from other transactions.
     ReadUncommitted,

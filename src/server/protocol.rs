@@ -209,7 +209,7 @@
 //! - **Type Safety**: `PrepareOk` returns expected parameter types for validation
 //! - **Isolation Levels**: Passed as enum in `BeginTransaction` for explicit control
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 use crate::concurrency::transaction::IsolationLevel;
 use crate::types_db::type_id::TypeId;
@@ -221,7 +221,7 @@ use crate::types_db::value::Value;
 /// serialized via bincode and sent over TCP to the server.
 ///
 /// See the module-level documentation for the request/response mapping table.
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum DatabaseRequest {
     /// Execute a SQL query directly.
     ///
@@ -278,7 +278,7 @@ pub enum DatabaseRequest {
 ///
 /// Represents all possible responses the server can send back to the client.
 /// Each variant is serialized via bincode and sent over TCP.
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum DatabaseResponse {
     /// Successful query execution results.
     ///
@@ -324,7 +324,7 @@ pub enum DatabaseResponse {
 ///     messages: ["2 rows returned"],
 /// }
 /// ```
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct QueryResults {
     /// Names of the columns in the result set.
     ///

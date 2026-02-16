@@ -48,7 +48,7 @@ use std::any::Any;
 use std::fmt::Debug;
 use std::mem::size_of;
 
-use crate::common::config::{DB_PAGE_SIZE, PageId, storage_bincode_config};
+use crate::common::config::{DB_PAGE_SIZE, PageId};
 use crate::common::exception::PageError;
 use crate::common::rid::RID;
 use crate::storage::page::{PAGE_TYPE_OFFSET, Page, PageTrait, PageType, PageTypeId};
@@ -154,8 +154,8 @@ impl ExtendableHTableBucketPage {
         // Write entries
         for (value, rid) in &self.entries {
             // Serialize value
-            let value_bytes = bincode::encode_to_vec(value, storage_bincode_config())
-                .map_err(|_| PageError::SerializationError)?;
+            let value_bytes =
+                postcard::to_allocvec(value).map_err(|_| PageError::SerializationError)?;
             let value_size = value_bytes.len();
 
             // Write value size and data
@@ -196,11 +196,9 @@ impl ExtendableHTableBucketPage {
             offset += 4;
 
             // Deserialize value
-            let (value, _): (Value, _) = bincode::decode_from_slice(
-                &self.data[offset..offset + value_size as usize],
-                storage_bincode_config(),
-            )
-            .map_err(|_| PageError::DeserializationError)?;
+            let value: Value =
+                postcard::from_bytes(&self.data[offset..offset + value_size as usize])
+                    .map_err(|_| PageError::DeserializationError)?;
             offset += value_size as usize;
 
             // Read RID

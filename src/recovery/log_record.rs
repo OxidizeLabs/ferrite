@@ -170,10 +170,10 @@ use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use bincode::{Decode, Encode};
 use log::error;
+use serde::{Deserialize, Serialize};
 
-use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId, storage_bincode_config};
+use crate::common::config::{INVALID_LSN, Lsn, PageId, TxnId};
 use crate::common::rid::RID;
 use crate::storage::table::tuple::Tuple;
 
@@ -183,7 +183,7 @@ use crate::storage::table::tuple::Tuple;
 /// captured for crash recovery. See the module-level documentation for
 /// detailed descriptions of each type.
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogRecordType {
     /// Represents an invalid or uninitialized log record.
     Invalid = 0,
@@ -228,7 +228,7 @@ pub enum LogRecordType {
 /// - **Update**: `rid` + `old_tuple` + `new_tuple`
 /// - **NewPage**: `prev_page_id` + `page_id`
 /// - **Transaction (Begin/Commit/Abort)**: No additional payload
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LogRecord {
     /// Total serialized size in bytes, computed during construction.
     size: i32,
@@ -294,12 +294,23 @@ impl LogRecord {
     /// If encoding fails (which should not happen for valid records), an error
     /// is logged and the current size is left unchanged.
     fn refresh_size_from_encoding(&mut self) {
-        match bincode::encode_to_vec(&*self, storage_bincode_config()) {
-            Ok(bytes) => self.size = bytes.len() as i32,
-            Err(e) => {
-                // Encoding should be infallible for supported types; log and leave current size on error.
-                error!("Failed to encode log record for size calculation: {}", e);
-            },
+        // Compute the size matching `to_bytes()` output: 4-byte header + postcard payload.
+        // Postcard uses varint encoding, so changing `self.size` can change total length.
+        // Iterate until stable.
+        for _ in 0..5 {
+            match postcard::to_allocvec(&*self) {
+                Ok(bytes) => {
+                    let new_size = (4 + bytes.len()) as i32;
+                    if new_size == self.size {
+                        return;
+                    }
+                    self.size = new_size;
+                },
+                Err(e) => {
+                    error!("Failed to encode log record for size calculation: {}", e);
+                    return;
+                },
+            }
         }
     }
 
@@ -578,24 +589,42 @@ impl LogRecord {
         self.log_record_type == LogRecordType::Commit
     }
 
-    /// Serializes the log record to bytes using bincode 2.0.
+    /// Serializes the log record to bytes using postcard with a fixed 4-byte LE
+    /// length header for WAL framing.
+    ///
+    /// Wire format: `[total_len: u32 LE][postcard-encoded LogRecord]`
+    ///
+    /// The length header includes itself (4 bytes) + the postcard payload,
+    /// matching the convention that the first 4 bytes of the on-disk record
+    /// encode the full record size so the WAL iterator can frame records.
     ///
     /// # Returns
     /// A vector of bytes representing the serialized log record, or an error if serialization fails.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::error::EncodeError> {
-        bincode::encode_to_vec(self, storage_bincode_config())
+    pub fn to_bytes(&self) -> Result<Vec<u8>, postcard::Error> {
+        let payload = postcard::to_allocvec(self)?;
+        let total_len = (4 + payload.len()) as u32;
+        let mut out = Vec::with_capacity(total_len as usize);
+        out.extend_from_slice(&(total_len as i32).to_le_bytes());
+        out.extend_from_slice(&payload);
+        Ok(out)
     }
 
-    /// Deserializes a log record from bytes using bincode 2.0.
+    /// Deserializes a log record from bytes using postcard.
+    ///
+    /// Expects the format produced by [`to_bytes`](Self::to_bytes):
+    /// `[total_len: u32 LE][postcard payload]`.
     ///
     /// # Parameters
-    /// - `bytes`: The bytes to deserialize.
+    /// - `bytes`: The bytes to deserialize (including the 4-byte length header).
     ///
     /// # Returns
     /// A deserialized log record, or an error if deserialization fails.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
-        let (record, _) = bincode::decode_from_slice(bytes, storage_bincode_config())?;
-        Ok(record)
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, postcard::Error> {
+        if bytes.len() < 4 {
+            return Err(postcard::Error::DeserializeUnexpectedEnd);
+        }
+        // Skip the 4-byte length header
+        postcard::from_bytes(&bytes[4..])
     }
 }
 

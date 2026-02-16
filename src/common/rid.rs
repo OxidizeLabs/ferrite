@@ -190,7 +190,7 @@
 use std::fmt;
 use std::hash::Hash;
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 use crate::common::config::{INVALID_PAGE_ID, PageId};
 
@@ -200,7 +200,7 @@ use crate::common::config::{INVALID_PAGE_ID, PageId};
 /// the physical location of a tuple within a table heap.
 ///
 /// See module-level documentation for details.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, Decode)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Hash, Ord, Serialize, Deserialize)]
 pub struct RID {
     /// The page identifier within the table heap.
     page_id: PageId,

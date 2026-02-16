@@ -425,7 +425,7 @@ impl DatabaseClient {
     /// Uses bincode for compact binary serialization over the TCP stream.
     async fn send_request(&mut self, request: &DatabaseRequest) -> Result<(), DBError> {
         debug!("[Network] Serializing request");
-        let data = bincode::encode_to_vec(request, bincode::config::standard()).map_err(|e| {
+        let data = postcard::to_allocvec(request).map_err(|e| {
             error!("[Network] Failed to serialize request: {}", e);
             DBError::Internal(format!("Failed to serialize request: {}", e))
         })?;
@@ -463,13 +463,13 @@ impl DatabaseClient {
 
             buffer.extend_from_slice(&temp_buffer[..n]);
 
-            match bincode::decode_from_slice(&buffer, bincode::config::standard()) {
-                Ok((response, _)) => {
+            match postcard::from_bytes::<DatabaseResponse>(&buffer) {
+                Ok(response) => {
                     debug!("[Network] Received {} bytes total", buffer.len());
                     return Ok(response);
                 },
                 Err(e) => {
-                    // For bincode, we assume we need more data if decoding fails
+                    // We assume we need more data if decoding fails
                     if buffer.len() < 4096 {
                         continue;
                     }

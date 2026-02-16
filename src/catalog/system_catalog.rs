@@ -164,12 +164,12 @@
 
 use std::sync::Arc;
 
-use bincode::{Decode, Encode};
 use log::debug;
+use serde::{Deserialize, Serialize};
 
 use crate::catalog::column::Column;
 use crate::catalog::schema::Schema;
-use crate::common::config::{IndexOidT, PageId, TableOidT, storage_bincode_config};
+use crate::common::config::{IndexOidT, PageId, TableOidT};
 use crate::storage::table::table_heap::{TableHeap, TableInfo};
 use crate::types_db::type_id::TypeId;
 use crate::types_db::value::{Val, Value};
@@ -262,7 +262,7 @@ impl SystemCatalogSchemas {
 ///
 /// This struct provides bidirectional conversion between in-memory
 /// table metadata and the tuple format stored in the system catalog heap.
-#[derive(Debug, Encode, Decode, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TableCatalogRow {
     /// Unique object identifier for the table.
     pub table_oid: TableOidT,
@@ -318,7 +318,7 @@ impl TableCatalogRow {
 ///
 /// This struct provides conversion between in-memory index metadata and
 /// the tuple format stored in the system catalog heap.
-#[derive(Debug, Encode, Decode, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IndexCatalogRow {
     /// Unique object identifier for the index.
     pub index_oid: IndexOidT,
@@ -344,8 +344,7 @@ impl IndexCatalogRow {
     ///
     /// The `key_attrs` field is serialized using bincode before storage.
     pub fn to_values(&self) -> Vec<Value> {
-        let key_attrs_bin =
-            bincode::encode_to_vec(&self.key_attrs, storage_bincode_config()).unwrap_or_default();
+        let key_attrs_bin = postcard::to_allocvec(&self.key_attrs).unwrap_or_default();
         vec![
             Value::new(self.index_oid as i64),
             Value::new(self.index_name.clone()),
