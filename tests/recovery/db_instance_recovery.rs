@@ -5,6 +5,7 @@ use ferrite::concurrency::transaction::IsolationLevel;
 use crate::common::logger::init_test_logger;
 use crate::common::tempdb::temp_db_config;
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn db_instance_recovery_integration() {
     init_test_logger();

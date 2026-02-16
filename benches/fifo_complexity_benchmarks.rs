@@ -182,7 +182,7 @@ fn benchmark_eviction_time_complexity(c: &mut Criterion) {
                         cache.insert(key, value);
                         black_box(cache)
                     },
-                    criterion::BatchSize::SmallInput,
+                    BatchSize::SmallInput,
                 );
             },
         );

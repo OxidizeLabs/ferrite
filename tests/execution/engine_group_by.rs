@@ -620,6 +620,7 @@ async fn test_group_by_empty_table() {
     assert_eq!(schema.get_columns()[1].get_name(), "count");
 }
 
+#[cfg_attr(miri, ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
 async fn test_group_by_performance_large_dataset() {
     init_test_logger();
