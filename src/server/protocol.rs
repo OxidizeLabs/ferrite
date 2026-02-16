@@ -1,7 +1,7 @@
 //! # Server Protocol
 //!
 //! This module defines the wire protocol types for client-server communication in Ferrite.
-//! All types are serializable via bincode for efficient binary transmission over TCP.
+//! All types are serializable via postcard for efficient binary transmission over TCP.
 //!
 //! ## Architecture
 //!
@@ -16,7 +16,7 @@
 //!   │        ▼                                                                │
 //!   │   DatabaseRequest::Query("SELECT * FROM users")                         │
 //!   │        │                                                                │
-//!   │        │  bincode::encode()                                             │
+//!   │        │  postcard::to_allocvec()                                       │
 //!   │        ▼                                                                │
 //!   │   [binary bytes] ─────────────────────────────────────────────────────► │
 //!   └─────────────────────────────────────────────────────────────────────────┘
@@ -29,7 +29,7 @@
 //!   │ ◄─────────────────────────────────────────────────────────────────────  │
 //!   │   [binary bytes]                                                        │
 //!   │        │                                                                │
-//!   │        │  bincode::decode()                                             │
+//!   │        │  postcard::from_bytes()                                        │
 //!   │        ▼                                                                │
 //!   │   DatabaseRequest::Query("SELECT * FROM users")                         │
 //!   │        │                                                                │
@@ -37,7 +37,7 @@
 //!   │        ▼                                                                │
 //!   │   DatabaseResponse::Results(QueryResults { ... })                       │
 //!   │        │                                                                │
-//!   │        │  bincode::encode()                                             │
+//!   │        │  postcard::to_allocvec()                                       │
 //!   │        ▼                                                                │
 //!   │   [binary bytes] ─────────────────────────────────────────────────────► │
 //!   └─────────────────────────────────────────────────────────────────────────┘
@@ -50,7 +50,7 @@
 //!   │ ◄─────────────────────────────────────────────────────────────────────  │
 //!   │   [binary bytes]                                                        │
 //!   │        │                                                                │
-//!   │        │  bincode::decode()                                             │
+//!   │        │  postcard::from_bytes()                                        │
 //!   │        ▼                                                                │
 //!   │   DatabaseResponse::Results(QueryResults { ... })                       │
 //!   │        │                                                                │
@@ -142,7 +142,7 @@
 //!
 //! ## Serialization
 //!
-//! All types derive `bincode::Encode` and `bincode::Decode` for efficient binary
+//! All types derive `serde::Serialize` and `serde::Deserialize` for efficient binary
 //! serialization:
 //!
 //! ```text
@@ -163,12 +163,11 @@
 //!
 //! // Client sends query
 //! let request = DatabaseRequest::Query("SELECT * FROM users".to_string());
-//! let bytes = bincode::encode_to_vec(&request, bincode::config::standard())?;
+//! let bytes = postcard::to_allocvec(&request)?;
 //! // ... send bytes over TCP ...
 //!
 //! // Server receives and processes
-//! let (request, _): (DatabaseRequest, _) =
-//!     bincode::decode_from_slice(&bytes, bincode::config::standard())?;
+//! let request: DatabaseRequest = postcard::from_bytes(&bytes)?;
 //!
 //! // Server sends response
 //! let results = QueryResults::new(
@@ -179,7 +178,7 @@
 //!     ],
 //! );
 //! let response = DatabaseResponse::Results(results);
-//! let response_bytes = bincode::encode_to_vec(&response, bincode::config::standard())?;
+//! let response_bytes = postcard::to_allocvec(&response)?;
 //! // ... send response_bytes over TCP ...
 //!
 //! // Prepared statement workflow
@@ -218,7 +217,7 @@ use crate::types_db::value::Value;
 /// Client request to the database server.
 ///
 /// Represents all possible operations a client can request. Each variant is
-/// serialized via bincode and sent over TCP to the server.
+/// serialized via postcard and sent over TCP to the server.
 ///
 /// See the module-level documentation for the request/response mapping table.
 #[derive(Debug, Serialize, Deserialize)]
@@ -277,7 +276,7 @@ pub enum DatabaseRequest {
 /// Server response to a client request.
 ///
 /// Represents all possible responses the server can send back to the client.
-/// Each variant is serialized via bincode and sent over TCP.
+/// Each variant is serialized via postcard and sent over TCP.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DatabaseResponse {
     /// Successful query execution results.

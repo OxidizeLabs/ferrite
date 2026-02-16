@@ -114,7 +114,7 @@
 //!
 //! ## Serialization
 //!
-//! Log records use `bincode` 2.0 for compact binary serialization:
+//! Log records use [`postcard`](https://docs.rs/postcard) for compact binary serialization:
 //!
 //! ```rust,ignore
 //! // Serialize to WAL
@@ -163,7 +163,7 @@
 //!
 //! - `lsn` uses `AtomicU64` for lock-free updates
 //! - Log records are immutable after creation (except LSN assignment)
-//! - Implements `Encode`/`Decode` for bincode serialization
+//! - Implements `serde::Serialize`/`Deserialize` for postcard serialization
 
 use std::fmt::Debug;
 use std::mem::size_of;
@@ -274,7 +274,7 @@ impl LogRecord {
     /// Includes: `size` (i32) + `lsn` (AtomicU64) + `txn_id` (TxnId) + `prev_lsn` (Lsn)
     /// + `log_record_type` (LogRecordType as i32).
     ///
-    /// Note: Actual serialized size may differ due to bincode encoding.
+    /// Note: Actual serialized size may differ due to postcard encoding.
     /// Reserved for future serialization optimizations (fixed-size header parsing).
     #[allow(dead_code)]
     const HEADER_SIZE: usize = size_of::<i32>()
@@ -283,7 +283,7 @@ impl LogRecord {
         + size_of::<Lsn>()
         + size_of::<LogRecordType>();
 
-    /// Recalculates the `size` field based on the actual bincode-encoded length.
+    /// Recalculates the `size` field based on the actual postcard-encoded length.
     ///
     /// This method serializes the record to bytes and updates `self.size` with
     /// the exact encoded length. Called during construction to ensure the size
@@ -1061,7 +1061,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bincode_serialization_transaction_record() {
+    fn test_postcard_serialization_transaction_record() {
         let record =
             LogRecord::new_transaction_record(DUMMY_TXN_ID, DUMMY_PREV_LSN, LogRecordType::Begin);
 
@@ -1082,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bincode_serialization_insert_record() {
+    fn test_postcard_serialization_insert_record() {
         let tuple = create_test_tuple();
         let rid = tuple.get_rid();
 
@@ -1121,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bincode_serialization_update_record() {
+    fn test_postcard_serialization_update_record() {
         let old_tuple = create_test_tuple();
         let new_tuple = create_test_tuple_updated();
         let rid = old_tuple.get_rid();
@@ -1174,7 +1174,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bincode_serialization_new_page_record() {
+    fn test_postcard_serialization_new_page_record() {
         let record = LogRecord::new_page_record(
             DUMMY_TXN_ID,
             DUMMY_PREV_LSN,

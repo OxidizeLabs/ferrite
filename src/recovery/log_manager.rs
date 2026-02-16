@@ -553,7 +553,7 @@ impl LogManager {
             return None;
         }
 
-        // Try to deserialize using LogRecord's bincode implementation
+        // Try to deserialize using LogRecord's postcard implementation
         match LogRecord::from_bytes(data) {
             Ok(record) => Some(record),
             Err(e) => {

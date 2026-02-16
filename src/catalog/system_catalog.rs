@@ -47,7 +47,7 @@
 //! | table_name    | VarChar  | Name of the table              |
 //! | first_page_id | BigInt   | First page in table heap       |
 //! | last_page_id  | BigInt   | Last page in table heap        |
-//! | schema_bin    | Binary   | Serialized Schema (bincode)    |
+//! | schema_bin    | Binary   | Serialized Schema (postcard)   |
 //!
 //! ### `__indexes` Schema
 //!
@@ -342,7 +342,7 @@ impl IndexCatalogRow {
     /// The values are ordered to match the `__indexes` schema:
     /// `[index_oid, index_name, table_oid, unique, index_type, key_attrs, key_schema_bin]`
     ///
-    /// The `key_attrs` field is serialized using bincode before storage.
+    /// The `key_attrs` field is serialized using postcard before storage.
     pub fn to_values(&self) -> Vec<Value> {
         let key_attrs_bin = postcard::to_allocvec(&self.key_attrs).unwrap_or_default();
         vec![

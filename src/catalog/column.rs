@@ -152,7 +152,7 @@
 //!
 //! ## Serialization
 //!
-//! Columns implement `bincode::Encode` and `bincode::Decode` for efficient
+//! Columns implement `serde::Serialize` and `serde::Deserialize` for efficient
 //! binary serialization, used when persisting schema metadata to the system
 //! catalog tables.
 //!

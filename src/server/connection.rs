@@ -49,7 +49,7 @@
 //!        │
 //!        ▼
 //!   ┌────────────────────────────────────────────────────────────────────────┐
-//!   │  bincode::decode_from_slice() → DatabaseRequest                        │
+//!   │  postcard::from_bytes() → DatabaseRequest                              │
 //!   └────────────────────────────────────────────────────────────────────────┘
 //!        │
 //!        ▼
@@ -68,7 +68,7 @@
 //!        │
 //!        ▼
 //!   ┌────────────────────────────────────────────────────────────────────────┐
-//!   │  bincode::encode_to_vec(response) → bytes                              │
+//!   │  postcard::to_allocvec(response) → bytes                               │
 //!   └────────────────────────────────────────────────────────────────────────┘
 //!        │
 //!        ▼
@@ -446,17 +446,17 @@ fn format_client_error(error: &(dyn StdError + 'static)) -> String {
 
 /// Parses and dispatches a single client request.
 ///
-/// Decodes the raw bytes into a `DatabaseRequest` using bincode, then
+/// Decodes the raw bytes into a `DatabaseRequest` using postcard, then
 /// delegates to the database instance for execution.
 ///
 /// # Parameters
-/// - `data`: Raw bytes received from the client (bincode-encoded request).
+/// - `data`: Raw bytes received from the client (postcard-encoded request).
 /// - `db`: The database instance for query execution.
 /// - `client_id`: The unique identifier for this client connection.
 ///
 /// # Returns
 /// - `Ok(DatabaseResponse)`: The query executed successfully (or failed gracefully).
-/// - `Err(...)`: Request parsing failed (bincode decode error).
+/// - `Err(...)`: Request parsing failed (postcard decode error).
 ///
 /// # Note
 /// Query execution errors are converted to `DatabaseResponse::Error` and
@@ -490,7 +490,7 @@ async fn handle_client_request(
 
 /// Serializes and sends a response to the client.
 ///
-/// Encodes the response using bincode and writes it to the TCP stream.
+/// Encodes the response using postcard and writes it to the TCP stream.
 /// Handles partial writes by looping until all data is sent.
 ///
 /// # Parameters

@@ -177,7 +177,7 @@
 //!   up rebuild by caching serialized metadata
 //! - **OID generation**: Each database maintains its own OID counters for
 //!   tables and indexes
-//! - **Schema serialization**: Uses `bincode` for compact schema storage in
+//! - **Schema serialization**: Uses `postcard` for compact schema storage in
 //!   system catalog rows
 
 use core::fmt;

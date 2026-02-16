@@ -42,7 +42,7 @@
 //!
 //! # Serialization
 //!
-//! The page uses [`bincode`] for tuple and metadata serialization. Magic numbers
+//! The page uses [`postcard`](https://docs.rs/postcard) for tuple and metadata serialization. Magic numbers
 //! at the start and end of the slot directory provide basic corruption detection.
 //!
 //! # Thread Safety
@@ -75,13 +75,13 @@ use crate::storage::table::tuple::{Tuple, TupleMeta};
 ///   num_tuples (2), num_deleted_tuples (2).
 /// - Start magic (4 bytes): 0xDEADBEEF (big-endian) for basic corruption check.
 /// - Slot directory entries (one per tuple), packed front-to-back:
-///   [offset: u16][size: u16][TupleMeta (bincode-encoded, variable)]
+///   [offset: u16][size: u16][TupleMeta (postcard-encoded, variable)]
 /// - End magic (4 bytes): 0xCAFEBABE (big-endian) immediately after the last
 ///   encoded TupleMeta.
 /// - Tuple bodies: written from the end of the page backward; `offset` points
 ///   into this region.
 ///
-/// Tuple body format: `[TupleMeta][Tuple data]` (bincode).
+/// Tuple body format: `[TupleMeta][Tuple data]` (postcard).
 ///
 /// Text diagram (low addresses at left, high at right):
 ///

@@ -40,8 +40,8 @@
 //! # Generics
 //!
 //! The page is generic over:
-//! - `K`: Key type (must implement `KeyType`, `bincode::Encode/Decode`)
-//! - `V`: Value type (typically `RID`, must implement `bincode::Encode/Decode`)
+//! - `K`: Key type (must implement `KeyType`, `serde::Serialize`/`Deserialize`)
+//! - `V`: Value type (typically `RID`, must implement `serde::Serialize`/`Deserialize`)
 //! - `C`: Comparator function for key ordering
 //!
 //! # Size Constraints
@@ -52,7 +52,7 @@
 //!
 //! # Serialization
 //!
-//! Leaf pages serialize their contents using [`bincode`] for persistence.
+//! Leaf pages serialize their contents using [`postcard`](https://docs.rs/postcard) for persistence.
 
 use std::any::Any;
 use std::cmp::Ordering;
@@ -284,7 +284,7 @@ where
     }
 
     pub fn serialize(&self, buffer: &mut [u8]) {
-        // Simple serialization using bincode for keys and values
+        // Simple serialization using postcard for keys and values
         // Format:
         // [size: u32][max_size: u32][next_page_id: Option<PageId>][keys][values]
         let mut cursor = 0;

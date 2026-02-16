@@ -139,7 +139,7 @@
 //! ## Generics
 //!
 //! The tree is generic over:
-//! - `K: KeyType` - Key type (must be `bincode` serializable)
+//! - `K: KeyType` - Key type (must be postcard serializable via serde)
 //! - `V: ValueType` - Value type (typically `RID`)
 //! - `C: KeyComparator<K>` - Comparison function for keys
 

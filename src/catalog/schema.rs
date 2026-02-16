@@ -134,7 +134,7 @@
 //!
 //! ## Serialization
 //!
-//! `Schema` implements `bincode::Encode` and `bincode::Decode` for efficient
+//! `Schema` implements `serde::Serialize` and `serde::Deserialize` for efficient
 //! binary serialization, used when persisting schema metadata to the system
 //! catalog.
 //!

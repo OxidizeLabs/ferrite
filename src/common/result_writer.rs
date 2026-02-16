@@ -37,7 +37,7 @@
 //!           │                                    │
 //!           ▼                                    ▼
 //!   ┌─────────────────────┐          ┌──────────────────────────────────┐
-//!   │  Terminal Output    │          │  QueryResults (bincode → TCP)   │
+//!   │  Terminal Output    │          │  QueryResults (postcard → TCP)  │
 //!   │                     │          │                                  │
 //!   │  ┌───────┬───────┐  │          │  Sent to DatabaseClient          │
 //!   │  │ Name  │ Value │  │          │                                  │
@@ -128,7 +128,7 @@
 //!   │   messages: ["2 rows returned"]                                         │
 //!   │                                                                         │
 //!   │   → into_results() → QueryResults { column_names, rows, messages }      │
-//!   │   → bincode::encode → TCP → DatabaseClient                              │
+//!   │   → postcard::to_allocvec → TCP → DatabaseClient                        │
 //!   └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!

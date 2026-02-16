@@ -30,7 +30,7 @@
 //!   │                                     │                                │
 //!   └─────────────────────────────────────┼────────────────────────────────┘
 //!                                         │
-//!                                         │ TCP (bincode serialization)
+//!                                         │ TCP (postcard serialization)
 //!                                         │
 //!                                         ▼
 //!   ┌─────────────────────────────────────────────────────────────────────────┐
@@ -56,7 +56,7 @@
 //!        │
 //!        ▼
 //!   ┌────────────────────────────────────────────────────────────────────────┐
-//!   │  2. Serialize with bincode → Vec<u8>                                  │
+//!   │  2. Serialize with postcard → Vec<u8>                                 │
 //!   └────────────────────────────────────────────────────────────────────────┘
 //!        │
 //!        ▼
@@ -71,7 +71,7 @@
 //!        │
 //!        ▼
 //!   ┌────────────────────────────────────────────────────────────────────────┐
-//!   │  5. Deserialize DatabaseResponse with bincode                         │
+//!   │  5. Deserialize DatabaseResponse with postcard                        │
 //!   └────────────────────────────────────────────────────────────────────────┘
 //!        │
 //!        ▼
@@ -193,10 +193,10 @@
 //!
 //! ## Wire Protocol
 //!
-//! - **Serialization**: bincode (compact binary format)
+//! - **Serialization**: postcard (compact binary format)
 //! - **Transport**: TCP with async I/O (tokio)
 //! - **Buffering**: 4KB read buffer, incremental parsing
-//! - **Message framing**: bincode self-describing length
+//! - **Message framing**: postcard self-describing length
 //!
 //! ## Thread Safety
 //!
@@ -422,7 +422,7 @@ impl DatabaseClient {
 
     /// Serializes and sends a request to the database server.
     ///
-    /// Uses bincode for compact binary serialization over the TCP stream.
+    /// Uses postcard for compact binary serialization over the TCP stream.
     async fn send_request(&mut self, request: &DatabaseRequest) -> Result<(), DBError> {
         debug!("[Network] Serializing request");
         let data = postcard::to_allocvec(request).map_err(|e| {
@@ -440,7 +440,7 @@ impl DatabaseClient {
     /// Receives and deserializes a response from the database server.
     ///
     /// Handles buffered reads to assemble the complete response, as data
-    /// may arrive in multiple TCP packets. Uses bincode for deserialization.
+    /// may arrive in multiple TCP packets. Uses postcard for deserialization.
     async fn receive_response(&mut self) -> Result<DatabaseResponse, DBError> {
         let mut buffer = Vec::with_capacity(4096);
         let mut temp_buffer = [0u8; 4096];

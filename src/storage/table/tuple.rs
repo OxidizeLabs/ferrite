@@ -117,7 +117,7 @@
 //! ## Tuple Serialization
 //!
 //! ```text
-//!   What IS serialized (via bincode):
+//!   What IS serialized (via postcard):
 //!   ┌─────────┬─────────┬─────────┬─────────┐
 //!   │ Value 0 │ Value 1 │ Value 2 │   ...   │
 //!   └─────────┴─────────┴─────────┴─────────┘
@@ -186,7 +186,7 @@
 //!
 //! - `Tuple` has value semantics; cloning creates an independent copy
 //! - `TupleMeta` is `Copy` for efficient pass-by-value
-//! - Both implement `bincode::Encode/Decode` for serialization
+//! - Both implement `serde::Serialize`/`Deserialize` for serialization (postcard)
 //! - Page-level locking protects concurrent access to stored tuples
 
 use std::fmt::{Debug, Display, Formatter};
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn test_tuple_deserialize_with_trailing_bytes() -> Result<(), TupleError> {
-        // Postcard may silently ignore trailing bytes (unlike bincode).
+        // Postcard may silently ignore trailing bytes.
         // Verify the deserialized tuple matches the original values regardless.
         let (tuple, _schema) = create_sample_tuple();
         let mut storage = vec![0u8; 1000];

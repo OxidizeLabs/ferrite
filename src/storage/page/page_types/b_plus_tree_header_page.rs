@@ -25,7 +25,7 @@
 //!
 //! # Serialization
 //!
-//! Header data is serialized using [`bincode`] for compact binary representation.
+//! Header data is serialized using [`postcard`](https://docs.rs/postcard) for compact binary representation.
 //! The [`HeaderData`] struct contains only the essential fields for persistence,
 //! excluding transient page metadata like pin count and dirty flag.
 //!

@@ -49,7 +49,7 @@
 //! ## Serialization
 //!
 //! ```text
-//!   On-Disk Format (via bincode)
+//!   On-Disk Format (via postcard)
 //!   ─────────────────────────────────────────────────────────────────────────
 //!
 //!   What IS serialized:
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_record_deserialize_with_trailing_bytes() {
-        // Postcard may silently ignore trailing bytes (unlike bincode).
+        // Postcard may silently ignore trailing bytes.
         // Verify that exact-length data deserializes correctly.
         let (record, _schema) = create_sample_record();
         let mut storage = vec![0u8; 1000];

@@ -41,7 +41,7 @@
 //!
 //! # Serialization
 //!
-//! Entries are serialized using [`bincode`] for persistence. The format stores
+//! Entries are serialized using [`postcard`](https://docs.rs/postcard) for persistence. The format stores
 //! the local depth, size, max size, followed by length-prefixed key-value pairs.
 
 use std::any::Any;

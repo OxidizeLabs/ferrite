@@ -10,7 +10,7 @@ This document provides a comprehensive overview of Ferrite's architecture, a Rus
                               │                                                                         │
 ┌─────────────┐               │   ┌─────────────────────────────────────────────────────────────────┐   │
 │   Client    │◄──────────────┼──►│                        Network Layer                            │   │
-│  (ferrite   │   TCP/bincode │   │   ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │   │
+│  (ferrite   │   TCP/postcard │   │   ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │   │
 │   client)   │               │   │   │ ServerHandle │  │  Connection  │  │  Protocol (Request/  │  │   │
 └─────────────┘               │   │   │    (TCP)     │  │   Handler    │  │    Response/Query)   │  │   │
                               │   │   └──────────────┘  └──────────────┘  └──────────────────────┘  │   │
@@ -192,7 +192,7 @@ The access layer provides interfaces for database interaction:
 │   │  • TCP listener      │  │  • Connect to     │  │  • Interactive   │   │
 │   │  • Connection pool   │  │    remote server  │  │    shell         │   │
 │   │  • Request routing   │  │  • Prepared       │  │  • Embedded mode │   │
-│   │  • bincode protocol  │  │    statements     │  │  • File scripts  │   │
+│   │  • postcard protocol │  │    statements     │  │  • File scripts  │   │
 │   │                      │  │  • Result display │  │                  │   │
 │   └──────────────────────┘  └───────────────────┘  └──────────────────┘   │
 │                                                                           │
@@ -220,7 +220,7 @@ The access layer provides interfaces for database interaction:
 
 #### Wire Protocol
 
-- **Serialization**: `bincode` (compact binary format)
+- **Serialization**: `postcard` (compact binary format)
 - **Framing**: Length-prefixed messages
 - **Message Types**: `Execute`, `Prepare`, `ExecutePrepared`, `Ping`, `Disconnect`
 

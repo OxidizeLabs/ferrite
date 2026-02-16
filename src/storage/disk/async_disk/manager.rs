@@ -1337,7 +1337,7 @@ impl AsyncDiskManager {
     /// Writes a log record to the log file
     pub async fn write_log(&self, log_record: &LogRecord) -> IoResult<u64> {
         debug!("Writing log record: {:?}", log_record);
-        // Serialize using the storage bincode config (LogRecord::to_bytes)
+        // Serialize using the storage postcard config (LogRecord::to_bytes)
         let bytes = log_record.to_bytes().map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
