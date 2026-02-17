@@ -20,6 +20,7 @@ md5 = "0.8"
 thiserror = "2.0"
 libc = "0.2"
 mockall = { version = "0.14", optional = true }
+cachekit = "0.3.0"
 
 # Time and random utilities
 chrono = "0.4"
@@ -84,18 +85,6 @@ sqllogictest = "0.29"
 criterion = { version = "0.8", features = ["html_reports"] }
 
 # Benchmark targets
-[[bench]]
-name = "cache_benchmarks"
-harness = false
-
-[[bench]]
-name = "fifo_cache_benchmarking"
-harness = false
-
-[[bench]]
-name = "fifo_complexity_benchmarks"
-harness = false
-
 [[bench]]
 name = "time_complexity_demo"
 harness = false

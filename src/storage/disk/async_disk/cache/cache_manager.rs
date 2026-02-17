@@ -119,9 +119,9 @@
 //! | Component             | Description                                          |
 //! |-----------------------|------------------------------------------------------|
 //! | `CacheManager`        | Central cache coordinator with three tiers           |
-//! | `LRUKCache`           | Hot cache with LRU-K (K=2) eviction                  |
-//! | `LFUCache`            | Warm cache with frequency-based eviction             |
-//! | `FIFOCache`           | Cold cache with FIFO eviction                        |
+//! | `LrukCache`           | Hot cache with LRU-K (K=2) eviction                  |
+//! | `LfuCache`            | Warm cache with frequency-based eviction             |
+//! | `S3FifoCache`           | Cold cache with FIFO eviction                        |
 //! | `AdmissionController` | Regulates cache entry based on memory pressure       |
 //! | `PrefetchEngine`      | Sequential and pattern-based prefetch prediction     |
 //! | `DeduplicationEngine` | Identifies duplicate page content                    |
@@ -235,15 +235,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
+use cachekit::policy::lfu::LfuCache;
+use cachekit::policy::lru_k::LrukCache;
+use cachekit::policy::s3_fifo::S3FifoCache;
+use cachekit::traits::{CoreCache, LfuCacheTrait, LrukCacheTrait, ReadOnlyCache};
 use tokio::sync::RwLock;
 
-use super::fifo::FIFOCache;
-use super::lfu::LFUCache;
-use super::lru_k::LRUKCache;
 use crate::common::config::{DB_PAGE_SIZE, PageId};
-use crate::storage::disk::async_disk::cache::cache_traits::{
-    CoreCache, FIFOCacheTrait, LFUCacheTrait, LRUKCacheTrait,
-};
 use crate::storage::disk::async_disk::config::DiskManagerConfig;
 use crate::storage::disk::async_disk::metrics::collector::MetricsCollector;
 
@@ -810,15 +808,15 @@ pub struct PageAccessDetails {
 pub struct CacheManager {
     /// L1 Hot Cache: LRU-K based cache for frequently accessed pages.
     /// Uses `Arc<Vec<u8>>` for efficient data sharing during promotions.
-    hot_cache: Arc<RwLock<LRUKCache<PageId, Arc<Vec<u8>>>>>,
+    hot_cache: Arc<RwLock<LrukCache<PageId, Arc<Vec<u8>>>>>,
 
     /// L2 Warm Cache: LFU based cache for moderately accessed pages.
     /// Stores full `PageData` including access metadata.
-    warm_cache: Arc<RwLock<LFUCache<PageId, PageData>>>,
+    warm_cache: Arc<RwLock<LfuCache<PageId, PageData>>>,
 
     /// L3 Cold Cache: FIFO based cache for newly inserted pages.
     /// Low overhead, ideal for one-time sequential scans.
-    cold_cache: Arc<RwLock<FIFOCache<PageId, PageData>>>,
+    cold_cache: Arc<RwLock<S3FifoCache<PageId, PageData>>>,
 
     /// Configured capacity for hot cache (number of entries).
     hot_cache_size: usize,
@@ -908,10 +906,15 @@ impl CacheManager {
         let warm_cache_size = (total_cache_mb as f64 * config.warm_cache_ratio) as usize;
         let cold_cache_size = total_cache_mb - hot_cache_size - warm_cache_size;
 
+        // Ensure minimum capacity of 1 for all caches (cachekit doesn't allow zero capacity)
+        let hot_cache_size = hot_cache_size.max(1);
+        let warm_cache_size = warm_cache_size.max(1);
+        let cold_cache_size = cold_cache_size.max(1);
+
         // Use LRU-K cache for hot cache (L1)
-        let hot_cache = Arc::new(RwLock::new(LRUKCache::with_k(hot_cache_size, 2)));
-        let warm_cache = Arc::new(RwLock::new(LFUCache::new(warm_cache_size)));
-        let cold_cache = Arc::new(RwLock::new(FIFOCache::new(cold_cache_size)));
+        let hot_cache = Arc::new(RwLock::new(LrukCache::with_k(hot_cache_size, 2)));
+        let warm_cache = Arc::new(RwLock::new(LfuCache::new(warm_cache_size)));
+        let cold_cache = Arc::new(RwLock::new(S3FifoCache::new(cold_cache_size)));
 
         let prefetch_engine = Arc::new(RwLock::new(PrefetchEngine {
             access_patterns: HashMap::new(),
@@ -1025,7 +1028,7 @@ impl CacheManager {
 
         // Check L1 hot cache first (LRU-K)
         if let Ok(mut hot_cache) = self.hot_cache.try_write()
-            && let Some(data_arc) = <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<
+            && let Some(data_arc) = <LrukCache<PageId, Arc<Vec<u8>>> as CoreCache<
                 PageId,
                 Arc<Vec<u8>>,
             >>::get(&mut hot_cache, &page_id)
@@ -1041,11 +1044,7 @@ impl CacheManager {
 
         // Check L2 warm cache (LFU)
         if let Ok(mut warm_cache) = self.warm_cache.try_write()
-            && let Some(page_data) =
-                <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(
-                    &mut warm_cache,
-                    &page_id,
-                )
+            && let Some(page_data) = <LfuCache<PageId, PageData>>::get(&mut warm_cache, &page_id)
         {
             // Promote to hot cache on hit - share the Arc, no data copying
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -1053,7 +1052,7 @@ impl CacheManager {
             self.promotion_count.fetch_add(1, Ordering::Relaxed);
             let data_arc = Arc::clone(&page_data.data);
             if let Ok(mut hot_cache) = self.hot_cache.try_write() {
-                <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(
+                <LrukCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(
                     &mut hot_cache,
                     page_id,
                     data_arc,
@@ -1069,21 +1068,20 @@ impl CacheManager {
 
         // Check L3 cold cache (FIFO)
         if let Ok(mut cold_cache) = self.cold_cache.try_write()
-            && let Some(page_data) =
-                <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::get(
-                    &mut cold_cache,
-                    &page_id,
-                )
+            && let Some(page_data) = <S3FifoCache<PageId, PageData> as CoreCache<
+                PageId,
+                PageData,
+            >>::get(&mut cold_cache, &page_id)
         {
             // Promote to warm cache on hit - clone the PageData (cheap with Arc)
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
             self.cold_cache_hits.fetch_add(1, Ordering::Relaxed);
             self.promotion_count.fetch_add(1, Ordering::Relaxed);
             if let Ok(mut warm_cache) = self.warm_cache.try_write() {
-                <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
+                <LfuCache<PageId, PageData>>::insert(
                     &mut warm_cache,
                     page_id,
-                    page_data.clone(),
+                    Arc::from(page_data.clone()),
                 );
             }
             if let Some(metrics) = metrics_collector {
@@ -1251,7 +1249,7 @@ impl CacheManager {
         match temperature {
             DataTemperature::Hot => {
                 if let Ok(mut cache) = self.hot_cache.try_write() {
-                    <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(
+                    <LrukCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::insert(
                         &mut cache,
                         page_id,
                         Arc::clone(&data_arc),
@@ -1266,9 +1264,7 @@ impl CacheManager {
                     temperature: temperature.clone(),
                 };
                 if let Ok(mut cache) = self.warm_cache.try_write() {
-                    <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
-                        &mut cache, page_id, page_data,
-                    );
+                    <LfuCache<PageId, PageData>>::insert(&mut cache, page_id, Arc::from(page_data));
                 }
             },
             _ => {
@@ -1279,7 +1275,7 @@ impl CacheManager {
                     temperature: temperature.clone(),
                 };
                 if let Ok(mut cache) = self.cold_cache.try_write() {
-                    <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
+                    <S3FifoCache<PageId, PageData> as CoreCache<PageId, PageData>>::insert(
                         &mut cache, page_id, page_data,
                     );
                 }
@@ -1503,19 +1499,19 @@ impl CacheManager {
     /// decisions. Called automatically by `perform_maintenance()`.
     pub fn update_memory_pressure(&self) {
         let hot_used = if let Ok(cache) = self.hot_cache.try_read() {
-            <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::len(&cache)
+            <LrukCache<PageId, Arc<Vec<u8>>>>::len(&cache)
         } else {
             0
         };
 
         let warm_used = if let Ok(cache) = self.warm_cache.try_read() {
-            <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
+            <LfuCache<PageId, PageData>>::len(&cache)
         } else {
             0
         };
 
         let cold_used = if let Ok(cache) = self.cold_cache.try_read() {
-            <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
+            <S3FifoCache<PageId, PageData> as ReadOnlyCache<PageId, PageData>>::len(&cache)
         } else {
             0
         };
@@ -1585,14 +1581,16 @@ impl CacheManager {
             // High memory pressure - reduce cold cache size
             if let Ok(mut cold_cache) = self.cold_cache.try_write() {
                 let target_size = self.cold_cache_size / 2;
-                let current_size =
-                    <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cold_cache);
+                let current_size = <S3FifoCache<PageId, PageData> as ReadOnlyCache<
+                    PageId,
+                    PageData,
+                >>::len(&cold_cache);
                 if current_size > target_size {
                     // For FIFO cache, we can't easily evict specific items
                     // Instead, we'll clear part of the cache
                     if current_size > target_size * 2 {
                         let evicted_count = current_size as u64;
-                        <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(
+                        <S3FifoCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(
                             &mut cold_cache,
                         );
                         self.demotion_count
@@ -1606,16 +1604,13 @@ impl CacheManager {
             // Extreme memory pressure - reduce warm cache size
             if let Ok(mut warm_cache) = self.warm_cache.try_write() {
                 let target_size = self.warm_cache_size / 2;
-                let current_size =
-                    <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&warm_cache);
+                let current_size = <LfuCache<PageId, PageData>>::len(&warm_cache);
                 if current_size > target_size {
                     // For LFU cache, we can't easily evict specific items
                     // Instead, we'll clear part of the cache
                     if current_size > target_size * 2 {
                         let evicted_count = current_size as u64;
-                        <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::clear(
-                            &mut warm_cache,
-                        );
+                        <LfuCache<PageId, PageData>>::clear(&mut warm_cache);
                         self.demotion_count
                             .fetch_add(evicted_count, Ordering::Relaxed);
                     }
@@ -1657,19 +1652,19 @@ impl CacheManager {
         self.update_memory_pressure();
 
         let hot_used = if let Ok(cache) = self.hot_cache.try_read() {
-            <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::len(&cache)
+            <LrukCache<PageId, Arc<Vec<u8>>>>::len(&cache)
         } else {
             0
         };
 
         let warm_used = if let Ok(cache) = self.warm_cache.try_read() {
-            <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
+            <LfuCache<PageId, PageData>>::len(&cache)
         } else {
             0
         };
 
         let cold_used = if let Ok(cache) = self.cold_cache.try_read() {
-            <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::len(&cache)
+            <S3FifoCache<PageId, PageData>>::len(&cache)
         } else {
             0
         };
@@ -1930,7 +1925,7 @@ impl CacheManager {
     pub fn get_enhanced_cache_statistics(&self) -> EnhancedCacheStatistics {
         // Get LRU-K specific statistics from hot cache
         let lru_k_value = if let Ok(cache) = self.hot_cache.try_read() {
-            <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<PageId, Arc<Vec<u8>>>>::k_value(
+            <LrukCache<PageId, Arc<Vec<u8>>> as LrukCacheTrait<PageId, Arc<Vec<u8>>>>::k_value(
                 &cache,
             )
         } else {
@@ -1964,23 +1959,19 @@ impl CacheManager {
     ///
     /// Logs at `trace` level to minimize performance impact in production.
     pub fn perform_specialized_maintenance(&self) {
-        // Use FIFO-specific operations for cold cache
-        if let Ok(cold_cache) = self.cold_cache.try_read()
-            && let Some((oldest_key, _)) = <FIFOCache<PageId, PageData> as FIFOCacheTrait<
-                PageId,
-                PageData,
-            >>::peek_oldest(&cold_cache)
-        {
-            // Log the oldest page for monitoring
-            log::trace!("Oldest page in cold cache: {}", oldest_key);
+        // Log cold cache statistics (S3-FIFO from cachekit)
+        if let Ok(cold_cache) = self.cold_cache.try_read() {
+            log::trace!(
+                "Cold cache (S3-FIFO) stats - small: {}, main: {}, ghost: {}",
+                cold_cache.small_len(),
+                cold_cache.main_len(),
+                cold_cache.ghost_len()
+            );
         }
 
         // Use LFU-specific operations for warm cache
         if let Ok(warm_cache) = self.warm_cache.try_read()
-            && let Some((lfu_key, _)) = <LFUCache<PageId, PageData> as LFUCacheTrait<
-                PageId,
-                PageData,
-            >>::peek_lfu(&warm_cache)
+            && let Some((lfu_key, _)) = <LfuCache<PageId, PageData>>::peek_lfu(&warm_cache)
         {
             // Log the least frequently used page
             log::trace!("Least frequently used page in warm cache: {}", lfu_key);
@@ -1988,7 +1979,7 @@ impl CacheManager {
 
         // Use LRU-K specific operations for hot cache
         if let Ok(hot_cache) = self.hot_cache.try_read()
-            && let Some((lru_k_key, _)) = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+            && let Some((lru_k_key, _)) = <LrukCache<PageId, Arc<Vec<u8>>> as LrukCacheTrait<
                 PageId,
                 Arc<Vec<u8>>,
             >>::peek_lru_k(&hot_cache)
@@ -2036,23 +2027,23 @@ impl CacheManager {
     pub fn get_page_access_details(&self, page_id: PageId) -> Option<PageAccessDetails> {
         if let Ok(hot_cache) = self.hot_cache.try_read() {
             // Check if page is in hot cache and get LRU-K specific details
-            if <LRUKCache<PageId, Arc<Vec<u8>>> as CoreCache<PageId, Arc<Vec<u8>>>>::contains(
+            if <LrukCache<PageId, Arc<Vec<u8>>> as ReadOnlyCache<PageId, Arc<Vec<u8>>>>::contains(
                 &hot_cache, &page_id,
             ) {
-                let k_value = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                let k_value = <LrukCache<PageId, Arc<Vec<u8>>> as LrukCacheTrait<
                     PageId,
                     Arc<Vec<u8>>,
                 >>::k_value(&hot_cache);
-                let access_count = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                let access_count = <LrukCache<PageId, Arc<Vec<u8>>> as LrukCacheTrait<
                     PageId,
                     Arc<Vec<u8>>,
                 >>::access_count(&hot_cache, &page_id)
                 .map(|count| count as u64);
-                let k_distance = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                let k_distance = <LrukCache<PageId, Arc<Vec<u8>>> as LrukCacheTrait<
                     PageId,
                     Arc<Vec<u8>>,
                 >>::k_distance(&hot_cache, &page_id);
-                let rank = <LRUKCache<PageId, Arc<Vec<u8>>> as LRUKCacheTrait<
+                let rank = <LrukCache<PageId, Arc<Vec<u8>>> as LrukCacheTrait<
                     PageId,
                     Arc<Vec<u8>>,
                 >>::k_distance_rank(&hot_cache, &page_id);
@@ -2071,15 +2062,8 @@ impl CacheManager {
 
         if let Ok(warm_cache) = self.warm_cache.try_read() {
             // Check if page is in warm cache and get LFU specific details
-            if <LFUCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(
-                &warm_cache,
-                &page_id,
-            ) {
-                let frequency =
-                    <LFUCache<PageId, PageData> as LFUCacheTrait<PageId, PageData>>::frequency(
-                        &warm_cache,
-                        &page_id,
-                    );
+            if <LfuCache<PageId, PageData>>::contains(&warm_cache, &page_id) {
+                let frequency = <LfuCache<PageId, PageData>>::frequency(&warm_cache, &page_id);
 
                 return Some(PageAccessDetails {
                     cache_level: "Warm".to_string(),
@@ -2094,24 +2078,17 @@ impl CacheManager {
         }
 
         if let Ok(cold_cache) = self.cold_cache.try_read() {
-            // Check if page is in cold cache and get FIFO specific details
-            if <FIFOCache<PageId, PageData> as CoreCache<PageId, PageData>>::contains(
-                &cold_cache,
-                &page_id,
-            ) {
-                let age_rank =
-                    <FIFOCache<PageId, PageData> as FIFOCacheTrait<PageId, PageData>>::age_rank(
-                        &cold_cache,
-                        &page_id,
-                    );
-
+            // Check if page is in cold cache (S3-FIFO from cachekit)
+            if cold_cache.contains(&page_id) {
+                // Note: cachekit's S3FifoCache doesn't expose age_rank,
+                // so we set eviction_rank to None
                 return Some(PageAccessDetails {
                     cache_level: "Cold".to_string(),
-                    algorithm: "FIFO".to_string(),
+                    algorithm: "S3-FIFO".to_string(),
                     k_value: None,
                     access_count: None,
                     k_distance: None,
-                    eviction_rank: age_rank,
+                    eviction_rank: None,
                     temperature: DataTemperature::Cold,
                 });
             }
@@ -2679,8 +2656,9 @@ mod tests {
                 "LFU" => {
                     assert!(details.access_count.is_some()); // Frequency information
                 },
-                "FIFO" => {
-                    assert!(details.eviction_rank.is_some()); // Age rank information
+                "S3-FIFO" => {
+                    // Note: cachekit's S3FifoCache doesn't expose eviction_rank
+                    // so we can't assert on it
                 },
                 _ => panic!("Unknown algorithm: {}", details.algorithm),
             }
