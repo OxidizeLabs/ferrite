@@ -43,7 +43,7 @@ rustyline = "17.0"
 clap = { version = "4.5", features = ["derive"] }
 
 # Async runtime and concurrency
-tokio = { version = "1.49", default-features = false, features = [
+tokio = { version = "1.50", default-features = false, features = [
     "rt", "io-util", "net", "rt-multi-thread", "signal", "macros", "sync", "fs", "time"
 ] }
 futures = "0.3"
@@ -73,11 +73,11 @@ num_cpus = "1.17"
 
 [dev-dependencies]
 # Enhanced tokio for testing
-tokio = { version = "1.49", features = ["full", "test-util"] }
+tokio = { version = "1.50", features = ["full", "test-util"] }
 
 # Testing framework dependencies
 mockall = "0.14"
-tempfile = "3.25"
+tempfile = "3.26"
 sqllogictest = "0.29"
 
 # Benchmarking
