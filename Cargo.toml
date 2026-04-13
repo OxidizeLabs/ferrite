@@ -39,7 +39,7 @@ zstd = "0.13"
 
 # User interface
 colored = "3.1"
-rustyline = "17.0"
+rustyline = "18.0"
 clap = { version = "4.6", features = ["derive"] }
 
 # Async runtime and concurrency
