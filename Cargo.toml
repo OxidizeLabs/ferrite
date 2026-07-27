@@ -19,7 +19,7 @@ prettytable-rs = "0.10"
 md5 = "0.8"
 thiserror = "2.0"
 libc = "0.2"
-mockall = { version = "0.14", optional = true }
+mockall = { version = "0.15", optional = true }
 
 # Time and random utilities
 chrono = "0.4"
@@ -76,7 +76,7 @@ num_cpus = "1.17"
 tokio = { version = "1.52", features = ["full", "test-util"] }
 
 # Testing framework dependencies
-mockall = "0.14"
+mockall = "0.15"
 tempfile = "3.27"
 sqllogictest = "0.29"
 
